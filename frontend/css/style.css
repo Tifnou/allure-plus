@@ -2955,25 +2955,30 @@ body.plans-active {
 [data-theme="dark"] .goals-race-type-badge--road  { color: #93c5fd; }
 .goals-hero-inputs {
   display: flex; align-items: flex-end;
-  gap: 8px; flex-wrap: wrap;
+  gap: 6px; flex-wrap: nowrap;
   padding: 6px 0 0;
   border-top: 1px solid var(--border-light);
   margin-top: 2px;
 }
 .goals-hero-input-item {
-  display: flex; flex-direction: column; gap: 3px;
+  display: flex; flex-direction: column; gap: 2px;
+  min-width: 0;
 }
 .goals-hero-input-label {
-  font-size: 0.7rem; font-weight: 700;
-  text-transform: uppercase; letter-spacing: 0.05em;
+  font-size: 0.58rem; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.02em;
   color: var(--text-muted);
+  white-space: nowrap;
 }
-.goals-hero-input-field { width: 80px !important; }
+.goals-hero-input-field { width: 44px !important; padding: 4px 5px !important; font-size: 12px !important; }
+#goal-target-time { width: 58px !important; padding: 4px 3px !important; font-size: 11px !important; }
+.goals-dplus-input-wrap { gap: 3px !important; }
+.form-unit { font-size: 10px; }
 .btn-goals-valider {
-  padding: 7px 16px; border-radius: 8px;
+  padding: 5px 9px; border-radius: 7px;
   background: var(--accent); color: #fff;
   border: none; cursor: pointer;
-  font-size: 0.82rem; font-weight: 700;
+  font-size: 0.68rem; font-weight: 700;
   transition: opacity .15s;
   white-space: nowrap;
 }

@@ -2294,11 +2294,10 @@ function updateGoalsPage(goal, weeks = []) {
     </div>`;
   }
 
-  // "?"? Carte course cible (infos Campus) "?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?
+  // Chip catégorie course (distance/D+ déjà affichés dans les champs éditables ci-dessus,
+  // pas besoin de les répéter ici — uniquement la catégorie, info non montrée ailleurs)
   const specificData = goal.specificData || {};
   const raceInfoHtml = [
-    specificData.distance    ? `<span class="race-chip">${specificData.distance} km</span>` : '',
-    specificData.elevationGain ? `<span class="race-chip">↗ ${specificData.elevationGain} m D+</span>` : '',
     (() => { const isTrail = (goal.goalType || '').toLowerCase().includes('trail'); return isTrail ? (getTrailCatLabel(specificData.distance) ? `<span class="race-chip">${getTrailCatLabel(specificData.distance)}</span>` : '') : (specificData.trailTitle ? `<span class="race-chip">${specificData.trailTitle}</span>` : ''); })()
   ].filter(Boolean).join('');
   if (raceInfoHtml && el('goals-race-content')) {
