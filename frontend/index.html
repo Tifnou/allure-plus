@@ -862,19 +862,6 @@
     </div>
   </div>
 
-  <!-- ── MODALE CONFIRMATION ALLURE+ ── -->
-  <div id="confirm-modal" style="display:none;position:fixed;inset:0;z-index:10000;background:rgba(5,7,15,0.60);backdrop-filter:blur(6px);align-items:center;justify-content:center;" onclick="if(event.target===this)_confirmCancel()">
-    <div style="background:var(--bg-white);border:1px solid var(--border);border-radius:18px;box-shadow:0 24px 64px rgba(0,0,0,0.35);width:min(420px,92vw);padding:32px 28px;font-family:var(--font);">
-      <div id="confirm-modal-icon" style="font-size:2.4rem;margin-bottom:12px;text-align:center;"></div>
-      <h3 id="confirm-modal-title" style="margin:0 0 8px;font-size:18px;font-weight:700;color:var(--text-primary);text-align:center;"></h3>
-      <p id="confirm-modal-msg" style="margin:0 0 28px;font-size:14px;color:var(--text-secondary);text-align:center;line-height:1.6;"></p>
-      <div style="display:flex;gap:12px;justify-content:center;">
-        <button id="confirm-modal-cancel" onclick="_confirmCancel()" style="flex:1;max-width:160px;padding:11px 20px;border:1.5px solid var(--border);border-radius:10px;background:var(--bg-white);color:var(--text-secondary);font-size:14px;font-weight:500;cursor:pointer;">Annuler</button>
-        <button id="confirm-modal-ok" onclick="_confirmOk()" style="flex:1;max-width:160px;padding:11px 20px;border:none;border-radius:10px;background:#ef4444;color:#fff;font-size:14px;font-weight:600;cursor:pointer;">Confirmer</button>
-      </div>
-    </div>
-  </div>
-
   <!-- ... OVERLAY SERVEUR HORS LIGNE .............................. -->
   <div id="server-down-overlay" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(5,7,15,0.96);backdrop-filter:blur(8px);flex-direction:column;align-items:center;justify-content:center;gap:20px;">
     <div style="text-align:center;max-width:420px;padding:0 24px;">

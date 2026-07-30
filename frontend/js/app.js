@@ -145,44 +145,6 @@ let _allActivities = [];  // stocké pour le filtre et le détail
 let _fullyLoadedYears = new Set(); // années dont on a chargé l'ensemble complet depuis Garmin
 
 
-// ══════════════════════════════════════════════════════
-// MODALE CONFIRMATION ALLURE+
-// ══════════════════════════════════════════════════════
-let _confirmCallback = null;
-
-function showConfirmModal({ icon = '⚠️', title = 'Confirmation', message = '', okLabel = 'Confirmer', onConfirm }) {
-  _confirmCallback = onConfirm || null;
-  const modal = document.getElementById('confirm-modal');
-  const titleEl = document.getElementById('confirm-modal-title');
-  const msgEl   = document.getElementById('confirm-modal-msg');
-  const iconEl  = document.getElementById('confirm-modal-icon');
-  const okBtn   = document.getElementById('confirm-modal-ok');
-  if (iconEl)  iconEl.textContent  = icon;
-  if (titleEl) titleEl.textContent = title;
-  if (msgEl)   msgEl.textContent   = message;
-  if (okBtn)   okBtn.textContent   = okLabel;
-  if (modal) {
-    modal.style.display = 'flex';
-    // Animation d'entrée
-    modal.querySelector('div').style.transform = 'scale(0.9)';
-    modal.querySelector('div').style.transition = 'transform 0.2s ease';
-    setTimeout(() => { modal.querySelector('div').style.transform = 'scale(1)'; }, 10);
-  }
-}
-
-function _confirmOk() {
-  document.getElementById('confirm-modal').style.display = 'none';
-  if (typeof _confirmCallback === 'function') {
-    _confirmCallback();
-    _confirmCallback = null;
-  }
-}
-
-function _confirmCancel() {
-  document.getElementById('confirm-modal').style.display = 'none';
-  _confirmCallback = null;
-}
-
 // ═══════════════════════════════════════════════
 // NAVIGATION
 // ═══════════════════════════════════════════════
