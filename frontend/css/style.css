@@ -1028,11 +1028,15 @@ body::before{
 #page-goals .card-header{ margin-bottom:8px; }
 #page-goals .card-title{ font-size:12.5px; }
 
+/* Espacement vertical entre les blocs empilés (Course cible/Avancement,
+   Estimations, Courbe, Alertes, Cycles...) pour qu'ils ne soient pas collés */
+#goals-with-plan{ display:flex; flex-direction:column; gap:14px; }
+
 .goals-layout{
   display:grid;
   grid-template-columns:300px 1fr;
   gap:12px;
-  align-items:start;
+  align-items:stretch;
 }
 .goals-race-card{ grid-column:1; grid-row:1; }
 .goals-progress-card{ grid-column:2; grid-row:1; }
