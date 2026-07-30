@@ -6,3 +6,4 @@ cache.json
 .garmin_tokens/
 *.log
 imported_plan.json
+.claude/settings.local.json
