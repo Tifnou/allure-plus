@@ -1923,16 +1923,10 @@ function renderObjectifsBlocks(goal, weeks) {
     typeBadgeEl.className = 'goals-race-type-badge ' + (isTrail ? 'goals-race-type-badge--trail' : 'goals-race-type-badge--road');
   }
 
-  // Meta course (D+ uniquement — dist et temps cible sont dans les inputs)
+  // Meta course (catégorie trail uniquement — dist et temps cible sont dans les inputs)
   const metaEl = el('goals-race-meta');
   if (metaEl) {
     const items = [];
-    let dplusMeta = specificData.elevationGain || 0;
-    if (!dplusMeta && planCategory?.dplusLabel) {
-      const parts = planCategory.dplusLabel.split('_').map(Number).filter(n => !isNaN(n));
-      if (parts.length === 2) dplusMeta = Math.round((parts[0] + parts[1]) / 2);
-    }
-    if (dplusMeta && isTrail) items.push('↗ ' + Math.round(dplusMeta) + ' m D+ estimé');
     if (isTrail && distKm) { const c = getTrailCatLabel(distKm); if (c) items.push(c); }
     metaEl.innerHTML = items.map(t => `<span class="goals-race-meta-chip">${t}</span>`).join('');
   }
@@ -1967,13 +1961,10 @@ function renderObjectifsBlocks(goal, weeks) {
   let dplusM = savedDplus ? parseInt(savedDplus) : dplusMid;
 
   const dplusInput = el('goals-dplus-input');
-  const dplusHint  = el('goals-dplus-hint');
   if (dplusInput && isTrail) {
     if (!dplusInput.dataset.init) {
       dplusInput.value = (wasValidated && savedDplus) ? dplusM : '';  // vierge si pas encore validé
       dplusInput.dataset.init = '1';
-      if (dplusHint && dplusMin !== dplusMax && !savedDplus)
-        dplusHint.textContent = `Fourchette plan : ${dplusMin}–${dplusMax} m · Défaut : ~${dplusMid} m`;
       dplusInput.oninput = () => {
         const val = parseInt(dplusInput.value) || dplusMid;
         localStorage.setItem(planKey, val);
@@ -1987,7 +1978,6 @@ function renderObjectifsBlocks(goal, weeks) {
   const distKey   = 'suivi_objectif_dist_' + (goal._id || 'plan');
   const savedDist = localStorage.getItem(distKey);
   const distInput = el('goals-dist-input');
-  const distHint  = el('goals-dist-hint');
 
   // Fourchette de distance depuis planCategory
   let distMin = 0, distMax = 0;
@@ -2003,8 +1993,6 @@ function renderObjectifsBlocks(goal, weeks) {
     distInput.value = (wasValidated && savedDist) ? parseFloat(savedDist) : '';
     if (!distInput.dataset.init) {
       distInput.dataset.init = '1';
-      if (distHint && distMin !== distMax)
-        distHint.textContent = `Fourchette : ${distMin}–${distMax} km`;
       distInput.oninput = () => {
         const val = parseFloat(distInput.value);  // ne pas fallback distMid si vide
         if (val > 0) {
