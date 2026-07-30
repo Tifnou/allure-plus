@@ -2245,13 +2245,6 @@ async function loadGoalsPage() {
     if (detailRes?.summary) renderGoalSummary(detailRes.summary);
   } catch(e) { /* pas de token = pas de détail */ }
 
-  try {
-    const pacesRes = await fetchJSON('/api/campus/paces');
-    renderPaces(pacesRes?.paces || null);
-  } catch(e) {
-    renderPaces(null);
-  }
-
   // Re-rendu des estimations après tous les fetches (VMA peut être à présent disponible)
   if (campusState.goal && campusState.weeks) {
     const dplusInput = document.getElementById('goals-dplus-input');
@@ -2400,10 +2393,9 @@ function renderGoalSummary(summary) {
 }
 
 // Allures de course — Route + Trail selon le type de plan
-function renderPaces(paces) {
-  const container = document.getElementById('goals-paces-section');
-  if (!container) return;
-
+// Construit le contenu (utilisé par la modale "Voir mes allures" — plus de
+// carte affichée en permanence sur la page, redondante avec le Profil).
+function buildPacesTableHTML() {
   const isTrail = (campusState.goal?.goalType || '').toLowerCase().includes('trail');
 
   const CAMPUS_ZONES = [
@@ -2449,7 +2441,30 @@ function renderPaces(paces) {
     : '<span class="paces-type-badge paces-type-badge--road">&#x1F3C3; Route</span>';
   const vmaNote = vmaKmh ? '<span class="paces-vma-badge">VMA ' + vmaKmh + ' km/h</span>' : '';
 
-  container.innerHTML = '<div class="card goals-paces-card"><div class="card-header"><div class="paces-card-title-row"><h2 class="card-title">&#x23F1; Allures de course</h2><div class="paces-badges">' + typeLabel + vmaNote + '</div></div></div>' + colHeader + '<div class="paces-list">' + rows + '</div></div>';
+  return '<div class="paces-card-title-row"><h2 class="card-title" style="margin:0">&#x23F1; Allures de course</h2><div class="paces-badges">' + typeLabel + vmaNote + '</div></div>' + colHeader + '<div class="paces-list">' + rows + '</div>';
+}
+
+// Modale "Voir mes allures" — construit le tableau à la demande
+function showPacesModal() {
+  const existing = document.getElementById('paces-modal');
+  if (existing) { existing.remove(); return; }
+
+  const modal = document.createElement('div');
+  modal.id = 'paces-modal';
+  modal.style.cssText = 'position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.55);backdrop-filter:blur(4px);';
+  modal.innerHTML = `
+    <div style="background:var(--bg-white);border:1px solid var(--border);border-radius:16px;padding:22px 22px 18px;width:100%;max-width:460px;max-height:82vh;overflow-y:auto;box-shadow:0 24px 60px rgba(0,0,0,.25);">
+      ${buildPacesTableHTML()}
+      <button id="paces-modal-close" style="margin-top:16px;width:100%;padding:10px;border:1px solid var(--border);border-radius:9px;background:transparent;color:var(--text-secondary);font-size:13px;font-weight:600;cursor:pointer;">Fermer</button>
+    </div>
+  `;
+  document.body.appendChild(modal);
+
+  const close = () => { modal.remove(); document.removeEventListener('keydown', escHandler); };
+  function escHandler(e) { if (e.key === 'Escape') close(); }
+  modal.querySelector('#paces-modal-close').addEventListener('click', close);
+  modal.addEventListener('click', e => { if (e.target === modal) close(); });
+  document.addEventListener('keydown', escHandler);
 }
 
 // "?"? Objectifs personnels sauvegardés "?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?
