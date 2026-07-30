@@ -2109,30 +2109,33 @@ body::before{
 
 /* ─── Profile connected apps card ───────────────── */
 .profile-card-title {
-  font-size: 12px;
+  font-size: 10.5px;
   font-weight: 700;
   letter-spacing: 0.04em;
   color: var(--text-muted);
   text-transform: uppercase;
-  margin-bottom: 10px;
+  margin-bottom: 6px;
 }
-.profile-apps-card { padding: 12px 14px; background: var(--bg-white); border: 1px solid var(--border); border-radius: 10px; }
-.profile-apps-list { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.profile-apps-card { padding: 10px 12px; background: var(--bg-white); border: 1px solid var(--border); border-radius: 10px; }
+.profile-apps-list { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 0; }
+@media(max-width:640px){.profile-apps-list{grid-template-columns:1fr;}}
 .profile-app-row {
-  display: flex; align-items: center; gap: 12px;
-  padding: 10px 12px;
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 9px;
   background: var(--bg, #f8f8f8);
-  border-radius: 8px;
+  border-radius: 7px;
   border: 1px solid var(--border-light, #eee);
+  min-width: 0;
 }
-.profile-app-icon { font-size: 20px; }
-.profile-app-info { flex: 1; }
-.profile-app-name { font-size: 13px; font-weight: 600; color: var(--text-primary, #111); }
-.profile-app-status { font-size: 11px; color: var(--text-muted); }
+.profile-app-icon { font-size: 15px; flex-shrink: 0; }
+.profile-app-info { flex: 1; min-width: 0; }
+.profile-app-name { font-size: 12px; font-weight: 600; color: var(--text-primary, #111); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.profile-app-status { font-size: 10px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .profile-app-badge {
-  font-size: 13px; font-weight: 700;
-  padding: 3px 10px; border-radius: 20px;
+  font-size: 11px; font-weight: 700;
+  padding: 2px 7px; border-radius: 20px;
   background: var(--bg-hover, #eee); color: var(--text-muted);
+  flex-shrink: 0;
 }
 .profile-app-badge.connected {
   background: #e8f5e9; color: #2e7d32;
