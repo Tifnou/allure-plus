@@ -47,6 +47,7 @@ const {
   getPersonalRecords,
   buildGarminFunctions
 } = require('./garmin_client');
+const { getZoneRange } = require('./zones');
 const {
   campusLogin,
   getActiveGoal,
@@ -768,17 +769,6 @@ app.post('/api/campus/export', requireCampusToken, async (req, res) => {
       const { allureplusVma: apVmaCampus, isTrail: isTrailCampus,
               trailCorrs: trailCorrsCampus, hasIntervals: hasIntervalsCampus } = req.body;
 
-      const ALLURE_PLUS_ZONES_SRV = {
-        RECOVER:    { pctLow: 0.55, pctHigh: 0.65 },
-        EF:         { pctLow: 0.65, pctHigh: 0.75 },
-        TEMPO:      { pctLow: 0.75, pctHigh: 0.79 },
-        SWEET_SPOT: { pctLow: 0.75, pctHigh: 0.79, isSweetSpot: true },
-        S60:        { pctLow: 0.79, pctHigh: 0.83 },
-        S30:        { pctLow: 0.86, pctHigh: 0.88 },
-        AS10:       { pctLow: 0.90, pctHigh: 0.95 },
-        VMA:        { pctLow: 1.00, pctHigh: 1.05 },
-      };
-
       // VMA : priorité à la valeur sex-corrected d'Allure+ (plus précise)
       // Fallback : VO2max Garmin avec ancienne formule (×0.300 au lieu de ×0.313)
       let vmaGarmin = apVmaCampus || null;
@@ -795,10 +785,9 @@ app.post('/api/campus/export', requireCampusToken, async (req, res) => {
 
       // Calcule min/max vitesse (m/s) depuis une clé de zone, la VMA, et la correction trail
       function zoneToSpeed(zoneKey) {
-        const ref = ALLURE_PLUS_ZONES_SRV[zoneKey];
+        const ref = getZoneRange(zoneKey);
         if (!ref || !vmaGarmin) return null;
-        let pL = ref.pctLow, pH = ref.pctHigh;
-        if (ref.isSweetSpot) { pL = 0.79 * 0.95; pH = 0.83 * 0.95; }
+        const pL = ref.pctLow, pH = ref.pctHigh;
         // Correction trail : EF warmup (séance avec intervalles) → Route
         // EF sortie longue 100% endurance → Trail
         const isEfWarmup = hasIntervalsCampus && (zoneKey === 'EF');
@@ -1162,21 +1151,7 @@ app.post('/api/garmin/workout-from-session', requireSession, async (req, res) =>
     let userZones = null;
 
     if (allureplusVma && allureplusVma > 0) {
-      const ZONES = {
-        EF:         { pL: 0.62, pH: 0.67 },
-        TEMPO:      { pL: 0.71, pH: 0.75 },
-        AS42:       { pL: 0.75, pH: 0.78 },
-        SWEET_SPOT: { pL: 0.84 * 0.95, pH: 0.87 * 0.95 },
-        AS30:       { pL: 0.80, pH: 0.83 },
-        AS21:       { pL: 0.82, pH: 0.85 },
-        S60:        { pL: 0.84, pH: 0.87 },
-        AS10:       { pL: 0.88, pH: 0.91 },
-        S30:        { pL: 0.89, pH: 0.92 },
-        VMA:        { pL: 0.95, pH: 1.05 },
-        RECOVER:    { pL: 0.55, pH: 0.62 },
-        RECOVERY:   { pL: 0.55, pH: 0.62 },
-      };
-      const ZG = { Z1:'RECOVER', Z2:'EF', Z3:'TEMPO', Z4:'S60', Z5:'VMA', WARMUP:'EF', COOLDOWN:'EF' };
+      const ZG = { Z1:'RECOVER', Z2:'EF', Z3:'TEMPO', Z4:'S60', Z5:'VMA', WARMUP:'EF', COOLDOWN:'EF', RECOVERY:'RECOVER' };
       // Détecter si la séance a des intervalles (S60/VMA etc) ou est 100% endurance
       const sessionZoneKeys = (session.paceZones || []).map(pz => {
         const pzKey = (pz.kind || '').toUpperCase();
@@ -1185,7 +1160,7 @@ app.post('/api/garmin/workout-from-session', requireSession, async (req, res) =>
       const hasIntervalsServer = sessionZoneKeys.some(k => !['EF','RECOVER','RECOVERY','WARMUP','COOLDOWN'].includes(k));
       const calcZone = (zKey) => {
         const apKey    = ZG[zKey] || zKey;
-        const z        = ZONES[apKey];
+        const z        = getZoneRange(apKey);
         if (!z) return null;
         // EF en warmup (session avec intervalles) → Route ; EF sortie longue → Trail
         // On utilise hasIntervals du frontend (déjà calculé correctement)
@@ -1194,8 +1169,8 @@ app.post('/api/garmin/workout-from-session', requireSession, async (req, res) =>
         const isEfLike   = apKey === 'RECOVER' || apKey === 'RECOVERY';  // RECOVER → jamais de cible
         const corr       = (isTrail && !isEfWarmup && !isEfLike && trailCorrs?.[apKey]) ? trailCorrs[apKey] : 0;
         return {
-          min: Math.round(3600 / (allureplusVma * z.pH) * (1 + corr)), // allure rapide sec/km
-          max: Math.round(3600 / (allureplusVma * z.pL) * (1 + corr)), // allure lente sec/km
+          min: Math.round(3600 / (allureplusVma * z.pctHigh) * (1 + corr)), // allure rapide sec/km
+          max: Math.round(3600 / (allureplusVma * z.pctLow) * (1 + corr)), // allure lente sec/km
         };
       };
       userZones = {};
