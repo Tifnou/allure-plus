@@ -2958,35 +2958,37 @@ body.plans-active {
 [data-theme="dark"] .goals-race-type-badge--trail { color: #86efac; }
 [data-theme="dark"] .goals-race-type-badge--road  { color: #93c5fd; }
 .goals-hero-inputs {
-  display: flex; align-items: flex-end;
-  gap: 6px; flex-wrap: nowrap;
+  display: flex; flex-direction: column; gap: 8px;
   padding: 6px 0 0;
   border-top: 1px solid var(--border-light);
   margin-top: 2px;
+}
+.goals-hero-inputs-row {
+  display: flex; align-items: flex-end;
+  gap: 8px; flex-wrap: nowrap;
 }
 .goals-hero-input-item {
   display: flex; flex-direction: column; gap: 2px;
   flex-shrink: 0;
 }
 .goals-hero-input-label {
-  font-size: 0.58rem; font-weight: 700;
+  font-size: 0.6rem; font-weight: 700;
   text-transform: uppercase; letter-spacing: 0.02em;
   color: var(--text-muted);
   white-space: nowrap;
 }
-.goals-hero-input-field { width: 44px !important; padding: 4px 5px !important; font-size: 12px !important; }
-#goals-dplus-input { width: 52px !important; }
-#goal-target-time { width: 88px !important; padding: 4px 3px !important; font-size: 11px !important; }
+.goals-hero-input-field { width: 56px !important; padding: 4px 6px !important; font-size: 12.5px !important; }
+#goals-dplus-input { width: 64px !important; }
+#goal-target-time { width: 90px !important; padding: 4px 3px !important; font-size: 11px !important; }
 .goals-dplus-input-wrap { gap: 3px !important; }
-.form-unit { font-size: 10px; }
+.form-unit { font-size: 10.5px; }
 .btn-goals-valider {
-  flex-shrink: 0;
-  width: 30px; height: 30px;
-  display: flex; align-items: center; justify-content: center;
-  padding: 0; border-radius: 7px;
+  align-self: flex-start;
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 6px 14px; border-radius: 7px;
   background: var(--accent); color: #fff;
   border: none; cursor: pointer;
-  font-size: 13px; font-weight: 700;
+  font-size: 12px; font-weight: 700;
   transition: opacity .15s;
 }
 .btn-goals-valider:hover { opacity: .85; }

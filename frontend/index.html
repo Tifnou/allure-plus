@@ -663,31 +663,33 @@
 
               <!-- Inputs distance / D+ / temps cible dans le hero -->
               <div class="goals-hero-inputs" id="goals-hero-inputs">
-                <div class="goals-hero-input-item">
-                  <label class="goals-hero-input-label" for="goals-dist-input">Distance</label>
-                  <div class="goals-dplus-input-wrap">
-                    <input type="number" id="goals-dist-input" class="form-input goals-hero-input-field"
-                      placeholder="km" min="1" max="999" step="0.5" />
-                    <span class="form-unit">km</span>
+                <div class="goals-hero-inputs-row">
+                  <div class="goals-hero-input-item">
+                    <label class="goals-hero-input-label" for="goals-dist-input">Distance</label>
+                    <div class="goals-dplus-input-wrap">
+                      <input type="number" id="goals-dist-input" class="form-input goals-hero-input-field"
+                        placeholder="km" min="1" max="999" step="0.5" />
+                      <span class="form-unit">km</span>
+                    </div>
                   </div>
-                </div>
-                <div class="goals-hero-input-item" id="goals-dplus-row" style="display:none">
-                  <label class="goals-hero-input-label" for="goals-dplus-input">D+</label>
-                  <div class="goals-dplus-input-wrap">
-                    <input type="number" id="goals-dplus-input" class="form-input goals-hero-input-field"
-                      placeholder="m" min="0" max="9999" />
-                    <span class="form-unit">m</span>
+                  <div class="goals-hero-input-item" id="goals-dplus-row" style="display:none">
+                    <label class="goals-hero-input-label" for="goals-dplus-input">D+</label>
+                    <div class="goals-dplus-input-wrap">
+                      <input type="number" id="goals-dplus-input" class="form-input goals-hero-input-field"
+                        placeholder="m" min="0" max="9999" />
+                      <span class="form-unit">m</span>
+                    </div>
                   </div>
-                </div>
-                <div class="goals-hero-input-item">
-                  <label class="goals-hero-input-label" for="goal-target-time">Temps cible</label>
-                  <div class="goals-dplus-input-wrap">
-                    <input type="time" id="goal-target-time" class="form-input goals-hero-input-field"
-                      step="1" autocomplete="off" />
+                  <div class="goals-hero-input-item">
+                    <label class="goals-hero-input-label" for="goal-target-time">Temps cible</label>
+                    <div class="goals-dplus-input-wrap">
+                      <input type="time" id="goal-target-time" class="form-input goals-hero-input-field"
+                        step="1" autocomplete="off" />
+                    </div>
                   </div>
                 </div>
                 <button class="btn-goals-valider" onclick="applyRaceInputs()" title="Valider / Recalculer">
-                  &#x2713;
+                  &#x2713; Valider
                 </button>
               </div>
 
