@@ -1799,17 +1799,19 @@ function renderProfile() {
   if (racePacesEl && vma) {
     setVal('profile-paces-method', 'VMA ' + vma.toFixed(2) + ' km/h');
 
-    // Table de reference Allure+ — Route + Trail (campus.js = source de vérité)
+    // Table de reference Allure+ — Route + Trail (doit rester identique à
+    // ALLURE_PLUS_ZONES dans campus.js, la vraie source de vérité)
     const APZ = {
-      // RECOVER : pas d'allure cible, allure libre selon forme du jour
-      RECOVER:    { pL:0.55, pH:0.65, icon:'&#128994;', label:'Récupération',        color:'#94a3b8', note:'55–65% VMA', noTarget:true },
-      EF:         { pL:0.65, pH:0.75, icon:'&#128995;', label:'EF — Endurance fond.', color:'#4ade80', note:'65–75% VMA', trailCorr:0.07 },
-      TEMPO:      { pL:0.75, pH:0.79, icon:'&#128992;', label:'Tempo',                color:'#a3e635', note:'75–79% VMA', trailCorr:0.07 },
+      RECOVER:    { pL:0.55, pH:0.62, icon:'&#128994;', label:'Récupération',        color:'#94a3b8', note:'55–62% VMA', noTarget:true },
+      EF:         { pL:0.62, pH:0.67, icon:'&#128995;', label:'EF — Endurance fond.', color:'#4ade80', note:'62–67% VMA', trailCorr:0.07 },
+      TEMPO:      { pL:0.71, pH:0.75, icon:'&#128992;', label:'Tempo',                color:'#a3e635', note:'71–75% VMA', trailCorr:0.07 },
+      AS42:       { pL:0.75, pH:0.78, icon:'&#127942;', label:'AS42 — Allure Marathon', color:'#818cf8', note:'75–78% VMA', trailCorr:0.07 },
       SWEET_SPOT: { pL:null, pH:null, icon:'&#11088;',  label:'Sweet Spot',           color:'#facc15', note:'95% vitesse S60',  isSweetSpot:true, trailCorr:0.07 },
-      S60:        { pL:0.79, pH:0.83, icon:'&#9200;',   label:'S60 — Seuil 60min',    color:'#fb923c', note:'79–83% VMA', trailCorr:0.07 },
-      S30:        { pL:0.86, pH:0.88, icon:'&#9889;',   label:'S30 — Seuil 30min',    color:'#f87171', note:'86–88% VMA', trailCorr:0.07 },
-      AS10:       { pL:0.90, pH:0.95, icon:'&#127937;', label:'AS10 — 10km',          color:'#c084fc', note:'90–95% VMA', trailCorr:0.08 },
-      VMA:        { pL:1.00, pH:1.05, icon:'&#9889;',   label:'VMA',                  color:'#e879f9', note:'100–105% VMA', trailCorr:0.10 },
+      AS21:       { pL:0.82, pH:0.85, icon:'&#127942;', label:'AS21 — Allure Semi',   color:'#fb923c', note:'82–85% VMA', trailCorr:0.07 },
+      S60:        { pL:0.84, pH:0.87, icon:'&#9200;',   label:'S60 — Seuil 60min',    color:'#f97316', note:'84–87% VMA', trailCorr:0.07 },
+      AS10:       { pL:0.88, pH:0.91, icon:'&#127937;', label:'AS10 — Allure 10km',   color:'#c084fc', note:'88–91% VMA', trailCorr:0.08 },
+      S30:        { pL:0.89, pH:0.92, icon:'&#9889;',   label:'S30 — Seuil 30min',    color:'#f87171', note:'89–92% VMA', trailCorr:0.07 },
+      VMA:        { pL:0.95, pH:1.05, icon:'&#9889;',   label:'VMA',                  color:'#e879f9', note:'95–105% VMA', trailCorr:0.10 },
     };
 
     // Formatteur d'allure sec → min'ss"
@@ -1857,12 +1859,14 @@ function renderProfile() {
       + '</div>'
       + paceRow(APZ.EF)
       + paceRow(APZ.TEMPO)
+      + paceRow(APZ.AS42)
       + paceRow(APZ.SWEET_SPOT)
+      + paceRow(APZ.AS21)
       + '<div class="rpt-sep"></div>'
       + paceRow(APZ.S60)
+      + paceRow(APZ.AS10)
       + paceRow(APZ.S30)
       + '<div class="rpt-sep"></div>'
-      + paceRow(APZ.AS10)
       + paceRow(APZ.VMA)
       + '</div>';
   } else if (racePacesEl) {
