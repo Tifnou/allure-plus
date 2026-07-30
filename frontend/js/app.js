@@ -100,42 +100,6 @@ function activityTypeClass(type) {
   if (!type) return '';
   const t = type.toLowerCase();
   if (t.includes('trail')) return 'run-type-text--trail';
-}
-
-function formatTime(seconds) {
-  if (!seconds) return '—';
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const s = Math.floor(seconds % 60);
-  if (h > 0) return `${h}h${String(m).padStart(2,'0')}m${String(s).padStart(2,'0')}s`;
-  return `${m}m${String(s).padStart(2,'0')}s`;
-}
-
-// activityType est une string simple ex: "running", "trail_running"
-function activityTypeLabel(type) {
-  if (!type) return '—';
-  const t = type.toLowerCase();
-  if (t.includes('trail'))    return 'Trail';
-  if (t.includes('treadmill')) return 'Tapis';
-  if (t.includes('run'))      return 'Course';
-  if (t.includes('cycl') || t.includes('bike')) return 'Vélo';
-  if (t.includes('swim'))     return 'Natation';
-  if (t.includes('walk'))     return 'Marche';
-  if (t.includes('hik'))      return 'Rando';
-  if (t.includes('strength')) return 'Muscu';
-  if (t.includes('cardio'))   return 'Cardio';
-  return type.replace(/_/g,' ');
-}
-
-function isRunType(type) {
-  if (!type) return false;
-  return type.toLowerCase().includes('run') || type.toLowerCase().includes('trail');
-}
-
-function activityTypeClass(type) {
-  if (!type) return '';
-  const t = type.toLowerCase();
-  if (t.includes('trail')) return 'run-type-text--trail';
   if (t.includes('run'))   return 'run-type-text--running';
   return '';
 }
