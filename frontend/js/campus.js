@@ -999,15 +999,6 @@ function mdBold(text) {
   return text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
 }
 
-function matchZoneFromPace(pace, vma) {
-  const speed = 3600 / pace;
-  if (speed >= vma * 0.95) return 'Z5';
-  if (speed >= vma * 0.85) return 'Z4';
-  if (speed >= vma * 0.75) return 'Z3';
-  if (speed >= vma * 0.65) return 'Z2';
-  return 'Z1';
-}
-
 // "?"? Panneau de détail d'une séance "?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?
 function renderSessionDetail(session, weekId, isCurrentWeek) {
   const isPPG = session.sport === 'ppg' || session.trainingCategory === 'gpp';
