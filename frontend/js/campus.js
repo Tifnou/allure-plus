@@ -1524,24 +1524,96 @@ async function importPlan(event) {
   }
 }
 
+// Date de course la plus proche pour laquelle le plan peut demarrer sur le
+// lundi de la semaine en cours, sans sauter de semaine complete. En dessous
+// de cette date, la course est trop proche pour suivre le plan en entier.
+function calcMinSafeRaceDate(weeksBeforeRace) {
+  const now = new Date();
+  const dow = now.getDay(); // 0=dim, 1=lun, ..., 6=sam
+  const delta = dow === 0 ? -6 : 1 - dow;
+  const thisMonday = new Date(now.getFullYear(), now.getMonth(), now.getDate() + delta, 12, 0, 0);
+  return new Date(thisMonday.getTime() + (weeksBeforeRace || 0) * 7 * 24 * 3600 * 1000);
+}
+
 // Modal de saisie du nom et de la date de course a l'import
 function showRaceModal({ prefillName, prefillDate, nbWeeks, raceWeekIdx = null, postCompWeeks = 0 }) {
   return new Promise(resolve => {
     const existing = document.getElementById('import-race-modal');
     if (existing) existing.remove();
 
-    function calcStart(dateStr) {
-      if (!dateStr) return '';
-      const d = new Date(dateStr + 'T12:00:00'); // T12 pour éviter décalage TZ
-      if (isNaN(d)) return '';
-      // Utiliser raceWeekIdx pour calculer le vrai debut du plan
-      const weeksBeforeRace = raceWeekIdx !== null ? raceWeekIdx : nbWeeks - 1;
-      const rawMs = d.getTime() - weeksBeforeRace * 7 * 24 * 3600 * 1000;
-      // Caler sur le lundi de la semaine (identique au chargement réel du plan)
-      const dow = new Date(rawMs).getDay(); // 0=dim, 1=lun, ..., 6=sam
+    const weeksBeforeRace = raceWeekIdx !== null ? raceWeekIdx : nbWeeks - 1;
+
+    function calcStart(dateObj) {
+      if (!dateObj || isNaN(dateObj)) return '';
+      const rawMs = dateObj.getTime() - weeksBeforeRace * 7 * 24 * 3600 * 1000;
+      const dow = new Date(rawMs).getDay();
       const delta = dow === 0 ? -6 : 1 - dow;
       const startD = new Date(rawMs + delta * 24 * 3600 * 1000);
       return startD.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' });
+    }
+
+    // Date la plus proche pour laquelle aucune semaine complete n'est sautee
+    const minSafeDate = calcMinSafeRaceDate(weeksBeforeRace);
+    const minSafeMidnight = new Date(minSafeDate); minSafeMidnight.setHours(0, 0, 0, 0);
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+
+    // Date initiale : celle deja fournie (import .aplus) sinon la date minimale conseillee
+    let selected = prefillDate ? new Date(prefillDate + 'T12:00:00') : new Date(minSafeDate);
+    if (isNaN(selected)) selected = new Date(minSafeDate);
+    let viewYear  = selected.getFullYear();
+    let viewMonth = selected.getMonth();
+
+    const MONTH_NAMES = ['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'];
+
+    function fmtISO(d) {
+      return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    }
+    function sameDay(a, b) { return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate(); }
+
+    function buildCalendarHTML() {
+      const first = new Date(viewYear, viewMonth, 1);
+      const leading = (first.getDay() + 6) % 7; // semaine commence lundi
+      const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
+
+      let cells = '';
+      for (let i = 0; i < leading; i++) cells += '<div class="mcal-cell mcal-empty"></div>';
+      for (let day = 1; day <= daysInMonth; day++) {
+        const d = new Date(viewYear, viewMonth, day);
+        const isPast = d < today;
+        const isWarn = !isPast && d < minSafeMidnight;
+        const isSel  = sameDay(d, selected);
+        const cls = ['mcal-cell'];
+        if (isPast) cls.push('mcal-disabled');
+        else if (isWarn) cls.push('mcal-warn');
+        if (isSel) cls.push('mcal-selected');
+        cells += '<button type="button" class="' + cls.join(' ') + '" data-date="' + fmtISO(d) + '"' + (isPast ? ' disabled' : '') + '>' + day + '</button>';
+      }
+      return cells;
+    }
+
+    function renderMonthLabel() {
+      modal.querySelector('#mcal-month-label').textContent = MONTH_NAMES[viewMonth] + ' ' + viewYear;
+    }
+
+    function rerenderGrid() {
+      modal.querySelector('#mcal-grid').innerHTML = buildCalendarHTML();
+      renderMonthLabel();
+    }
+
+    function updateHint() {
+      const hint = modal.querySelector('#modal-start-hint');
+      const warnBox = modal.querySelector('#modal-warn-banner');
+      const postInfo = postCompWeeks > 0 ? ' · ' + postCompWeeks + ' sem. post-course' : '';
+      hint.textContent = '📅 Début du plan : ' + calcStart(selected) + postInfo;
+      const selMid = new Date(selected); selMid.setHours(0, 0, 0, 0);
+      if (selMid < minSafeMidnight) {
+        const missingDays  = Math.round((minSafeMidnight - selMid) / (24 * 3600 * 1000));
+        const missingWeeks = Math.max(1, Math.ceil(missingDays / 7));
+        warnBox.style.display = '';
+        warnBox.innerHTML = '⚠️ Course trop proche : environ <strong>' + missingWeeks + ' semaine' + (missingWeeks > 1 ? 's' : '') + '</strong> du plan ' + (missingWeeks > 1 ? 'seraient' : 'serait') + ' déjà passée' + (missingWeeks > 1 ? 's' : '') + '. Vous pouvez continuer, mais le plan ne pourra pas être suivi dans son intégralité.';
+      } else {
+        warnBox.style.display = 'none';
+      }
     }
 
     const modal = document.createElement('div');
@@ -1550,6 +1622,21 @@ function showRaceModal({ prefillName, prefillDate, nbWeeks, raceWeekIdx = null, 
 
     const safeN = (prefillName || '').replace(/"/g, '&quot;');
     modal.innerHTML = `
+      <style>
+        .mcal-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;}
+        .mcal-nav{background:none;border:none;font-size:16px;color:var(--text-secondary);cursor:pointer;padding:4px 10px;border-radius:6px;line-height:1;}
+        .mcal-nav:hover{background:var(--bg-hover,#f0f0f0);}
+        .mcal-month-label{font-size:13px;font-weight:700;color:var(--text-primary);text-transform:capitalize;}
+        .mcal-weekdays{display:grid;grid-template-columns:repeat(7,1fr);font-size:10.5px;color:var(--text-muted);text-align:center;margin-bottom:4px;font-weight:600;}
+        .mcal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:3px;}
+        .mcal-cell{aspect-ratio:1;border:none;background:var(--bg,#f7f7f7);border-radius:7px;font-size:12.5px;color:var(--text-primary);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background .12s;font-family:inherit;}
+        .mcal-cell:hover:not(.mcal-disabled){background:var(--accent-light,#e8efff);}
+        .mcal-empty{background:none;cursor:default;}
+        .mcal-disabled{color:var(--text-muted);opacity:0.35;cursor:not-allowed;}
+        .mcal-warn{background:rgba(220,38,38,0.10);color:#dc2626;font-weight:600;}
+        .mcal-warn:hover{background:rgba(220,38,38,0.18);}
+        .mcal-selected{background:var(--accent,#4F7BE9) !important;color:#fff !important;font-weight:700;}
+      </style>
       <div style="background:var(--bg-white);border:1px solid var(--border);border-radius:16px;padding:32px 28px 24px;width:100%;max-width:400px;box-shadow:0 24px 60px rgba(0,0,0,.25);">
         <div style="display:flex;align-items:center;gap:12px;margin-bottom:24px;">
           <span style="font-size:28px;">🏁</span>
@@ -1563,14 +1650,18 @@ function showRaceModal({ prefillName, prefillDate, nbWeeks, raceWeekIdx = null, 
           <input id="modal-race-name" type="text" placeholder="ex: Marathon de Lyon" value="${safeN}"
             style="display:block;width:100%;margin-top:6px;padding:10px 12px;border:1.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text-primary);font-size:15px;outline:none;box-sizing:border-box;">
         </label>
-        <label style="display:block;margin-bottom:8px;">
-          <span style="font-size:12px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;">Date de la course</span>
-          <input id="modal-race-date" type="date" value="${prefillDate}"
-            style="display:block;width:100%;margin-top:6px;padding:10px 12px;border:1.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text-primary);font-size:15px;outline:none;box-sizing:border-box;">
-        </label>
-        <div id="modal-start-hint" style="font-size:12px;color:var(--text-muted);margin-bottom:20px;min-height:18px;padding-left:2px;">
-          ${prefillDate ? '📅 Debut du plan : ' + calcStart(prefillDate) : ''}
+        <span style="font-size:12px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;">Date de la course</span>
+        <div style="margin-top:6px;margin-bottom:12px;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;background:var(--bg);">
+          <div class="mcal-head">
+            <button type="button" class="mcal-nav" id="mcal-prev">‹</button>
+            <span class="mcal-month-label" id="mcal-month-label"></span>
+            <button type="button" class="mcal-nav" id="mcal-next">›</button>
+          </div>
+          <div class="mcal-weekdays"><span>L</span><span>M</span><span>M</span><span>J</span><span>V</span><span>S</span><span>D</span></div>
+          <div class="mcal-grid" id="mcal-grid"></div>
         </div>
+        <div id="modal-start-hint" style="font-size:12px;color:var(--text-muted);margin-bottom:8px;min-height:18px;padding-left:2px;"></div>
+        <div id="modal-warn-banner" style="display:none;font-size:11.5px;color:#92400e;background:rgba(234,179,8,0.12);border:1px solid rgba(234,179,8,0.3);border-radius:8px;padding:8px 10px;margin-bottom:16px;line-height:1.4;"></div>
         <div style="display:flex;gap:10px;">
           <button id="modal-cancel" style="flex:1;padding:11px;border:1.5px solid var(--border);border-radius:9px;background:transparent;color:var(--text-secondary);font-size:14px;font-weight:600;cursor:pointer;">Annuler</button>
           <button id="modal-confirm" style="flex:2;padding:11px;border:none;border-radius:9px;background:var(--accent,#4F7BE9);color:#fff;font-size:14px;font-weight:700;cursor:pointer;">Charger le plan ✓</button>
@@ -1580,16 +1671,28 @@ function showRaceModal({ prefillName, prefillDate, nbWeeks, raceWeekIdx = null, 
 
     document.body.appendChild(modal);
 
-    const dateInput = modal.querySelector('#modal-race-date');
-    const hint      = modal.querySelector('#modal-start-hint');
     const nameInput = modal.querySelector('#modal-race-name');
-    dateInput.addEventListener('input', () => {
-      const s = calcStart(dateInput.value);
-      const postInfo = postCompWeeks > 0 ? ' · ' + postCompWeeks + ' sem. post-course' : '';
-      hint.textContent = s ? '📅 Debut du plan : ' + s + postInfo : '';
+
+    rerenderGrid();
+    updateHint();
+
+    modal.querySelector('#mcal-prev').addEventListener('click', () => {
+      viewMonth--; if (viewMonth < 0) { viewMonth = 11; viewYear--; }
+      rerenderGrid();
+    });
+    modal.querySelector('#mcal-next').addEventListener('click', () => {
+      viewMonth++; if (viewMonth > 11) { viewMonth = 0; viewYear++; }
+      rerenderGrid();
+    });
+    modal.querySelector('#mcal-grid').addEventListener('click', e => {
+      const btn = e.target.closest('.mcal-cell');
+      if (!btn || btn.disabled || !btn.dataset.date) return;
+      selected = new Date(btn.dataset.date + 'T12:00:00');
+      rerenderGrid();
+      updateHint();
     });
 
-    setTimeout(() => (prefillName ? dateInput : nameInput).focus(), 80);
+    setTimeout(() => nameInput.focus(), 80);
 
     modal.addEventListener('keydown', e => {
       if (e.key === 'Enter')  modal.querySelector('#modal-confirm').click();
@@ -1599,8 +1702,7 @@ function showRaceModal({ prefillName, prefillDate, nbWeeks, raceWeekIdx = null, 
     modal.querySelector('#modal-cancel').addEventListener('click', () => { modal.remove(); resolve(null); });
     modal.querySelector('#modal-confirm').addEventListener('click', () => {
       const name = nameInput.value.trim();
-      const date = dateInput.value;
-      if (!date) { dateInput.style.borderColor = '#e74c3c'; dateInput.focus(); return; }
+      const date = fmtISO(selected);
       modal.remove();
       resolve({ name, date });
     });
