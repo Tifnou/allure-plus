@@ -48,6 +48,20 @@ const SLUG_TO_ZONE = {
   'vo2max': 'VMA', 'vma': 'VMA', 'fast': 'VMA', 'sprint': 'VMA',
 };
 
+// Libellés affichés (description du pas Garmin, nom de zone dans l'app)
+const ZONE_LABELS = {
+  RECOVER:    'Récupération',
+  EF:         'EF — Endurance fond.',
+  TEMPO:      'Tempo',
+  AS42:       'AS42 — Allure Marathon',
+  SWEET_SPOT: 'Sweet Spot',
+  AS21:       'AS21 — Allure Semi',
+  S60:        'S60 — Seuil 60min',
+  AS10:       'AS10 — Allure 10km',
+  S30:        'S30 — Seuil 30min',
+  VMA:        'VMA',
+};
+
 // "race" = allure de course cible. Son sens dépend de la distance de l'objectif.
 // En trail (ou objectif inconnu), pas de zone AS pertinente → repli sur EF
 // (les valeurs D+ ayant servi à générer le plan ne sont pas celles du coureur réel).
@@ -95,4 +109,4 @@ function annotatePaceZones(session, goalType) {
   return zones.map((z, i) => Object.assign({}, z, { resolvedZone: resolveZoneFromExercise(paces[i], z.kind, goalType) }));
 }
 
-module.exports = { ALLURE_PLUS_ZONES, getZoneRange, resolveZoneFromExercise, annotatePaceZones };
+module.exports = { ALLURE_PLUS_ZONES, ZONE_LABELS, getZoneRange, resolveZoneFromExercise, annotatePaceZones };

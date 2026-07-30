@@ -47,7 +47,7 @@ const {
   getPersonalRecords,
   buildGarminFunctions
 } = require('./garmin_client');
-const { getZoneRange, annotatePaceZones } = require('./zones');
+const { getZoneRange, annotatePaceZones, ZONE_LABELS } = require('./zones');
 const {
   campusLogin,
   getActiveGoal,
@@ -959,18 +959,16 @@ function buildGarminWorkoutFromSession(session, weekNum, sessionDisplay, userZon
   const mkStep = (zone, index) => {
     // Priorite 1: kind semantique (ne jamais le remplacer par une detection d'allure)
     const zKey = (zone.kind || '').toUpperCase();
-    const zoneName = ZONE_NAMES[zKey] || zKey || 'Exercice';
+    // La vraie zone de ce pas est déjà résolue depuis pace.slug (fiable, voir zones.js
+    // resolveZoneFromExercise/annotatePaceZones) — plus de devinette texte ici.
+    const refinedKey = zone.resolvedZone || zKey;
+    const zoneName = ZONE_LABELS[refinedKey] || ZONE_NAMES[zKey] || zKey || 'Exercice';
 
     // Priorite des allures:
     // 1) zone.pace.value (allure calibree par Campus pour cet utilisateur) -> +-5%
     // 2) userZones (calcule depuis VO2max Garmin) -> si pas de pace Campus
     let targetType = NO_TARGET, targetValueOne = null, targetValueTwo = null;
     let description = toAscii(zoneName);
-
-    // Priorité Allure+ si VMA sex-corrected dispo → zones calculées précises
-    // La vraie zone de ce pas est déjà résolue depuis pace.slug (fiable, voir zones.js
-    // resolveZoneFromExercise/annotatePaceZones) — plus de devinette texte ici.
-    const refinedKey = zone.resolvedZone || zKey;
 
     const apUserZone = userZones && userZones[refinedKey] ? userZones[refinedKey] : null;
     // RECOVER/RECOVERY = allure libre (jamais de cible Garmin)
