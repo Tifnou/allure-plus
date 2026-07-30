@@ -85,7 +85,6 @@ const ALLURE_PLUS_ZONES = {
   TEMPO:      { pctLow: 0.71, pctHigh: 0.75, label: 'Tempo',                    color: '#a3e635', trailCorr: 0.07 },
   AS42:       { pctLow: 0.75, pctHigh: 0.78, label: 'AS42 — Allure Marathon',   color: '#818cf8', trailCorr: 0.07 },
   SWEET_SPOT: { pctLow: 0.79, pctHigh: 0.82, label: 'Sweet Spot',               color: '#facc15', isSweetSpot: true, trailCorr: 0.07 },
-  AS30:       { pctLow: 0.80, pctHigh: 0.83, label: 'AS30 — Allure 30km',      color: '#fbbf24', trailCorr: 0.07 },
   AS21:       { pctLow: 0.82, pctHigh: 0.85, label: 'AS21 — Allure Semi',      color: '#fb923c', trailCorr: 0.07 },
   S60:        { pctLow: 0.84, pctHigh: 0.87, label: 'S60 — Seuil 60min',       color: '#f97316', trailCorr: 0.07 },
   AS10:       { pctLow: 0.88, pctHigh: 0.91, label: 'AS10 — Allure 10km',      color: '#c084fc', trailCorr: 0.08 },
@@ -159,7 +158,6 @@ function resolveAllurePlusZone(sessionName, zoneKind) {
   // Codes de zone directs (Campus peut les envoyer explicitement)
   if (['AS42','AS_42'].includes(k))              return 'AS42';
   if (['AS21','AS_21','SEMI','HM'].includes(k))  return 'AS21';
-  if (['AS30','AS_30'].includes(k))              return 'AS30';
   if (['AS10','AS_10'].includes(k))              return 'AS10';
   if (['S30','S_30'].includes(k))                return 'S30';
   if (['S60','S_60'].includes(k))                return 'S60';
@@ -180,8 +178,6 @@ function resolveAllurePlusZone(sessionName, zoneKind) {
     if (/\b42[\s.]?km\b|\bas42\b|allure[\s_-]*marathon\b/i.test(n))          return 'AS42';
     // AS21 = allure semi-marathon (21km)
     if (/\b21[\s.]?km\b|\bas21\b|allure[\s_-]*21\b|allure[\s_-]*semi\b/i.test(n)) return 'AS21';
-    // AS30 = allure 30km
-    if (/\b30[\s.]?km\b|\bas30\b/i.test(n))                                      return 'AS30';
     // AS10 = allure 10km
     if (/\b10[\s.]?km\b|\bas10\b/i.test(n))                                      return 'AS10';
   }

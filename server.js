@@ -986,7 +986,6 @@ function buildGarminWorkoutFromSession(session, weekNum, sessionDisplay, userZon
       else if (/sweet.spot/i.test(descLower))                               refinedKey = 'SWEET_SPOT';
       else if (/\b42[\s.]?km\b|\bas42\b|allure[\s_-]*marathon\b/i.test(descLower)) refinedKey = 'AS42';
       else if (/\b21[\s.]?km\b|\bas21\b|allure[\s_-]*21\b|allure[\s_-]*semi\b/i.test(descLower)) refinedKey = 'AS21';
-      else if (/\b30[\s.]?km\b|\bas30\b/i.test(descLower))                  refinedKey = 'AS30';
       else if (/as10|\b10[\s.]?km\b/i.test(descLower))                      refinedKey = 'AS10';
       else if (/\btempo\b/i.test(descLower))                                refinedKey = 'TEMPO';
       else if (/endurance|fond|\bef\b|echauffement|warmup/i.test(descLower)) refinedKey = 'EF';
@@ -1175,7 +1174,7 @@ app.post('/api/garmin/workout-from-session', requireSession, async (req, res) =>
       };
       userZones = {};
       ['Z1','Z2','Z3','Z4','Z5','RECOVER','RECOVERY','WARMUP','COOLDOWN',
-       'EF','TEMPO','SWEET_SPOT','AS42','AS30','AS21','S60','S30','AS10','VMA'].forEach(k => {
+       'EF','TEMPO','SWEET_SPOT','AS42','AS21','S60','S30','AS10','VMA'].forEach(k => {
         const z = calcZone(k); if (z) userZones[k] = z;
       });
       console.log('[Allure+] VMA=' + allureplusVma + ' isTrail=' + isTrail + ' zones calculees');

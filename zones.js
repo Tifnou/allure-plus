@@ -10,7 +10,6 @@ const ALLURE_PLUS_ZONES = {
   TEMPO:      { pctLow: 0.71, pctHigh: 0.75 },
   AS42:       { pctLow: 0.75, pctHigh: 0.78 },
   SWEET_SPOT: { pctLow: 0.79, pctHigh: 0.82, isSweetSpot: true },
-  AS30:       { pctLow: 0.80, pctHigh: 0.83 },
   AS21:       { pctLow: 0.82, pctHigh: 0.85 },
   S60:        { pctLow: 0.84, pctHigh: 0.87 },
   AS10:       { pctLow: 0.88, pctHigh: 0.91 },
