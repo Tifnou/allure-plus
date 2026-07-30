@@ -14,7 +14,9 @@ const _logFile = path.join(__dirname, 'server.log');
       if (lines.length > 500) fs.writeFileSync(_logFile, lines.slice(-400).join('\n') + '\n', 'utf8');
     }
   } catch (_) {}
-  const _ts = () => new Date().toISOString().slice(11, 19);
+  // toISOString() renvoie toujours l'heure UTC (decalee de l'heure francaise) :
+  // on force explicitement le fuseau Europe/Paris pour les logs.
+  const _ts = () => new Date().toLocaleTimeString('fr-FR', { timeZone: 'Europe/Paris', hour12: false });
   const _write = (tag, args) => {
     try { fs.appendFileSync(_logFile, `[${tag}] ${_ts()} ${args.join(' ')}\n`, 'utf8'); } catch (_) {}
   };
