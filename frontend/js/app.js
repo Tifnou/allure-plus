@@ -1706,21 +1706,29 @@ function renderProfile() {
     const pct = Math.min(Math.max((bmi - 15) / (35 - 15) * 100, 2), 98);
 
     // Conseil perte de poids si poids > borne haute de la fourchette sportive
-    let adviceHTML = '';
-    if (ideal && weight > ideal.max) {
-      const tolose = Math.round((weight - ideal.max) * 10) / 10;
-      const weeks  = Math.round(tolose / 0.35);  // ~0.35 kg/sem pour sportif régulier
-      adviceHTML = `
-        <div class="weight-loss-advice">
-          <div class="weight-loss-title">⚠️ Objectif poids — conseils personnalisés</div>
-          <div class="weight-loss-items">
-            <div class="weight-loss-item">\ud83c\udfaf Poids \u00e0 perdre\u00a0: <span>${tolose} kg</span></div>
-            <div class="weight-loss-item">\ud83d\udcc5 Dur\u00e9e estim\u00e9e\u00a0: <span>~${weeks} semaines</span> (\u00e0 rythme sportif)</div>
-            <div class="weight-loss-item">\u2696\ufe0f Rythme\u00a0: <span>0.25\u20130.5 kg/semaine</span> (d\u00e9ficit ~300\u2013500 kcal/jour)</div>
-            <div class="weight-loss-item">\ud83c\udfc3 Privil\u00e9gier\u00a0: <span>sorties Z2 longues</span> + alimentation qualitative</div>
-            <div class="weight-loss-item">\u274c \u00c0 \u00e9viter\u00a0: <span>r\u00e9gime sev\u00e8re</span> \u2014 risque de perte musculaire</div>
-          </div>
-        </div>`;
+    // Affiche dans son propre bloc pleine largeur (#profile-weight-goal),
+    // pas empile dans la carte Composition corporelle.
+    const weightGoalEl = el('profile-weight-goal');
+    if (weightGoalEl) {
+      if (ideal && weight > ideal.max) {
+        const tolose = Math.round((weight - ideal.max) * 10) / 10;
+        const weeks  = Math.round(tolose / 0.35);  // ~0.35 kg/sem pour sportif regulier
+        weightGoalEl.innerHTML = `
+          <div class="weight-loss-advice">
+            <div class="weight-loss-title">⚠️ Objectif poids — conseils personnalisés</div>
+            <div class="weight-loss-items">
+              <div class="weight-loss-item">🎯 Poids à perdre : <span>${tolose} kg</span></div>
+              <div class="weight-loss-item">📅 Durée estimée : <span>~${weeks} semaines</span> (à rythme sportif)</div>
+              <div class="weight-loss-item">⚖️ Rythme : <span>0.25–0.5 kg/semaine</span> (déficit ~300–500 kcal/jour)</div>
+              <div class="weight-loss-item">🏃 Privilégier : <span>sorties Z2 longues</span> + alimentation qualitative</div>
+              <div class="weight-loss-item">❌ À éviter : <span>régime sevère</span> — risque de perte musculaire</div>
+            </div>
+          </div>`;
+        weightGoalEl.style.display = '';
+      } else {
+        weightGoalEl.innerHTML = '';
+        weightGoalEl.style.display = 'none';
+      }
     }
 
     bmiEl.innerHTML = `
@@ -1747,10 +1755,11 @@ function renderProfile() {
         <div class="weight-range-val">${ideal.min} – ${ideal.max} kg</div>
         <div class="weight-range-label">poids idéal sportif (IMC cible ${ideal.bmiRange || (sex==='F'?'20–22':'22–23')})</div>
       </div>` : ''}
-      ${adviceHTML}
     `;
   } else if (bmiEl) {
     bmiEl.innerHTML = '<div class="profile-indicator-empty">Renseignez taille et poids pour voir les calculs</div>';
+    const weightGoalElEmpty = el('profile-weight-goal');
+    if (weightGoalElEmpty) { weightGoalElEmpty.innerHTML = ''; weightGoalElEmpty.style.display = 'none'; }
   }
 
   // \u2500 Zones FC \u2500

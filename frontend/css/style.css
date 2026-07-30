@@ -567,8 +567,10 @@ body::before{
 .profile-layout{display:grid;grid-template-columns:340px 1fr;gap:12px;align-items:start;}
 .profile-form-col{display:flex;flex-direction:column;gap:12px;}
 .profile-results-col{display:flex;flex-direction:column;gap:12px;}
-.profile-imc-vo2-row{display:grid;grid-template-columns:1.3fr 1fr;gap:12px;align-items:start;}
+.profile-imc-vo2-row{display:grid;grid-template-columns:1.3fr 1fr;gap:16px;align-items:center;}
 @media(max-width:700px){.profile-imc-vo2-row{grid-template-columns:1fr;}}
+.profile-vo2-compact{display:flex;align-items:center;gap:10px;background:var(--bg-hover);border-radius:var(--radius-sm);padding:10px 12px;height:100%;}
+.profile-vo2-compact-icon{font-size:20px;line-height:1;flex-shrink:0;}
 .profile-fullwidth-col{display:flex;flex-direction:column;gap:12px;margin-top:12px;}
 
 /* Formulaire profil */
@@ -625,7 +627,7 @@ body::before{
 .btn-save-profile:hover{background:#1d4ed8;transform:translateY(-1px);box-shadow:0 4px 12px rgba(37,99,235,0.3);}
 
 /* VO2max card */
-.profile-vo2-display{text-align:center;padding:10px 0 4px;}
+.profile-vo2-display{text-align:left;padding:0;}
 .profile-vo2-value{font-family:var(--font);font-size:32px;font-weight:700;color:var(--accent);line-height:1;font-variant-numeric:tabular-nums;}
 .profile-vo2-unit{font-family:var(--font-body);font-size:11px;color:var(--text-muted);margin-top:2px;}
 .profile-vo2-label{font-family:var(--font-body);font-size:12px;color:var(--text-secondary);margin-top:5px;font-weight:500;}
@@ -658,10 +660,10 @@ body::before{
 .weight-range-label{font-family:var(--font-body);font-size:11.5px;color:var(--text-muted);}
 
 /* Conseil perte de poids */
-.weight-loss-advice{margin-top:10px;padding:10px 12px;background:rgba(234,179,8,0.08);border:1px solid rgba(234,179,8,0.25);border-radius:10px;}
-.weight-loss-title{font-family:var(--font-body);font-size:11.5px;font-weight:600;color:#92400e;margin-bottom:5px;}
-.weight-loss-items{display:flex;flex-direction:column;gap:3px;}
-.weight-loss-item{font-family:var(--font-body);font-size:11.5px;color:var(--text-secondary);}
+.weight-loss-advice{padding:14px 18px;background:var(--card-bg);border:1px solid var(--border);border-left:3px solid #d97706;border-radius:var(--radius-md);box-shadow:var(--shadow-sm);}
+.weight-loss-title{font-family:var(--font-body);font-size:13px;font-weight:600;color:var(--text-primary);margin-bottom:10px;}
+.weight-loss-items{display:flex;flex-wrap:wrap;gap:8px 24px;}
+.weight-loss-item{font-family:var(--font-body);font-size:12px;color:var(--text-secondary);white-space:nowrap;}
 .weight-loss-item span{font-weight:600;color:var(--text-primary);}
 
 /* Zones FC */

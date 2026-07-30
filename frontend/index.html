@@ -222,25 +222,24 @@
             </div>
           </section>
 
-          <!-- IMC + poids idéal / VO2max, côte à côte -->
-          <div class="profile-imc-vo2-row">
-            <section class="card">
-              <div class="card-header"><h2 class="card-title"><span class="card-title-icon">&#x1F3CB;&#xFE0F;</span> Composition corporelle</h2></div>
+          <!-- IMC + poids idéal, avec VO2max intégré à droite -->
+          <section class="card">
+            <div class="card-header"><h2 class="card-title"><span class="card-title-icon">&#x1F3CB;&#xFE0F;</span> Composition corporelle</h2></div>
+            <div class="profile-imc-vo2-row">
               <div id="profile-bmi-section">
                 <div class="profile-indicator-empty">Renseignez vos données pour voir les calculs</div>
               </div>
-            </section>
-
-            <section class="card profile-vo2-card">
-              <div class="card-header"><h2 class="card-title"><span class="card-title-icon">&#x1FAC1;</span> VO&#x2082;max Garmin</h2></div>
-              <div class="profile-vo2-display">
-                <div class="profile-vo2-value" id="profile-vo2-value"></div>
-                <div class="profile-vo2-unit">mL/kg/min</div>
-                <div class="profile-vo2-label" id="profile-vo2-label"></div>
-                <div id="profile-run-category" class="profile-run-cat" style="display:none"></div>
+              <div class="profile-vo2-compact">
+                <span class="profile-vo2-compact-icon">&#x1FAC1;</span>
+                <div class="profile-vo2-display">
+                  <div class="profile-vo2-value" id="profile-vo2-value"></div>
+                  <div class="profile-vo2-unit">mL/kg/min</div>
+                  <div class="profile-vo2-label" id="profile-vo2-label"></div>
+                  <div id="profile-run-category" class="profile-run-cat" style="display:none"></div>
+                </div>
               </div>
-            </section>
-          </div>
+            </div>
+          </section>
 
           <!-- Applications connectées -->
           <div class="profile-card profile-apps-card">
@@ -276,8 +275,10 @@
         </div>
       </div>
 
-      <!-- Zones FC + Allures de course : pleine largeur -->
+      <!-- Objectif poids + Zones FC + Allures de course : pleine largeur -->
       <div class="profile-fullwidth-col">
+        <div id="profile-weight-goal" style="display:none"></div>
+
         <section class="card">
           <div class="card-header">
             <h2 class="card-title"><span class="card-title-icon">&#x2764;&#xFE0F;</span> Zones d'entraînement FC</h2>
