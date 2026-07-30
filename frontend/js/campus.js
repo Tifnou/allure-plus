@@ -994,11 +994,6 @@ function sanitizeCoachText(text) {
     .trim();
 }
 
-function mdBold(text) {
-  if (!text) return text;
-  return text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-}
-
 // "?"? Panneau de détail d'une séance "?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?
 function renderSessionDetail(session, weekId, isCurrentWeek) {
   const isPPG = session.sport === 'ppg' || session.trainingCategory === 'gpp';
