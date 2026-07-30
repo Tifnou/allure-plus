@@ -47,7 +47,7 @@ const {
   getPersonalRecords,
   buildGarminFunctions
 } = require('./garmin_client');
-const { getZoneRange } = require('./zones');
+const { getZoneRange, annotatePaceZones } = require('./zones');
 const {
   campusLogin,
   getActiveGoal,
@@ -968,33 +968,16 @@ function buildGarminWorkoutFromSession(session, weekNum, sessionDisplay, userZon
     let description = toAscii(zoneName);
 
     // Priorité Allure+ si VMA sex-corrected dispo → zones calculées précises
-    // Raffinement depuis la description : quand Campus envoie Z4 pour TOUT le seuil,
-    // on affine (S30 vs S60) depuis la description de la zone OU du nom de la séance
-    let descLower = (zone.description || zone.name || '').toLowerCase();
-    // Pour les zones génériques (Z3/Z4/Z5) sans description précise,
-    // on utilise le nom/description de la séance comme fallback
-    const GENERIC_KINDS = ['Z3','Z4','Z5'];
-    if (GENERIC_KINDS.includes(zKey) && !/s30|s60|vma|tempo|as10|as21|as42|as30/i.test(descLower)) {
-      const sessionDesc = (session.displayName || session.name || session.description || '').toLowerCase();
-      if (sessionDesc) descLower = sessionDesc;
-    }
-    let refinedKey = zKey;
-    if (userZones && preferAllureplusZones) {
-      if (/(s30|seuil[\s_-]?30|seuil 30)/i.test(descLower))                 refinedKey = 'S30';
-      else if (/(s60|seuil[\s_-]?60|seuil 60)/i.test(descLower))            refinedKey = 'S60';
-      else if (/\bvma\b|vo2|interval/i.test(descLower))                     refinedKey = 'VMA';
-      else if (/sweet.spot/i.test(descLower))                               refinedKey = 'SWEET_SPOT';
-      else if (/\b42[\s.]?km\b|\bas42\b|allure[\s_-]*marathon\b/i.test(descLower)) refinedKey = 'AS42';
-      else if (/\b21[\s.]?km\b|\bas21\b|allure[\s_-]*21\b|allure[\s_-]*semi\b/i.test(descLower)) refinedKey = 'AS21';
-      else if (/as10|\b10[\s.]?km\b/i.test(descLower))                      refinedKey = 'AS10';
-      else if (/\btempo\b/i.test(descLower))                                refinedKey = 'TEMPO';
-      else if (/endurance|fond|\bef\b|echauffement|warmup/i.test(descLower)) refinedKey = 'EF';
-      else if (/recup|recover|repos|retour.au.calme/i.test(descLower))      refinedKey = 'RECOVER';
-    }
+    // La vraie zone de ce pas est déjà résolue depuis pace.slug (fiable, voir zones.js
+    // resolveZoneFromExercise/annotatePaceZones) — plus de devinette texte ici.
+    const refinedKey = zone.resolvedZone || zKey;
 
     const apUserZone = userZones && userZones[refinedKey] ? userZones[refinedKey] : null;
     // RECOVER/RECOVERY = allure libre (jamais de cible Garmin)
-    const isRecoverKind = ['RECOVER','RECOVERY','REST','Z1'].includes(zKey) || refinedKey === 'RECOVER';
+    // Le code brut (zKey) sert au type d'étape Garmin plus bas, pas à la cible :
+    // un pas tagué RECOVER par Campus peut avoir un slug "ef" (ex: retour au calme
+    // à allure EF) et doit alors recevoir une vraie cible, comme dans l'affichage.
+    const isRecoverKind = refinedKey === 'RECOVER';
     if (isRecoverKind) {
       // Pas de cible : Garmin laisse le coureur récupérer à son rythme
     } else if (preferAllureplusZones && apUserZone) {
@@ -1143,7 +1126,11 @@ app.post('/api/garmin/workout-from-session', requireSession, async (req, res) =>
 
   try {
     const gc = req.session.gc;
-    const { allureplusVma, isTrail, trailCorrs, hasIntervals } = req.body;
+    const { allureplusVma, isTrail, trailCorrs, hasIntervals, goalType } = req.body;
+
+    // Résout la vraie zone de chaque pas depuis pace.slug (fiable), utilisée
+    // ensuite par buildGarminWorkoutFromSession au lieu de deviner depuis le texte.
+    session.paceZones = annotatePaceZones(session, goalType || '');
 
     // Zones Allure+ depuis VMA sex-corrected envoyee par le frontend (priorite)
     // ou fallback sur VO2max Garmin brut

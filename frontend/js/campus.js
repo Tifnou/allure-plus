@@ -144,6 +144,74 @@ function calcAllureRefTrail(zoneKey, vma) {
   };
 }
 
+// ═══════════════════════════════════════════════════════
+// Résolution de zone depuis pace.slug (fichier .aplus)
+// SOURCE DE VÉRITÉ : le champ pace.slug fourni par Campus dans
+// exercisesBlocks est fiable à 100% (contrairement au code générique
+// Z1-Z5 + devinette sur le nom de séance, qui produisait des erreurs
+// comme "Big Five" classée entièrement en S60 au lieu de S30/Sweet Spot).
+// ⚠️ Ce bloc doit rester identique à celui de zones.js (serveur).
+// ═══════════════════════════════════════════════════════
+const SLUG_TO_ZONE = {
+  'ef': 'EF', 'endurance-fondamentale': 'EF',
+  'slow': 'RECOVER', 'endurance-confort': 'RECOVER',
+  'tempo': 'TEMPO', 'aerobie': 'TEMPO', 'endurance-active': 'TEMPO',
+  'sweet-spot': 'SWEET_SPOT',
+  'seuil60': 'S60',
+  'seuil30': 'S30',
+  '10km': 'AS10',
+  'half-marathon': 'AS21',
+  'marathon': 'AS42',
+  'vo2max': 'VMA', 'vma': 'VMA', 'fast': 'VMA', 'sprint': 'VMA',
+};
+
+// "race" = allure de course cible. Son sens dépend de la distance de l'objectif.
+// En trail (ou objectif inconnu), pas de zone AS pertinente → repli sur EF
+// (les valeurs D+ ayant servi à générer le plan ne sont pas celles du coureur réel).
+const RACE_GOAL_ZONE = { '10km': 'AS10', 'half-marathon': 'AS21', 'marathon': 'AS42' };
+
+// Résout la zone Allure+ d'un exercice depuis pace.slug (fiable),
+// avec repli sur le code générique zoneKind si le slug est absent/inconnu.
+function resolveZoneFromExercise(pace, zoneKind, goalType) {
+  const slug = (pace?.slug || '').toLowerCase();
+  const zk   = (zoneKind || pace?.zoneKind || '').toUpperCase();
+
+  if (slug === 'race') {
+    return (goalType && RACE_GOAL_ZONE[goalType]) ? RACE_GOAL_ZONE[goalType] : 'EF';
+  }
+  if (slug && SLUG_TO_ZONE[slug]) return SLUG_TO_ZONE[slug];
+
+  // Repli : code générique Campus (utilisé seulement si le slug manque)
+  if (['RECOVER','RECOVERY','REST','REPOS'].includes(zk)) return 'RECOVER';
+  if (['WARMUP','COOLDOWN'].includes(zk)) return 'EF';
+  if (zk === 'Z1' || zk === 'Z2') return 'EF';
+  if (zk === 'Z3') return 'TEMPO';
+  if (zk === 'Z4') return 'S60';
+  if (zk === 'Z5') return 'VMA';
+  return null;
+}
+
+// Aplatit exercisesBlocks (en respectant "repeat") dans le même ordre que
+// session.paceZones, pour retrouver le pace.slug de chaque zone
+// (paceZones ne contient que kind/duration/pace.value, pas le slug).
+function flattenExercisePaces(session) {
+  const out = [];
+  (session.exercisesBlocks || []).forEach(block => {
+    const repeat = block.repeat || 1;
+    for (let r = 0; r < repeat; r++) {
+      (block.exercises || []).forEach(ex => out.push(ex.pace || null));
+    }
+  });
+  return out;
+}
+
+// Annote chaque entrée de session.paceZones avec sa zone Allure+ résolue (resolvedZone)
+function annotatePaceZones(session, goalType) {
+  const paces = flattenExercisePaces(session);
+  const zones = session.paceZones || [];
+  return zones.map((z, i) => ({ ...z, resolvedZone: resolveZoneFromExercise(paces[i], z.kind, goalType) }));
+}
+
 // Mappe le couple (nom de séance, kind Campus) vers une clé ALLURE_PLUS_ZONES
 // Règle absolue : Campus dit le TYPE, Allure+ calcule la VALEUR
 function resolveAllurePlusZone(sessionName, zoneKind) {
@@ -1079,23 +1147,24 @@ function renderSessionDetail(session, weekId, isCurrentWeek) {
       + '</div><div class="pace-zones-list">' + raceInfoRows + '</div></div>';
 
   } else if (paceZones.length > 0) {
-    // ALLURE_PLUS_ZONES : zone résolue depuis nom+kind → VMA Garmin → allure Route ou Trail
-    const sessionName  = session.displayName || session.name || '';
-    const isSessTrail  = isTrailSession(session);
+    // Zone résolue depuis pace.slug (fiable) → VMA utilisateur → allure Route ou Trail
+    const isSessTrail   = isTrailSession(session);
+    const goalTypeLocal = campusState.goal?.goalType || '';
+    const zonesResolved = annotatePaceZones(session, goalTypeLocal);
     const modeBadge    = isSessTrail
       ? '<span class="session-mode-badge session-mode-badge--trail">&#127956;&nbsp;Côte / Trail</span>'
       : '<span class="session-mode-badge session-mode-badge--route">&#127939;&nbsp;Route</span>';
     // Détecter si la séance est 100% endurance (EF/RECOVER uniquement)
-    const hasIntervals = paceZones.some(z => {
-      const az = resolveAllurePlusZone(sessionName, z.kind);
+    const hasIntervals = zonesResolved.some(z => {
+      const az = z.resolvedZone;
       return az && az !== 'EF' && az !== 'RECOVER' && az !== 'WARMUP' && az !== 'COOLDOWN';
     });
-    const zoneRows = paceZones.map(z => {
+    const zoneRows = zonesResolved.map(z => {
       const zKey    = (z.kind || '').toUpperCase();
-      const apZone  = resolveAllurePlusZone(sessionName, z.kind);
+      const apZone  = z.resolvedZone;
       const zoneDef = apZone ? ALLURE_PLUS_ZONES[apZone] : null;
       const rowBg   = getZoneColor(zKey);
-      const zoneLbl = zoneDef ? zoneDef.label : fmtZoneKind(z.kind, sessionName);
+      const zoneLbl = zoneDef ? zoneDef.label : fmtZoneKind(z.kind, session.displayName || session.name || '');
       // RECOVER → allure libre, pas de valeur cible
       if (zoneDef?.noTarget) {
         return '<div class="pace-zone-row" data-zone="' + zKey + '" style="background:' + rowBg + ';border-radius:4px;margin-bottom:2px;padding:4px 8px;">'
@@ -1230,7 +1299,7 @@ async function exportWeekToGarmin(weekId, sessionNum) {
     });
 
     // ── Corrections trail par zone (identiques à ALLURE_PLUS_ZONES) ──────────
-    const trailCorrs = { EF:0.07, TEMPO:0.07, SWEET_SPOT:0.07, S60:0.07, S30:0.07, AS10:0.08, VMA:0.10 };
+    const trailCorrs = { EF:0.07, TEMPO:0.07, AS42:0.07, SWEET_SPOT:0.07, AS21:0.07, S60:0.07, S30:0.07, AS10:0.08, VMA:0.10 };
 
     // ── Envoi UNIQUE : /api/garmin/workout-from-session ───────────────────────
     // Allure+ construit le workout de A à Z avec nos paces.
@@ -1245,6 +1314,7 @@ async function exportWeekToGarmin(weekId, sessionNum) {
         isTrail:        isTrailExport,
         trailCorrs,
         hasIntervals:   hasIntervalsExport,
+        goalType:       campusState.goal?.goalType || '',
       }),
     });
 

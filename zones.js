@@ -27,4 +27,72 @@ function getZoneRange(zoneKey) {
   return { pctLow: ref.pctLow, pctHigh: ref.pctHigh };
 }
 
-module.exports = { ALLURE_PLUS_ZONES, getZoneRange };
+// ═══════════════════════════════════════════════════════
+// Résolution de zone depuis pace.slug (fichier .aplus)
+// SOURCE DE VÉRITÉ : le champ pace.slug fourni par Campus dans
+// exercisesBlocks est fiable à 100% (contrairement au code générique
+// Z1-Z5 + devinette sur le nom de séance, qui produisait des erreurs
+// comme "Big Five" classée entièrement en S60 au lieu de S30/Sweet Spot).
+// ⚠️ Ce bloc doit rester identique à celui de frontend/js/campus.js.
+// ═══════════════════════════════════════════════════════
+const SLUG_TO_ZONE = {
+  'ef': 'EF', 'endurance-fondamentale': 'EF',
+  'slow': 'RECOVER', 'endurance-confort': 'RECOVER',
+  'tempo': 'TEMPO', 'aerobie': 'TEMPO', 'endurance-active': 'TEMPO',
+  'sweet-spot': 'SWEET_SPOT',
+  'seuil60': 'S60',
+  'seuil30': 'S30',
+  '10km': 'AS10',
+  'half-marathon': 'AS21',
+  'marathon': 'AS42',
+  'vo2max': 'VMA', 'vma': 'VMA', 'fast': 'VMA', 'sprint': 'VMA',
+};
+
+// "race" = allure de course cible. Son sens dépend de la distance de l'objectif.
+// En trail (ou objectif inconnu), pas de zone AS pertinente → repli sur EF
+// (les valeurs D+ ayant servi à générer le plan ne sont pas celles du coureur réel).
+const RACE_GOAL_ZONE = { '10km': 'AS10', 'half-marathon': 'AS21', 'marathon': 'AS42' };
+
+// Résout la zone Allure+ d'un exercice depuis pace.slug (fiable),
+// avec repli sur le code générique zoneKind si le slug est absent/inconnu.
+function resolveZoneFromExercise(pace, zoneKind, goalType) {
+  const slug = ((pace && pace.slug) || '').toLowerCase();
+  const zk   = (zoneKind || (pace && pace.zoneKind) || '').toUpperCase();
+
+  if (slug === 'race') {
+    return (goalType && RACE_GOAL_ZONE[goalType]) ? RACE_GOAL_ZONE[goalType] : 'EF';
+  }
+  if (slug && SLUG_TO_ZONE[slug]) return SLUG_TO_ZONE[slug];
+
+  // Repli : code générique Campus (utilisé seulement si le slug manque)
+  if (['RECOVER','RECOVERY','REST','REPOS'].includes(zk)) return 'RECOVER';
+  if (['WARMUP','COOLDOWN'].includes(zk)) return 'EF';
+  if (zk === 'Z1' || zk === 'Z2') return 'EF';
+  if (zk === 'Z3') return 'TEMPO';
+  if (zk === 'Z4') return 'S60';
+  if (zk === 'Z5') return 'VMA';
+  return null;
+}
+
+// Aplatit exercisesBlocks (en respectant "repeat") dans le même ordre que
+// session.paceZones, pour retrouver le pace.slug de chaque zone
+// (paceZones ne contient que kind/duration/pace.value, pas le slug).
+function flattenExercisePaces(session) {
+  const out = [];
+  (session.exercisesBlocks || []).forEach(block => {
+    const repeat = block.repeat || 1;
+    for (let r = 0; r < repeat; r++) {
+      (block.exercises || []).forEach(ex => out.push(ex.pace || null));
+    }
+  });
+  return out;
+}
+
+// Annote chaque entrée de session.paceZones avec sa zone Allure+ résolue (resolvedZone)
+function annotatePaceZones(session, goalType) {
+  const paces = flattenExercisePaces(session);
+  const zones = session.paceZones || [];
+  return zones.map((z, i) => Object.assign({}, z, { resolvedZone: resolveZoneFromExercise(paces[i], z.kind, goalType) }));
+}
+
+module.exports = { ALLURE_PLUS_ZONES, getZoneRange, resolveZoneFromExercise, annotatePaceZones };
