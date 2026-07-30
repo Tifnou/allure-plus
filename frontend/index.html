@@ -209,17 +209,38 @@
               </button>
             </form>
           </section>
+        </div>
 
-          <!-- VO2max card -->
-          <section class="card profile-vo2-card">
-            <div class="card-header"><h2 class="card-title"><span class="card-title-icon">&#x1FAC1;</span> VO&#x2082;max Garmin</h2></div>
-            <div class="profile-vo2-display">
-              <div class="profile-vo2-value" id="profile-vo2-value"></div>
-              <div class="profile-vo2-unit">mL/kg/min</div>
-              <div class="profile-vo2-label" id="profile-vo2-label"></div>
-              <div id="profile-run-category" class="profile-run-cat" style="display:none"></div>
+        <!-- Indicateurs calculés -->
+        <div class="profile-results-col">
+
+          <!-- VMA + FC -->
+          <section class="card">
+            <div class="card-header"><h2 class="card-title"><span class="card-title-icon">&#x1F4CA;</span> Indicateurs de performance</h2></div>
+            <div class="profile-indicators" id="profile-indicators">
+              <div class="profile-indicator-empty">Renseignez vos données pour voir les calculs</div>
             </div>
           </section>
+
+          <!-- IMC + poids idéal / VO2max, côte à côte -->
+          <div class="profile-imc-vo2-row">
+            <section class="card">
+              <div class="card-header"><h2 class="card-title"><span class="card-title-icon">&#x1F3CB;&#xFE0F;</span> Composition corporelle</h2></div>
+              <div id="profile-bmi-section">
+                <div class="profile-indicator-empty">Renseignez vos données pour voir les calculs</div>
+              </div>
+            </section>
+
+            <section class="card profile-vo2-card">
+              <div class="card-header"><h2 class="card-title"><span class="card-title-icon">&#x1FAC1;</span> VO&#x2082;max Garmin</h2></div>
+              <div class="profile-vo2-display">
+                <div class="profile-vo2-value" id="profile-vo2-value"></div>
+                <div class="profile-vo2-unit">mL/kg/min</div>
+                <div class="profile-vo2-label" id="profile-vo2-label"></div>
+                <div id="profile-run-category" class="profile-run-cat" style="display:none"></div>
+              </div>
+            </section>
+          </div>
 
           <!-- Applications connectées -->
           <div class="profile-card profile-apps-card">
@@ -251,50 +272,31 @@
               </div>
             </div>
           </div>
-        </div>
-
-        <!-- Indicateurs calculés -->
-        <div class="profile-results-col">
-
-          <!-- VMA + FC -->
-          <section class="card">
-            <div class="card-header"><h2 class="card-title"><span class="card-title-icon">&#x1F4CA;</span> Indicateurs de performance</h2></div>
-            <div class="profile-indicators" id="profile-indicators">
-              <div class="profile-indicator-empty">Renseignez vos données pour voir les calculs</div>
-            </div>
-          </section>
-
-          <!-- IMC + poids idéal -->
-          <section class="card">
-            <div class="card-header"><h2 class="card-title"><span class="card-title-icon">&#x1F3CB;&#xFE0F;</span> Composition corporelle</h2></div>
-            <div id="profile-bmi-section">
-              <div class="profile-indicator-empty">Renseignez vos données pour voir les calculs</div>
-            </div>
-          </section>
-
-          <!-- Zones FC -->
-          <section class="card">
-            <div class="card-header">
-              <h2 class="card-title"><span class="card-title-icon">&#x2764;&#xFE0F;</span> Zones d'entraînement FC</h2>
-              <span class="card-badge" id="profile-zones-method">Méthode Karvonen</span>
-            </div>
-            <div id="profile-hr-zones">
-              <div class="profile-indicator-empty">Renseignez votre âge pour voir les zones</div>
-            </div>
-          </section>
-
-          <!-- Allures de course (calculées depuis VMA Garmin) -->
-          <section class="card">
-            <div class="card-header">
-              <h2 class="card-title"><span class="card-title-icon">&#127939;</span> Allures de course</h2>
-              <span class="card-badge" id="profile-paces-method">Calcul VMA</span>
-            </div>
-            <div id="profile-race-paces">
-              <div class="profile-indicator-empty">Synchronisez Garmin pour voir vos allures cibles</div>
-            </div>
-          </section>
 
         </div>
+      </div>
+
+      <!-- Zones FC + Allures de course : pleine largeur -->
+      <div class="profile-fullwidth-col">
+        <section class="card">
+          <div class="card-header">
+            <h2 class="card-title"><span class="card-title-icon">&#x2764;&#xFE0F;</span> Zones d'entraînement FC</h2>
+            <span class="card-badge" id="profile-zones-method">Méthode Karvonen</span>
+          </div>
+          <div id="profile-hr-zones">
+            <div class="profile-indicator-empty">Renseignez votre âge pour voir les zones</div>
+          </div>
+        </section>
+
+        <section class="card">
+          <div class="card-header">
+            <h2 class="card-title"><span class="card-title-icon">&#127939;</span> Allures de course</h2>
+            <span class="card-badge" id="profile-paces-method">Calcul VMA</span>
+          </div>
+          <div id="profile-race-paces">
+            <div class="profile-indicator-empty">Synchronisez Garmin pour voir vos allures cibles</div>
+          </div>
+        </section>
       </div>
 
       <!-- Conseils personnalisés (pleine largeur) -->

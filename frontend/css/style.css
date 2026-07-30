@@ -557,9 +557,19 @@ body::before{
 /* ═══════════════════════════════════════════════
    PAGE PROFIL
 ═══════════════════════════════════════════════ */
-.profile-layout{display:grid;grid-template-columns:340px 1fr;gap:16px;align-items:start;}
-.profile-form-col{display:flex;flex-direction:column;gap:16px;}
-.profile-results-col{display:flex;flex-direction:column;gap:16px;}
+/* Densité resserrée, propre à cette page (n'affecte aucune autre page) */
+#page-profile{padding:24px 28px 48px;}
+#page-profile .page-header{margin-bottom:16px;padding:8px 18px;}
+#page-profile .card{padding:14px 16px;}
+#page-profile .card-header{margin-bottom:10px;}
+#page-profile .card-title{font-size:12.5px;}
+
+.profile-layout{display:grid;grid-template-columns:340px 1fr;gap:12px;align-items:start;}
+.profile-form-col{display:flex;flex-direction:column;gap:12px;}
+.profile-results-col{display:flex;flex-direction:column;gap:12px;}
+.profile-imc-vo2-row{display:grid;grid-template-columns:1.3fr 1fr;gap:12px;align-items:start;}
+@media(max-width:700px){.profile-imc-vo2-row{grid-template-columns:1fr;}}
+.profile-fullwidth-col{display:flex;flex-direction:column;gap:12px;margin-top:12px;}
 
 /* Formulaire profil */
 .profile-form{display:flex;flex-direction:column;gap:14px;}
@@ -2104,7 +2114,7 @@ body::before{
   text-transform: uppercase;
   margin-bottom: 10px;
 }
-.profile-apps-card { margin-top: 16px; padding: 14px 16px; background: var(--bg-white); border: 1px solid var(--border); border-radius: 12px; }
+.profile-apps-card { padding: 12px 14px; background: var(--bg-white); border: 1px solid var(--border); border-radius: 10px; }
 .profile-apps-list { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
 .profile-app-row {
   display: flex; align-items: center; gap: 12px;
