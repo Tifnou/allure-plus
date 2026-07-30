@@ -615,71 +615,73 @@ body::before{
 .btn-save-profile:hover{background:#1d4ed8;transform:translateY(-1px);box-shadow:0 4px 12px rgba(37,99,235,0.3);}
 
 /* VO2max card */
-.profile-vo2-display{text-align:center;padding:16px 0 8px;}
-.profile-vo2-value{font-family:var(--font);font-size:52px;font-weight:700;color:var(--accent);line-height:1;}
-.profile-vo2-unit{font-family:var(--font-body);font-size:12px;color:var(--text-muted);margin-top:4px;}
-.profile-vo2-label{font-family:var(--font-body);font-size:13px;color:var(--text-secondary);margin-top:8px;font-weight:500;}
+.profile-vo2-display{text-align:center;padding:10px 0 4px;}
+.profile-vo2-value{font-family:var(--font);font-size:32px;font-weight:700;color:var(--accent);line-height:1;font-variant-numeric:tabular-nums;}
+.profile-vo2-unit{font-family:var(--font-body);font-size:11px;color:var(--text-muted);margin-top:2px;}
+.profile-vo2-label{font-family:var(--font-body);font-size:12px;color:var(--text-secondary);margin-top:5px;font-weight:500;}
 
 /* Indicateurs de performance */
-.profile-indicators{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding-top:4px;}
-.profile-ind-card{background:rgba(255,255,255,0.5);border:1px solid var(--border);border-radius:12px;padding:14px 16px;}
-.profile-ind-value{font-family:var(--font);font-size:26px;font-weight:700;color:var(--text-primary);}
-.profile-ind-unit{font-family:var(--font-body);font-size:11px;color:var(--text-muted);}
-.profile-ind-label{font-family:var(--font-body);font-size:12px;color:var(--text-secondary);margin-top:4px;}
-.profile-ind-sub{font-family:var(--font-body);font-size:11px;color:var(--text-muted);margin-top:2px;font-style:italic;}
+.profile-indicators{display:grid;grid-template-columns:repeat(4,1fr);gap:0;padding-top:2px;}
+.profile-ind-card{border-right:1px solid var(--border);padding:10px 12px;}
+.profile-ind-card:last-child{border-right:none;}
+.profile-ind-value{font-family:var(--font);font-size:20px;font-weight:700;color:var(--text-primary);font-variant-numeric:tabular-nums;}
+.profile-ind-unit{font-family:var(--font-body);font-size:10.5px;color:var(--text-muted);}
+.profile-ind-label{font-family:var(--font-body);font-size:11px;color:var(--text-secondary);font-weight:600;margin-top:3px;}
+.profile-ind-sub{font-family:var(--font-body);font-size:10px;color:var(--text-muted);margin-top:1px;}
 .profile-indicator-empty{font-family:var(--font-body);font-size:13px;color:var(--text-muted);font-style:italic;padding:12px 0;}
+@media(max-width:900px){.profile-indicators{grid-template-columns:repeat(2,1fr);}.profile-ind-card:nth-child(2){border-right:none;}}
 
 /* IMC bar */
-.bmi-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;}
-.bmi-value-big{font-family:var(--font);font-size:36px;font-weight:700;}
-.bmi-cat{font-family:var(--font-body);font-size:13px;font-weight:500;padding:3px 10px;border-radius:20px;}
+.bmi-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;}
+.bmi-value-big{font-family:var(--font);font-size:26px;font-weight:700;font-variant-numeric:tabular-nums;}
+.bmi-cat{font-family:var(--font-body);font-size:12px;font-weight:500;padding:3px 10px;border-radius:20px;}
 .bmi-cat.normal{background:rgba(22,163,74,0.12);color:#15803d;}
 .bmi-cat.overweight{background:rgba(234,179,8,0.15);color:#a16207;}
 .bmi-cat.obese{background:rgba(239,68,68,0.12);color:#dc2626;}
 .bmi-cat.underweight{background:rgba(99,102,241,0.12);color:#4338ca;}
 .bmi-bar-wrap{position:relative;margin:8px 0 4px;}
-.bmi-bar{height:8px;border-radius:4px;background:linear-gradient(to right,#818cf8 0%,#818cf8 17.5%,#4ade80 17.5%,#4ade80 50%,#facc15 50%,#facc15 75%,#f97316 75%,#ef4444 100%);overflow:visible;}
-.bmi-marker{position:absolute;top:-4px;width:16px;height:16px;background:#fff;border:2px solid var(--text-primary);border-radius:50%;transform:translateX(-50%);transition:left 0.6s ease;}
-.bmi-scale{position:relative;height:16px;margin-top:4px;}.bmi-scale span{position:absolute;font-family:var(--font-body);font-size:10px;color:var(--text-muted);transform:translateX(-50%);white-space:nowrap;}.bmi-scale span:first-child{transform:translateX(0);}.bmi-scale span:last-child{transform:translateX(-100%);}
-.weight-range{display:flex;align-items:baseline;gap:6px;margin-top:10px;}
-.weight-range-val{font-family:var(--font);font-size:20px;font-weight:700;color:var(--green);}
-.weight-range-label{font-family:var(--font-body);font-size:12px;color:var(--text-muted);}
+.bmi-bar{height:6px;border-radius:3px;background:linear-gradient(to right,#818cf8 0%,#818cf8 17.5%,#4ade80 17.5%,#4ade80 50%,#facc15 50%,#facc15 75%,#f97316 75%,#ef4444 100%);overflow:visible;}
+.bmi-marker{position:absolute;top:-3px;width:12px;height:12px;background:#fff;border:2px solid var(--text-primary);border-radius:50%;transform:translateX(-50%);transition:left 0.6s ease;}
+.bmi-scale{position:relative;height:14px;margin-top:3px;}.bmi-scale span{position:absolute;font-family:var(--font-body);font-size:9.5px;color:var(--text-muted);transform:translateX(-50%);white-space:nowrap;}.bmi-scale span:first-child{transform:translateX(0);}.bmi-scale span:last-child{transform:translateX(-100%);}
+.weight-range{display:flex;align-items:baseline;gap:6px;margin-top:8px;}
+.weight-range-val{font-family:var(--font);font-size:16px;font-weight:700;color:var(--green);font-variant-numeric:tabular-nums;}
+.weight-range-label{font-family:var(--font-body);font-size:11.5px;color:var(--text-muted);}
 
 /* Conseil perte de poids */
-.weight-loss-advice{margin-top:14px;padding:12px 14px;background:rgba(234,179,8,0.08);border:1px solid rgba(234,179,8,0.25);border-radius:12px;}
-.weight-loss-title{font-family:var(--font-body);font-size:12px;font-weight:600;color:#92400e;margin-bottom:6px;}
-.weight-loss-items{display:flex;flex-direction:column;gap:4px;}
-.weight-loss-item{font-family:var(--font-body);font-size:12px;color:var(--text-secondary);}
+.weight-loss-advice{margin-top:10px;padding:10px 12px;background:rgba(234,179,8,0.08);border:1px solid rgba(234,179,8,0.25);border-radius:10px;}
+.weight-loss-title{font-family:var(--font-body);font-size:11.5px;font-weight:600;color:#92400e;margin-bottom:5px;}
+.weight-loss-items{display:flex;flex-direction:column;gap:3px;}
+.weight-loss-item{font-family:var(--font-body);font-size:11.5px;color:var(--text-secondary);}
 .weight-loss-item span{font-weight:600;color:var(--text-primary);}
 
 /* Zones FC */
-.hr-zones-list{display:flex;flex-direction:column;gap:10px;padding-top:4px;}
-.hr-zone-row{display:flex;align-items:center;gap:10px;flex-wrap:nowrap;}
-.hr-zone-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;}
+.hr-zones-list{display:flex;flex-direction:column;gap:6px;padding-top:2px;font-variant-numeric:tabular-nums;}
+.hr-zone-row{display:flex;align-items:center;gap:10px;flex-wrap:nowrap;padding:2px 0;}
+.hr-zone-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0;}
 .hr-zone-name{font-family:var(--font-body);font-size:12px;font-weight:600;color:var(--text-primary);min-width:140px;}
-.hr-zone-range{font-family:var(--font);font-size:12px;color:var(--text-secondary);min-width:95px;white-space:nowrap;}
-.hr-zone-speed{font-family:var(--font);font-size:12px;color:var(--text-primary);min-width:100px;white-space:nowrap;font-weight:500;}
-.hr-zone-pace{font-family:var(--font);font-size:12px;color:var(--text-secondary);min-width:110px;white-space:nowrap;}
+.hr-zone-range{font-family:var(--font-mono,var(--font));font-size:12px;color:var(--text-secondary);min-width:95px;white-space:nowrap;}
+.hr-zone-speed{font-family:var(--font-mono,var(--font));font-size:12px;color:var(--text-primary);min-width:100px;white-space:nowrap;font-weight:500;}
+.hr-zone-pace{font-family:var(--font-mono,var(--font));font-size:12px;color:var(--text-secondary);min-width:110px;white-space:nowrap;}
 .hr-zone-desc{font-family:var(--font-body);font-size:11px;color:var(--text-muted);}
 .hr-zone-bar-wrap{flex:1;height:5px;background:var(--border);border-radius:3px;overflow:hidden;min-width:40px;}
 .hr-zone-bar{height:100%;border-radius:3px;transition:width 0.5s ease;}
 
 /* Conseils personnalises */
-.profile-advice-section{margin-top:20px;}
-.advice-section-title{font-family:var(--font);font-size:16px;font-weight:700;color:var(--text-primary);margin-bottom:14px;display:flex;align-items:center;gap:8px;}
-.advice-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;}
+.profile-advice-section{margin-top:18px;}
+.advice-section-title{font-family:var(--font);font-size:15px;font-weight:700;color:var(--text-primary);margin-bottom:12px;display:flex;align-items:center;gap:8px;}
+.advice-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;}
 @media(max-width:1100px){.advice-grid{grid-template-columns:repeat(2,1fr);}}
 @media(max-width:700px){.advice-grid{grid-template-columns:1fr;}}
-.advice-card{background:rgba(255,255,255,0.88);border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden;box-shadow:var(--shadow-sm);transition:box-shadow var(--transition);}
+.advice-card{background:rgba(255,255,255,0.88);border:1px solid var(--border);border-radius:var(--radius-md);overflow:hidden;box-shadow:var(--shadow-sm);transition:box-shadow var(--transition);}
 .advice-card:hover{box-shadow:var(--shadow-md);}
-.advice-card-header{display:flex;align-items:center;gap:10px;padding:12px 16px;}
-.advice-card-icon{font-size:18px;line-height:1;}
-.advice-card-title{font-family:var(--font-body);font-size:13px;font-weight:600;color:var(--text-primary);}
-.advice-card-body{padding:0 16px 14px;}
-.advice-tip{display:flex;align-items:flex-start;gap:8px;padding:5px 0;border-bottom:1px solid var(--border-light);font-family:var(--font-body);font-size:12px;color:var(--text-secondary);line-height:1.5;}
+.advice-card-header{display:flex;align-items:center;gap:8px;padding:10px 14px;}
+.advice-card-icon{font-size:16px;line-height:1;}
+.advice-card-title{font-family:var(--font-body);font-size:12.5px;font-weight:600;color:var(--text-primary);}
+.advice-card-body{padding:0 14px 12px;}
+.advice-tip{display:flex;align-items:flex-start;gap:7px;padding:4px 0;border-bottom:1px solid var(--border-light);font-family:var(--font-body);font-size:11.5px;color:var(--text-secondary);line-height:1.45;}
 .advice-tip:last-child{border-bottom:none;}
-.advice-tip-icon{font-size:13px;flex-shrink:0;margin-top:1px;}
-.advice-highlight{margin-top:10px;padding:8px 10px;background:linear-gradient(135deg,rgba(37,99,235,0.06),rgba(124,58,237,0.06));border:1px solid rgba(37,99,235,0.15);border-radius:8px;font-family:var(--font-body);font-size:12px;color:var(--text-primary);}
+.advice-tip-icon{font-size:12px;flex-shrink:0;margin-top:1px;}
+.advice-highlight{margin-top:8px;padding:7px 9px;background:linear-gradient(135deg,rgba(37,99,235,0.06),rgba(124,58,237,0.06));border:1px solid rgba(37,99,235,0.15);border-radius:7px;font-family:var(--font-body);font-size:11.5px;color:var(--text-primary);}
 .advice-highlight strong{color:var(--accent);}
 .advice-card--nutrition .advice-card-header{background:rgba(22,163,74,0.06);}
 .advice-card--hydration .advice-card-header{background:rgba(14,165,233,0.06);}
@@ -2440,7 +2442,6 @@ body::before{
 /* ── Arrière-plans semi-transparents (rgba blanc → rgba sombre) ── */
 [data-theme="dark"] .stat-card,
 [data-theme="dark"] .filter-pill,
-[data-theme="dark"] .profile-ind-card,
 [data-theme="dark"] .advice-card,
 [data-theme="dark"] .btn-back,
 [data-theme="dark"] .coming-soon-card,
@@ -2887,403 +2888,54 @@ td .activity-type-cell {
 }
 
 /* -------------------------------------------------------
-   RPT � Race Pace Table (tableau allures Route/Trail)
-   Design sobre, pro, lisible light + dark
+   RPT — Race Pace Table (tableau allures Route/Trail)
+   Grille CSS compacte, alignement header = lignes
    ------------------------------------------------------- */
-.rpt-table {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  font-size: 13px;
-}
-
-/* En-t�te */
-.rpt-header {
-  display: grid;
-  grid-template-columns: 1fr 130px 150px;
-  align-items: center;
-  padding: 6px 10px 8px 14px;
-  border-bottom: 1px solid var(--border);
-  margin-bottom: 2px;
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-}
-.rpt-h-zone  { }
-.rpt-h-route { text-align: right; }
-.rpt-h-trail { text-align: right; padding-right: 2px; }
-
-/* Ligne de zone */
-.rpt-row {
-  display: grid;
-  grid-template-columns: 1fr 130px 150px;
-  align-items: center;
-  padding: 8px 10px 8px 12px;
-  border-radius: 4px;
-  border-left: 3px solid transparent;
-  transition: background 0.15s;
-  gap: 4px;
-}
-.rpt-row:hover {
-  background: var(--bg-hover, rgba(0,0,0,0.04));
-}
-[data-theme="dark"] .rpt-row:hover {
-  background: rgba(255,255,255,0.05);
-}
-
-/* Zone : nom + % VMA */
-.rpt-zone {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-.rpt-zone-name {
-  font-weight: 500;
-  font-size: 13px;
-  color: var(--text-primary);
-}
-.rpt-zone-pct {
-  font-size: 10px;
-  color: var(--text-muted);
-  font-weight: 400;
-  letter-spacing: 0.02em;
-}
-
-/* Colonnes Route et Trail */
-.rpt-route, .rpt-trail {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 4px;
-}
-
-/* Valeurs d'allure : monospace, poids moyen, couleur neutre */
-.rpt-pace {
-  font-family: var(--font-mono, 'SF Mono', 'Fira Code', monospace);
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--text-primary);
-  letter-spacing: 0.01em;
-  white-space: nowrap;
-}
-.rpt-sep   { color: var(--text-muted); font-weight: 400; }
-.rpt-unit  { font-size: 10px; color: var(--text-muted); font-weight: 400; margin-left: 1px; }
-
-/* Trail : l�g�rement diff�renci� mais pas fluorescent */
-.rpt-pace--trail {
-  color: var(--text-secondary, #555);
-}
-[data-theme="dark"] .rpt-pace--trail {
-  color: var(--text-secondary, #aaa);
-}
-
-/* Badge de correction +X% */
-.rpt-corr {
-  font-size: 10px;
-  font-weight: 500;
-  color: var(--text-muted);
-  background: var(--bg-subtle, rgba(0,0,0,0.06));
-  border: 1px solid var(--border);
-  padding: 1px 5px;
-  border-radius: 8px;
-  letter-spacing: 0.02em;
-  white-space: nowrap;
-}
-[data-theme="dark"] .rpt-corr {
-  background: rgba(255,255,255,0.08);
-  color: #9ca3af;
-  border-color: rgba(255,255,255,0.12);
-}
-
-/* Allure libre (RECOVER) */
-.rpt-free {
-  font-size: 12px;
-  font-style: italic;
-  color: var(--text-muted);
-  font-weight: 400;
-}
-
-/* N/A */
-.rpt-na {
-  font-size: 13px;
-  color: var(--text-muted);
-}
-
-/* S�parateur entre groupes */
-.rpt-divider {
-  height: 1px;
-  background: var(--border);
-  margin: 4px 0;
-  opacity: 0.6;
-}
-
-/* -------------------------------------------------------
-   RPT v2 � Race Pace Table HTML table, alignement parfait
-   ------------------------------------------------------- */
-.rpt-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 13px;
-  table-layout: fixed;
-}
-
-/* Largeurs colonnes : Zone prend le reste, Route et Trail fixes */
-.rpt-th-zone, .rpt-td-zone { width: auto; }
-.rpt-th-pace, .rpt-td-pace { width: 160px; }
-
-/* En-t�te */
-.rpt-head {
-  border-bottom: 1px solid var(--border);
-}
-.rpt-th {
-  padding: 5px 10px 8px;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-  text-align: right;
-}
-.rpt-th-zone { text-align: left; padding-left: 14px; }
-.rpt-unit-hd  { font-weight: 400; opacity: 0.6; }
-
-/* Lignes */
-.rpt-row {
-  border-left: 3px solid transparent;
-  transition: background 0.12s;
-}
-.rpt-row:hover { background: var(--bg-hover, rgba(0,0,0,0.04)); }
-[data-theme="dark"] .rpt-row:hover { background: rgba(255,255,255,0.05); }
-
-/* Cellules */
-.rpt-td {
-  padding: 9px 10px;
-  vertical-align: middle;
-}
-.rpt-td-zone {
-  padding-left: 12px;
-}
-
-/* Zone : nom + % VMA empil�s */
-.rpt-zone-name {
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--text-primary);
-  line-height: 1.3;
-}
-.rpt-zone-pct {
-  font-size: 10px;
-  color: var(--text-muted);
-  font-weight: 400;
-  margin-top: 1px;
-}
-
-/* Valeurs d'allure : monospace, align�es � droite */
-.rpt-td-pace {
-  text-align: right;
-  font-family: var(--font-mono, 'SF Mono', 'Fira Code', 'Consolas', monospace);
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--text-primary);
-  white-space: nowrap;
-}
-.rpt-td-trail {
-  color: var(--text-secondary, #555);
-}
-[data-theme="dark"] .rpt-td-trail {
-  color: #c0c8d8;
-}
-
-.rpt-v    { display: inline; }
-.rpt-dash { color: var(--text-muted); font-weight: 400; margin: 0 1px; }
-
-/* Badge +X% */
-.rpt-badge {
-  display: inline-block;
-  margin-left: 6px;
-  font-size: 10px;
-  font-weight: 500;
-  font-family: inherit;
-  color: var(--text-muted);
-  background: var(--bg-subtle, rgba(0,0,0,0.06));
-  border: 1px solid var(--border);
-  padding: 1px 5px;
-  border-radius: 8px;
-  letter-spacing: 0.02em;
-  vertical-align: middle;
-}
-[data-theme="dark"] .rpt-badge {
-  background: rgba(255,255,255,0.07);
-  border-color: rgba(255,255,255,0.12);
-  color: #9ca3af;
-}
-
-/* Allure libre */
-.rpt-free {
-  font-size: 12px;
-  font-style: italic;
-  color: var(--text-muted);
-  font-weight: 400;
-  font-family: inherit;
-}
-
-/* N/A */
-.rpt-na { color: var(--text-muted); font-size: 14px; }
-
-/* S�parateur entre groupes */
-.rpt-sep-row td { padding: 2px 0; }
-.rpt-sep {
-  height: 1px;
-  background: var(--border);
-  opacity: 0.5;
-}
-
-/* --- Tableau allures profil : s�parateur visible Route / Trail --- */
-.rpt-td-trail, .rpt-head .rpt-th:last-child {
-  border-left: 1px solid var(--border);
-  padding-left: 16px;
-}
-
-/* --- Couleurs neutres allures dans les s�ances ------------------- */
-:root {
-  --text-pace:  var(--text-primary);
-  --text-trail: #5a7a8a;
-}
-[data-theme="dark"] {
-  --text-pace:  #d1d5db;
-  --text-trail: #93b8c8;
-}
-
-/* Badge correction trail dans s�ances */
-.trail-corr-note {
-  font-size: 10px;
-  opacity: 0.65;
-  margin-left: 3px;
-  font-weight: 400;
-}
-
-/* -------------------------------------------------------
-   RPT v3 � CSS Grid (alignement garanti header = lignes)
-   ------------------------------------------------------- */
-
-/* Conteneur g�n�ral */
-.rpt-table { width: 100%; }
-
-/* M�ME grid pour header ET lignes : alignement parfait */
+.rpt-table { width: 100%; font-variant-numeric: tabular-nums; }
 .rpt-head,
 .rpt-row {
   display: grid;
-  grid-template-columns: 1fr 148px 160px;
+  grid-template-columns: 1fr 128px 140px;
   align-items: center;
   border-left: 3px solid transparent;
 }
-
-/* En-t�te */
 .rpt-head {
   border-bottom: 1px solid var(--border);
-  margin-bottom: 3px;
-  padding: 4px 0 6px;
+  padding: 0 0 6px;
 }
 .rpt-head .rpt-cell {
-  font-size: 10px;
+  font-size: 9.5px;
   font-weight: 700;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.07em;
   text-transform: uppercase;
   color: var(--text-muted);
   padding: 0 6px;
 }
-
-/* Ligne de zone */
-.rpt-row {
-  border-radius: 3px;
-  transition: background 0.12s;
-  padding: 2px 0;
-}
+.rpt-row { border-radius: 3px; transition: background 0.12s; }
 .rpt-row:hover { background: var(--bg-hover, rgba(0,0,0,0.04)); }
 [data-theme="dark"] .rpt-row:hover { background: rgba(255,255,255,0.04); }
-
-/* Cellule g�n�rique */
-.rpt-cell { padding: 5px 6px; }
-
-/* Colonne Zone */
-.rpt-zone { padding-left: 8px; }
-.rpt-zone-name {
-  font-size: 12.5px;
-  font-weight: 500;
-  color: var(--text-primary);
-  line-height: 1.25;
+.rpt-cell { padding: 4px 6px; }
+.rpt-zone { padding-left: 6px; }
+.rpt-zone-name { font-size: 12px; font-weight: 500; color: var(--text-primary); line-height: 1.25; }
+.rpt-zone-pct { font-size: 9.5px; color: var(--text-muted); font-weight: 400; margin-top: 0; }
+.rpt-route, .rpt-trail {
+  font-family: var(--font-mono, 'SF Mono', 'Fira Code', 'Consolas', monospace);
+  font-size: 12px; font-weight: 500; text-align: right; color: var(--text-primary);
+  white-space: nowrap; padding-right: 6px;
 }
-.rpt-zone-pct {
-  font-size: 10px;
-  color: var(--text-muted);
-  font-weight: 400;
-  margin-top: 1px;
-}
-
-/* Colonnes Route et Trail : mono, droite, m�me taille */
-.rpt-route,
-.rpt-trail {
-  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
-  font-size: 12.5px;
-  font-weight: 500;
-  text-align: right;
-  color: var(--text-primary);
-  white-space: nowrap;
-  padding-right: 8px;
-}
-
-/* Trail : s�parateur visible + couleur distincte mais sobre */
-.rpt-trail {
-  border-left: 1px solid var(--border);
-  color: var(--text-secondary, #4a5568);
-}
+.rpt-trail { border-left: 1px solid var(--border); color: var(--text-secondary, #4a5568); }
 [data-theme="dark"] .rpt-trail { color: #b0bec5; }
-
-/* Tiret entre les deux valeurs */
 .rpt-dash { color: var(--text-muted); font-weight: 400; }
-
-/* Badge +X% */
 .rpt-badge {
-  font-size: 10px;
-  font-weight: 500;
-  color: var(--text-muted);
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  padding: 0 4px;
-  border-radius: 6px;
-  vertical-align: middle;
-  margin-left: 3px;
-  font-family: inherit;
+  font-size: 9.5px; font-weight: 500; color: var(--text-muted);
+  background: var(--bg-hover); border: 1px solid var(--border);
+  padding: 0 4px; border-radius: 6px; vertical-align: middle; margin-left: 3px; font-family: inherit;
 }
-[data-theme="dark"] .rpt-badge {
-  background: rgba(255,255,255,0.06);
-  border-color: rgba(255,255,255,0.12);
-}
-
-/* Unit� /km dans les headers */
+[data-theme="dark"] .rpt-badge { background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.12); }
 .rpt-unit-hd { font-weight: 400; opacity: 0.55; font-size: 9px; }
-
-/* Allure libre (RECOVER) */
-.rpt-free {
-  font-size: 11px;
-  font-style: italic;
-  color: var(--text-muted);
-  font-weight: 400;
-  font-family: inherit;
-}
-
-/* N/A */
+.rpt-free { font-size: 11px; font-style: italic; color: var(--text-muted); font-weight: 400; font-family: inherit; }
 .rpt-na { color: var(--text-muted); }
-
-/* S�parateur entre groupes */
-.rpt-sep {
-  height: 1px;
-  background: var(--border);
-  margin: 4px 0;
-  opacity: 0.5;
-}
+.rpt-sep { height: 1px; background: var(--border); margin: 3px 0; opacity: 0.5; }
 
 /* Bouton Annuler plan - rouge discret */
 .btn-plan-cancel {
