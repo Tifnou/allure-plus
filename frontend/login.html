@@ -1,0 +1,737 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Allure+ - Configuration</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --accent: #2563EB;
+      --accent-hover: #1d4ed8;
+      --bg: #F0F2F5;
+      --card-bg: rgba(255,255,255,0.95);
+      --border: #E2E5EB;
+      --border-focus: #2563EB;
+      --text-primary: #111827;
+      --text-secondary: #4B5563;
+      --text-muted: #9CA3AF;
+      --green: #16a34a;
+      --garmin-blue: #0077CC;
+      --radius: 14px;
+      --radius-sm: 9px;
+      --shadow: 0 12px 40px rgba(0,0,0,0.10), 0 2px 8px rgba(0,0,0,0.06);
+      --transition: 0.18s ease;
+      --font: 'Inter', system-ui, sans-serif;
+    }
+
+    body {
+      font-family: var(--font);
+      background: var(--bg);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px 16px;
+      position: relative;
+    }
+
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background:
+        radial-gradient(ellipse 70% 50% at 15% 15%, rgba(37,99,235,0.08) 0%, transparent 65%),
+        radial-gradient(ellipse 50% 70% at 85% 85%, rgba(16,163,74,0.06) 0%, transparent 65%);
+      pointer-events: none;
+    }
+
+    .page-wrap {
+      position: relative;
+      z-index: 1;
+      width: 100%;
+      max-width: 500px;
+    }
+
+    /* "?"? Brand "?"? */
+    .brand {
+      text-align: center;
+      margin-bottom: 28px;
+    }
+    .brand-logo {
+      display: inline-block;
+      margin-bottom: 12px;
+    }
+    .brand-logo img {
+      width: 80px;
+      height: auto;
+      display: block;
+    }
+    .brand-name {
+      font-size: 26px;
+      font-weight: 700;
+      color: var(--text-primary);
+      letter-spacing: -0.03em;
+    }
+    .brand-sub { font-size: 13px; color: var(--text-muted); margin-top: 4px; }
+
+    /* "?"? Card "?"? */
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 28px 28px 24px;
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(10px);
+    }
+
+    .section-title {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 12px;
+    }
+
+    /* "?"? GPS app selector "?"? */
+    .app-list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-bottom: 24px;
+    }
+
+    .app-item {
+      border: 1.5px solid var(--border);
+      border-radius: var(--radius-sm);
+      transition: border-color var(--transition), box-shadow var(--transition);
+      overflow: hidden;
+    }
+    .app-item.selected {
+      border-color: var(--garmin-blue);
+      box-shadow: 0 0 0 3px rgba(0,119,204,0.10);
+    }
+    .app-item.disabled {
+      opacity: 0.55;
+      pointer-events: none;
+    }
+
+    .app-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 14px 16px;
+      cursor: pointer;
+      user-select: none;
+      background: #fff;
+      transition: background var(--transition);
+    }
+    .app-header:hover { background: #f8faff; }
+    .app-item.disabled .app-header { cursor: not-allowed; }
+
+    .app-check {
+      width: 20px; height: 20px;
+      border: 2px solid var(--border);
+      border-radius: 50%;
+      flex-shrink: 0;
+      transition: all var(--transition);
+      display: flex; align-items: center; justify-content: center;
+    }
+    .app-item.selected .app-check {
+      background: var(--garmin-blue);
+      border-color: var(--garmin-blue);
+    }
+    .app-check-dot {
+      width: 8px; height: 8px;
+      background: #fff;
+      border-radius: 50%;
+      opacity: 0;
+      transition: opacity var(--transition);
+    }
+    .app-item.selected .app-check-dot { opacity: 1; }
+
+    .app-icon {
+      width: 38px; height: 38px;
+      border-radius: 10px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 20px;
+      flex-shrink: 0;
+    }
+    .app-icon.garmin  { background: #e8f2fa; }
+    .app-icon.suunto  { background: #ffeee8; }
+    .app-icon.coros   { background: #f0f0ff; }
+
+    .app-info { flex: 1; }
+    .app-name { font-size: 14px; font-weight: 600; color: var(--text-primary); }
+    .app-desc { font-size: 12px; color: var(--text-muted); margin-top: 1px; }
+
+    .badge-soon {
+      font-size: 10px;
+      font-weight: 600;
+      background: #F3F4F6;
+      color: var(--text-muted);
+      padding: 3px 8px;
+      border-radius: 20px;
+      flex-shrink: 0;
+    }
+
+    /* "?"? Credentials panel (expands under app item) "?"? */
+    .app-credentials {
+      max-height: 0;
+      overflow: hidden;
+      transition: max-height 0.28s ease, padding 0.18s ease;
+      background: #f8faff;
+      border-top: 1.5px solid transparent;
+    }
+    .app-credentials.open {
+      max-height: 220px;
+      border-top-color: rgba(0,119,204,0.12);
+    }
+    .app-credentials-inner { padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+
+    /* "?"? Fields "?"? */
+    .field { display: flex; flex-direction: column; gap: 5px; }
+    .field label {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .field input {
+      padding: 9px 12px;
+      border: 1.5px solid var(--border);
+      border-radius: var(--radius-sm);
+      font-family: var(--font);
+      font-size: 14px;
+      color: var(--text-primary);
+      background: #fff;
+      transition: border-color var(--transition), box-shadow var(--transition);
+      outline: none;
+    }
+    .field input:focus {
+      border-color: var(--border-focus);
+      box-shadow: 0 0 0 3px rgba(37,99,235,0.10);
+    }
+    .field input::placeholder { color: var(--text-muted); }
+
+    /* "?"? Remember me "?"? */
+    .remember-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      color: var(--text-secondary);
+      cursor: pointer;
+      margin-top: 2px;
+    }
+    .remember-row input[type="checkbox"] {
+      width: 15px; height: 15px;
+      accent-color: var(--garmin-blue);
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+
+    /* "?"? Separator "?"? */
+    .sep {
+      height: 1px;
+      background: var(--border);
+      margin: 20px 0;
+    }
+
+    /* "?"? Campus Yes/No "?"? */
+    .campus-section { margin-bottom: 24px; }
+    .yesno-row {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    .yesno-btn {
+      flex: 1;
+      padding: 10px 16px;
+      border: 1.5px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: #fff;
+      font-family: var(--font);
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--text-secondary);
+      cursor: pointer;
+      transition: all var(--transition);
+    }
+    .yesno-btn:hover { border-color: var(--text-muted); color: var(--text-primary); }
+    .yesno-btn.active-yes {
+      background: #e8f5e9; color: #15803d;
+      border-color: #86efac;
+      font-weight: 600;
+    }
+    .yesno-btn.active-no {
+      background: #f3f4f6; color: var(--text-secondary);
+      border-color: var(--text-muted);
+      font-weight: 600;
+    }
+
+    .campus-fields {
+      max-height: 0;
+      overflow: hidden;
+      transition: max-height 0.28s ease;
+    }
+    .campus-fields.open { max-height: 200px; }
+    .campus-fields-inner {
+      background: #f0fdf4;
+      border: 1.5px solid #86efac;
+      border-radius: var(--radius-sm);
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .campus-no-msg {
+      display: none;
+      font-size: 12px;
+      color: var(--text-muted);
+      background: #f9fafb;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 10px 12px;
+      line-height: 1.5;
+    }
+    .campus-no-msg.show { display: block; }
+
+    /* "?"? CTA Button "?"? */
+    .btn-cta {
+      width: 100%;
+      padding: 13px;
+      background: linear-gradient(135deg, var(--accent), #7c3aed);
+      color: #fff;
+      border: none;
+      border-radius: var(--radius-sm);
+      font-family: var(--font);
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all var(--transition);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      box-shadow: 0 4px 14px rgba(37,99,235,0.25);
+    }
+    .btn-cta:hover:not(:disabled) {
+      transform: translateY(-1px);
+      box-shadow: 0 6px 20px rgba(37,99,235,0.35);
+    }
+    .btn-cta:disabled { opacity: 0.65; cursor: not-allowed; transform: none; }
+
+    /* "?"? Auto-login reconnect card "?"? */
+    .reconnect-card {
+      display: none;
+    }
+    .reconnect-banner {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      background: linear-gradient(135deg, rgba(37,99,235,0.06), rgba(124,58,237,0.04));
+      border: 1px solid rgba(37,99,235,0.18);
+      border-radius: var(--radius-sm);
+      padding: 14px 16px;
+      margin-bottom: 16px;
+    }
+    .reconnect-avatar {
+      width: 42px; height: 42px;
+      background: linear-gradient(135deg, var(--accent), #7c3aed);
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 18px; color: #fff; flex-shrink: 0;
+    }
+    .reconnect-info { flex: 1; min-width: 0; }
+    .reconnect-label { font-size: 11px; color: var(--text-muted); margin-bottom: 2px; }
+    .reconnect-email { font-size: 14px; font-weight: 600; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    .btn-reconnect {
+      width: 100%;
+      padding: 12px;
+      background: var(--green);
+      color: #fff;
+      border: none;
+      border-radius: var(--radius-sm);
+      font-family: var(--font);
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all var(--transition);
+      margin-bottom: 12px;
+    }
+    .btn-reconnect:hover:not(:disabled) {
+      background: #15803d;
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(22,163,74,0.3);
+    }
+    .btn-reconnect:disabled { opacity: 0.65; cursor: not-allowed; }
+
+    .link-reconfig {
+      display: block;
+      text-align: center;
+      font-size: 12px;
+      color: var(--text-muted);
+      cursor: pointer;
+      text-decoration: underline;
+      background: none;
+      border: none;
+      font-family: var(--font);
+    }
+    .link-reconfig:hover { color: var(--text-secondary); }
+
+    /* "?"? Error / Spinner "?"? */
+    .error-box {
+      display: none;
+      align-items: center;
+      gap: 8px;
+      background: rgba(239,68,68,0.07);
+      border: 1px solid rgba(239,68,68,0.22);
+      border-radius: var(--radius-sm);
+      padding: 10px 12px;
+      font-size: 13px;
+      color: #dc2626;
+      margin-top: 12px;
+    }
+    .error-box.show { display: flex; }
+
+    .spinner {
+      width: 16px; height: 16px;
+      border: 2px solid rgba(255,255,255,0.3);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      display: inline-block;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .footer-note {
+      text-align: center;
+      font-size: 11.5px;
+      color: var(--text-muted);
+      margin-top: 18px;
+      line-height: 1.6;
+    }
+  </style>
+</head>
+<body>
+  <div class="page-wrap">
+
+    <!-- Brand -->
+    <div class="brand">
+      <div class="brand-logo"><img src="images/logo-allure-noir.png" alt="Allure+"></div>
+      <div class="brand-name">Allure+</div>
+      <div class="brand-sub">Allure+ - Suivi sport connecté · Garmin Connect</div>
+    </div>
+
+    <div class="card">
+
+      <!-- .. MODE RECONNEXION (si .env déjà configuré) .. -->
+      <div class="reconnect-card" id="reconnect-card">
+        <div class="section-title">Compte enregistré</div>
+        <div class="reconnect-banner">
+          <div class="reconnect-avatar"><img src="images/logo-allure-noir.png" alt="Allure+" style="width:48px;height:auto;"></div>
+          <div class="reconnect-info">
+            <div class="reconnect-label">Connexion automatique via</div>
+            <div class="reconnect-email" id="reconnect-email"></div>
+          </div>
+        </div>
+        <button class="btn-reconnect" id="btn-reconnect" onclick="doAutoLogin()">
+          ✓ Continuer
+        </button>
+        <button class="link-reconfig" onclick="showSetup()">Modifier la configuration</button>
+        <div class="error-box" id="reconnect-error">
+          <span>&#x2699;&#xFE0F;</span>
+          <span id="reconnect-error-msg"></span>
+        </div>
+      </div>
+
+      <!-- .. MODE SETUP (premier lancement ou reconfiguration) .. -->
+      <div id="setup-card">
+
+        <!-- Section 1 : Application GPS -->
+        <div class="section-title">Application GPS utilisée</div>
+        <div class="app-list" id="app-list">
+
+          <!-- Garmin -->
+          <div class="app-item" id="item-garmin" onclick="selectApp('garmin')">
+            <div class="app-header">
+              <div class="app-check"><div class="app-check-dot"></div></div>
+              <div class="app-icon garmin">&#x231A;</div>
+              <div class="app-info">
+                <div class="app-name">Garmin Connect</div>
+                <div class="app-desc">Montres Forerunner, Fenix, Venué, etc.</div>
+              </div>
+            </div>
+            <div class="app-credentials" id="creds-garmin">
+              <div class="app-credentials-inner">
+                <div class="field">
+                  <label>Adresse e-mail Garmin</label>
+                  <input type="email" id="garmin-email" placeholder="votre@email.com" autocomplete="email" onclick="event.stopPropagation()">
+                </div>
+                <div class="field">
+                  <label>Mot de passe</label>
+                  <input type="password" id="garmin-password" placeholder="Mot de passe" autocomplete="current-password" onclick="event.stopPropagation()">
+                </div>
+                <label class="remember-row" onclick="event.stopPropagation()">
+                  <input type="checkbox" id="remember-garmin" checked>
+                  Mémoriser mes identifiants (connexion automatique au démarrage)
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <!-- Suunto -->
+          <div class="app-item disabled">
+            <div class="app-header">
+              <div class="app-check"><div class="app-check-dot"></div></div>
+              <div class="app-icon suunto">&#x231A;</div>
+              <div class="app-info">
+                <div class="app-name">Suunto App</div>
+                <div class="app-desc">Montres Suunto 9, Race, Peak, etc.</div>
+              </div>
+              <span class="badge-soon">Prochainement</span>
+            </div>
+          </div>
+
+          <!-- Coros -->
+          <div class="app-item disabled">
+            <div class="app-header">
+              <div class="app-check"><div class="app-check-dot"></div></div>
+              <div class="app-icon coros">&#x231A;</div>
+              <div class="app-info">
+                <div class="app-name">Coros</div>
+                <div class="app-desc">Montres APEX, PACE, VERTIX, etc.</div>
+              </div>
+              <span class="badge-soon">Prochainement</span>
+            </div>
+          </div>
+
+        </div>
+
+        <div class="sep"></div>
+
+        <!-- Section 2 : Campus Coach -->
+        <div class="campus-section">
+          <div class="section-title">Compte Campus Coach</div>
+          <div class="yesno-row">
+            <button class="yesno-btn" id="btn-campus-yes" onclick="setCampus(true)">✓ Oui, j'en ai un</button>
+            <button class="yesno-btn" id="btn-campus-no"  onclick="setCampus(false)">✗ Non, je n'en ai pas</button>
+          </div>
+
+          <div class="campus-fields" id="campus-fields">
+            <div class="campus-fields-inner">
+              <div class="field">
+                <label>E-mail Campus Coach</label>
+                <input type="email" id="campus-email" placeholder="votre@email.com">
+              </div>
+              <div class="field">
+                <label>Mot de passe Campus Coach</label>
+                <input type="password" id="campus-password" placeholder="Mot de passe">
+              </div>
+              <label class="remember-row">
+                <input type="checkbox" id="remember-campus" checked>
+                Mémoriser mes identifiants Campus Coach
+              </label>
+            </div>
+          </div>
+
+          <div class="campus-no-msg" id="campus-no-msg">
+            Vous pourrez importer un plan d'entraînement partagé par votre coach via un fichier <strong>.aplus</strong>. La section Campus Coach sera masquée dans l'application.
+          </div>
+        </div>
+
+        <!-- Bouton Commencer -->
+        <button class="btn-cta" id="btn-start" onclick="doSetup()">
+          Commencer
+        </button>
+
+        <div class="error-box" id="setup-error">
+          <span>&#x2699;&#xFE0F;</span>
+          <span id="setup-error-msg"></span>
+        </div>
+
+      </div><!-- /setup-card -->
+
+    </div><!-- /card -->
+
+    <div class="footer-note">
+      Vos identifiants sont stockés uniquement sur ce PC.<br>
+      Aucune donnée n'est envoyée à un serveur externe.
+    </div>
+
+  </div><!-- /page-wrap -->
+
+  <script>
+    let selectedApp = null;
+    let campusEnabled = null; // null = non choisi, true = oui, false = non
+
+    // "?"? Vérifier statut au chargement "?"?
+    fetch('/api/status')
+      .then(r => r.json())
+      .then(d => {
+        if (d.connected) {
+          window.location.href = '/';
+          return;
+        }
+        if (d.envEmail) {
+          // Credentials sauvegardés ?' mode reconnexion
+          document.getElementById('reconnect-card').style.display = 'block';
+          document.getElementById('setup-card').style.display = 'none';
+          document.getElementById('reconnect-email').textContent = d.envEmail;
+        }
+        // Pré-remplir email si déjà connu
+        if (d.envEmail) {
+          document.getElementById('garmin-email').value = d.envEmail;
+        }
+      })
+      .catch(() => {});
+
+    // "?"? Sélection app GPS "?"?
+    function selectApp(name) {
+      // Désélectionner l'ancien
+      if (selectedApp) {
+        document.getElementById('item-' + selectedApp)?.classList.remove('selected');
+        const oldCreds = document.getElementById('creds-' + selectedApp);
+        if (oldCreds) oldCreds.classList.remove('open');
+      }
+      // Sélectionner le nouveau
+      selectedApp = name;
+      document.getElementById('item-' + name)?.classList.add('selected');
+      const newCreds = document.getElementById('creds-' + name);
+      if (newCreds) newCreds.classList.add('open');
+    }
+
+    // Sélectionner Garmin par défaut
+    selectApp('garmin');
+
+    // "?"? Campus Coach "?"?
+    function setCampus(val) {
+      campusEnabled = val;
+      document.getElementById('btn-campus-yes').className = 'yesno-btn' + (val  ? ' active-yes' : '');
+      document.getElementById('btn-campus-no').className  = 'yesno-btn' + (!val ? ' active-no'  : '');
+      const fields = document.getElementById('campus-fields');
+      const noMsg  = document.getElementById('campus-no-msg');
+      fields.classList.toggle('open', val);
+      noMsg.classList.toggle('show', !val);
+    }
+
+    // ⏱ Cooldown après 429 — évite de ré-essayer et de rallonger le blocage Garmin
+    let _loginCooldownTimer = null;
+    function startLoginCooldown(btn, seconds) {
+      if (_loginCooldownTimer) clearInterval(_loginCooldownTimer);
+      btn.disabled = true;
+      const tick = () => {
+        if (seconds <= 0) {
+          clearInterval(_loginCooldownTimer);
+          btn.disabled = false;
+          btn.textContent = '✓ Continuer';
+          return;
+        }
+        const m = Math.floor(seconds / 60), s = seconds % 60;
+        btn.textContent = `⏳ Attendre ${m > 0 ? m + 'min ' : ''}${s}s avant de réessayer`;
+        seconds--;
+      };
+      tick();
+      _loginCooldownTimer = setInterval(tick, 1000);
+    }
+
+    // ⬇️ Auto-login (mode reconnexion)
+    async function doAutoLogin() {
+      const btn = document.getElementById('btn-reconnect');
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner"></span> Connexion...';
+      try {
+        const r = await fetch('/api/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ useEnv: true })
+        });
+        const d = await r.json();
+        if (d.success) {
+          window.location.href = '/';
+        } else if (r.status === 429 || d.retryable) {
+          showErr('reconnect', d.error || 'Trop de tentatives. Attendez avant de réessayer.');
+          startLoginCooldown(btn, 180); // 3 minutes
+        } else {
+          showErr('reconnect', d.error || 'Échec de connexion. Vérifiez vos identifiants.');
+          btn.disabled = false;
+          btn.textContent = '✓ Continuer';
+        }
+      } catch(e) {
+        showErr('reconnect', 'Impossible de contacter le serveur.');
+        btn.disabled = false;
+        btn.textContent = '✓ Continuer';
+      }
+    }
+
+    // "?"? Afficher setup depuis mode reconnexion "?"?
+    function showSetup() {
+      document.getElementById('reconnect-card').style.display = 'none';
+      document.getElementById('setup-card').style.display = 'block';
+    }
+
+    // "?"? Setup complet (premier lancement / reconfiguration) "?"?
+    async function doSetup() {
+      const btn = document.getElementById('btn-start');
+
+      // Validation
+      if (!selectedApp) { showErr('setup', 'Veuillez sélectionner votre application GPS.'); return; }
+      const garminEmail    = document.getElementById('garmin-email').value.trim();
+      const garminPassword = document.getElementById('garmin-password').value;
+      const rememberGarmin = document.getElementById('remember-garmin').checked;
+
+      if (!garminEmail || !garminPassword) { showErr('setup', 'Saisissez votre e-mail et mot de passe Garmin.'); return; }
+      if (campusEnabled === null) { showErr('setup', 'Indiquez si vous avez un compte Campus Coach.'); return; }
+
+      let campusEmail = '', campusPassword = '', rememberCampus = false;
+      if (campusEnabled) {
+        campusEmail    = document.getElementById('campus-email').value.trim();
+        campusPassword = document.getElementById('campus-password').value;
+        rememberCampus = document.getElementById('remember-campus').checked;
+        if (!campusEmail || !campusPassword) { showErr('setup', 'Saisissez vos identifiants Campus Coach.'); return; }
+      }
+
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner"></span> Connexion en cours...';
+      document.getElementById('setup-error').classList.remove('show');
+
+      try {
+        const r = await fetch('/api/setup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            garminEmail, garminPassword, rememberGarmin,
+            campusEnabled, campusEmail, campusPassword, rememberCampus
+          })
+        });
+        const d = await r.json();
+        if (d.success) {
+          window.location.href = '/';
+        } else {
+          showErr('setup', d.error || 'Identifiants incorrects. Vérifiez vos informations.');
+          btn.disabled = false;
+          btn.textContent = 'Commencer';
+        }
+      } catch(e) {
+        showErr('setup', 'Impossible de contacter le serveur.');
+        btn.disabled = false;
+        btn.textContent = 'Commencer';
+      }
+    }
+
+    function showErr(ctx, msg) {
+      const el  = document.getElementById(ctx + '-error');
+      const msg_el = document.getElementById(ctx + '-error-msg');
+      if (msg_el) msg_el.textContent = msg;
+      if (el) el.classList.add('show');
+    }
+  </script>
+</body>
+</html>

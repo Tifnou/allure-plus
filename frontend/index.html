@@ -1,0 +1,960 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Allure+ Dashboard</title>
+  <meta name="description" content="Allure+ ?" Votre application de suivi sportif connectée à Garmin Connect" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="stylesheet" href="css/plans.css" />
+</head>
+<body>
+<!-- ✨ SPLASH SCREEN ✨ -->
+  <div id="splash-screen" aria-hidden="true">
+    <video id="splash-video" autoplay muted playsinline>
+      <source src="media/logo_blanc.mp4" type="video/mp4">
+    </video>
+  </div>
+
+  <!-- 🔄 WATERMARK BAS-DROITE (toutes les pages) -->
+  <div id="logo-watermark" aria-hidden="true">
+    <video autoplay loop muted playsinline>
+      <source src="media/logo_blanc.mp4" type="video/mp4">
+    </video>
+  </div>
+
+<!-- 🌅 Fond défilant -->
+  <div id="bg-slideshow" aria-hidden="true">
+    <div class="bg-layer" id="bg-layer-a"></div>
+    <div class="bg-layer" id="bg-layer-b"></div>
+  </div>
+
+  <!-- ...................................
+       SIDEBAR
+  ...................................... -->
+  <aside class="sidebar">
+    <div class="sidebar-brand">
+      <img src="images/logo-allure-noir.png" id="sidebar-logo-img" alt="Allure+" class="sidebar-logo" />
+      <div>
+        <div class="brand-name">Allure+</div>
+        <div class="brand-user" id="sidebar-username"></div>
+      </div>
+    </div>
+
+    <nav class="sidebar-nav">
+      <a class="nav-item" data-page="profile" id="nav-profile">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+          <circle cx="12" cy="7" r="4"/>
+        </svg>
+        Profil
+        <span class="nav-profile-badge" id="nav-profile-badge" style="display:none">!</span>
+      </a>
+      <a class="nav-item active" data-page="dashboard" id="nav-dashboard">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
+          <rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>
+        </svg>
+        Synthèse
+      </a>
+      <a class="nav-item" data-page="activities" id="nav-activities">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+        </svg>
+        Activités
+      </a>
+      <a class="nav-item nav-item--disabled" data-page="health" id="nav-health">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
+        </svg>
+        Santé
+      
+        <span class="nav-coming-soon">Bientôt</span>
+      </a>
+      <a class="nav-item" data-page="training" id="nav-training">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M6 4v16M18 4v16M4 8h3M17 8h3M4 16h3M17 16h3M7 12h10"/>
+        </svg>
+        Entraînements
+      </a>
+      <a class="nav-item" data-page="goals" id="nav-goals">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>
+        </svg>
+        Objectifs
+      </a>
+      <a class="nav-item nav-item--disabled" data-page="records" id="nav-records">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+        </svg>
+        Records
+      
+        <span class="nav-coming-soon">Bientôt</span>
+      </a>
+      <!-- FIX 6 : Statistiques -->
+      <a class="nav-item nav-item--disabled" data-page="stats" id="nav-stats">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/>
+          <line x1="6" y1="20" x2="6" y2="14"/><line x1="2" y1="20" x2="22" y2="20"/>
+        </svg>
+        Statistiques
+      
+        <span class="nav-coming-soon">Bientôt</span>
+      </a>
+      <!-- Plans d'entraînement -->
+      <a class="nav-item" data-page="plans" id="nav-plans" onclick="initPlansPage()">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+          <polyline points="14 2 14 8 20 8"/>
+          <line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>
+          <polyline points="10 9 9 9 8 9"/>
+        </svg>
+        Plans d’entraînement
+      </a>
+      <a class="nav-item nav-item--admin" data-page="admin" id="nav-admin">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/>
+          <path d="M15.54 8.46a5 5 0 0 1 0 7.07M8.46 8.46a5 5 0 0 0 0 7.07"/>
+        </svg>
+        Admin
+      </a>
+    </nav>
+
+    <div class="sidebar-footer">
+      <!-- Voyant statut serveur -->
+      <div class="server-status-bar" id="server-status-bar">
+        <div class="server-led" id="server-led"></div>
+        <span class="server-status-text" id="server-status-text">Connexion...?</span>
+      </div>
+
+      <!-- Compte connecté + déconnexion -->
+      <div class="sidebar-user" id="sidebar-user" style="display:none">
+        <div class="sidebar-user-email" id="sidebar-user-email"></div>
+        <button class="btn-logout" id="btn-logout" onclick="handleLogout()" title="Changer de compte">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+          <span>Changer de compte</span>
+        </button>
+      </div>
+
+      <div class="last-updated" id="last-updated"></div>
+    </div>
+  </aside>
+
+  <!-- ...................................
+       CONTENU PRINCIPAL
+  ...................................... -->
+  <div class="app-content">
+
+    <!-- "?"? PAGE : PROFIL "?"? -->
+    <div class="page" id="page-profile">
+      <div class="page-header">
+        <div>
+          <h1 class="page-title">Mon Profil</h1>
+          <div class="page-subtitle">Données personnelles &amp; indicateurs sportifs</div>
+        </div>
+      </div>
+
+      <div class="profile-layout">
+
+        <!-- Formulaire saisie -->
+        <div class="profile-form-col">
+          <section class="card profile-form-card">
+            <div class="card-header"><h2 class="card-title"><span class="card-title-icon">&#x1F464;</span> Mes informations</h2></div>
+            <form id="profile-form" class="profile-form">
+              <div class="form-row">
+                <label class="form-label">Sexe</label>
+                <div class="form-toggle-group">
+                  <button type="button" class="form-toggle active" id="sex-m" data-val="M">Homme</button>
+                  <button type="button" class="form-toggle" id="sex-f" data-val="F">Femme</button>
+                </div>
+              </div>
+              <div class="form-row">
+                <label class="form-label" for="input-birthdate">Date de naissance</label>
+                <div class="form-input-wrap">
+                  <input type="date" id="input-birthdate" class="profile-input form-input" max="2010-01-01" />
+                </div>
+              </div>
+              <div class="form-row">
+                <label class="form-label" for="input-height">Taille</label>
+                <div class="form-input-wrap">
+                  <input type="number" id="input-height" class="form-input" min="130" max="220" placeholder="ex: 178">
+                  <span class="form-unit">cm</span>
+                </div>
+              </div>
+              <div class="form-row">
+                <label class="form-label" for="input-weight">Poids actuel</label>
+                <div class="form-input-wrap">
+                  <input type="number" id="input-weight" class="form-input" min="30" max="200" step="0.1" placeholder="ex: 75.5">
+                  <span class="form-unit">kg</span>
+                </div>
+              </div>
+              <div class="form-row">
+                <label class="form-label" for="input-hrmax">FC max réelle</label>
+                <div class="form-input-wrap">
+                  <input type="number" id="input-hrmax" class="form-input" min="100" max="220" placeholder="optionnel">
+                  <span class="form-unit">bpm</span>
+                </div>
+              </div>
+              <button type="submit" class="btn-save-profile">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+                Enregistrer
+              </button>
+            </form>
+          </section>
+
+          <!-- VO2max card -->
+          <section class="card profile-vo2-card">
+            <div class="card-header"><h2 class="card-title"><span class="card-title-icon">&#x1FAC1;</span> VO&#x2082;max Garmin</h2></div>
+            <div class="profile-vo2-display">
+              <div class="profile-vo2-value" id="profile-vo2-value"></div>
+              <div class="profile-vo2-unit">mL/kg/min</div>
+              <div class="profile-vo2-label" id="profile-vo2-label"></div>
+              <div id="profile-run-category" class="profile-run-cat" style="display:none"></div>
+            </div>
+          </section>
+
+          <!-- Applications connectées -->
+          <div class="profile-card profile-apps-card">
+            <div class="profile-card-title">Applications connectées</div>
+            <div class="profile-apps-list">
+              <div class="profile-app-row" id="app-garmin-row">
+                <div class="profile-app-icon">&#x1F4F1;</div>
+                <div class="profile-app-info">
+                  <div class="profile-app-name">Garmin Connect</div>
+                  <div class="profile-app-status" id="app-garmin-status">Connecté</div>
+                </div>
+                <div class="profile-app-badge connected">&#x2713;</div>
+              </div>
+              <div class="profile-app-row" id="app-campus-row">
+                <div class="profile-app-icon">&#x1F4F1;</div>
+                <div class="profile-app-info">
+                  <div class="profile-app-name">Campus Coach</div>
+                  <div class="profile-app-status" id="app-campus-status">Non connecté</div>
+                </div>
+                <div class="profile-app-badge" id="app-campus-badge"></div>
+              </div>
+            </div>
+            <div id="campus-quick-login" style="display:none; margin-top:12px">
+              <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">Connecter Campus Coach pour accéder aux plans d'entraînement</div>
+              <div style="display:flex;gap:8px;flex-direction:column">
+                <input type="email" id="campus-profile-email" class="profile-input" placeholder="Email Campus Coach" />
+                <input type="password" id="campus-profile-password" class="profile-input" placeholder="Mot de passe" />
+                <button class="btn-save-profile" onclick="connectCampusFromProfile()" type="button">Se connecter à Campus Coach</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Indicateurs calculés -->
+        <div class="profile-results-col">
+
+          <!-- VMA + FC -->
+          <section class="card">
+            <div class="card-header"><h2 class="card-title"><span class="card-title-icon">&#x1F4CA;</span> Indicateurs de performance</h2></div>
+            <div class="profile-indicators" id="profile-indicators">
+              <div class="profile-indicator-empty">Renseignez vos données pour voir les calculs</div>
+            </div>
+          </section>
+
+          <!-- IMC + poids idéal -->
+          <section class="card">
+            <div class="card-header"><h2 class="card-title"><span class="card-title-icon">&#x1F3CB;&#xFE0F;</span> Composition corporelle</h2></div>
+            <div id="profile-bmi-section">
+              <div class="profile-indicator-empty">Renseignez vos données pour voir les calculs</div>
+            </div>
+          </section>
+
+          <!-- Zones FC -->
+          <section class="card">
+            <div class="card-header">
+              <h2 class="card-title"><span class="card-title-icon">&#x2764;&#xFE0F;</span> Zones d'entraînement FC</h2>
+              <span class="card-badge" id="profile-zones-method">Méthode Karvonen</span>
+            </div>
+            <div id="profile-hr-zones">
+              <div class="profile-indicator-empty">Renseignez votre âge pour voir les zones</div>
+            </div>
+          </section>
+
+          <!-- Allures de course (calculées depuis VMA Garmin) -->
+          <section class="card">
+            <div class="card-header">
+              <h2 class="card-title"><span class="card-title-icon">&#127939;</span> Allures de course</h2>
+              <span class="card-badge" id="profile-paces-method">Calcul VMA</span>
+            </div>
+            <div id="profile-race-paces">
+              <div class="profile-indicator-empty">Synchronisez Garmin pour voir vos allures cibles</div>
+            </div>
+          </section>
+
+        </div>
+      </div>
+
+      <!-- Conseils personnalisés (pleine largeur) -->
+      <div id="profile-advice-section" class="profile-advice-section"></div>
+
+    </div>
+
+    <!-- "?"? PAGE : SYNTH^SE "?"? -->
+    <div class="page active" id="page-dashboard">
+      <div class="page-header">
+        <h1 class="page-title">Synthèse</h1>
+        <div class="page-subtitle" id="page-date"></div>
+      </div>
+
+      <!-- Hero Stats -->
+      <div class="hero-stats">
+        <div class="stat-card">
+          <span class="stat-card-icon">&#x1F3C3;</span>
+          <div class="stat-value" id="stat-km-year"></div>
+          <div class="stat-label">Kilomètres cette année</div>
+          <div class="stat-sub" id="stat-km-run">dont km en course</div>
+          <span class="stat-tag stat-tag--neutral" id="stat-km-tag" style="display:none"></span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-card-icon">&#x26A1;</span>
+          <div class="stat-value" id="stat-activities"></div>
+          <div class="stat-label">Activités cette année</div>
+          <div class="stat-sub" id="stat-time">? heures d'entraînement</div>
+        </div>
+        <div class="stat-card">
+          <span class="stat-card-icon">&#x1F4C5;</span>
+          <div class="stat-value" id="stat-days-off"></div>
+          <div class="stat-label">Jours sans activité</div>
+          <span class="stat-tag" id="stat-days-tag"></span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-card-icon">&#x1FAC1;</span>
+          <div class="stat-value" id="stat-vo2max"></div>
+          <div class="stat-label">VO&#x2082;max estimée</div>
+          <span class="stat-tag" id="stat-vo2max-trend" style="display:none"></span>
+        </div>
+      </div>
+
+      <!-- Dernière sortie -->
+      <section class="card card--wide" id="section-last-run" style="margin-bottom:16px">
+        <div class="card-header">
+          <h2 class="card-title">
+            <span class="card-title-icon">&#x1F3C3;</span>
+            Dernière sortie course
+          </h2>
+          <button class="btn-text-link" id="see-all-runs">Voir tout »</button>
+        </div>
+        <div class="collapsible-body" id="runs-body">
+          <div class="table-wrapper">
+            <table class="runs-table" id="runs-table">
+              <thead>
+                <tr>
+                  <th>Date</th><th>Type</th><th>Activité</th>
+                  <th>Distance</th><th>Durée</th><th>Allure</th>
+                  <th>FC moy.</th><th>D+</th><th>Cal.</th>
+                </tr>
+              </thead>
+              <tbody id="runs-tbody">
+                <tr><td colspan="9" class="table-loading">Chargement…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- Grid charts -->
+      <div class="dashboard-grid">
+        <section class="card" id="section-vo2max">
+          <div class="card-header">
+            <h2 class="card-title"><span class="card-title-icon">&#x1F4C8;</span> &#xC9;volution VO&#x2082;max</h2>
+            <span class="card-badge">12 mois</span>
+          </div>
+          <div class="chart-container">
+            <canvas id="vo2max-chart"></canvas>
+          </div>
+          <p class="chart-empty" id="vo2max-empty" style="display:none">Aucune donnée disponible</p>
+        </section>
+
+        <section class="card" id="section-hr">
+          <div class="card-header">
+            <h2 class="card-title"><span class="card-title-icon">&#x2764;&#xFE0F;</span> FC au repos</h2>
+            <span class="card-badge">30 jours</span>
+          </div>
+          <div class="chart-container">
+            <canvas id="hr-chart"></canvas>
+          </div>
+          <p class="chart-empty" id="hr-empty" style="display:none">Aucune donnée disponible</p>
+        </section>
+
+        <section class="card" id="section-sports">
+          <div class="card-header">
+            <h2 class="card-title"><span class="card-title-icon">&#x1F3AF;</span> Répartition</h2>
+            <span class="card-badge">Cette année</span>
+          </div>
+          <div class="chart-container chart-container--donut">
+            <canvas id="sports-chart"></canvas>
+          </div>
+          <div id="sports-legend" class="sports-legend"></div>
+        </section>
+
+        <section class="card card--wide" id="section-heatmap">
+          <div class="card-header">
+            <h2 class="card-title"><span class="card-title-icon">&#x1F4C5;</span> Calendrier d'activité</h2>
+            <span class="card-badge">12 derniers mois</span>
+          </div>
+          <div class="heatmap-wrapper" id="heatmap-wrapper">
+            <div class="heatmap-loading">Chargement…</div>
+          </div>
+          <div class="heatmap-legend">
+            <span>Moins</span>
+            <div class="heatmap-legend-cells">
+              <div class="heatmap-cell" data-level="0"></div>
+              <div class="heatmap-cell" data-level="1"></div>
+              <div class="heatmap-cell" data-level="2"></div>
+              <div class="heatmap-cell" data-level="3"></div>
+              <div class="heatmap-cell" data-level="4"></div>
+            </div>
+            <span>Plus</span>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <!-- ── PAGE : ACTIVITÉS ── -->
+    <div class="page" id="page-activities">
+      <div class="page-header act-header-sticky">
+
+        <!-- Gauche : titre + badge + stats -->
+        <div class="act-header-left">
+          <h1 class="page-title" style="margin:0 0 8px 0">Activités</h1>
+          <div id="activities-year-badge" class="act-year-badge"></div>
+          <div id="activities-summary" class="act-header-stats-col"></div>
+        </div>
+
+        <!-- Centre : filtres sport (1 ligne) + année/mois (dessous) -->
+        <div class="act-header-center">
+          <div class="filter-pills act-pills-nowrap" id="activity-filters">
+            <button class="filter-pill active" data-filter="all">Tout</button>
+            <button class="filter-pill" data-filter="running"><span class="sport-icon sport-icon--running"></span>Course</button>
+            <button class="filter-pill" data-filter="trail"><span class="sport-icon sport-icon--trail"></span>Trail</button>
+            <button class="filter-pill" data-filter="cycling"><span class="sport-icon sport-icon--cycling"></span>Vélo</button>
+            <button class="filter-pill" data-filter="cardio"><span class="sport-icon sport-icon--cardio"></span>Cardio</button>
+            <button class="filter-pill" data-filter="walking"><span class="sport-icon sport-icon--walking"></span>Marche</button>
+          </div>
+          <div class="activity-time-filters act-time-centered" id="activity-time-filters">
+            <select id="filter-year" class="activity-filter-select">
+              <option value="">Toutes les années</option>
+            </select>
+            <select id="filter-month" class="activity-filter-select">
+              <option value="">Tous les mois</option>
+              <option value="1">Janvier</option>
+              <option value="2">Février</option>
+              <option value="3">Mars</option>
+              <option value="4">Avril</option>
+              <option value="5">Mai</option>
+              <option value="6">Juin</option>
+              <option value="7">Juillet</option>
+              <option value="8">Août</option>
+              <option value="9">Septembre</option>
+              <option value="10">Octobre</option>
+              <option value="11">Novembre</option>
+              <option value="12">Décembre</option>
+            </select>
+          </div>
+        </div>
+
+      </div>
+
+      <div class="card card--fullwidth">
+        <div class="table-wrapper">
+          <table class="runs-table" id="all-activities-table">
+            <thead>
+              <tr>
+                <th>Date</th><th>Type</th><th>Activité</th>
+                <th>Distance</th><th>Durée</th><th>Allure</th>
+                <th>FC moy.</th><th>D+</th><th>Cal.</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="all-activities-tbody">
+              <tr><td colspan="10" class="table-loading">Chargement…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- "?"? PAGE : D?TAIL ACTIVIT? "?"? -->
+    <div class="page" id="page-activity-detail">
+      <div class="page-header">
+        <button class="btn-back" id="btn-back-activities">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="15 18 9 12 15 6"></polyline>
+          </svg>
+          Retour aux activités
+        </button>
+      </div>
+      <div class="activity-detail-layout">
+        <div id="activity-detail-content"><!-- rempli dynamiquement --></div>
+        <div id="activity-analysis-panel" class="activity-analysis-panel" style="display:none">
+          <div class="analysis-section">
+            <div class="analysis-section-title">s Intervalles</div>
+            <div id="activity-laps-table"></div>
+          </div>
+          <div class="analysis-section">
+            <div class="analysis-section-title">&#x1F4CA; Analyse</div>
+            <div id="activity-analysis-text"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- "?"? PAGE : SANT? "?"? -->
+    <div class="page" id="page-health">
+      <div class="page-header">
+        <h1 class="page-title">Santé</h1>
+        <div class="page-subtitle">Indicateurs de forme</div>
+      </div>
+      <div class="dashboard-grid">
+        <section class="card card--wide">
+          <div class="card-header">
+            <h2 class="card-title"><span class="card-title-icon">&#x1F4C8;</span> &#xC9;volution VO&#x2082;max</h2>
+            <span class="card-badge">Toutes les sorties</span>
+          </div>
+          <div class="chart-container" style="height:240px">
+            <canvas id="vo2max-chart-health"></canvas>
+          </div>
+        </section>
+        <section class="card card--two">
+          <div class="card-header">
+            <h2 class="card-title"><span class="card-title-icon">&#x2764;&#xFE0F;</span> Fréquence cardiaque au repos</h2>
+            <span class="card-badge">30 jours</span>
+          </div>
+          <div class="chart-container" style="height:220px">
+            <canvas id="hr-chart-health"></canvas>
+          </div>
+        </section>
+        <section class="card">
+          <div class="card-header">
+            <h2 class="card-title"><span class="card-title-icon">&#x1F634;</span> Sommeil</h2>
+            <span class="card-badge">14 jours</span>
+          </div>
+          <div class="chart-container" style="height:220px">
+            <canvas id="sleep-chart-health"></canvas>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <!-- "?"? PAGE : RECORDS "?"? -->
+    <div class="page" id="page-records">
+      <div class="page-header">
+        <h1 class="page-title">Records personnels</h1>
+        <div class="page-subtitle">Vos meilleures performances</div>
+      </div>
+      <div class="card card--fullwidth">
+        <div class="records-list" id="records-list-full">
+          <div class="table-loading">Chargement…</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- "?"? PAGE : ENTRAZNEMENTS "?"? -->
+    <div class="page" id="page-training">
+      <div class="page-header">
+        <div>
+          <h1 class="page-title">Entraînements</h1>
+          <div class="page-subtitle" id="campus-plan-subtitle">Plan d'entraînement Campus Coach</div>
+        </div>
+      </div>
+
+      <!-- "?"? Connexion... Campus Coach "?"? -->
+      <div id="campus-connect-card" class="card campus-connect-card">
+        <div class="campus-connect-inner">
+          <div class="campus-connect-logo">
+            <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+          </div>
+          <div class="campus-connect-text">
+            <h2>Accéder à votre plan</h2>
+            <p id="campus-connect-msg">Connectez-vous à Campus Coach ou importez un plan partagé.</p>
+          </div>
+        </div>
+
+        <!-- Option 1 : Campus Coach (masqué si campus-import-only mode) -->
+        <div class="campus-option-block" id="campus-login-block">
+          <div class="campus-option-label">Compte Campus Coach</div>
+          <form id="campus-login-form" class="campus-login-form">
+            <div class="campus-login-row">
+              <input type="email" id="campus-email" class="campus-input" placeholder="Email Campus Coach" required />
+              <input type="password" id="campus-password" class="campus-input" placeholder="Mot de passe" required />
+              <button type="submit" class="campus-login-btn" id="campus-login-btn">Se connecter</button>
+            </div>
+            <div class="campus-login-options">
+              <label class="campus-remember">
+                <input type="checkbox" id="campus-remember" /> Mémoriser (enregistrer dans .env)
+              </label>
+            </div>
+            <div id="campus-login-error" class="campus-login-error" style="display:none"></div>
+          </form>
+        </div>
+
+        <!-- Séparateur -->
+        <div class="campus-or-sep" id="campus-login-sep"><span>ou</span></div>
+
+        <!-- Option 2 : Import plan (toujours visible) -->
+        <div class="campus-option-block" id="campus-import-only">
+          <div class="campus-option-label">Plan partagé (.aplus)</div>
+          <div class="campus-import-area">
+            <label for="plan-import-input" class="campus-import-btn">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+              Importer un plan
+            </label>
+            <input type="file" id="plan-import-input" accept=".aplus,.json" style="display:none" />
+            <p class="campus-import-hint">Fichier partagé par votre coach ou exporté depuis Allure+</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- "?"? Plan chargé "?"? -->
+      <div id="campus-plan-wrap" style="display:none"><!-- rempli dynamiquement par campus.js --></div>
+
+      <div id="campus-loading" class="campus-loading" style="display:none">
+        <div class="campus-spinner"></div>
+        <span>Chargement du plan Campus Coach?</span>
+      </div>
+    </div>
+
+    <!-- 🎯 PAGE : OBJECTIFS 🎯 -->
+    <div class="page" id="page-goals">
+      <div class="page-header">
+        <h1 class="page-title">Objectifs</h1>
+        <div class="page-subtitle">Course cible &amp; progression du plan</div>
+      </div>
+
+      <!-- État : Aucun plan actif -->
+      <div class="goals-empty-state" id="goals-no-plan">
+        <div class="goals-empty-icon">🎯</div>
+        <h2 class="goals-empty-title">Aucun objectif en cours</h2>
+        <p class="goals-empty-desc">Importez un plan d’entraînement ou connectez votre compte Campus Coach pour voir vos objectifs ici.</p>
+      </div>
+
+      <!-- État : Plan actif -->
+      <div id="goals-with-plan" style="display:none">
+
+        <!-- BLOC 1 : Course cible + Compte à rebours -->
+        <div class="goals-layout">
+          <div class="card goals-race-card" id="goals-race-card">
+            <div class="card-header">
+              <h2 class="card-title"><span class="card-title-icon">&#x1F3C1;</span> Course cible</h2>
+              <span class="goals-plan-badge" id="goals-plan-badge"></span>
+            </div>
+            <div class="goals-race-content" id="goals-race-content">
+              <div class="goals-race-name" id="goals-race-name">—</div>
+              <div class="goals-race-type-row">
+                <span class="goals-race-type-badge" id="goals-race-type-badge"></span>
+                <div class="goals-race-meta" id="goals-race-meta"></div>
+              </div>
+
+              <!-- Inputs distance / D+ / temps cible dans le hero -->
+              <div class="goals-hero-inputs" id="goals-hero-inputs">
+                <div class="goals-hero-input-item">
+                  <label class="goals-hero-input-label" for="goals-dist-input">Distance</label>
+                  <div class="goals-dplus-input-wrap">
+                    <input type="number" id="goals-dist-input" class="form-input goals-hero-input-field"
+                      placeholder="km" min="1" max="999" step="0.5" />
+                    <span class="form-unit">km</span>
+                  </div>
+                  <div class="goals-dplus-hint" id="goals-dist-hint"></div>
+                </div>
+                <div class="goals-hero-input-item" id="goals-dplus-row" style="display:none">
+                  <label class="goals-hero-input-label" for="goals-dplus-input">D+</label>
+                  <div class="goals-dplus-input-wrap">
+                    <input type="number" id="goals-dplus-input" class="form-input goals-hero-input-field"
+                      placeholder="m" min="0" max="9999" />
+                    <span class="form-unit">m</span>
+                  </div>
+                  <div class="goals-dplus-hint" id="goals-dplus-hint"></div>
+                </div>
+                <div class="goals-hero-input-item">
+                  <label class="goals-hero-input-label" for="goal-target-time">Temps cible</label>
+                  <div class="goals-dplus-input-wrap">
+                    <input type="time" id="goal-target-time" class="form-input goals-hero-input-field"
+                      step="1" autocomplete="off" />
+                  </div>
+                </div>
+                <button class="btn-goals-valider" onclick="applyRaceInputs()" title="Recalculer">
+                  &#x2713; Valider
+                </button>
+              </div>
+
+              <div class="goals-race-date" id="goals-race-date">—</div>
+              <div class="goals-countdown">
+                <div class="goals-countdown-item">
+                  <div class="goals-countdown-num" id="countdown-days">—</div>
+                  <div class="goals-countdown-label">jours</div>
+                </div>
+                <div class="goals-countdown-sep">:</div>
+                <div class="goals-countdown-item">
+                  <div class="goals-countdown-num" id="countdown-weeks">—</div>
+                  <div class="goals-countdown-label">semaines</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Avancement du plan -->
+          <div class="card goals-progress-card">
+            <div class="card-header">
+              <h2 class="card-title"><span class="card-title-icon">&#x1F4CA;</span> Avancement du plan</h2>
+            </div>
+            <div class="goals-plan-stats" id="goals-plan-stats">
+              <div class="goals-stat">
+                <div class="goals-stat-num" id="goals-weeks-done">—</div>
+                <div class="goals-stat-label">Semaines &eacute;coul&eacute;es</div>
+              </div>
+              <div class="goals-stat">
+                <div class="goals-stat-num" id="goals-weeks-left">—</div>
+                <div class="goals-stat-label">Semaines restantes</div>
+              </div>
+              <div class="goals-stat">
+                <div class="goals-stat-num" id="goals-pct">—</div>
+                <div class="goals-stat-label">&Eacute;coul&eacute;</div>
+              </div>
+            </div>
+            <div class="goals-progress-track" style="margin-top:16px">
+              <div class="goals-progress-fill" id="goals-progress-fill" style="width:0%"></div>
+            </div>
+            <!-- Séances intégrées dans la carte avancement -->
+            <div class="goals-sessions-inline">
+              <div class="gsi-item">
+                <span class="gsi-icon">&#x2705;</span>
+                <span class="gsi-num" id="goals-sess-done">—</span>
+                <span class="gsi-label">Faites</span>
+              </div>
+              <div class="gsi-item">
+                <span class="gsi-icon">&#x274C;</span>
+                <span class="gsi-num" id="goals-sess-missed">—</span>
+                <span class="gsi-label">Manqu&eacute;es</span>
+              </div>
+              <div class="gsi-item">
+                <span class="gsi-icon">&#x1F4C5;</span>
+                <span class="gsi-num" id="goals-sess-remaining">—</span>
+                <span class="gsi-label">Restantes</span>
+              </div>
+              <div class="gsi-item" id="goals-assiduity-card">
+                <span class="gsi-icon">&#x1F3AF;</span>
+                <span class="gsi-num" id="goals-assiduity">—</span>
+                <span class="gsi-label">Assiduit&eacute;</span>
+              </div>
+            </div>
+            <div id="goals-cycle-theme" class="goals-cycle-theme" style="margin-top:14px"></div>
+          </div>
+        </div>
+
+        <!-- BLOC 3 : Estimations de performance -->
+        <div class="card goals-estimations-card">
+          <div class="card-header">
+            <h2 class="card-title"><span class="card-title-icon">&#x23F1;</span> Estimations de performance</h2>
+            <span class="goals-est-note">basé sur votre VO₂max Garmin</span>
+          </div>
+          <div class="goals-est-grid">
+            <div class="goals-est-card goals-est-current">
+              <div class="goals-est-label">Estimation actuelle</div>
+              <div class="goals-est-vo2">VO₂max&nbsp;<span id="goals-vo2-current">—</span></div>
+              <div class="goals-est-time" id="goals-time-current">—</div>
+              <div class="goals-est-pace" id="goals-pace-current"></div>
+            </div>
+            <div class="goals-est-arrow">→</div>
+            <div class="goals-est-card goals-est-projected">
+              <div class="goals-est-label">Fin de plan (projection)</div>
+              <div class="goals-est-vo2">VO₂max proj.&nbsp;<span id="goals-vo2-projected">—</span></div>
+              <div class="goals-est-time" id="goals-time-projected">—</div>
+              <div class="goals-est-delta" id="goals-time-delta"></div>
+            </div>
+          </div>
+          <!-- Comparaison avec le temps cible -->
+          <div id="goals-target-compare" class="goals-target-compare"></div>
+        </div>
+
+        <!-- BLOC 4 : Courbe de progression -->
+        <div class="card goals-chart-card">
+          <div class="card-header">
+            <h2 class="card-title"><span class="card-title-icon">&#x1F4C8;</span> Évolution du temps estimé</h2>
+            <span class="goals-chart-note">↓ signifie progression</span>
+          </div>
+          <div class="goals-chart-wrap">
+            <canvas id="goals-chart"></canvas>
+          </div>
+        </div>
+
+        <!-- BLOC 5 : Alertes contextuelles -->
+        <div id="goals-alerts-section" style="margin-bottom:16px"></div>
+
+
+        <!-- Cycles du plan Campus -->
+        <div id="goals-campus-detail">
+          <div class="section-label" style="margin-top:24px;">Cycles d’entraînement</div>
+          <div id="goals-cycles-list" class="goals-cycles-list"></div>
+          <div id="goals-paces-section" style="margin-top:16px;"></div>
+        </div>
+
+      </div><!-- /goals-with-plan -->
+    </div><!-- /page-goals -->
+
+    <!-- PAGE : PLANS D'ENTRAÎNEMENT -->
+    <div class="page" id="page-plans">
+      <div class="page-header">
+        <div>
+          <h1 class="page-title">Plans d’entraînement</h1>
+          <div class="page-subtitle">Trouvez le plan adapté à votre objectif</div>
+        </div>
+      </div>
+
+      <!-- WIZARD -->
+      <div id="plans-wizard">
+        <div id="plans-step-indicator" style="margin-bottom:16px;"></div>
+        <div id="plans-step-content" class="wizard-step-content"></div>
+        <div class="wizard-nav">
+          <button id="plans-nav-back" class="btn-wizard-back" onclick="wizardBack()" style="display:none">← Retour</button>
+          <button id="plans-nav-next" class="btn-wizard-next" onclick="wizardNext()" disabled>Suivant →</button>
+        </div>
+      </div>
+
+      <!-- RÉSULTATS -->
+      <div id="plans-results" style="display:none">
+        <div class="plans-results-top">
+          <div id="plans-results-header"></div>
+          <button class="btn-plans-restart" onclick="plansRestart()">↺ Modifier les critères</button>
+        </div>
+        <div id="plans-results-list" class="plans-results-list"></div>
+      </div>
+
+      <!-- DÉTAIL -->
+      <div id="plans-detail" style="display:none">
+        <div class="plans-detail-top">
+          <button class="btn-plans-back-results" onclick="showView('results')">← Retour aux résultats</button>
+        </div>
+        <div id="plans-detail-content"></div>
+        <div class="plans-load-bar">
+          <button id="plans-load-btn" class="btn-plans-load">📅 Charger ce plan</button>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /app-content -->
+
+  <script src="js/app.js?v=1783586674010"></script>
+  <script src="js/campus.js?v=1785079636816"></script>
+  <script src="js/plans.js"></script>
+  <!-- ... MODAL LOGS ........................... -->
+  <div id="logs-modal" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.55);backdrop-filter:blur(4px);" onclick="if(event.target===this)closeLogsModal()">
+    <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:min(700px,95vw);max-height:80vh;background:#0f1117;border:1px solid #2a2a3a;border-radius:14px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 24px 64px rgba(0,0,0,0.6);">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid #2a2a3a;">
+        <div style="font-family:var(--font);font-size:14px;color:#e2e8f0;font-weight:700;">Y"< Logs serveur</div>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <span id="logs-source" style="font-size:11px;color:#64748b;"></span>
+          <button onclick="loadLogs()" style="background:none;border:1px solid #2a2a3a;color:#94a3b8;border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer;">&#x1F504; Rafraîchir</button>
+          <button onclick="closeLogsModal()" style="background:none;border:none;color:#64748b;font-size:18px;cursor:pointer;line-height:1;">o.</button>
+        </div>
+      </div>
+      <div id="logs-content" style="flex:1;overflow-y:auto;padding:14px 18px;font-family:'Cascadia Code','Consolas',monospace;font-size:12px;line-height:1.7;color:#94a3b8;">Chargement...</div>
+    </div>
+  </div>
+
+  <!-- ── MODALE CONFIRMATION ALLURE+ ── -->
+  <div id="confirm-modal" style="display:none;position:fixed;inset:0;z-index:10000;background:rgba(5,7,15,0.60);backdrop-filter:blur(6px);align-items:center;justify-content:center;" onclick="if(event.target===this)_confirmCancel()">
+    <div style="background:var(--bg-white);border:1px solid var(--border);border-radius:18px;box-shadow:0 24px 64px rgba(0,0,0,0.35);width:min(420px,92vw);padding:32px 28px;font-family:var(--font);">
+      <div id="confirm-modal-icon" style="font-size:2.4rem;margin-bottom:12px;text-align:center;"></div>
+      <h3 id="confirm-modal-title" style="margin:0 0 8px;font-size:18px;font-weight:700;color:var(--text-primary);text-align:center;"></h3>
+      <p id="confirm-modal-msg" style="margin:0 0 28px;font-size:14px;color:var(--text-secondary);text-align:center;line-height:1.6;"></p>
+      <div style="display:flex;gap:12px;justify-content:center;">
+        <button id="confirm-modal-cancel" onclick="_confirmCancel()" style="flex:1;max-width:160px;padding:11px 20px;border:1.5px solid var(--border);border-radius:10px;background:var(--bg-white);color:var(--text-secondary);font-size:14px;font-weight:500;cursor:pointer;">Annuler</button>
+        <button id="confirm-modal-ok" onclick="_confirmOk()" style="flex:1;max-width:160px;padding:11px 20px;border:none;border-radius:10px;background:#ef4444;color:#fff;font-size:14px;font-weight:600;cursor:pointer;">Confirmer</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ... OVERLAY SERVEUR HORS LIGNE .............................. -->
+  <div id="server-down-overlay" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(5,7,15,0.96);backdrop-filter:blur(8px);flex-direction:column;align-items:center;justify-content:center;gap:20px;">
+    <div style="text-align:center;max-width:420px;padding:0 24px;">
+      <div style="font-size:56px;margin-bottom:16px;">Y"</div>
+      <div style="font-family:var(--font);font-size:22px;font-weight:700;color:#f1f5f9;margin-bottom:10px;">Serveur hors ligne</div>
+      <div style="font-family:var(--font-body);font-size:14px;color:#94a3b8;line-height:1.7;margin-bottom:28px;">
+        Le serveur ne répond plus.<br>
+        Pour le relancer, double-cliquez sur&nbsp;:
+      </div>
+      <div style="background:#1e2130;border:1px solid #2a2a3a;border-radius:10px;padding:14px 20px;font-family:'Cascadia Code','Consolas',monospace;font-size:15px;color:#60a5fa;margin-bottom:28px;">
+        Y"" start.bat
+      </div>
+      <div style="font-family:var(--font-body);font-size:12px;color:#475569;">
+        Le dashboard se rechargera automatiquement dès que le serveur redémarrera.
+      </div>
+      <div style="margin-top:24px;">
+        <div id="server-down-spinner" style="width:8px;height:8px;border-radius:50%;background:#ef4444;display:inline-block;animation:pulse-led 1.2s ease-in-out infinite;"></div>
+        <span style="font-family:var(--font-body);font-size:12px;color:#64748b;margin-left:8px;">En attente du serveur?</span>
+      </div>
+    </div>
+  </div>
+
+
+
+    <!-- 📌 PAGE : ADMIN 📌 -->
+    <div class="page" id="page-admin">
+      <div class="page-header">
+        <div>
+          <h1 class="page-title">&#x2699;&#xFE0F; Administration</h1>
+          <div class="page-subtitle">Gestion du serveur et des connexions</div>
+        </div>
+      </div>
+      <div class="admin-grid">
+
+        <!-- Statut serveur -->
+        <section class="card">
+          <div class="card-header">
+            <h2 class="card-title"><span class="card-title-icon">&#x1F5A5;&#xFE0F;</span> Serveur</h2>
+          </div>
+          <div class="card-body" id="admin-server-info">
+            <div class="table-loading">Chargement…</div>
+          </div>
+          <div style="padding:0 16px 16px">
+            <button class="btn-admin-action" id="restart-btn">&#x1F504; Redémarrer le serveur</button>
+          </div>
+        </section>
+
+        <!-- Connexions -->
+        <section class="card">
+          <div class="card-header">
+            <h2 class="card-title"><span class="card-title-icon">&#x1F511;</span> Connexion...s</h2>
+          </div>
+          <div class="card-body" id="admin-connections">
+            <div class="table-loading">Chargement…</div>
+          </div>
+          <div style="padding:0 16px 16px">
+            <button class="btn-admin-action" id="refresh-btn" onclick="refreshAll()" style="border-color:var(--accent);background:var(--accent-light);color:var(--accent-text)">
+              &#x1F504; Actualiser les données
+            </button>
+          </div>
+        </section>
+
+        <!-- Logs -->
+        <section class="card admin-logs-card">
+          <div class="card-header">
+            <h2 class="card-title"><span class="card-title-icon">&#x1F4CB;</span> Logs serveur</h2>
+            <button class="btn-admin-refresh" id="admin-refresh-logs" onclick="loadAdminLogs()">? Rafraîchir</button>
+          </div>
+          <div class="card-body">
+            <div class="admin-logs-pre" id="admin-logs-content">Chargement…</div>
+          </div>
+        </section>
+
+      </div>
+    </div>
+
+  <!-- Bouton thème flottant (top-right fixe) -->
+  <button class="btn-theme-floating" id="btn-theme-toggle" title="Passer en mode sombre">
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+  </button>
+
+</body>
+</html>

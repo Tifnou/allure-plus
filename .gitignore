@@ -1,0 +1,8 @@
+# Suivi Sport Dashboard
+node_modules/
+cache.json
+.env
+.campus_token
+.garmin_tokens/
+*.log
+imported_plan.json
