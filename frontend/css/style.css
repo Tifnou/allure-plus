@@ -569,7 +569,7 @@ body::before{
 .profile-results-col{display:flex;flex-direction:column;gap:12px;}
 .profile-imc-vo2-row{display:grid;grid-template-columns:1.3fr 1fr;gap:16px;align-items:center;}
 @media(max-width:700px){.profile-imc-vo2-row{grid-template-columns:1fr;}}
-.profile-vo2-compact{display:flex;align-items:center;gap:10px;background:var(--bg-hover);border-radius:var(--radius-sm);padding:10px 12px;height:100%;}
+.profile-vo2-compact{display:flex;align-items:center;justify-content:center;gap:10px;background:var(--bg-hover);border-left:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px 10px 20px;height:100%;}
 .profile-vo2-compact-icon{font-size:20px;line-height:1;flex-shrink:0;}
 .profile-fullwidth-col{display:flex;flex-direction:column;gap:12px;margin-top:12px;}
 
@@ -628,6 +628,7 @@ body::before{
 
 /* VO2max card */
 .profile-vo2-display{text-align:left;padding:0;}
+.profile-vo2-title{font-family:var(--font-body);font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:2px;}
 .profile-vo2-value{font-family:var(--font);font-size:32px;font-weight:700;color:var(--accent);line-height:1;font-variant-numeric:tabular-nums;}
 .profile-vo2-unit{font-family:var(--font-body);font-size:11px;color:var(--text-muted);margin-top:2px;}
 .profile-vo2-label{font-family:var(--font-body);font-size:12px;color:var(--text-secondary);margin-top:5px;font-weight:500;}
