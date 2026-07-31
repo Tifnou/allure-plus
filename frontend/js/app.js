@@ -697,10 +697,12 @@ function drawRouteTrace(canvas, points) {
       doubleClickZoom: false, boxZoom: false, keyboard: false
     });
     window._routeLeafletMap = map;
-    L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
-      maxZoom: 17,
-      subdomains: 'abc',
-      attribution: 'Map data: &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, SRTM | Map style: &copy; <a href="https://opentopomap.org">OpenTopoMap</a> (<a href="https://creativecommons.org/licenses/by-sa/3.0/">CC-BY-SA</a>)'
+    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+    const tileUrl = isDark
+      ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
+      : 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png';
+    L.tileLayer(tileUrl, {
+      maxZoom: 19, attribution: '&copy; <a href="https://openstreetmap.org">OSM</a> &copy; <a href="https://carto.com">CARTO</a>'
     }).addTo(map);
     map.fitBounds(bounds, { padding: [44, 44] });
     coords = points.map(p => {
