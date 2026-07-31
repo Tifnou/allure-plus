@@ -196,6 +196,7 @@ echo.
 set /p LAUNCH="  Lancer Allure+ maintenant ? (O/N) : "
 if /i "!LAUNCH!"=="O" (
     start "" /D "%~dp0" "%~dp0start.bat"
+    exit /b 0
 )
 
 echo.
