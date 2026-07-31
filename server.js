@@ -638,7 +638,26 @@ app.get('/api/activity/:id/gps', requireSession, async (req, res) => {
     const points = poly
       .filter((_, i) => i % step === 0)
       .map(p => ({ lat: p.lat, lon: p.lon, alt: p.altitude }));
-    res.json({ points, total: poly.length });
+
+    // Profil d'elevation : l'altitude du polyline (geoPolylineDTO) est souvent null.
+    // Garmin fournit une serie temporelle separee (activityDetailMetrics) avec
+    // elevation + distance cumulee deja calculees - plus fiable pour le profil.
+    let elevation = [];
+    if (Array.isArray(detail.metricDescriptors) && Array.isArray(detail.activityDetailMetrics)) {
+      const keys = detail.metricDescriptors.map(m => m.key);
+      const idxElev = keys.indexOf('directElevation');
+      const idxDist = keys.indexOf('sumDistance');
+      if (idxElev !== -1 && idxDist !== -1) {
+        const rows = detail.activityDetailMetrics;
+        const elevStep = Math.max(1, Math.floor(rows.length / MAX_PTS));
+        elevation = rows
+          .filter((_, i) => i % elevStep === 0)
+          .map(r => ({ distKm: (r.metrics[idxDist] || 0) / 1000, alt: r.metrics[idxElev] }))
+          .filter(p => p.alt != null);
+      }
+    }
+
+    res.json({ points, total: poly.length, elevation });
   } catch (err) {
     console.error('GPS error:', err.message);
     res.json({ points: [], error: err.message });

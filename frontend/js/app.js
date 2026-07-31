@@ -640,11 +640,88 @@ function showActivityDetail(activity) {
   if (routeBadge)   { routeBadge.style.display = 'none'; }
   if (routeCanvas)  { const ctx = routeCanvas.getContext('2d'); if (ctx) ctx.clearRect(0, 0, routeCanvas.width, routeCanvas.height); }
 
+  // Reinitialise la bascule carte / profil d'elevation sur la vue "carte"
+  _lastRoutePoints = null;
+  _lastRouteElevation = null;
+  const mapWrap = el('route-canvas-wrapper');
+  const elevWrap = el('route-elevation-wrapper');
+  const toggleIcon = el('route-view-toggle-icon');
+  if (mapWrap)  mapWrap.classList.remove('route-view-hidden');
+  if (elevWrap) elevWrap.classList.add('route-view-hidden');
+  if (toggleIcon) toggleIcon.textContent = '⛰️';
+  if (routeElevationChart) { routeElevationChart.destroy(); routeElevationChart = null; }
+  const toggleBtn = el('route-view-toggle');
+  if (toggleBtn) { toggleBtn.style.display = ''; toggleBtn.onclick = toggleRouteView; }
+
   // Bouton retour
   el('btn-back-activities').onclick = () => navigateTo('activities');
 
   if (activity.id) loadAndDrawRoute(activity.id, dist, dur);
   loadActivityAnalysis(activity);
+}
+
+// ─── Bascule carte / profil d'elevation (transition croisee) ─────────
+let _lastRoutePoints = null;
+let _lastRouteElevation = null;
+let routeElevationChart = null;
+function toggleRouteView() {
+  const mapWrap = el('route-canvas-wrapper');
+  const elevWrap = el('route-elevation-wrapper');
+  const toggleIcon = el('route-view-toggle-icon');
+  if (!mapWrap || !elevWrap) return;
+  const showingMap = !mapWrap.classList.contains('route-view-hidden');
+  if (showingMap) {
+    mapWrap.classList.add('route-view-hidden');
+    elevWrap.classList.remove('route-view-hidden');
+    if (toggleIcon) toggleIcon.textContent = '🗺️';
+    renderElevationProfile(_lastRouteElevation);
+  } else {
+    elevWrap.classList.add('route-view-hidden');
+    mapWrap.classList.remove('route-view-hidden');
+    if (toggleIcon) toggleIcon.textContent = '⛰️';
+  }
+}
+
+// elevation : [{ distKm, alt }] fourni directement par Garmin (activityDetailMetrics),
+// distance cumulee et altitude deja calculees cote Garmin - pas de recalcul ici.
+function renderElevationProfile(elevation) {
+  const canvas = el('route-elevation-chart');
+  if (!canvas) return;
+  if (routeElevationChart) { routeElevationChart.destroy(); routeElevationChart = null; }
+  if (!elevation || elevation.length < 2) {
+    return;
+  }
+  const labels = elevation.map(p => p.distKm.toFixed(2));
+  const data = elevation.map(p => Math.round(p.alt));
+  routeElevationChart = new Chart(canvas.getContext('2d'), {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{
+        data,
+        borderColor: '#60a5fa',
+        backgroundColor: 'rgba(96,165,250,0.18)',
+        fill: true,
+        pointRadius: 0,
+        borderWidth: 2,
+        tension: 0.25,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: {
+        callbacks: {
+          title: (items) => `${items[0].label} km`,
+          label: (item) => `${item.formattedValue} m`,
+        }
+      }},
+      scales: {
+        x: { ticks: { color: 'rgba(255,255,255,0.5)', maxTicksLimit: 6, font: { size: 10 } }, grid: { color: 'rgba(255,255,255,0.06)' } },
+        y: { ticks: { color: 'rgba(255,255,255,0.5)', font: { size: 10 } }, grid: { color: 'rgba(255,255,255,0.06)' } },
+      }
+    }
+  });
 }
 // ─── Dessin du tracé GPS (canvas animé) ─────────────
 async function loadAndDrawRoute(activityId, distLabel, durLabel) {
@@ -659,15 +736,21 @@ async function loadAndDrawRoute(activityId, distLabel, durLabel) {
 
   try {
     const res = await fetch(`${API}/api/activity/${activityId}/gps`);
-    const { points } = await res.json();
+    const { points, elevation } = await res.json();
 
     if (!points || points.length < 3) {
       if (loading) loading.innerHTML = '<div style="font-size:13px;color:rgba(255,255,255,0.4)">Pas de données GPS<br><small>(activité indoor ?)</small></div>';
+      const toggleBtn = el('route-view-toggle');
+      if (toggleBtn) toggleBtn.style.display = 'none';
       return;
     }
 
     if (loading) loading.style.display = 'none';
     if (badge) badge.style.display = 'flex';
+    const toggleBtn = el('route-view-toggle');
+    if (toggleBtn) toggleBtn.style.display = (elevation && elevation.length >= 2) ? '' : 'none';
+    _lastRoutePoints = points;
+    _lastRouteElevation = elevation || null;
     drawRouteTrace(canvas, points);
   } catch(e) {
     if (loading) loading.innerHTML = '<div style="color:rgba(255,255,255,0.4);font-size:13px">Tracé non disponible</div>';
