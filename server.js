@@ -499,7 +499,8 @@ app.get('/api/dashboard', requireSession, async (req, res) => {
       maxHR:           a.maxHR,
       elevationGain:   a.elevationGain,
       calories:        a.calories,
-      activityType:    a.activityType?.typeKey
+      activityType:    a.activityType?.typeKey,
+      vO2MaxValue:     a.vO2MaxValue
     }));
     res.json({ stats, lastRuns, allActivities, records, lastUpdated: new Date().toISOString() });
   } catch (err) { handleError(res, err); }
@@ -526,7 +527,8 @@ app.get('/api/activities/year/:year', requireSession, async (req, res) => {
       maxHR:           a.maxHR,
       elevationGain:   a.elevationGain,
       calories:        a.calories,
-      activityType:    a.activityType?.typeKey
+      activityType:    a.activityType?.typeKey,
+      vO2MaxValue:     a.vO2MaxValue
     }));
     res.json({ year, activities: mapped, count: mapped.length });
   } catch (err) { handleError(res, err); }

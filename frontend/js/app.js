@@ -808,13 +808,18 @@ async function loadActivityAnalysis(activity) {
   panel.style.display = '';
   if (analysisCard) analysisCard.style.display = '';
 
+  // Contexte pour la classification en zone (VMA du coureur + trail ou route)
+  const isTrail = (activity.activityType || '').toLowerCase().includes('trail');
+  const _zoneProfile = loadProfileData();
+  const vma = calcVMA(_latestVO2Max, _zoneProfile.sex || 'M');
+
   // ─── Analyse basique (fallback sans laps) ────────────────────
   function buildBasicAnalysis(act) {
     const insights = [];
-    if (act.averageSpeed > 0) insights.push(`Allure moyenne : <strong>${formatPace(1000/act.averageSpeed)}/km</strong>`);
-    if (act.averageHR)  insights.push(`FC moyenne : <strong>${Math.round(act.averageHR)} bpm</strong>`);
+    if (act.avgPaceSecPerKm > 0) insights.push(`Allure moyenne : <strong>${formatPace(act.avgPaceSecPerKm)}</strong>`);
+    if (act.avgHR)      insights.push(`FC moyenne : <strong>${Math.round(act.avgHR)} bpm</strong>`);
     if (act.maxHR)      insights.push(`FC max : <strong>${Math.round(act.maxHR)} bpm</strong>`);
-    if (act.distance)   insights.push(`Distance : <strong>${(act.distance/1000).toFixed(2)} km</strong>`);
+    if (act.distanceKm) insights.push(`Distance : <strong>${act.distanceKm.toFixed(2)} km</strong>`);
     if (act.calories)   insights.push(`Calories : <strong>${Math.round(act.calories)} kcal</strong>`);
     return insights;
   }
@@ -881,6 +886,50 @@ async function loadActivityAnalysis(activity) {
     });
   }
 
+  // ─── Regroupement des efforts par duree similaire ────────────────────
+  // Une seance peut enchainer plusieurs types de repetition a des allures
+  // volontairement differentes (ex: 30s + 2min + 6min) : les traiter comme
+  // un seul bloc fausse regularite/derive/split. On les separe par duree
+  // (tolerance 20%, plancher 8s) et on classe chaque groupe dans sa zone.
+  function describeDuration(sec) {
+    if (sec < 60) return `${Math.round(sec)}s`;
+    const min = sec / 60;
+    return `${Number.isInteger(min) ? min : min.toFixed(1)}min`;
+  }
+  function groupEffortsByDuration(effortEntries) {
+    const groups = [];
+    effortEntries.forEach(({ lap, idx }) => {
+      const dur = lap.elapsedDuration || lap.movingDuration || lap.duration || 0;
+      let group = groups.find(g => Math.abs(dur - g.anchorDuration) <= Math.max(g.anchorDuration * 0.20, 8));
+      if (!group) {
+        group = { anchorDuration: dur, memberIdx: [], paces: [], hrValues: [] };
+        groups.push(group);
+      }
+      group.memberIdx.push(idx);
+      if (lap.averageSpeed > 0) group.paces.push(1000 / lap.averageSpeed);
+      if (lap.averageHR) group.hrValues.push(Math.round(lap.averageHR));
+    });
+    groups.forEach(g => {
+      g.repCount = g.memberIdx.length;
+      g.avgPaceSecKm = g.paces.length ? g.paces.reduce((a, b) => a + b, 0) / g.paces.length : null;
+      if (g.paces.length >= 2) {
+        g.regularityMaxEcart = Math.round(Math.max(...g.paces) - Math.min(...g.paces));
+        g.regularityLabel = g.regularityMaxEcart <= 5 ? 'excellente régularité'
+          : g.regularityMaxEcart <= 12 ? 'bonne régularité'
+          : g.regularityMaxEcart <= 25 ? 'quelques variations'
+          : 'répétitions irrégulières';
+        g.splitDiffSec = Math.round(g.paces[g.paces.length - 1] - g.paces[0]);
+      } else {
+        g.regularityMaxEcart = null; g.regularityLabel = null; g.splitDiffSec = null;
+      }
+      g.hrDriftBpm = g.hrValues.length >= 2 ? (g.hrValues[g.hrValues.length - 1] - g.hrValues[0]) : null;
+      g.zoneKey = (vma && g.avgPaceSecKm) ? matchZoneFromPaceTrailAware(g.avgPaceSecKm, vma, isTrail) : null;
+      g.zoneLabel = (g.zoneKey && typeof ALLURE_PLUS_ZONES !== 'undefined') ? ALLURE_PLUS_ZONES[g.zoneKey]?.label : null;
+      g.zoneColor = (g.zoneKey && typeof ALLURE_PLUS_ZONES !== 'undefined') ? ALLURE_PLUS_ZONES[g.zoneKey]?.color : null;
+    });
+    return groups;
+  }
+
   try {
     const result = await fetchJSON(`/api/activity/${activity.id}/laps`);
     const validLaps = Array.isArray(result?.laps) ? result.laps : [];
@@ -916,16 +965,39 @@ async function loadActivityAnalysis(activity) {
         const insights = [];
         const kmLaps = validLaps.filter(l => l.averageSpeed > 0);
         if (kmLaps.length >= 2) {
-          const paces = kmLaps.map(l => Math.round(1000 / l.averageSpeed));
-          const minP = Math.min(...paces), maxP = Math.max(...paces);
-          insights.push(`Allures : de <strong>${formatPace(minP)}</strong> à <strong>${formatPace(maxP)}/km</strong>`);
-          const diff = paces[paces.length-1] - paces[0];
+          const rawPaces = kmLaps.map(l => 1000 / l.averageSpeed);
+          const minP = Math.round(Math.min(...rawPaces)), maxP = Math.round(Math.max(...rawPaces));
+          insights.push(`Allures : de <strong>${formatPace(minP)}</strong> à <strong>${formatPace(maxP)}</strong>`);
+
+          const avgRawPace = rawPaces.reduce((a,b) => a+b, 0) / rawPaces.length;
+          if (vma) {
+            const zoneKey = matchZoneFromPaceTrailAware(avgRawPace, vma, isTrail);
+            const zoneLabel = (zoneKey && typeof ALLURE_PLUS_ZONES !== 'undefined') ? ALLURE_PLUS_ZONES[zoneKey]?.label : null;
+            if (zoneLabel) insights.push(`Allure moyenne : <strong>${formatPace(Math.round(avgRawPace))}</strong> — zone <strong>${zoneLabel}</strong>`);
+          }
+
+          // Terrain vallonne : Garmin fournit une allure ajustee au denivele (avgGradeAdjustedSpeed)
+          // par intervalle - on l'utilise pour juger la regularite si le terrain le justifie,
+          // plutot que l'allure brute qui varie naturellement avec les montees/descentes.
+          const totalElevGain = kmLaps.reduce((s,l) => s + (l.elevationGain || 0), 0);
+          const elevPerKm = totalElevGain / kmLaps.length;
+          const hasGAP = kmLaps.every(l => l.avgGradeAdjustedSpeed > 0);
+          const terrainVallonne = hasGAP && (isTrail || elevPerKm > 10);
+          const evalPaces = terrainVallonne ? kmLaps.map(l => 1000 / l.avgGradeAdjustedSpeed) : rawPaces;
+
+          const diff = Math.round(evalPaces[evalPaces.length-1] - evalPaces[0]);
           if (Math.abs(diff) > 8) {
-            insights.push(diff < 0
-              ? `Negative split : tu as accéléré sur la fin `
-              : `Positive split : tu as ralenti au fil des km`);
+            if (terrainVallonne) {
+              insights.push(`Allure ${diff > 0 ? 'plus lente' : 'plus rapide'} en fin de sortie une fois ajustée au dénivelé (${diff > 0 ? '+' : ''}${diff}"/km) — terrain vallonné (D+ total : <strong>${Math.round(totalElevGain)} m</strong>), pas forcément un signe de fatigue.`);
+            } else {
+              insights.push(diff < 0
+                ? `Negative split : tu as accéléré sur la fin `
+                : `Positive split : tu as ralenti au fil des km`);
+            }
           } else {
-            insights.push(`Allure très régulière tout au long de la sortie `);
+            insights.push(terrainVallonne
+              ? `Allure régulière une fois ajustée au dénivelé (D+ total : <strong>${Math.round(totalElevGain)} m</strong>)`
+              : `Allure très régulière tout au long de la sortie `);
           }
           const hrLaps = validLaps.filter(l => l.averageHR);
           if (hrLaps.length >= 2) {
@@ -943,6 +1015,15 @@ async function loadActivityAnalysis(activity) {
       } else {
         // ─── Mode INTERVALLES (séance qualité) ──────────────────────────
         const types = classifyLaps(validLaps);
+        const effortEntries = validLaps.reduce((acc, lap, idx) => {
+          if (types[idx] === 'effort') acc.push({ lap, idx });
+          return acc;
+        }, []);
+        const restLaps   = validLaps.filter((_, i) => types[i] === 'rest');
+        const warmupLaps = validLaps.filter((_, i) => types[i] === 'warmup');
+        const groups = groupEffortsByDuration(effortEntries);
+        const zoneByIdx = {};
+        groups.forEach(g => g.memberIdx.forEach(i => { zoneByIdx[i] = { label: g.zoneKey, color: g.zoneColor }; }));
 
         lapsEl.innerHTML = `
           <table class="laps-table">
@@ -957,43 +1038,46 @@ async function loadActivityAnalysis(activity) {
               const dist = lap.distance ? (lap.distance/1000).toFixed(2)+' km' : '—';
               const pace = (lap.averageSpeed && lap.averageSpeed > 0) ? formatPace(1000/lap.averageSpeed) : '—';
               const hr   = lap.averageHR ? Math.round(lap.averageHR)+' bpm' : '—';
-              const label = isRest ? 'Récupération' : isWarmup ? 'Échauffement' : 'Effort';
+              const z = zoneByIdx[i];
+              const label = isRest ? 'Récupération' : isWarmup ? 'Échauffement'
+                : (z && z.label) ? `Effort — ${z.label}` : 'Effort';
               const cls   = isRest ? 'lap-rest' : isWarmup ? 'lap-warmup' : 'lap-effort';
+              const typeCell = (!isRest && !isWarmup && z && z.color)
+                ? `<span style="background:${z.color}20;color:${z.color};border:1px solid ${z.color}40;padding:2px 6px;border-radius:4px;font-size:11px;white-space:nowrap">${label}</span>`
+                : label;
               return `<tr class="lap-row ${cls}">
-                <td>${i+1}</td><td>${label}</td>
+                <td>${i+1}</td><td>${typeCell}</td>
                 <td>${formatDuration(dur)}</td><td>${dist}</td>
                 <td class="pace-value">${pace}</td><td class="hr-value">${hr}</td>
               </tr>`;
             }).join('')}</tbody>
           </table>`;
 
-        const effortLaps = validLaps.filter((_, i) => types[i] === 'effort');
-        const restLaps   = validLaps.filter((_, i) => types[i] === 'rest');
-        const warmupLaps = validLaps.filter((_, i) => types[i] === 'warmup');
         const insights = [];
 
-        if (effortLaps.length > 0) {
-          const effortPaces = effortLaps.filter(l => l.averageSpeed > 0).map(l => formatPace(1000/l.averageSpeed));
-          if (effortPaces.length > 0) insights.push(`Allures efforts : ${effortPaces.map(p=>`<strong>${p}/km</strong>`).join(' → ')}`);
-          const hrEfforts = effortLaps.filter(l => l.averageHR).map(l => Math.round(l.averageHR));
-          if (hrEfforts.length >= 2) {
-            const drift = hrEfforts[hrEfforts.length-1] - hrEfforts[0];
-            const driftMsg = Math.abs(drift) <= 5 ? 'FC stable — charge bien gérée'
-              : drift > 0 ? `+${drift} bpm de dérive — fatigue progressive`
-              : `${drift} bpm — tu t'es relâché(e) en fin de séance`;
-            insights.push(`Dérive cardiaque : FC1=<strong>${hrEfforts[0]} bpm</strong> → FC${hrEfforts.length}=<strong>${hrEfforts[hrEfforts.length-1]} bpm</strong> — ${driftMsg}`);
+        if (effortEntries.length > 0) {
+          groups.forEach((g, gi) => {
+            const paceStrs = g.paces.map(p => `<strong>${formatPace(Math.round(p))}</strong>`);
+            let line = `Groupe ${gi+1} — ${g.repCount}× ~${describeDuration(g.anchorDuration)} : ${paceStrs.join(' → ')}`;
+            if (g.zoneLabel) line += ` — zone <strong>${g.zoneLabel}</strong>`;
+            if (g.repCount >= 2 && g.regularityLabel) {
+              line += ` — ${g.regularityLabel} (écart max ${g.regularityMaxEcart}"/km)`;
+            }
+            if (g.hrDriftBpm !== null && Math.abs(g.hrDriftBpm) > 5) {
+              line += `, FC ${g.hrDriftBpm > 0 ? '+' : ''}${g.hrDriftBpm} bpm`;
+            }
+            insights.push(line);
+          });
+
+          const allEffortHR = effortEntries.map(e => e.lap.averageHR).filter(Boolean);
+          if (allEffortHR.length > 0) {
+            const avgHRAllEfforts = Math.round(allEffortHR.reduce((a,b) => a+b, 0) / allEffortHR.length);
+            insights.push(`FC moyenne (tous les efforts) : <strong>${avgHRAllEfforts} bpm</strong>`);
           }
-          const effortSpds = effortLaps.filter(l => l.averageSpeed > 0).map(l => l.averageSpeed);
-          if (effortSpds.length >= 2) {
-            const paces = effortSpds.map(s => 1000/s);
-            const maxEcart = Math.round(Math.max(...paces) - Math.min(...paces));
-            const regMsg = maxEcart <= 5 ? '— excellente régularité ' : maxEcart <= 12 ? '— bonne régularité' : maxEcart <= 25 ? '— quelques variations' : '— effort irrégulier';
-            insights.push(`Régularité : écart max <strong>${maxEcart}" /km</strong> ${regMsg}`);
-            const diff = Math.round(1000/effortSpds[effortSpds.length-1] - 1000/effortSpds[0]);
-            if (Math.abs(diff) > 3) insights.push(diff < 0 ? `Negative split : tu as accéléré sur la fin ` : `Positive split : la fin était plus difficile`);
-          }
-          insights.push(`Structure : <strong>${effortLaps.length}</strong> effort(s) · <strong>${restLaps.length}</strong> récup. · <strong>${warmupLaps.length}</strong> échauff./retour`);
-          const avgSpd = effortLaps.reduce((s,l) => s+(l.averageSpeed||0),0)/effortLaps.length;
+
+          insights.push(`Structure : <strong>${effortEntries.length}</strong> effort(s) en <strong>${groups.length}</strong> groupe(s) · <strong>${restLaps.length}</strong> récup. · <strong>${warmupLaps.length}</strong> échauff./retour`);
+
+          const avgSpd = effortEntries.reduce((s,e) => s+(e.lap.averageSpeed||0),0)/effortEntries.length;
           if (avgSpd > 0) {
             const p = 1000/avgSpd;
             const enc = p < 270 ? 'Allure de pointe — séance de qualité !' : p < 300 ? 'Bonne vitesse sur les efforts.' : p < 330 ? 'Séance dans les clous.' : 'Séance gérée à allure confortable.';
@@ -1506,6 +1590,21 @@ function calcVMA(vo2max, sex) {
   if (!vo2max || vo2max <= 0) return null;
   const factor = sex === 'F' ? 0.315 : 0.313;
   return Math.round((vo2max - 3.5) * factor * 10) / 10;
+}
+
+// Classe une allure (sec/km) dans une zone ALLURE_PLUS (matchZoneFromPace, campus.js)
+// en tenant compte du surcout trail : on "deshabille" l'allure de la correction
+// avant classification, sinon un effort trail est vu comme plus rapide/exigeant
+// qu'il ne l'est reellement (2 passes : approx a 7%, puis affinee avec le vrai
+// trailCorr de la zone trouvee, qui peut differer : AS10=8%, VMA=10%)
+function matchZoneFromPaceTrailAware(paceSecKm, vma, isTrail) {
+  if (!paceSecKm || !vma) return null;
+  if (typeof matchZoneFromPace !== 'function') return null;
+  if (!isTrail) return matchZoneFromPace(paceSecKm, vma);
+  const approxZone = matchZoneFromPace(paceSecKm / 1.07, vma);
+  const corr = approxZone && ALLURE_PLUS_ZONES[approxZone]?.trailCorr;
+  if (!corr) return approxZone;
+  return matchZoneFromPace(paceSecKm / (1 + corr), vma) || approxZone;
 }
 
 // FC max : formule Tanaka (2001), plus précise pour adultes sportifs

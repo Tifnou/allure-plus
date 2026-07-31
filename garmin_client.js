@@ -319,7 +319,8 @@ function getLastRunActivities(activities, limit = 10) {
       maxHR: a.maxHR,
       elevationGain: a.elevationGain,
       calories: a.calories,
-      activityType: a.activityType?.typeKey
+      activityType: a.activityType?.typeKey,
+      vO2MaxValue: a.vO2MaxValue
     }));
 }
 

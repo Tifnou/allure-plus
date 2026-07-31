@@ -270,18 +270,20 @@ function fmtZoneKind(kind, sessionName) {
 }
 
 // matchZoneFromPace : retourne une clé ALLURE_PLUS_ZONES depuis une allure + VMA
+// Seuils derives directement de ALLURE_PLUS_ZONES (mi-point entre pctHigh d'une zone
+// et pctLow de la suivante), dans l'ordre d'intensite croissante des cles du fichier -
+// evite la desynchronisation d'anciens seuils recopies a la main (qui ne renvoyaient
+// par exemple jamais SWEET_SPOT, absorbee a tort par AS42/AS21).
+const ZONE_ORDER = Object.keys(ALLURE_PLUS_ZONES);
 function matchZoneFromPace(paceSecKm, vma) {
   if (!paceSecKm || !vma) return null;
   const pct = (3600 / paceSecKm) / vma;
-  if (pct < 0.65) return 'RECOVER';
-  if (pct < 0.73) return 'EF';
-  if (pct < 0.76) return 'TEMPO';
-  if (pct < 0.79) return 'AS42';   // zone marathon
-  if (pct < 0.84) return 'AS21';   // zone semi (chevauchement S60)
-  if (pct < 0.86) return 'S60';
-  if (pct < 0.90) return 'S30';
-  if (pct < 1.00) return 'AS10';
-  return 'VMA';
+  for (let i = 0; i < ZONE_ORDER.length - 1; i++) {
+    const cur = ALLURE_PLUS_ZONES[ZONE_ORDER[i]];
+    const next = ALLURE_PLUS_ZONES[ZONE_ORDER[i + 1]];
+    if (pct < (cur.pctHigh + next.pctLow) / 2) return ZONE_ORDER[i];
+  }
+  return ZONE_ORDER[ZONE_ORDER.length - 1]; // VMA
 }
 
 // Convertit le markdown **gras** en HTML <strong>
