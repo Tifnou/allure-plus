@@ -848,11 +848,12 @@ async function loadActivityAnalysis(activity) {
     const n = laps.length;
 
     return laps.map((lap, idx) => {
-      // Garmin retourne intensityType comme objet { typeKey: 'active'|'rest'|'warmup'|'cooldown'|'recovery' }
-      // On lit typeKey, avec fallback sur le champ legacy 'intensity' (string)
-      const intensRaw = lap.intensityType?.typeKey || lap.intensity || '';
+      // Garmin retourne intensityType tantot en chaine simple ('ACTIVE', 'RECOVERY'...)
+      // tantot en objet ({ typeKey: 'active' }) selon l'endpoint (laps/splits/details) -
+      // on gere les deux formes, avec fallback sur le champ legacy 'intensity'
+      const intensRaw = (typeof lap.intensityType === 'string' ? lap.intensityType : lap.intensityType?.typeKey) || lap.intensity || '';
       const intens = intensRaw.toLowerCase();
-      const trigRaw = lap.lapTriggerType?.typeKey || lap.lapTrigger || '';
+      const trigRaw = (typeof lap.lapTriggerType === 'string' ? lap.lapTriggerType : lap.lapTriggerType?.typeKey) || lap.lapTrigger || '';
       const trig   = trigRaw.toLowerCase();
 
       // 1. Champs Garmin explicites — le plus fiable, doit passer en PRIORITÉ
