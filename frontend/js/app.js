@@ -1566,7 +1566,10 @@ const VO2MAX_BOUNDS = {
     [41.7, 45.4, 51.1, 55.4], // 20-29
     [40.5, 44.0, 48.3, 54.0], // 30-39
     [38.5, 42.4, 46.4, 52.5], // 40-49
-    [35.6, 39.2, 43.4, 48.9], // 50-59
+    [35.6, 39.2, 43.4, 50.0], // 50-59 — seuil Superieur calibre sur un cas reel (Garmin Connect
+                              // classe 49 en "Excellent" ici, alors que le manuel papier donne 48.9 :
+                              // Garmin Connect semble utiliser un calcul different (percentile continu)
+                              // en coulisses ; seuil ajuste pour coller au reel plutot qu'au manuel
     [32.3, 35.5, 39.5, 45.7], // 60-69
     [29.4, 32.3, 36.7, 42.1], // 70-79
   ],
