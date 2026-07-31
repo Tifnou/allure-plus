@@ -2452,9 +2452,9 @@ function showPacesModal() {
   modal.id = 'paces-modal';
   modal.style.cssText = 'position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.55);backdrop-filter:blur(4px);';
   modal.innerHTML = `
-    <div style="background:var(--bg-white);border:1px solid var(--border);border-radius:16px;padding:22px 22px 18px;width:100%;max-width:460px;max-height:82vh;overflow-y:auto;box-shadow:0 24px 60px rgba(0,0,0,.25);">
+    <div style="background:var(--bg-white);border:1px solid var(--border);border-radius:16px;padding:18px 20px 16px;width:100%;max-width:700px;max-height:90vh;overflow-y:auto;box-shadow:0 24px 60px rgba(0,0,0,.25);">
       ${buildPacesTableHTML()}
-      <button id="paces-modal-close" style="margin-top:16px;width:100%;padding:10px;border:1px solid var(--border);border-radius:9px;background:transparent;color:var(--text-secondary);font-size:13px;font-weight:600;cursor:pointer;">Fermer</button>
+      <button id="paces-modal-close" style="margin-top:14px;width:100%;padding:9px;border:1px solid var(--border);border-radius:9px;background:transparent;color:var(--text-secondary);font-size:13px;font-weight:600;cursor:pointer;">Fermer</button>
     </div>
   `;
   document.body.appendChild(modal);
