@@ -608,46 +608,33 @@ function showActivityDetail(activity) {
   if (!detailEl) return;
 
   detailEl.innerHTML = `
-    <div class="activity-detail">
-      <!-- Colonne stats -->
-      <div class="activity-detail-left">
-        <div class="activity-detail-hero card">
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
-            <span class="run-type-text ${activityTypeClass(type)}">${activityTypeLabel(type)}</span>
-            <span style="color:var(--text-muted);font-family:var(--font-body)">&middot;</span>
-            <span style="color:var(--text-muted);font-size:12px;font-family:var(--font-body)">${formatDate(activity.date)}</span>
-          </div>
-          <div class="activity-detail-title">${activity.name || 'Activite'}</div>
-          <div class="activity-stats-grid" style="margin-top:20px">
-            <div class="activity-stat"><div class="activity-stat-value">${dist}</div><div class="activity-stat-label">Distance</div></div>
-            <div class="activity-stat"><div class="activity-stat-value">${dur}</div><div class="activity-stat-label">Duree</div></div>
-            <div class="activity-stat"><div class="activity-stat-value">${pace}</div><div class="activity-stat-label">Allure moy.</div></div>
-            <div class="activity-stat"><div class="activity-stat-value">${avgHR}</div><div class="activity-stat-label">FC moyenne</div></div>
-            <div class="activity-stat"><div class="activity-stat-value">${maxHR}</div><div class="activity-stat-label">FC max</div></div>
-            <div class="activity-stat"><div class="activity-stat-value">${elev}</div><div class="activity-stat-label">Denivele +</div></div>
-            <div class="activity-stat"><div class="activity-stat-value">${cal}</div><div class="activity-stat-label">Calories</div></div>
-            <div class="activity-stat"><div class="activity-stat-value">${activity.vO2MaxValue || '\u2014'}</div><div class="activity-stat-label">VO2max estimee</div></div>
-          </div>
-          ${activity.id ? `<a href="https://connect.garmin.com/modern/activity/${activity.id}" target="_blank" class="activity-link">Voir sur Garmin Connect</a>` : ''}
-        </div>
+    <div class="activity-detail-hero card">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+        <span class="run-type-text ${activityTypeClass(type)}">${activityTypeLabel(type)}</span>
+        <span style="color:var(--text-muted);font-family:var(--font-body)">&middot;</span>
+        <span style="color:var(--text-muted);font-size:12px;font-family:var(--font-body)">${formatDate(activity.date)}</span>
       </div>
-      <!-- Colonne trace GPS -->
-      <div class="activity-detail-right">
-        <div class="route-canvas-wrapper" id="route-canvas-wrapper">
-          <div class="route-canvas-loading" id="route-loading">
-            <div class="route-loading-spinner"></div>
-            <div>Chargement du trace...</div>
-          </div>
-          <div id="route-map"></div>
-          <canvas id="route-canvas" class="route-canvas"></canvas>
-          <div class="route-canvas-badge" id="route-badge" style="display:none">
-            <span id="route-badge-dist">${dist}</span>
-            <span class="route-badge-sep">&middot;</span>
-            <span id="route-badge-time">${dur}</span>
-          </div>
-        </div>
+      <div class="activity-detail-title">${activity.name || 'Activite'}</div>
+      <div class="activity-stats-grid" style="margin-top:14px">
+        <div class="activity-stat"><div class="activity-stat-value">${dist}</div><div class="activity-stat-label">Distance</div></div>
+        <div class="activity-stat"><div class="activity-stat-value">${dur}</div><div class="activity-stat-label">Duree</div></div>
+        <div class="activity-stat"><div class="activity-stat-value">${pace}</div><div class="activity-stat-label">Allure moy.</div></div>
+        <div class="activity-stat"><div class="activity-stat-value">${avgHR}</div><div class="activity-stat-label">FC moyenne</div></div>
+        <div class="activity-stat"><div class="activity-stat-value">${maxHR}</div><div class="activity-stat-label">FC max</div></div>
+        <div class="activity-stat"><div class="activity-stat-value">${elev}</div><div class="activity-stat-label">Denivele +</div></div>
+        <div class="activity-stat"><div class="activity-stat-value">${cal}</div><div class="activity-stat-label">Calories</div></div>
+        <div class="activity-stat"><div class="activity-stat-value">${activity.vO2MaxValue || '\u2014'}</div><div class="activity-stat-label">VO2max estimee</div></div>
       </div>
-    </div>`,
+      ${activity.id ? `<a href="https://connect.garmin.com/modern/activity/${activity.id}" target="_blank" class="activity-link">Voir sur Garmin Connect</a>` : ''}
+    </div>`;
+
+  // Reinitialise la carte GPS (elements statiques, reutilises a chaque activite)
+  const routeLoading = el('route-loading');
+  const routeBadge   = el('route-badge');
+  const routeCanvas  = el('route-canvas');
+  if (routeLoading) { routeLoading.style.display = ''; routeLoading.innerHTML = '<div class="route-loading-spinner"></div><div>Chargement du trace...</div>'; }
+  if (routeBadge)   { routeBadge.style.display = 'none'; }
+  if (routeCanvas)  { const ctx = routeCanvas.getContext('2d'); if (ctx) ctx.clearRect(0, 0, routeCanvas.width, routeCanvas.height); }
 
   // Bouton retour
   el('btn-back-activities').onclick = () => navigateTo('activities');
@@ -660,6 +647,10 @@ async function loadAndDrawRoute(activityId, distLabel, durLabel) {
   const canvas  = el('route-canvas');
   const loading = el('route-loading');
   const badge   = el('route-badge');
+  const badgeDist = el('route-badge-dist');
+  const badgeTime = el('route-badge-time');
+  if (badgeDist) badgeDist.textContent = distLabel;
+  if (badgeTime) badgeTime.textContent = durLabel;
   if (!canvas) return;
 
   try {

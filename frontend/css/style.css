@@ -703,31 +703,24 @@ body::before{
 .advice-card--cardio    .advice-card-header{background:rgba(239,68,68,0.06);}
 
 /* ─── Activity Detail ─── */
-.activity-detail{display:flex;flex-direction:column;gap:16px;}
 .activity-detail-hero{
   background:rgba(255,255,255,0.90);
   border:1px solid var(--border);
   border-radius:var(--radius-lg);
-  padding:28px;
+  padding:18px 20px;
   box-shadow:var(--shadow-sm);
 }
-.activity-detail-title{font-size:22px;font-weight:400;color:var(--text-primary);letter-spacing:-0.02em;margin-bottom:4px;}
+.activity-detail-title{font-size:20px;font-weight:400;color:var(--text-primary);letter-spacing:-0.02em;margin-bottom:4px;}
 .activity-detail-meta{font-size:13px;color:var(--text-muted);font-family:var(--font-body);margin-bottom:20px;}
-.activity-stats-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;}
-.activity-stat{text-align:center;padding:14px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);}
-.activity-stat-value{font-size:24px;font-weight:300;color:var(--text-primary);letter-spacing:-0.02em;}
+.activity-stats-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;}
+.activity-stat{text-align:center;padding:10px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);}
+.activity-stat-value{font-size:19px;font-weight:300;color:var(--text-primary);letter-spacing:-0.02em;}
 .activity-stat-label{font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.06em;font-family:var(--font-body);margin-top:3px;}
-.activity-link{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-family:var(--font-body);color:var(--accent-text);border:1px solid #BFDBFE;background:var(--accent-light);padding:6px 12px;border-radius:20px;text-decoration:none;margin-top:16px;transition:all var(--transition);}
+.activity-link{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-family:var(--font-body);color:var(--accent-text);border:1px solid #BFDBFE;background:var(--accent-light);padding:6px 12px;border-radius:20px;text-decoration:none;margin-top:12px;transition:all var(--transition);}
 .activity-link:hover{background:#DBEAFE;}
 
-/* Layout 2 colonnes detail */
-.activity-detail{display:flex;gap:16px;align-items:flex-start;}
-.activity-detail-left{flex:1;min-width:0;}
-.activity-detail-right{width:420px;flex-shrink:0;}
-@media(max-width:1000px){.activity-detail{flex-direction:column;}.activity-detail-right{width:100%;}}
-
 /* Canvas trace GPS */
-.route-canvas-wrapper{position:relative;width:100%;height:370px;border-radius:var(--radius-lg);overflow:hidden;background:#0d1b2e;box-shadow:0 8px 32px rgba(0,0,0,0.35);}
+.route-canvas-wrapper{position:relative;width:100%;height:100%;min-height:360px;border-radius:var(--radius-lg);overflow:hidden;background:#0d1b2e;box-shadow:0 8px 32px rgba(0,0,0,0.35);}
 .route-canvas{position:absolute;top:0;left:0;width:100%;height:100%;display:block;}
 /* Leaflet map inside route wrapper */
 #route-map{position:absolute;top:0;left:0;width:100%;height:100%;z-index:1;background:#0d1b2e;}
@@ -2179,23 +2172,27 @@ body::before{
 /* ─── Activity detail 2-column layout ──── */
 .activity-detail-layout {
   display: grid;
-  grid-template-columns: minmax(0,1fr) 360px;
+  grid-template-columns: minmax(0,1fr) 440px;
   gap: 20px;
-  align-items: start;
+  align-items: stretch;
 }
+.activity-detail-left-col {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+.activity-detail-map-col { min-height: 0; }
 .activity-analysis-panel {
   background: rgba(255,255,255,0.88);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
   border-radius: 16px;
-  padding: 20px;
+  padding: 16px 20px;
   border: 1px solid rgba(0,0,0,0.06);
-  position: sticky;
-  top: 20px;
-  max-height: calc(100vh - 60px);
   overflow-y: auto;
 }
-.analysis-section { margin-bottom: 20px; }
+.analysis-section { margin-bottom: 16px; }
 .analysis-section-title {
   font-size: 11px;
   font-weight: 700;
@@ -2224,7 +2221,7 @@ body::before{
 .no-data { font-size:12px; color:var(--text-muted); font-style:italic; }
 @media(max-width:900px) {
   .activity-detail-layout { grid-template-columns:1fr; }
-  .activity-analysis-panel { position:static; max-height:none; }
+  .activity-detail-map-col .route-canvas-wrapper { min-height:280px; }
 }
 
 /* --- Campus connect card - options ---- */
