@@ -145,6 +145,22 @@ function handleError(res, err) {
 }
 
 
+// Deduit un nom d'affichage lisible depuis le profil Garmin (partage entre
+// login complet et restauration par tokens, pour ne jamais retomber sur
+// l'email par defaut quand l'un des deux chemins est utilise)
+function computeDisplayName(profile) {
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const notUUID = (v) => v && !uuidRegex.test(v);
+  if (notUUID(profile?.fullName)) return profile.fullName;
+  if (notUUID(profile?.userProfileFullName)) return profile.userProfileFullName;
+  if (notUUID(profile?.preferredDisplayName)) return profile.preferredDisplayName;
+  const fn = (profile?.firstName || '').trim();
+  const ln = (profile?.lastName  || '').trim();
+  if (fn || ln) return (fn + ' ' + ln).trim();
+  if (notUUID(profile?.displayName)) return profile.displayName;
+  return null;
+}
+
 async function createGarminSession(email, password) {
   const gc = new GarminConnect({ username: email, password });
   await gc.login();
@@ -155,20 +171,7 @@ async function createGarminSession(email, password) {
   let displayName = null;
   try {
     const profile = await gc.getUserProfile();
-    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    const notUUID = (v) => v && !uuidRegex.test(v);
-    if (notUUID(profile?.fullName)) {
-      displayName = profile.fullName;
-    } else if (notUUID(profile?.userProfileFullName)) {
-      displayName = profile.userProfileFullName;
-    } else if (notUUID(profile?.preferredDisplayName)) {
-      displayName = profile.preferredDisplayName;
-    } else {
-      const fn = (profile?.firstName || '').trim();
-      const ln = (profile?.lastName  || '').trim();
-      if (fn || ln) displayName = (fn + ' ' + ln).trim();
-      else if (notUUID(profile?.displayName)) displayName = profile.displayName;
-    }
+    displayName = computeDisplayName(profile);
   } catch(e) { /* silencieux */ }
 
   return { gc, email, displayName, fns, lastAccess: Date.now() };
@@ -202,10 +205,12 @@ async function restoreGarminSession() {
     const gc = new GarminConnect({ username: ENV_EMAIL, password: ENV_PASSWORD });
     gc.loadTokenByFile(GARMIN_TOKEN_DIR);
     // Valider que la session est encore active avec un appel leger
-    await gc.getUserProfile();
+    // (reutilise aussi pour calculer le nom d'affichage, comme au login complet)
+    const profile = await gc.getUserProfile();
+    const displayName = computeDisplayName(profile);
     const fns = buildGarminFunctions(gc);
     console.log('[START] Session Garmin restauree depuis tokens sauvegardes (pas de login SSO)');
-    return { gc, email: ENV_EMAIL, fns, lastAccess: Date.now() };
+    return { gc, email: ENV_EMAIL, displayName, fns, lastAccess: Date.now() };
   } catch(e) {
     console.warn('[WARN] Tokens Garmin sauvegardes expires ou invalides, login SSO necessaire.');
     // Supprimer les tokens invalides
