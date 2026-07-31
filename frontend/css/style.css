@@ -223,7 +223,7 @@ body::before{
   border-radius:10px;
 }
 .brand-name{font-size:14px;font-weight:700;color:var(--text-primary);letter-spacing:-0.01em;}
-.brand-user{font-size:11px;color:var(--text-muted);font-family:var(--font-body);margin-top:1px;}
+.brand-user{font-size:11px;color:var(--text-primary);font-family:var(--font-body);margin-top:1px;}
 
 /* Nav */
 .sidebar-nav{
