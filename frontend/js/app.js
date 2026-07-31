@@ -1557,69 +1557,68 @@ function calcIdealWeight(height, sex) {
   };
 }
 
-// VO2max classification (Am Coll Cardiology)
-function vo2maxLabel(vo2, sex, age) {
-  const levels = sex === 'F'
-    ? [ [0,28,'Très faible'],[28,34,'Faible'],[34,39,'Moyen'],[39,45,'Bon'],[45,52,'Très bon'],[52,999,'Excellent'] ]
-    : [ [0,35,'Très faible'],[35,42,'Faible'],[42,48,'Moyen'],[48,54,'Bon'],[54,60,'Très bon'],[60,999,'Excellent'] ];
-  const lv = levels.find(([lo,hi]) => vo2 >= lo && vo2 < hi);
-  return lv ? lv[2] : '';
+// Barème officiel VO2max par age et sexe (Garmin / Cooper Institute)
+// Source : manuels Garmin (ex. Forerunner 265), tableau reproduit avec
+// l'autorisation du Cooper Institute. 5 categories, 4 seuils par tranche d'age.
+const VO2MAX_AGE_BANDS = [29, 39, 49, 59, 69, 999]; // borne haute de chaque tranche
+const VO2MAX_BOUNDS = {
+  M: [
+    [41.7, 45.4, 51.1, 55.4], // 20-29
+    [40.5, 44.0, 48.3, 54.0], // 30-39
+    [38.5, 42.4, 46.4, 52.5], // 40-49
+    [35.6, 39.2, 43.4, 48.9], // 50-59
+    [32.3, 35.5, 39.5, 45.7], // 60-69
+    [29.4, 32.3, 36.7, 42.1], // 70-79
+  ],
+  F: [
+    [36.1, 39.5, 43.9, 49.6], // 20-29
+    [34.4, 37.8, 42.4, 47.4], // 30-39
+    [33.0, 36.3, 39.7, 45.3], // 40-49
+    [30.1, 33.0, 36.7, 41.1], // 50-59
+    [27.5, 30.0, 33.0, 37.8], // 60-69
+    [25.9, 28.1, 30.9, 36.7], // 70-79
+  ],
+};
+const VO2MAX_CAT_NAMES  = ['Faible', 'Passable', 'Bon', 'Excellent', 'Supérieur'];
+const VO2MAX_CAT_COLORS = ['#e53935', '#f57c00', '#43a047', '#1976d2', '#6a1b9a'];
+
+function vo2maxBounds(sex, age) {
+  const table = (sex === 'F') ? VO2MAX_BOUNDS.F : VO2MAX_BOUNDS.M;
+  const idx = VO2MAX_AGE_BANDS.findIndex(max => (age || 40) <= max);
+  return table[idx === -1 ? table.length - 1 : idx];
 }
-
-// Paliers de couleur VO2max (approximation échelle Garmin Connect)
-// Source unique utilisée à la fois pour la couleur du chiffre et pour le camembert
-const VO2MAX_COLOR_LEVELS = [
-  { max: 34,       color: '#e53935' }, // Médiocre – rouge
-  { max: 40,       color: '#f57c00' }, // Faible – orange
-  { max: 46,       color: '#fbc02d' }, // Moyen – jaune
-  { max: 53,       color: '#1976d2' }, // Bon – bleu (couleur Garmin)
-  { max: 60,       color: '#1565c0' }, // Excellent – bleu foncé
-  { max: Infinity, color: '#6a1b9a' }, // Supérieur – violet (couleur Garmin)
-];
-const VO2MAX_GAUGE_MIN = 20;
-const VO2MAX_GAUGE_MAX = 65;
-
-// Ajustement léger par sexe (+6 pour les femmes car VO2max naturellement plus faible)
-function vo2maxAdjusted(vo2, sex) {
-  return (sex === 'F') ? vo2 + 6 : vo2;
+function vo2maxCategoryIndex(vo2, sex, age) {
+  const b = vo2maxBounds(sex, age);
+  if (vo2 >= b[3]) return 4;
+  if (vo2 >= b[2]) return 3;
+  if (vo2 >= b[1]) return 2;
+  if (vo2 >= b[0]) return 1;
+  return 0;
 }
-
 function vo2maxGarminColor(vo2, sex, age) {
   if (!vo2) return '#888';
-  const adjusted = vo2maxAdjusted(vo2, sex);
-  return VO2MAX_COLOR_LEVELS.find(lv => adjusted < lv.max).color;
+  return VO2MAX_CAT_COLORS[vo2maxCategoryIndex(vo2, sex, age)];
+}
+function vo2maxLabel(vo2, sex, age) {
+  if (!vo2) return '';
+  return VO2MAX_CAT_NAMES[vo2maxCategoryIndex(vo2, sex, age)];
 }
 
-// Camembert (jauge circulaire ouverte à 270°) façon Garmin Connect
-function renderVo2Gauge(vo2, sex) {
+// Barre horizontale 5 couleurs (bareme Garmin) + curseur a la position exacte
+function renderVo2Bar(vo2, sex, age) {
   if (!vo2) return '';
-  const cx = 100, cy = 100, r = 72, strokeW = 16;
-  const startDeg = -135, endDeg = 135; // arc de 270°, ouvert en bas
-  const toXY = (deg) => {
-    const rad = deg * Math.PI / 180;
-    return [cx + r * Math.sin(rad), cy - r * Math.cos(rad)];
-  };
-  const arcPath = (a0, a1) => {
-    const [x0, y0] = toXY(a0), [x1, y1] = toXY(a1);
-    const large = (a1 - a0) > 180 ? 1 : 0;
-    return `M ${x0} ${y0} A ${r} ${r} 0 ${large} 1 ${x1} ${y1}`;
-  };
-  const valueToDeg = (v) => {
-    const clamped = Math.min(Math.max(v, VO2MAX_GAUGE_MIN), VO2MAX_GAUGE_MAX);
-    return startDeg + (clamped - VO2MAX_GAUGE_MIN) / (VO2MAX_GAUGE_MAX - VO2MAX_GAUGE_MIN) * (endDeg - startDeg);
-  };
-
-  const bounds = [VO2MAX_GAUGE_MIN, ...VO2MAX_COLOR_LEVELS.map(l => l.max).slice(0, -1), VO2MAX_GAUGE_MAX];
-  let segments = '';
-  for (let i = 0; i < bounds.length - 1; i++) {
-    segments += `<path d="${arcPath(valueToDeg(bounds[i]), valueToDeg(bounds[i + 1]))}" stroke="${VO2MAX_COLOR_LEVELS[i].color}" stroke-width="${strokeW}" fill="none" stroke-linecap="round"/>`;
-  }
-
-  const adjusted = vo2maxAdjusted(vo2, sex);
-  const [mx, my] = toXY(valueToDeg(adjusted));
-  const markerColor = vo2maxGarminColor(vo2, sex);
-
-  return `<svg viewBox="0 0 200 200" class="vo2-gauge-svg">${segments}<circle cx="${mx}" cy="${my}" r="8" fill="#fff" stroke="${markerColor}" stroke-width="4"/></svg>`;
+  const b = vo2maxBounds(sex, age);
+  const span = b[3] - b[0];
+  const pad = span * 0.35; // marge visuelle pour les 2 categories ouvertes (Faible / Superieur)
+  const barMin = b[0] - pad, barMax = b[3] + pad, total = barMax - barMin;
+  const widths = [pad, b[1] - b[0], b[2] - b[1], b[3] - b[2], pad];
+  const segHtml = widths.map((w, i) =>
+    `<div class="vo2-bar-seg" style="flex:${w.toFixed(2)} 1 0;background:${VO2MAX_CAT_COLORS[i]}"></div>`
+  ).join('');
+  const clamped = Math.min(Math.max(vo2, barMin), barMax);
+  const cursorPct = ((clamped - barMin) / total * 100).toFixed(2);
+  const catColor = VO2MAX_CAT_COLORS[vo2maxCategoryIndex(vo2, sex, age)];
+  return `<div class="vo2-bar">${segHtml}</div><div class="vo2-bar-cursor" style="left:${cursorPct}%;border-color:${catColor}"></div>`;
 }
 
 // Catégorie de course FFA (basée sur âge et sexe)
@@ -1668,8 +1667,8 @@ function renderProfile() {
     const vo2El = el('profile-vo2-value');
     if (vo2El) vo2El.style.color = vo2color;
     setVal('profile-vo2-label', vo2maxLabel(vo2, sex, age));
-    const gaugeEl = el('profile-vo2-gauge');
-    if (gaugeEl) gaugeEl.innerHTML = renderVo2Gauge(vo2, sex);
+    const barEl = el('profile-vo2-bar-wrap');
+    if (barEl) barEl.innerHTML = renderVo2Bar(vo2, sex, age);
   }
 
   // Catégorie de course FFA
