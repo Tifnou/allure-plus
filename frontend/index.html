@@ -501,19 +501,7 @@
         </button>
       </div>
       <div class="activity-detail-layout">
-        <div class="activity-detail-left-col">
-          <div id="activity-detail-content"><!-- rempli dynamiquement --></div>
-          <div id="activity-analysis-panel" class="activity-analysis-panel" style="display:none">
-            <div class="analysis-section">
-              <div class="analysis-section-title">s Intervalles</div>
-              <div id="activity-laps-table"></div>
-            </div>
-            <div class="analysis-section">
-              <div class="analysis-section-title">&#x1F4CA; Analyse</div>
-              <div id="activity-analysis-text"></div>
-            </div>
-          </div>
-        </div>
+        <div id="activity-detail-content"><!-- rempli dynamiquement --></div>
         <div class="activity-detail-map-col">
           <div class="route-canvas-wrapper" id="route-canvas-wrapper">
             <div class="route-canvas-loading" id="route-loading">
@@ -528,6 +516,14 @@
               <span id="route-badge-time"></span>
             </div>
           </div>
+        </div>
+        <div id="activity-analysis-panel" class="activity-analysis-panel activity-laps-panel" style="display:none">
+          <div class="analysis-section-title">s Intervalles</div>
+          <div id="activity-laps-table" class="activity-laps-scroll"></div>
+        </div>
+        <div id="activity-analysis-card" class="activity-analysis-panel" style="display:none">
+          <div class="analysis-section-title">&#x1F4CA; Analyse</div>
+          <div id="activity-analysis-text"></div>
         </div>
       </div>
     </div>

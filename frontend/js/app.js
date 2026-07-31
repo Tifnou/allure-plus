@@ -801,10 +801,12 @@ function drawRouteTrace(canvas, points) {
 async function loadActivityAnalysis(activity) {
 
   const panel = el('activity-analysis-panel');
+  const analysisCard = el('activity-analysis-card');
   const lapsEl = el('activity-laps-table');
   const analysisEl = el('activity-analysis-text');
   if (!panel || !activity?.id) return;
   panel.style.display = '';
+  if (analysisCard) analysisCard.style.display = '';
 
   // ─── Analyse basique (fallback sans laps) ────────────────────
   function buildBasicAnalysis(act) {
