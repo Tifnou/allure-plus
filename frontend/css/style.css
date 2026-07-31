@@ -2095,20 +2095,13 @@ body::before{
 }
 
 /* ─── Profile connected apps card ───────────────── */
-.profile-card-title {
-  font-size: 10.5px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  margin-bottom: 6px;
-}
-.profile-apps-card { padding: 10px 12px; background: var(--bg-white); border: 1px solid var(--border); border-radius: 10px; }
+#page-profile .profile-apps-card { padding: 6px 16px; }
+#page-profile .profile-apps-card .card-header { margin-bottom: 4px; }
 .profile-apps-list { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 0; }
 @media(max-width:640px){.profile-apps-list{grid-template-columns:1fr;}}
 .profile-app-row {
   display: flex; align-items: center; gap: 8px;
-  padding: 7px 9px;
+  padding: 5px 9px;
   background: var(--bg, #f8f8f8);
   border-radius: 7px;
   border: 1px solid var(--border-light, #eee);
