@@ -216,6 +216,19 @@ async function restoreGarminSession() {
 }
 
 async function tryAutoLogin() {
+  // 1. Essayer d'abord de restaurer la session depuis les tokens deja valides
+  //    sauvegardes sur disque (pas de nouveau login SSO). C'etait defini mais
+  //    jamais appele : chaque redemarrage refaisait un login SSO complet, ce
+  //    qui peut declencher une verification anti-fraude Garmin sur un
+  //    appareil/IP inhabituel (ex: nouveau PC) et echouer silencieusement.
+  const restored = await restoreGarminSession();
+  if (restored) {
+    envSessionId = uuidv4();
+    sessions.set(envSessionId, restored);
+    await tryAutoLoginCampus();
+    return;
+  }
+
   if (!ENV_EMAIL || !ENV_PASSWORD) {
     // Pas de credentials Garmin f¢â?s¬â, tenter quand mªme le login Campus seul
     await tryAutoLoginCampus();
