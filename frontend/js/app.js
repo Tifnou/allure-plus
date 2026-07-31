@@ -1566,17 +1566,60 @@ function vo2maxLabel(vo2, sex, age) {
   return lv ? lv[2] : '';
 }
 
-// Couleur Garmin pour VO2max (approximation échelle Garmin Connect)
+// Paliers de couleur VO2max (approximation échelle Garmin Connect)
+// Source unique utilisée à la fois pour la couleur du chiffre et pour le camembert
+const VO2MAX_COLOR_LEVELS = [
+  { max: 34,       color: '#e53935' }, // Médiocre – rouge
+  { max: 40,       color: '#f57c00' }, // Faible – orange
+  { max: 46,       color: '#fbc02d' }, // Moyen – jaune
+  { max: 53,       color: '#1976d2' }, // Bon – bleu (couleur Garmin)
+  { max: 60,       color: '#1565c0' }, // Excellent – bleu foncé
+  { max: Infinity, color: '#6a1b9a' }, // Supérieur – violet (couleur Garmin)
+];
+const VO2MAX_GAUGE_MIN = 20;
+const VO2MAX_GAUGE_MAX = 65;
+
+// Ajustement léger par sexe (+6 pour les femmes car VO2max naturellement plus faible)
+function vo2maxAdjusted(vo2, sex) {
+  return (sex === 'F') ? vo2 + 6 : vo2;
+}
+
 function vo2maxGarminColor(vo2, sex, age) {
   if (!vo2) return '#888';
-  // Ajustement léger par sexe (+6 pour les femmes car VO2max naturellement plus faible)
-  const adjusted = (sex === 'F') ? vo2 + 6 : vo2;
-  if (adjusted < 34) return '#e53935'; // Médiocre – rouge
-  if (adjusted < 40) return '#f57c00'; // Faible – orange
-  if (adjusted < 46) return '#fbc02d'; // Moyen – jaune
-  if (adjusted < 53) return '#1976d2'; // Bon – bleu (couleur Garmin)
-  if (adjusted < 60) return '#1565c0'; // Excellent – bleu foncé
-  return '#6a1b9a';                    // Supérieur – violet (couleur Garmin)
+  const adjusted = vo2maxAdjusted(vo2, sex);
+  return VO2MAX_COLOR_LEVELS.find(lv => adjusted < lv.max).color;
+}
+
+// Camembert (jauge circulaire ouverte à 270°) façon Garmin Connect
+function renderVo2Gauge(vo2, sex) {
+  if (!vo2) return '';
+  const cx = 100, cy = 100, r = 72, strokeW = 16;
+  const startDeg = -135, endDeg = 135; // arc de 270°, ouvert en bas
+  const toXY = (deg) => {
+    const rad = deg * Math.PI / 180;
+    return [cx + r * Math.sin(rad), cy - r * Math.cos(rad)];
+  };
+  const arcPath = (a0, a1) => {
+    const [x0, y0] = toXY(a0), [x1, y1] = toXY(a1);
+    const large = (a1 - a0) > 180 ? 1 : 0;
+    return `M ${x0} ${y0} A ${r} ${r} 0 ${large} 1 ${x1} ${y1}`;
+  };
+  const valueToDeg = (v) => {
+    const clamped = Math.min(Math.max(v, VO2MAX_GAUGE_MIN), VO2MAX_GAUGE_MAX);
+    return startDeg + (clamped - VO2MAX_GAUGE_MIN) / (VO2MAX_GAUGE_MAX - VO2MAX_GAUGE_MIN) * (endDeg - startDeg);
+  };
+
+  const bounds = [VO2MAX_GAUGE_MIN, ...VO2MAX_COLOR_LEVELS.map(l => l.max).slice(0, -1), VO2MAX_GAUGE_MAX];
+  let segments = '';
+  for (let i = 0; i < bounds.length - 1; i++) {
+    segments += `<path d="${arcPath(valueToDeg(bounds[i]), valueToDeg(bounds[i + 1]))}" stroke="${VO2MAX_COLOR_LEVELS[i].color}" stroke-width="${strokeW}" fill="none" stroke-linecap="round"/>`;
+  }
+
+  const adjusted = vo2maxAdjusted(vo2, sex);
+  const [mx, my] = toXY(valueToDeg(adjusted));
+  const markerColor = vo2maxGarminColor(vo2, sex);
+
+  return `<svg viewBox="0 0 200 200" class="vo2-gauge-svg">${segments}<circle cx="${mx}" cy="${my}" r="8" fill="#fff" stroke="${markerColor}" stroke-width="4"/></svg>`;
 }
 
 // Catégorie de course FFA (basée sur âge et sexe)
@@ -1625,6 +1668,8 @@ function renderProfile() {
     const vo2El = el('profile-vo2-value');
     if (vo2El) vo2El.style.color = vo2color;
     setVal('profile-vo2-label', vo2maxLabel(vo2, sex, age));
+    const gaugeEl = el('profile-vo2-gauge');
+    if (gaugeEl) gaugeEl.innerHTML = renderVo2Gauge(vo2, sex);
   }
 
   // Catégorie de course FFA
