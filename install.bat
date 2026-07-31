@@ -145,34 +145,28 @@ if exist "package.json" (
     exit /b 1
 )
 
-if exist "node_modules\" (
-    echo  [OK] Dependances deja installees.
-) else (
-    echo  [INFO] Installation des modules npm...
-    echo  (cette etape peut prendre quelques minutes)
-    echo.
-    :: Essai 1 : npm via PATH
-    call npm install 2>nul
-    if errorlevel 1 (
-        :: Essai 2 : npm via chemin absolu (Node.js vient d'etre installe)
-        if exist "C:\Program Files\nodejs\npm.cmd" (
-            "C:\Program Files\nodejs\npm.cmd" install
-        ) else if exist "%LOCALAPPDATA%\Programs\nodejs\npm.cmd" (
-            "%LOCALAPPDATA%\Programs\nodejs\npm.cmd" install
-        )
+echo  [INFO] Installation/mise a jour des modules npm...
+echo  (rapide si tout est deja a jour, plus long sinon)
+echo.
+:: Essai 1 : npm via PATH
+call npm install 2>nul
+if errorlevel 1 (
+    :: Essai 2 : npm via chemin absolu (Node.js vient d'etre installe)
+    if exist "C:\Program Files\nodejs\npm.cmd" (
+        "C:\Program Files\nodejs\npm.cmd" install
+    ) else if exist "%LOCALAPPDATA%\Programs\nodejs\npm.cmd" (
+        "%LOCALAPPDATA%\Programs\nodejs\npm.cmd" install
     )
-    if exist "node_modules\" (
-        echo  [OK] Modules npm installes.
-    ) else (
-        echo  [ERREUR] npm install a echoue.
-        echo  Verifiez votre connexion Internet et relancez install.bat
-        pause
-        exit /b 1
-    )
-    echo.
-    echo  Appuyez sur une touche pour continuer...
-    pause >nul
 )
+if exist "node_modules\" (
+    echo  [OK] Modules npm a jour.
+) else (
+    echo  [ERREUR] npm install a echoue.
+    echo  Verifiez votre connexion Internet et relancez install.bat
+    pause
+    exit /b 1
+)
+echo.
 
 
 :: ═══════════════════════════════════════════════════════════
