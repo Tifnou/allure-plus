@@ -479,6 +479,15 @@ app.get('/api/dashboard', requireSession, async (req, res) => {
       }
     } catch(e) { /* silencieux - on garde la valeur activite */ }
 
+    // VO2max precis (non arrondi) : Garmin classe en "Excellent/Superieur/etc."
+    // sur cette valeur precise, pas sur l'entier affiche (ex: 48.8 -> arrondi a 49)
+    try {
+      const precise = await req.session.fns.getVO2MaxPrecise();
+      if (precise && typeof precise.vo2MaxPreciseValue === 'number') {
+        stats.vo2MaxPrecise = precise.vo2MaxPreciseValue;
+      }
+    } catch(e) { /* silencieux - pas bloquant, on retombe sur la valeur arrondie */ }
+
     const allActivities = activities.map(a => ({
       id:              a.activityId,
       date:            a.startTimeLocal,

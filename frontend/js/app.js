@@ -336,6 +336,9 @@ async function loadDashboard() {
     } else if (stats.latestVO2Max) {
       _latestVO2Max = stats.latestVO2Max;
     }
+    // Valeur precise (non arrondie) utilisee pour la classification couleur/categorie
+    // uniquement — Garmin classe sur cette valeur, pas sur l'entier affiche
+    _latestVO2MaxPrecise = (typeof stats.vo2MaxPrecise === 'number') ? stats.vo2MaxPrecise : null;
 
     renderHeroStats(stats);
     renderLastRun(lastRuns);
@@ -390,7 +393,8 @@ function renderHeroStats(stats) {
       return a;
     })() : (profile.age || null);
     if (vo2StatEl && typeof vo2maxGarminColor === 'function') {
-      vo2StatEl.style.color = vo2maxGarminColor(stats.latestVO2Max, profSex, profAge);
+      const vo2ForClass = (typeof stats.vo2MaxPrecise === 'number') ? stats.vo2MaxPrecise : stats.latestVO2Max;
+      vo2StatEl.style.color = vo2maxGarminColor(vo2ForClass, profSex, profAge);
     }
     const series = stats.vo2maxSeries || [];
     if (series.length >= 2) {
@@ -1566,10 +1570,7 @@ const VO2MAX_BOUNDS = {
     [41.7, 45.4, 51.1, 55.4], // 20-29
     [40.5, 44.0, 48.3, 54.0], // 30-39
     [38.5, 42.4, 46.4, 52.5], // 40-49
-    [35.6, 39.2, 43.4, 50.0], // 50-59 — seuil Superieur calibre sur un cas reel (Garmin Connect
-                              // classe 49 en "Excellent" ici, alors que le manuel papier donne 48.9 :
-                              // Garmin Connect semble utiliser un calcul different (percentile continu)
-                              // en coulisses ; seuil ajuste pour coller au reel plutot qu'au manuel
+    [35.6, 39.2, 43.4, 48.9], // 50-59
     [32.3, 35.5, 39.5, 45.7], // 60-69
     [29.4, 32.3, 36.7, 42.1], // 70-79
   ],
@@ -1663,15 +1664,18 @@ function renderProfile() {
   el('sex-f').classList.toggle('active', sex === 'F');
 
   // VO2max depuis données Garmin
+  // Affichage : valeur arrondie (comme Garmin) — Classification (couleur/categorie/curseur) :
+  // valeur precise quand disponible, car Garmin classe en interne sur la precision, pas l'arrondi
   const vo2 = _latestVO2Max;
+  const vo2ForClass = _latestVO2MaxPrecise != null ? _latestVO2MaxPrecise : vo2;
   if (vo2) {
-    const vo2color = vo2maxGarminColor(vo2, sex, age);
+    const vo2color = vo2maxGarminColor(vo2ForClass, sex, age);
     setVal('profile-vo2-value', vo2.toFixed(0)); // Garmin shows integer
     const vo2El = el('profile-vo2-value');
     if (vo2El) vo2El.style.color = vo2color;
-    setVal('profile-vo2-label', vo2maxLabel(vo2, sex, age));
+    setVal('profile-vo2-label', vo2maxLabel(vo2ForClass, sex, age));
     const barEl = el('profile-vo2-bar-wrap');
-    if (barEl) barEl.innerHTML = renderVo2Bar(vo2, sex, age);
+    if (barEl) barEl.innerHTML = renderVo2Bar(vo2ForClass, sex, age);
   }
 
   // Catégorie de course FFA
