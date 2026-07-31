@@ -648,7 +648,7 @@ function showActivityDetail(activity) {
   const toggleIcon = el('route-view-toggle-icon');
   if (mapWrap)  mapWrap.classList.remove('route-view-hidden');
   if (elevWrap) elevWrap.classList.add('route-view-hidden');
-  if (toggleIcon) toggleIcon.textContent = '⛰️';
+  if (toggleIcon) toggleIcon.innerHTML = ICON_MOUNTAIN;
   if (routeElevationChart) { routeElevationChart.destroy(); routeElevationChart = null; }
   const toggleBtn = el('route-view-toggle');
   if (toggleBtn) { toggleBtn.style.display = ''; toggleBtn.onclick = toggleRouteView; }
@@ -664,6 +664,8 @@ function showActivityDetail(activity) {
 let _lastRoutePoints = null;
 let _lastRouteElevation = null;
 let routeElevationChart = null;
+const ICON_MOUNTAIN = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m8 3 4 8 5-5 5 15H2L8 3z"/></svg>';
+const ICON_MAP = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6l6-3 6 3 6-3v15l-6 3-6-3-6 3V6z"/><path d="M9 3v15"/><path d="M15 6v15"/></svg>';
 function toggleRouteView() {
   const mapWrap = el('route-canvas-wrapper');
   const elevWrap = el('route-elevation-wrapper');
@@ -673,12 +675,12 @@ function toggleRouteView() {
   if (showingMap) {
     mapWrap.classList.add('route-view-hidden');
     elevWrap.classList.remove('route-view-hidden');
-    if (toggleIcon) toggleIcon.textContent = '🗺️';
+    if (toggleIcon) toggleIcon.innerHTML = ICON_MAP;
     renderElevationProfile(_lastRouteElevation);
   } else {
     elevWrap.classList.add('route-view-hidden');
     mapWrap.classList.remove('route-view-hidden');
-    if (toggleIcon) toggleIcon.textContent = '⛰️';
+    if (toggleIcon) toggleIcon.innerHTML = ICON_MOUNTAIN;
   }
 }
 
@@ -710,6 +712,7 @@ function renderElevationProfile(elevation) {
     options: {
       responsive: true,
       maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
       plugins: { legend: { display: false }, tooltip: {
         callbacks: {
           title: (items) => `${items[0].label} km`,
