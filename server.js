@@ -401,7 +401,7 @@ app.post('/api/setup', async (req, res) => {
 
   } catch(err) {
     console.error('Setup error:', err.message);
-    const is429 = err.message.includes('429') || err.message.toLowerCase().includes('rate');
+    const is429 = err.message.includes('429') || err.message.includes('427') || err.message.toLowerCase().includes('rate');
     const msg = is429
       ? 'Trop de tentatives de connexion. Garmin a temporairement bloqué l\'accès. Attendez 2-3 minutes et réessayez.'
       : (err.message.includes('401') || err.message.toLowerCase().includes('invalid')
@@ -446,7 +446,7 @@ app.post('/api/login', async (req, res) => {
 
   } catch (err) {
     console.error('Login error:', err.message);
-    const is429 = err.message.includes('429') || err.message.toLowerCase().includes('rate');
+    const is429 = err.message.includes('429') || err.message.includes('427') || err.message.toLowerCase().includes('rate');
     const msg = is429
       ? 'Trop de tentatives de connexion. Garmin a temporairement bloqué l\'accès. Attendez 2-3 minutes et réessayez.'
       : 'Identifiants Garmin incorrects. Vérifiez votre e-mail et mot de passe.';
