@@ -694,7 +694,17 @@ function renderElevationProfile(elevation) {
     return;
   }
   const labels = elevation.map(p => p.distKm.toFixed(2));
-  const data = elevation.map(p => Math.round(p.alt));
+  // Lissage (moyenne glissante) : l'altitude brute est bruitee (GPS/barometre),
+  // ce qui donne une courbe en escalier meme avec une interpolation arrondie -
+  // on lisse le signal en plus d'arrondir la courbe visuellement.
+  const rawAlt = elevation.map(p => p.alt);
+  const WINDOW = 5;
+  const half = Math.floor(WINDOW / 2);
+  const data = rawAlt.map((_, i) => {
+    const start = Math.max(0, i - half), end = Math.min(rawAlt.length, i + half + 1);
+    const slice = rawAlt.slice(start, end);
+    return slice.reduce((a,b) => a+b, 0) / slice.length;
+  });
   routeElevationChart = new Chart(canvas.getContext('2d'), {
     type: 'line',
     data: {
@@ -706,7 +716,7 @@ function renderElevationProfile(elevation) {
         fill: true,
         pointRadius: 0,
         borderWidth: 2,
-        tension: 0.25,
+        cubicInterpolationMode: 'monotone',
       }]
     },
     options: {
@@ -716,7 +726,7 @@ function renderElevationProfile(elevation) {
       plugins: { legend: { display: false }, tooltip: {
         callbacks: {
           title: (items) => `${items[0].label} km`,
-          label: (item) => `${item.formattedValue} m`,
+          label: (item) => `${Math.round(item.raw)} m`,
         }
       }},
       scales: {
@@ -1051,25 +1061,35 @@ async function loadActivityAnalysis(activity) {
         const insights = [];
         const kmLaps = validLaps.filter(l => l.averageSpeed > 0);
         if (kmLaps.length >= 2) {
-          const rawPaces = kmLaps.map(l => 1000 / l.averageSpeed);
+          // Exclure les fragments de fin de parcours (ex: dernier "km" de quelques
+          // metres a peine) : compte comme un km complet, un tel fragment fausse
+          // moyenne/regularite/split (allure erratique sur une distance minime)
+          const dists = kmLaps.map(l => l.distance || 0).filter(d => d > 0);
+          const medianDist = dists.length ? [...dists].sort((a,b) => a-b)[Math.floor(dists.length / 2)] : 0;
+          const repLaps = medianDist > 0 ? kmLaps.filter(l => (l.distance || 0) >= medianDist * 0.5) : kmLaps;
+
+          const rawPaces = repLaps.map(l => 1000 / l.averageSpeed);
           const minP = Math.round(Math.min(...rawPaces)), maxP = Math.round(Math.max(...rawPaces));
           insights.push(`Allures : de <strong>${formatPace(minP)}</strong> à <strong>${formatPace(maxP)}</strong>`);
 
-          const avgRawPace = rawPaces.reduce((a,b) => a+b, 0) / rawPaces.length;
-          if (vma) {
-            const zoneKey = matchZoneFromPaceTrailAware(avgRawPace, vma, isTrail);
+          // Allure moyenne globale : utiliser la valeur de l'activite (duree totale /
+          // distance totale, deja correcte) plutot qu'une moyenne arithmetique des
+          // paces par lap, qui donnerait le meme poids a un fragment de quelques
+          // metres qu'a un km complet et fausserait le resultat
+          if (vma && activity.avgPaceSecPerKm) {
+            const zoneKey = matchZoneFromPaceTrailAware(activity.avgPaceSecPerKm, vma, isTrail);
             const zoneLabel = (zoneKey && typeof ALLURE_PLUS_ZONES !== 'undefined') ? ALLURE_PLUS_ZONES[zoneKey]?.label : null;
-            if (zoneLabel) insights.push(`Allure moyenne : <strong>${formatPace(Math.round(avgRawPace))}</strong> — zone <strong>${zoneLabel}</strong>`);
+            if (zoneLabel) insights.push(`Allure moyenne : <strong>${formatPace(Math.round(activity.avgPaceSecPerKm))}</strong> — zone <strong>${zoneLabel}</strong>`);
           }
 
           // Terrain vallonne : Garmin fournit une allure ajustee au denivele (avgGradeAdjustedSpeed)
           // par intervalle - on l'utilise pour juger la regularite si le terrain le justifie,
           // plutot que l'allure brute qui varie naturellement avec les montees/descentes.
-          const totalElevGain = kmLaps.reduce((s,l) => s + (l.elevationGain || 0), 0);
-          const elevPerKm = totalElevGain / kmLaps.length;
-          const hasGAP = kmLaps.every(l => l.avgGradeAdjustedSpeed > 0);
+          const totalElevGain = repLaps.reduce((s,l) => s + (l.elevationGain || 0), 0);
+          const elevPerKm = totalElevGain / repLaps.length;
+          const hasGAP = repLaps.every(l => l.avgGradeAdjustedSpeed > 0);
           const terrainVallonne = hasGAP && (isTrail || elevPerKm > 10);
-          const evalPaces = terrainVallonne ? kmLaps.map(l => 1000 / l.avgGradeAdjustedSpeed) : rawPaces;
+          const evalPaces = terrainVallonne ? repLaps.map(l => 1000 / l.avgGradeAdjustedSpeed) : rawPaces;
 
           const diff = Math.round(evalPaces[evalPaces.length-1] - evalPaces[0]);
           if (Math.abs(diff) > 8) {
@@ -1085,7 +1105,7 @@ async function loadActivityAnalysis(activity) {
               ? `Allure régulière une fois ajustée au dénivelé (D+ total : <strong>${Math.round(totalElevGain)} m</strong>)`
               : `Allure très régulière tout au long de la sortie `);
           }
-          const hrLaps = validLaps.filter(l => l.averageHR);
+          const hrLaps = repLaps.filter(l => l.averageHR);
           if (hrLaps.length >= 2) {
             const hrFirst = Math.round(hrLaps[0].averageHR);
             const hrLast  = Math.round(hrLaps[hrLaps.length-1].averageHR);
