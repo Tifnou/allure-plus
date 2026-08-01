@@ -1936,25 +1936,59 @@ function renderObjectifsChart(weeks, goal, dplusM, distKmOverride) {
   if (!vma || !distKm || weeksTotal < 2) return;
 
   const elapsedWeeks = weeks.filter(w => w.weekDate < now).length;
-  const frac = weeksTotal > 0 ? elapsedWeeks / weeksTotal : 0;
-  const gainPct = getVO2maxGainPct(weeksTotal);
-  const vmaStart = vma / (1 + gainPct * frac);
-  const vmaEnd   = vma * (1 + gainPct * (1 - frac));
+
+  // Assiduité réelle (séances faites / (faites + manquées)) : le gain de forme
+  // encore attendu sur les semaines restantes est pondéré par ce taux — un plan
+  // peu suivi ne peut pas produire le même gain qu'un plan suivi à la lettre.
+  const sessionStats = computeSessionStats(weeks);
+  const assiduityRatio = sessionStats.assiduity !== null ? sessionStats.assiduity / 100 : 1;
+  const weeksRemaining = Math.max(0, weeksTotal - elapsedWeeks);
+  const gainPctRemaining = getVO2maxGainPct(weeksTotal) * (weeksRemaining / weeksTotal) * assiduityRatio;
+  const vmaEnd = vma * (1 + gainPctRemaining);
+
+  // Conversion VO2max -> VMA (même formule sexuée que getVmaFromState, pour
+  // rester cohérent avec la VMA "actuelle" affichée dans le bloc Estimations)
+  const profile = JSON.parse(localStorage.getItem('suivi_sport_profile') || '{}');
+  const sexFactor = (profile.sex || 'M') === 'F' ? 0.315 : 0.313;
+  const vo2ToVma = (vo2) => (vo2 - 3.5) * sexFactor;
+
+  // Historique quotidien réel du VO2max (source Garmin), utilisé pour que la
+  // portion "passée" de la courbe reflète les séances réellement effectuées
+  // au lieu d'une simple interpolation théorique
+  const vo2History = (typeof _vo2maxSeries !== 'undefined' ? _vo2maxSeries : [])
+    .filter(p => p && p.date && typeof p.value === 'number')
+    .map(p => ({ ts: new Date(p.date).getTime(), value: p.value }))
+    .sort((a, b) => a.ts - b.ts);
 
   // Temps cible (ligne horizontale verte)
   const saved = JSON.parse(localStorage.getItem('suivi_personal_goals') || '{}');
   const targetSecs = parseTargetTime(saved.targetTime);
   const targetMins = targetSecs ? Math.round(targetSecs / 60) : null;
 
+  const currentMins = Math.round((estimateRaceTime(vma, distKm, dplusM, isTrail) || 0) / 60);
+  const endMins = Math.round((estimateRaceTime(vmaEnd, distKm, dplusM, isTrail) || 0) / 60);
+
   const labels = [], past = [], future = [];
   for (let w = 1; w <= weeksTotal; w++) {
     labels.push('S' + w);
-    const f = (w - 1) / (weeksTotal - 1);
-    const v = vmaStart + (vmaEnd - vmaStart) * f;
-    const mins = Math.round((estimateRaceTime(v, distKm, dplusM, isTrail) || 0) / 60);
-    if (w < elapsedWeeks + 1)        { past.push(mins);  future.push(null); }
-    else if (w === elapsedWeeks + 1) { past.push(mins);  future.push(mins); }
-    else                             { past.push(null);  future.push(mins); }
+    if (w <= elapsedWeeks) {
+      // Semaine passée : VMA réelle = dernière valeur Garmin connue à la fin de cette semaine
+      const weekEndTs = weeks[w - 1] ? weeks[w - 1].weekDate + 7 * 86400000 : null;
+      const known = weekEndTs ? vo2History.filter(h => h.ts <= weekEndTs) : [];
+      if (known.length > 0) {
+        const vmaWeek = vo2ToVma(known[known.length - 1].value);
+        past.push(Math.round((estimateRaceTime(vmaWeek, distKm, dplusM, isTrail) || 0) / 60));
+      } else {
+        past.push(null);
+      }
+      future.push(null);
+    } else if (w === elapsedWeeks + 1) {
+      past.push(currentMins); future.push(currentMins);
+    } else {
+      const f = (w - (elapsedWeeks + 1)) / (weeksTotal - (elapsedWeeks + 1));
+      const mins = Math.round(currentMins + (endMins - currentMins) * f);
+      past.push(null); future.push(mins);
+    }
   }
 
   if (_goalsChartInst) { _goalsChartInst.destroy(); _goalsChartInst = null; }
