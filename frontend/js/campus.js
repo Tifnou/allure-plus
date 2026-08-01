@@ -1829,6 +1829,40 @@ function getVO2maxGainPct(weeksTotal) {
   return weeksTotal <= 12 ? 0.03 : weeksTotal <= 20 ? 0.05 : weeksTotal <= 28 ? 0.07 : 0.09;
 }
 
+/** Gain de VMA encore attendu (%) sur les semaines RESTANTES du plan,
+ *  pondere par l'assiduite reelle (seances faites vs manquees). Partage
+ *  entre le bloc Estimations et la courbe pour qu'ils restent toujours
+ *  coherents entre eux (meme point d'arrivee en fin de plan). */
+function getRemainingVmaGainPct(weeksTotal, weeks) {
+  if (!weeksTotal) return 0;
+  const now = Date.now();
+  const elapsedWeeks = (weeks || []).filter(w => w.weekDate < now).length;
+  const sessionStats = computeSessionStats(weeks);
+  const assiduityRatio = sessionStats.assiduity !== null ? sessionStats.assiduity / 100 : 1;
+  const weeksRemaining = Math.max(0, weeksTotal - elapsedWeeks);
+  return getVO2maxGainPct(weeksTotal) * (weeksRemaining / weeksTotal) * assiduityRatio;
+}
+
+/** Valeur VO2max interpolee lineairement entre les deux points reels les
+ *  plus proches d'une date donnee (historique quotidien Garmin, sparse).
+ *  Evite l'effet "palier puis a-pic" d'un simple report de la derniere
+ *  valeur connue quand les mises a jour Garmin sont espacees de plusieurs
+ *  semaines. En dehors de la plage connue, on garde la valeur du bord. */
+function vo2ValueAtDate(history, ts) {
+  if (!history || history.length === 0) return null;
+  if (ts <= history[0].ts) return history[0].value;
+  const lastIdx = history.length - 1;
+  if (ts >= history[lastIdx].ts) return history[lastIdx].value;
+  for (let i = 0; i < lastIdx; i++) {
+    if (ts >= history[i].ts && ts <= history[i + 1].ts) {
+      const span = history[i + 1].ts - history[i].ts;
+      const frac = span > 0 ? (ts - history[i].ts) / span : 0;
+      return history[i].value + (history[i + 1].value - history[i].value) * frac;
+    }
+  }
+  return history[lastIdx].value;
+}
+
 /** Distance en km depuis le goal (fallback planCategory.distLabel) */
 function getDistFromGoal(goal) {
   const d = goal.specificData || {};
@@ -1881,7 +1915,7 @@ function renderEstimations(goal, weeks, dplusM, distKmOverride) {
   el('goals-time-current') && (el('goals-time-current').textContent = fmtSecsToTime(secsNow));
   el('goals-pace-current') && (el('goals-pace-current').textContent = isTrail ? '' : fmtPaceFromSecs(distKm, secsNow));
 
-  const gainPct = getVO2maxGainPct(weeksTotal);
+  const gainPct = getRemainingVmaGainPct(weeksTotal, weeks);
   const vmaEnd = vma * (1 + gainPct);
   const vo2maxEnd = parseFloat((vmaEnd * 1000 / 60 * 0.2 + 3.5).toFixed(1));
   const secsEnd = estimateRaceTime(vmaEnd, distKm, dplusM, isTrail);
@@ -1937,14 +1971,10 @@ function renderObjectifsChart(weeks, goal, dplusM, distKmOverride) {
 
   const elapsedWeeks = weeks.filter(w => w.weekDate < now).length;
 
-  // Assiduité réelle (séances faites / (faites + manquées)) : le gain de forme
-  // encore attendu sur les semaines restantes est pondéré par ce taux — un plan
-  // peu suivi ne peut pas produire le même gain qu'un plan suivi à la lettre.
-  const sessionStats = computeSessionStats(weeks);
-  const assiduityRatio = sessionStats.assiduity !== null ? sessionStats.assiduity / 100 : 1;
-  const weeksRemaining = Math.max(0, weeksTotal - elapsedWeeks);
-  const gainPctRemaining = getVO2maxGainPct(weeksTotal) * (weeksRemaining / weeksTotal) * assiduityRatio;
-  const vmaEnd = vma * (1 + gainPctRemaining);
+  // Même formule que le bloc Estimations (gain pondéré par l'assiduité réelle
+  // et le nombre de semaines restantes) pour que les deux blocs soient
+  // toujours cohérents entre eux (même valeur en fin de plan).
+  const vmaEnd = vma * (1 + getRemainingVmaGainPct(weeksTotal, weeks));
 
   // Conversion VO2max -> VMA (même formule sexuée que getVmaFromState, pour
   // rester cohérent avec la VMA "actuelle" affichée dans le bloc Estimations)
@@ -1972,11 +2002,14 @@ function renderObjectifsChart(weeks, goal, dplusM, distKmOverride) {
   for (let w = 1; w <= weeksTotal; w++) {
     labels.push('S' + w);
     if (w <= elapsedWeeks) {
-      // Semaine passée : VMA réelle = dernière valeur Garmin connue à la fin de cette semaine
-      const weekEndTs = weeks[w - 1] ? weeks[w - 1].weekDate + 7 * 86400000 : null;
-      const known = weekEndTs ? vo2History.filter(h => h.ts <= weekEndTs) : [];
-      if (known.length > 0) {
-        const vmaWeek = vo2ToVma(known[known.length - 1].value);
+      // Semaine passée : VMA réelle interpolée entre les deux relevés Garmin
+      // les plus proches du milieu de cette semaine (les mises à jour Garmin
+      // sont espacées de plusieurs jours/semaines - un simple report de la
+      // dernière valeur connue créerait des paliers puis des à-pics artificiels)
+      const weekMidTs = weeks[w - 1] ? weeks[w - 1].weekDate + 3.5 * 86400000 : null;
+      const vo2Week = weekMidTs != null ? vo2ValueAtDate(vo2History, weekMidTs) : null;
+      if (vo2Week != null) {
+        const vmaWeek = vo2ToVma(vo2Week);
         past.push(Math.round((estimateRaceTime(vmaWeek, distKm, dplusM, isTrail) || 0) / 60));
       } else {
         past.push(null);
