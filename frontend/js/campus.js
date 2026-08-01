@@ -1832,35 +1832,39 @@ function getVO2maxGainPct(weeksTotal) {
 /** Gain de VMA encore attendu (%) sur les semaines RESTANTES du plan,
  *  pondere par l'assiduite reelle (seances faites vs manquees). Partage
  *  entre le bloc Estimations et la courbe pour qu'ils restent toujours
- *  coherents entre eux (meme point d'arrivee en fin de plan). */
+ *  coherents entre eux (meme point d'arrivee en fin de plan).
+ *  Plancher a 30% : meme avec une assiduite tres faible, un entrainement
+ *  irregulier produit quand meme une part de l'adaptation physiologique
+ *  attendue - la ramener a quasi zero serait irrealiste. */
 function getRemainingVmaGainPct(weeksTotal, weeks) {
   if (!weeksTotal) return 0;
   const now = Date.now();
   const elapsedWeeks = (weeks || []).filter(w => w.weekDate < now).length;
   const sessionStats = computeSessionStats(weeks);
-  const assiduityRatio = sessionStats.assiduity !== null ? sessionStats.assiduity / 100 : 1;
+  const assiduityRatio = sessionStats.assiduity !== null ? 0.3 + 0.7 * (sessionStats.assiduity / 100) : 1;
   const weeksRemaining = Math.max(0, weeksTotal - elapsedWeeks);
   return getVO2maxGainPct(weeksTotal) * (weeksRemaining / weeksTotal) * assiduityRatio;
 }
 
-/** Valeur VO2max interpolee lineairement entre les deux points reels les
- *  plus proches d'une date donnee (historique quotidien Garmin, sparse).
- *  Evite l'effet "palier puis a-pic" d'un simple report de la derniere
- *  valeur connue quand les mises a jour Garmin sont espacees de plusieurs
- *  semaines. En dehors de la plage connue, on garde la valeur du bord. */
-function vo2ValueAtDate(history, ts) {
+/** Valeur VO2max estimee a une date donnee par moyenne de tout l'historique
+ *  reel, ponderee par la proximite temporelle (poids qui decroit de moitie
+ *  tous les halfLifeDays jours d'ecart). Une mesure Garmin isolee peut
+ *  varier de +/-1 a 2 points d'un jour a l'autre sans que la forme physique
+ *  ait reellement change - une simple interpolation a 2 points ou un report
+ *  de la derniere valeur connue restent trop sensibles a ce bruit, surtout
+ *  quand les releves sont espaces de facon irreguliere (recalcul Garmin
+ *  sporadique). Cette moyenne ponderee lisse naturellement le bruit tout en
+ *  restant tres proche des points les plus recents. */
+function vo2ValueAtDate(history, ts, halfLifeDays = 10) {
   if (!history || history.length === 0) return null;
-  if (ts <= history[0].ts) return history[0].value;
-  const lastIdx = history.length - 1;
-  if (ts >= history[lastIdx].ts) return history[lastIdx].value;
-  for (let i = 0; i < lastIdx; i++) {
-    if (ts >= history[i].ts && ts <= history[i + 1].ts) {
-      const span = history[i + 1].ts - history[i].ts;
-      const frac = span > 0 ? (ts - history[i].ts) / span : 0;
-      return history[i].value + (history[i + 1].value - history[i].value) * frac;
-    }
+  const dayMs = 86400000;
+  let wSum = 0, vSum = 0;
+  for (const h of history) {
+    const days = Math.abs(ts - h.ts) / dayMs;
+    const w = Math.pow(0.5, days / halfLifeDays);
+    wSum += w; vSum += w * h.value;
   }
-  return history[lastIdx].value;
+  return wSum > 0 ? vSum / wSum : null;
 }
 
 /** Distance en km depuis le goal (fallback planCategory.distLabel) */
@@ -1989,6 +1993,16 @@ function renderObjectifsChart(weeks, goal, dplusM, distKmOverride) {
     .filter(p => p && p.date && typeof p.value === 'number')
     .map(p => ({ ts: new Date(p.date).getTime(), value: p.value }))
     .sort((a, b) => a.ts - b.ts);
+  // Ancrer la fin de l'historique sur la valeur actuelle authentique (celle
+  // affichée sur Synthèse) : garantit que la moyenne ponderee converge
+  // exactement vers "aujourd'hui" pour la semaine en cours, au lieu de
+  // deriver a cause d'un dernier releve Garmin isole
+  if (typeof _latestVO2Max !== 'undefined' && _latestVO2Max > 0) {
+    const nowTs = Date.now();
+    if (vo2History.length === 0 || vo2History[vo2History.length - 1].ts < nowTs) {
+      vo2History.push({ ts: nowTs, value: _latestVO2Max });
+    }
+  }
 
   // Temps cible (ligne horizontale verte)
   const saved = JSON.parse(localStorage.getItem('suivi_personal_goals') || '{}');
@@ -2002,10 +2016,9 @@ function renderObjectifsChart(weeks, goal, dplusM, distKmOverride) {
   for (let w = 1; w <= weeksTotal; w++) {
     labels.push('S' + w);
     if (w <= elapsedWeeks) {
-      // Semaine passée : VMA réelle interpolée entre les deux relevés Garmin
-      // les plus proches du milieu de cette semaine (les mises à jour Garmin
-      // sont espacées de plusieurs jours/semaines - un simple report de la
-      // dernière valeur connue créerait des paliers puis des à-pics artificiels)
+      // Semaine passée : VMA réelle estimée au milieu de cette semaine par
+      // moyenne pondérée de l'historique Garmin (lisse le bruit de mesure
+      // sans créer les paliers/à-pics d'un simple report de dernière valeur)
       const weekMidTs = weeks[w - 1] ? weeks[w - 1].weekDate + 3.5 * 86400000 : null;
       const vo2Week = weekMidTs != null ? vo2ValueAtDate(vo2History, weekMidTs) : null;
       if (vo2Week != null) {
