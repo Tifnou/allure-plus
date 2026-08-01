@@ -130,34 +130,37 @@ async function getVO2MaxData() {
   });
 }
 
-// VO2max precis (non arrondi) : Garmin affiche un entier (ex: 49) mais classe
-// en interne sur la valeur precise (ex: 48.8), d'ou des categories qui peuvent
-// paraitre incoherentes avec la valeur arrondie affichee. Endpoint non expose
-// par la lib garmin-connect, appele directement via son client HTTP generique.
-async function getVO2MaxPrecise() {
-  return getCachedData('vo2max_precise', async () => {
+// Historique quotidien officiel du VO2max (meme source que Garmin Connect
+// utilise lui-meme). Remplace l'ancienne approche basee sur le champ
+// vO2MaxValue de chaque activite : ce champ ne reflete pas toujours la
+// valeur "du jour" recalculee par Garmin (une sortie donnee n'est pas
+// forcement celle qui declenche le recalcul), ce qui pouvait faire
+// diverger l'historique affiche de ce que montre reellement Garmin Connect.
+// Endpoint non expose par la lib garmin-connect, appele directement via
+// son client HTTP generique.
+async function getVO2MaxHistory(days = 400) {
+  return getCachedData('vo2max_history', async () => {
     const gc = await getGarminClient();
     const fmt = (d) => {
       const pad = (n) => String(n).padStart(2, '0');
       return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
     };
     const today = new Date();
-    const past = new Date(today.getTime() - 90 * 24 * 60 * 60 * 1000);
+    const past = new Date(today.getTime() - days * 24 * 60 * 60 * 1000);
     const url = `https://connectapi.garmin.com/metrics-service/metrics/maxmet/daily/${fmt(past)}/${fmt(today)}`;
     try {
       const res = await gc.get(url);
-      const withValue = (Array.isArray(res) ? res : [])
+      return (Array.isArray(res) ? res : [])
         .filter(r => r.generic && typeof r.generic.vo2MaxPreciseValue === 'number')
-        .sort((a, b) => new Date(b.generic.calendarDate) - new Date(a.generic.calendarDate));
-      if (withValue.length === 0) return null;
-      return {
-        calendarDate: withValue[0].generic.calendarDate,
-        vo2MaxPreciseValue: withValue[0].generic.vo2MaxPreciseValue,
-        vo2MaxValue: withValue[0].generic.vo2MaxValue
-      };
+        .map(r => ({
+          date: r.generic.calendarDate,
+          value: r.generic.vo2MaxValue,
+          preciseValue: r.generic.vo2MaxPreciseValue
+        }))
+        .sort((a, b) => new Date(a.date) - new Date(b.date));
     } catch (e) {
-      console.log('VO2max precis indisponible:', e.message);
-      return null;
+      console.log('Historique VO2max indisponible:', e.message);
+      return [];
     }
   });
 }
@@ -449,29 +452,32 @@ function buildGarminFunctions(gc) {
         .sort((a, b) => new Date(a.calendarDate) - new Date(b.calendarDate));
     });
   }
-  async function getVO2MaxPrecise() {
-    return cached('vo2max_precise', async () => {
+  // Historique quotidien officiel du VO2max (meme source que Garmin Connect
+  // utilise lui-meme) - voir le commentaire de la version module-level ci-dessus
+  // pour le detail du pourquoi cette source remplace l'ancienne (vo2maxSeries
+  // issue des activites).
+  async function getVO2MaxHistory(days = 400) {
+    return cached('vo2max_history', async () => {
       const fmt = (d) => {
         const pad = (n) => String(n).padStart(2, '0');
         return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
       };
       const today = new Date();
-      const past = new Date(today.getTime() - 90 * 24 * 60 * 60 * 1000);
+      const past = new Date(today.getTime() - days * 24 * 60 * 60 * 1000);
       const url = `https://connectapi.garmin.com/metrics-service/metrics/maxmet/daily/${fmt(past)}/${fmt(today)}`;
       try {
         const res = await gc.get(url);
-        const withValue = (Array.isArray(res) ? res : [])
+        return (Array.isArray(res) ? res : [])
           .filter(r => r.generic && typeof r.generic.vo2MaxPreciseValue === 'number')
-          .sort((a, b) => new Date(b.generic.calendarDate) - new Date(a.generic.calendarDate));
-        if (withValue.length === 0) return null;
-        return {
-          calendarDate: withValue[0].generic.calendarDate,
-          vo2MaxPreciseValue: withValue[0].generic.vo2MaxPreciseValue,
-          vo2MaxValue: withValue[0].generic.vo2MaxValue
-        };
+          .map(r => ({
+            date: r.generic.calendarDate,
+            value: r.generic.vo2MaxValue,
+            preciseValue: r.generic.vo2MaxPreciseValue
+          }))
+          .sort((a, b) => new Date(a.date) - new Date(b.date));
       } catch (e) {
-        console.log('VO2max precis indisponible:', e.message);
-        return null;
+        console.log('Historique VO2max indisponible:', e.message);
+        return [];
       }
     });
   }
@@ -523,7 +529,7 @@ function buildGarminFunctions(gc) {
 
   function clearCache() { Object.keys(cache).forEach(k => delete cache[k]); }
 
-  return { getActivities, getActivitiesForYear, getUserProfile, getHeartRateData, getVO2MaxData, getVO2MaxPrecise, getSleepData, clearCache };
+  return { getActivities, getActivitiesForYear, getUserProfile, getHeartRateData, getVO2MaxData, getVO2MaxHistory, getSleepData, clearCache };
 }
 
 module.exports = {
@@ -531,7 +537,7 @@ module.exports = {
   getUserProfile,
   getHeartRateData,
   getVO2MaxData,
-  getVO2MaxPrecise,
+  getVO2MaxHistory,
   getSleepData,
   computeStats,
   getLastRunActivities,

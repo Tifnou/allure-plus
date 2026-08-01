@@ -476,41 +476,22 @@ app.get('/api/dashboard', requireSession, async (req, res) => {
     const lastRuns = getLastRunActivities(activities, 50);
     const records  = getPersonalRecords(activities);
 
-    // VO2max : prendre le max entre valeur activite et estimation Garmin globale
-    // (Garmin affiche l'estimation globale, ex: 49, tandis que l'activite peut montrer 48.0)
+    // VO2max : source de reference = historique quotidien officiel Garmin
+    // (celui que Garmin Connect utilise lui-meme pour sa propre courbe), qui
+    // remplace la serie construite a partir du champ vO2MaxValue de chaque
+    // activite. Cette derniere peut diverger (une sortie donnee n'est pas
+    // forcement celle qui declenche le recalcul Garmin d'un jour donne), ce
+    // qui faussait aussi bien la valeur du jour que l'indicateur de tendance.
+    // Si l'historique est indisponible, on retombe sur la serie de computeStats().
     try {
-      const settings = await gc.getUserSettings();
-      const vo2UserSettings = settings?.userData?.vo2MaxRunning || null;
-      if (vo2UserSettings && (!stats.latestVO2Max || vo2UserSettings > stats.latestVO2Max)) {
-        stats.latestVO2Max = vo2UserSettings;
-        // Mettre a jour aussi la serie du graphique avec la valeur d'aujourd'hui
-        // pour que la courbe Evolution VO2max reflète la valeur Garmin actuelle
-        const today = new Date().toISOString().split('T')[0];
-        if (!Array.isArray(stats.vo2maxSeries)) stats.vo2maxSeries = [];
-        const lastPoint = stats.vo2maxSeries[stats.vo2maxSeries.length - 1];
-        // lastPoint.date peut etre soit une date pure (point ajoute ici les jours
-        // precedents) soit un horodatage complet type "2026-08-01 11:09:32" (point
-        // issu d'une activite) - comparer sur les 10 premiers caracteres (YYYY-MM-DD)
-        // uniquement, sinon un point du jour existant n'est jamais reconnu comme tel
-        // et un doublon est ajoute, faussant le calcul de tendance (vs hier)
-        const lastPointDay = lastPoint ? String(lastPoint.date).slice(0, 10) : null;
-        if (!lastPoint || lastPointDay !== today) {
-          stats.vo2maxSeries.push({ date: today, value: vo2UserSettings });
-        } else {
-          // Même jour : mettre à jour la valeur si elle est plus haute
-          lastPoint.value = Math.max(lastPoint.value, vo2UserSettings);
-        }
+      const history = await req.session.fns.getVO2MaxHistory();
+      if (Array.isArray(history) && history.length > 0) {
+        stats.vo2maxSeries = history.map(h => ({ date: h.date, value: h.value }));
+        const last = history[history.length - 1];
+        stats.latestVO2Max = last.value;
+        stats.vo2MaxPrecise = last.preciseValue;
       }
-    } catch(e) { /* silencieux - on garde la valeur activite */ }
-
-    // VO2max precis (non arrondi) : Garmin classe en "Excellent/Superieur/etc."
-    // sur cette valeur precise, pas sur l'entier affiche (ex: 48.8 -> arrondi a 49)
-    try {
-      const precise = await req.session.fns.getVO2MaxPrecise();
-      if (precise && typeof precise.vo2MaxPreciseValue === 'number') {
-        stats.vo2MaxPrecise = precise.vo2MaxPreciseValue;
-      }
-    } catch(e) { /* silencieux - pas bloquant, on retombe sur la valeur arrondie */ }
+    } catch(e) { /* silencieux - on garde la serie issue des activites */ }
 
     const allActivities = activities.map(a => ({
       id:              a.activityId,
