@@ -1846,25 +1846,26 @@ function getRemainingVmaGainPct(weeksTotal, weeks) {
   return getVO2maxGainPct(weeksTotal) * (weeksRemaining / weeksTotal) * assiduityRatio;
 }
 
-/** Valeur VO2max estimee a une date donnee par moyenne de tout l'historique
- *  reel, ponderee par la proximite temporelle (poids qui decroit de moitie
- *  tous les halfLifeDays jours d'ecart). Une mesure Garmin isolee peut
- *  varier de +/-1 a 2 points d'un jour a l'autre sans que la forme physique
- *  ait reellement change - une simple interpolation a 2 points ou un report
- *  de la derniere valeur connue restent trop sensibles a ce bruit, surtout
- *  quand les releves sont espaces de facon irreguliere (recalcul Garmin
- *  sporadique). Cette moyenne ponderee lisse naturellement le bruit tout en
- *  restant tres proche des points les plus recents. */
-function vo2ValueAtDate(history, ts, halfLifeDays = 10) {
+/** Valeur VO2max "telle que Garmin l'affichait reellement" a une date donnee :
+ *  la derniere mesure connue a cette date (report de la derniere valeur
+ *  disponible), jamais melangee avec des mesures plus anciennes NI plus
+ *  recentes. C'est fidele a la facon dont Garmin affiche lui-meme cette
+ *  metrique au jour le jour (toujours la derniere estimation disponible, pas
+ *  une moyenne glissante). Une moyenne ponderee sur plusieurs semaines
+ *  d'historique a ete testee mais s'est reveleee trompeuse : pour une
+ *  semaine tres recente (le jour meme du debut du plan par ex.), un groupe
+ *  d'anciennes mesures pouvait peser plus lourd que la valeur du jour et
+ *  produire une estimation plus rapide que "aujourd'hui", ce qui n'a pas de
+ *  sens. history doit inclure un point "aujourd'hui" (voir plus bas) pour
+ *  qu'aucune semaine ne puisse jamais deborder au-dela de la valeur reelle
+ *  du jour. */
+function vo2ValueAtDate(history, ts) {
   if (!history || history.length === 0) return null;
-  const dayMs = 86400000;
-  let wSum = 0, vSum = 0;
+  let last = null;
   for (const h of history) {
-    const days = Math.abs(ts - h.ts) / dayMs;
-    const w = Math.pow(0.5, days / halfLifeDays);
-    wSum += w; vSum += w * h.value;
+    if (h.ts <= ts && (last === null || h.ts > last.ts)) last = h;
   }
-  return wSum > 0 ? vSum / wSum : null;
+  return last ? last.value : history[0].value;
 }
 
 /** Distance en km depuis le goal (fallback planCategory.distLabel) */
@@ -2016,11 +2017,10 @@ function renderObjectifsChart(weeks, goal, dplusM, distKmOverride) {
   for (let w = 1; w <= weeksTotal; w++) {
     labels.push('S' + w);
     if (w <= elapsedWeeks) {
-      // Semaine passée : VMA réelle estimée au milieu de cette semaine par
-      // moyenne pondérée de l'historique Garmin (lisse le bruit de mesure
-      // sans créer les paliers/à-pics d'un simple report de dernière valeur)
-      const weekMidTs = weeks[w - 1] ? weeks[w - 1].weekDate + 3.5 * 86400000 : null;
-      const vo2Week = weekMidTs != null ? vo2ValueAtDate(vo2History, weekMidTs) : null;
+      // Semaine passée : VMA réelle = dernière valeur VO2max connue à la fin
+      // de cette semaine (ce que Garmin affichait réellement à ce moment-là)
+      const weekEndTs = weeks[w - 1] ? weeks[w - 1].weekDate + 7 * 86400000 : null;
+      const vo2Week = weekEndTs != null ? vo2ValueAtDate(vo2History, weekEndTs) : null;
       if (vo2Week != null) {
         const vmaWeek = vo2ToVma(vo2Week);
         past.push(Math.round((estimateRaceTime(vmaWeek, distKm, dplusM, isTrail) || 0) / 60));
