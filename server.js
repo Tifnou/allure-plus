@@ -488,7 +488,13 @@ app.get('/api/dashboard', requireSession, async (req, res) => {
         const today = new Date().toISOString().split('T')[0];
         if (!Array.isArray(stats.vo2maxSeries)) stats.vo2maxSeries = [];
         const lastPoint = stats.vo2maxSeries[stats.vo2maxSeries.length - 1];
-        if (!lastPoint || lastPoint.date !== today) {
+        // lastPoint.date peut etre soit une date pure (point ajoute ici les jours
+        // precedents) soit un horodatage complet type "2026-08-01 11:09:32" (point
+        // issu d'une activite) - comparer sur les 10 premiers caracteres (YYYY-MM-DD)
+        // uniquement, sinon un point du jour existant n'est jamais reconnu comme tel
+        // et un doublon est ajoute, faussant le calcul de tendance (vs hier)
+        const lastPointDay = lastPoint ? String(lastPoint.date).slice(0, 10) : null;
+        if (!lastPoint || lastPointDay !== today) {
           stats.vo2maxSeries.push({ date: today, value: vo2UserSettings });
         } else {
           // Même jour : mettre à jour la valeur si elle est plus haute
