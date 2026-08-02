@@ -1210,12 +1210,17 @@ function renderSessionDetail(session, weekId, isCurrentWeek) {
       const az = z.resolvedZone;
       return az && az !== 'EF' && az !== 'RECOVER' && az !== 'WARMUP' && az !== 'COOLDOWN';
     });
-    const zoneRows = zonesResolved.map(z => {
+    const zoneRows = zonesResolved.map((z, idx) => {
       const zKey    = (z.kind || '').toUpperCase();
       const apZone  = z.resolvedZone;
       const zoneDef = apZone ? ALLURE_PLUS_ZONES[apZone] : null;
       const rowBg   = getZoneColor(zKey);
-      const zoneLbl = zoneDef ? zoneDef.label : fmtZoneKind(z.kind, session.displayName || session.name || '');
+      // Le tout premier segment, s'il resout en RECOVER, est la mise en
+      // route de la seance (pas une "recuperation" - rien avant lui) : on
+      // l'affiche "Échauffement", meme cohérence que l'export xlsx.
+      const zoneLbl = (apZone === 'RECOVER' && idx === 0)
+        ? 'Échauffement'
+        : (zoneDef ? zoneDef.label : fmtZoneKind(z.kind, session.displayName || session.name || ''));
       // RECOVER → allure libre, pas de valeur cible
       if (zoneDef?.noTarget) {
         return '<div class="pace-zone-row" data-zone="' + zKey + '" style="background:' + rowBg + ';border-radius:4px;margin-bottom:2px;padding:4px 8px;">'
