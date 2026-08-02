@@ -69,17 +69,25 @@ const RACE_GOAL_ZONE = { '10km': 'AS10', 'half-marathon': 'AS21', 'marathon': 'A
 
 // Résout la zone Allure+ d'un exercice depuis pace.slug (fiable),
 // avec repli sur le code générique zoneKind si le slug est absent/inconnu.
+//
+// Exception connue : les segments de retour au calme (exercices "CD_N")
+// portent un slug "endurance-fondamentale" (decrit l'allure cible, confort)
+// mais un zoneKind "RECOVER" (leur role structurel dans la seance). Le
+// zoneKind doit l'emporter ici : cote donnees reelles Campus, un retour au
+// calme etiquete EF au lieu de Recuperation induit en erreur (verifie sur
+// plusieurs seances reelles - "Bloc Choc", "Seuil 60", etc. terminent
+// toujours par un exercice CD_N slug=endurance-fondamentale/kind=RECOVER).
 function resolveZoneFromExercise(pace, zoneKind, goalType) {
   const slug = ((pace && pace.slug) || '').toLowerCase();
   const zk   = (zoneKind || (pace && pace.zoneKind) || '').toUpperCase();
 
+  if (['RECOVER','RECOVERY','REST','REPOS'].includes(zk)) return 'RECOVER';
   if (slug === 'race') {
     return (goalType && RACE_GOAL_ZONE[goalType]) ? RACE_GOAL_ZONE[goalType] : 'EF';
   }
   if (slug && SLUG_TO_ZONE[slug]) return SLUG_TO_ZONE[slug];
 
   // Repli : code générique Campus (utilisé seulement si le slug manque)
-  if (['RECOVER','RECOVERY','REST','REPOS'].includes(zk)) return 'RECOVER';
   if (['WARMUP','COOLDOWN'].includes(zk)) return 'EF';
   if (zk === 'Z1' || zk === 'Z2') return 'EF';
   if (zk === 'Z3') return 'TEMPO';
