@@ -1376,29 +1376,19 @@ app.get('/api/campus/export-plan', requireCampusToken, async (req, res) => {
 });
 
 // Export du plan actif en fichier Excel (.xlsx) presentable a des amis qui
-// n'utilisent pas Allure+ - reserve au compte admin. Reprend la meme logique
-// de resolution que /api/campus/training (plan importe prioritaire si pas
-// de token Campus, sinon plan Campus Coach en direct) pour fonctionner que
-// le plan actif soit importe ou reellement connecte a Campus Coach.
-app.get('/api/campus/export-plan-xlsx', requireAdmin, async (req, res) => {
+// n'utilisent pas Allure+ - reserve au compte admin. Recoit goal/weeks
+// directement du frontend (campusState, deja charge a l'ecran) plutot que
+// de les re-chercher cote serveur : le plan affiche dans Entrainements peut
+// venir d'un choix cote navigateur (localStorage "prefer_imported_plan")
+// que le serveur ne voit pas, donc re-deviner la source cote serveur peut
+// exporter le mauvais plan (ou aucun) meme quand un plan est bien affiche.
+app.post('/api/campus/export-plan-xlsx', requireAdmin, async (req, res) => {
   try {
-    const token = getCampusToken(req);
-    const importedFile = path.join(__dirname, 'imported_plan.json');
-    let goal, weeks;
-
-    if (!token && fs.existsSync(importedFile)) {
-      const data = JSON.parse(fs.readFileSync(importedFile, 'utf8'));
-      goal = data.goal;
-      weeks = data.weeks;
-    } else if (token) {
-      goal = await getActiveGoal(token);
-      if (!goal?._id) return res.status(404).json({ error: 'Aucun plan actif trouve sur Campus Coach' });
-      weeks = await getFullTrainingPlan(token, goal._id);
-    } else {
-      return res.status(404).json({ error: 'Aucun plan actif', noPlan: true });
+    const { goal, weeks } = req.body || {};
+    if (!goal || !Array.isArray(weeks) || weeks.length === 0) {
+      return res.status(400).json({ error: 'Aucun plan charge a exporter' });
     }
-
-    const workbook = await buildPlanWorkbook(goal, Array.isArray(weeks) ? weeks : []);
+    const workbook = await buildPlanWorkbook(goal, weeks);
     const safeName = (goal?.name || goal?.goalTitle || 'plan').replace(/[^a-zA-Z0-9-_]+/g, '_');
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="plan-${safeName}.xlsx"`);

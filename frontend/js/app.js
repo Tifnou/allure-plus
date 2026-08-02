@@ -2507,9 +2507,8 @@ function showAdminNav(userEmail) {
   }
 }
 
-function exportPlanXlsx() {
-  window.location.href = `${API}/api/campus/export-plan-xlsx`;
-}
+// Implémentation réelle dans campus.js (a besoin de campusState.goal/weeks,
+// le plan tel qu'affiché à l'écran - voir la fonction là-bas pour le detail)
 
 async function loadAdminInfo() {
   try {

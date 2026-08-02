@@ -720,6 +720,47 @@ function getTrailCatLabel(km) {
   return 'Ultra (>80 km)';
 }
 
+/** Exporte le plan actuellement affiché (campusState.goal/weeks - fonctionne
+ *  aussi bien pour un plan Campus Coach en direct que pour un plan importé,
+ *  puisqu'on envoie exactement ce qui est déjà chargé à l'écran plutôt que
+ *  de laisser le serveur re-deviner la source). */
+async function exportPlanXlsx() {
+  const goal = campusState.goal;
+  const weeks = campusState.weeks;
+  if (!goal || !Array.isArray(weeks) || weeks.length === 0) {
+    if (typeof showToast === 'function') showToast('Aucun plan chargé à exporter', 'error');
+    return;
+  }
+  const btn = document.getElementById('btn-export-plan-xlsx');
+  const originalText = btn ? btn.textContent : null;
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Génération...'; }
+  try {
+    const res = await fetch(`${API}/api/campus/export-plan-xlsx`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ goal, weeks }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || `Erreur ${res.status}`);
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const safeName = (goal.name || goal.goalTitle || 'plan').replace(/[^a-zA-Z0-9-_]+/g, '_');
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `plan-${safeName}.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    if (typeof showToast === 'function') showToast('Export impossible : ' + e.message, 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = originalText; }
+  }
+}
+
 function renderTrainingPlan(goal, weeks) {
   const el = id => document.getElementById(id);
   campusState.goal  = goal;
