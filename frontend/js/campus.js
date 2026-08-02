@@ -52,17 +52,19 @@ function fmtDateLong(ts) {
 }
 function fmtDuration(secs) {
   if (!secs) return '?';
-  const h = Math.floor(secs / 3600);
-  const m = Math.floor((secs % 3600) / 60);
-  const s = Math.round(secs % 60);
+  const total = Math.round(secs);
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
   if (h > 0) return `${h}h${m.toString().padStart(2,'0')}`;
   if (m > 0) return s > 0 ? `${m} min ${s}"` : `${m} min`;
   return `${s}"`; // Moins d'une minute : afficher les secondes
 }
 function fmtPace(secsPerKm) {
   if (!secsPerKm) return '?';
-  const m = Math.floor(secsPerKm / 60);
-  const s = Math.round(secsPerKm % 60);
+  const total = Math.round(secsPerKm);
+  const m = Math.floor(total / 60);
+  const s = total % 60;
   return `${m}'${s.toString().padStart(2,'0')}"`;
 }
 function fmtWeekRange(ts) {
@@ -1760,6 +1762,13 @@ document.addEventListener('DOMContentLoaded', () => {
 // OBJECTIFS — Helpers performance & affichage
 // ═════════════════════════════════════════════════════════════════
 
+/** Une séance de renforcement (PPG) n'a pas d'impact sur la VO2max/VMA -
+ *  ne doit pas compter dans l'assiduite utilisee pour projeter le gain de
+ *  forme (voir getRemainingVmaGainPct). Meme critere que renderSessionDetail. */
+function isStrengthSession(session) {
+  return session.sport === 'ppg' || session.trainingCategory === 'gpp';
+}
+
 /** Séances faites / manquées / restantes depuis localStorage */
 function computeSessionStats(weeks) {
   const doneMap = JSON.parse(localStorage.getItem('suivi_local_done') || '{}');
@@ -1778,6 +1787,29 @@ function computeSessionStats(weeks) {
   });
   const assiduity = (done + missed) > 0 ? Math.round(done / (done + missed) * 100) : null;
   return { done, missed, remaining, total: done + missed + remaining, assiduity };
+}
+
+/** Meme calcul que computeSessionStats, mais uniquement sur les séances
+ *  course/trail (exclut le renforcement/PPG) - utilisé pour pondérer le
+ *  gain de VMA projeté, puisque le renforcement n'a pas d'effet direct
+ *  sur la VO2max/VMA. La badge "Assiduité" affichée à l'écran, elle,
+ *  reste volontairement globale (toutes séances confondues). */
+function computeCardioAssiduity(weeks) {
+  const doneMap = JSON.parse(localStorage.getItem('suivi_local_done') || '{}');
+  const now = Date.now();
+  let done = 0, missed = 0;
+  (weeks || []).forEach(week => {
+    const weekPassed = (week.weekDate + 7 * 86400000) < now;
+    (week.sessions || []).forEach(session => {
+      if (isStrengthSession(session)) return;
+      const key = (week._id || '') + '_' + session.trainingIndex;
+      const status = doneMap[key] || session.status || 'todo';
+      if (status === 'done') done++;
+      else if (status === 'skip') missed++;
+      else if (weekPassed) missed++;
+    });
+  });
+  return (done + missed) > 0 ? Math.round(done / (done + missed) * 100) : null;
 }
 
 /** Estimation du temps de course en secondes depuis la VMA
@@ -1799,8 +1831,8 @@ function fmtSecsToTime(s) {
 
 function fmtPaceFromSecs(distKm, secs) {
   if (!distKm || !secs) return '';
-  const spk = secs / distKm;
-  return Math.floor(spk / 60) + "'" + String(Math.round(spk % 60)).padStart(2, '0') + "'' /km";
+  const total = Math.round(secs / distKm);
+  return Math.floor(total / 60) + "'" + String(total % 60).padStart(2, '0') + "'' /km";
 }
 
 /** Retourne la VMA (km/h) depuis les sources disponibles.
@@ -1840,8 +1872,8 @@ function getRemainingVmaGainPct(weeksTotal, weeks) {
   if (!weeksTotal) return 0;
   const now = Date.now();
   const elapsedWeeks = (weeks || []).filter(w => w.weekDate < now).length;
-  const sessionStats = computeSessionStats(weeks);
-  const assiduityRatio = sessionStats.assiduity !== null ? 0.3 + 0.7 * (sessionStats.assiduity / 100) : 1;
+  const cardioAssiduity = computeCardioAssiduity(weeks);
+  const assiduityRatio = cardioAssiduity !== null ? 0.3 + 0.7 * (cardioAssiduity / 100) : 1;
   const weeksRemaining = Math.max(0, weeksTotal - elapsedWeeks);
   return getVO2maxGainPct(weeksTotal) * (weeksRemaining / weeksTotal) * assiduityRatio;
 }
