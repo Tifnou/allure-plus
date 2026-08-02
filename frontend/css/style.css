@@ -3057,13 +3057,19 @@ body.plans-active {
 
 
 /* ── Sessions inline dans avancement du plan ─────────────────── */
+.goals-sessions-by-type {
+  display: flex; flex-direction: column; gap: 8px;
+  margin-top: 6px; padding-top: 6px;
+  border-top: 1px solid var(--border-light);
+}
+.gsi-row-label {
+  font-size: 0.68rem; font-weight: 700;
+  color: var(--text-muted); margin-bottom: 3px;
+}
 .goals-sessions-inline {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 6px;
-  margin-top: 6px;
-  padding-top: 6px;
-  border-top: 1px solid var(--border-light);
 }
 .gsi-item {
   display: flex; flex-direction: row;

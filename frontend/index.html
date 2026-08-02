@@ -753,27 +753,57 @@
             <div class="goals-progress-track" style="margin-top:6px">
               <div class="goals-progress-fill" id="goals-progress-fill" style="width:0%"></div>
             </div>
-            <!-- Séances intégrées dans la carte avancement -->
-            <div class="goals-sessions-inline">
-              <div class="gsi-item">
-                <span class="gsi-icon">&#x2705;</span>
-                <span class="gsi-num" id="goals-sess-done">—</span>
-                <span class="gsi-label">Faites</span>
+            <!-- Séances intégrées dans la carte avancement, ventilées par catégorie -->
+            <div class="goals-sessions-by-type">
+              <div class="gsi-row">
+                <div class="gsi-row-label">&#x1F3C3; Course / Trail</div>
+                <div class="goals-sessions-inline">
+                  <div class="gsi-item">
+                    <span class="gsi-icon">&#x2705;</span>
+                    <span class="gsi-num" id="goals-sess-done-cardio">—</span>
+                    <span class="gsi-label">Faites</span>
+                  </div>
+                  <div class="gsi-item">
+                    <span class="gsi-icon">&#x274C;</span>
+                    <span class="gsi-num" id="goals-sess-missed-cardio">—</span>
+                    <span class="gsi-label">Manqu&eacute;es</span>
+                  </div>
+                  <div class="gsi-item">
+                    <span class="gsi-icon">&#x1F4C5;</span>
+                    <span class="gsi-num" id="goals-sess-remaining-cardio">—</span>
+                    <span class="gsi-label">Restantes</span>
+                  </div>
+                  <div class="gsi-item" id="goals-assiduity-cardio-card">
+                    <span class="gsi-icon">&#x1F3AF;</span>
+                    <span class="gsi-num" id="goals-assiduity-cardio">—</span>
+                    <span class="gsi-label">Assiduit&eacute;</span>
+                  </div>
+                </div>
               </div>
-              <div class="gsi-item">
-                <span class="gsi-icon">&#x274C;</span>
-                <span class="gsi-num" id="goals-sess-missed">—</span>
-                <span class="gsi-label">Manqu&eacute;es</span>
-              </div>
-              <div class="gsi-item">
-                <span class="gsi-icon">&#x1F4C5;</span>
-                <span class="gsi-num" id="goals-sess-remaining">—</span>
-                <span class="gsi-label">Restantes</span>
-              </div>
-              <div class="gsi-item" id="goals-assiduity-card">
-                <span class="gsi-icon">&#x1F3AF;</span>
-                <span class="gsi-num" id="goals-assiduity">—</span>
-                <span class="gsi-label">Assiduit&eacute;</span>
+              <div class="gsi-row">
+                <div class="gsi-row-label">&#x1F4AA; Renforcement</div>
+                <div class="goals-sessions-inline">
+                  <div class="gsi-item">
+                    <span class="gsi-icon">&#x2705;</span>
+                    <span class="gsi-num" id="goals-sess-done-ppg">—</span>
+                    <span class="gsi-label">Faites</span>
+                  </div>
+                  <div class="gsi-item">
+                    <span class="gsi-icon">&#x274C;</span>
+                    <span class="gsi-num" id="goals-sess-missed-ppg">—</span>
+                    <span class="gsi-label">Manqu&eacute;es</span>
+                  </div>
+                  <div class="gsi-item">
+                    <span class="gsi-icon">&#x1F4C5;</span>
+                    <span class="gsi-num" id="goals-sess-remaining-ppg">—</span>
+                    <span class="gsi-label">Restantes</span>
+                  </div>
+                  <div class="gsi-item" id="goals-assiduity-ppg-card">
+                    <span class="gsi-icon">&#x1F3AF;</span>
+                    <span class="gsi-num" id="goals-assiduity-ppg">—</span>
+                    <span class="gsi-label">Assiduit&eacute;</span>
+                  </div>
+                </div>
               </div>
             </div>
             <div id="goals-cycle-theme" class="goals-cycle-theme" style="margin-top:8px"></div>
@@ -932,8 +962,8 @@
 
   </div><!-- /app-content -->
 
-  <script src="js/app.js?v=1785668604799"></script>
-  <script src="js/campus.js?v=1785668604799"></script>
+  <script src="js/app.js?v=1785670351007"></script>
+  <script src="js/campus.js?v=1785670351007"></script>
   <script src="js/plans.js"></script>
   <!-- ... MODAL LOGS ........................... -->
   <div id="logs-modal" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.55);backdrop-filter:blur(4px);" onclick="if(event.target===this)closeLogsModal()">

@@ -1769,47 +1769,46 @@ function isStrengthSession(session) {
   return session.sport === 'ppg' || session.trainingCategory === 'gpp';
 }
 
-/** Séances faites / manquées / restantes depuis localStorage */
+function _emptySessionBucket() {
+  return { done: 0, missed: 0, remaining: 0 };
+}
+function _finalizeSessionBucket(b) {
+  const assiduity = (b.done + b.missed) > 0 ? Math.round(b.done / (b.done + b.missed) * 100) : null;
+  return { done: b.done, missed: b.missed, remaining: b.remaining, total: b.done + b.missed + b.remaining, assiduity };
+}
+
+/** Séances faites / manquées / restantes depuis localStorage, ventilées par
+ *  catégorie (course/trail vs renforcement) car elles n'ont pas le même
+ *  impact physiologique et l'utilisateur veut voir/suivre les deux
+ *  séparément (voir aussi getRemainingVmaGainPct, qui n'utilise QUE
+ *  l'assiduité cardio pour projeter le gain de VO2max). */
 function computeSessionStats(weeks) {
   const doneMap = JSON.parse(localStorage.getItem('suivi_local_done') || '{}');
   const now = Date.now();
-  let done = 0, missed = 0, remaining = 0;
+  const cardio = _emptySessionBucket();
+  const strength = _emptySessionBucket();
   (weeks || []).forEach(week => {
     const weekPassed = (week.weekDate + 7 * 86400000) < now;
     (week.sessions || []).forEach(session => {
+      const bucket = isStrengthSession(session) ? strength : cardio;
       const key = (week._id || '') + '_' + session.trainingIndex;
       const status = doneMap[key] || session.status || 'todo';
-      if (status === 'done') done++;
-      else if (status === 'skip') missed++;
-      else if (weekPassed) missed++; // passée non marquée = manquée
-      else remaining++;
+      if (status === 'done') bucket.done++;
+      else if (status === 'skip') bucket.missed++;
+      else if (weekPassed) bucket.missed++; // passée non marquée = manquée
+      else bucket.remaining++;
     });
   });
-  const assiduity = (done + missed) > 0 ? Math.round(done / (done + missed) * 100) : null;
-  return { done, missed, remaining, total: done + missed + remaining, assiduity };
-}
-
-/** Meme calcul que computeSessionStats, mais uniquement sur les séances
- *  course/trail (exclut le renforcement/PPG) - utilisé pour pondérer le
- *  gain de VMA projeté, puisque le renforcement n'a pas d'effet direct
- *  sur la VO2max/VMA. La badge "Assiduité" affichée à l'écran, elle,
- *  reste volontairement globale (toutes séances confondues). */
-function computeCardioAssiduity(weeks) {
-  const doneMap = JSON.parse(localStorage.getItem('suivi_local_done') || '{}');
-  const now = Date.now();
-  let done = 0, missed = 0;
-  (weeks || []).forEach(week => {
-    const weekPassed = (week.weekDate + 7 * 86400000) < now;
-    (week.sessions || []).forEach(session => {
-      if (isStrengthSession(session)) return;
-      const key = (week._id || '') + '_' + session.trainingIndex;
-      const status = doneMap[key] || session.status || 'todo';
-      if (status === 'done') done++;
-      else if (status === 'skip') missed++;
-      else if (weekPassed) missed++;
-    });
-  });
-  return (done + missed) > 0 ? Math.round(done / (done + missed) * 100) : null;
+  const cardioStats = _finalizeSessionBucket(cardio);
+  const strengthStats = _finalizeSessionBucket(strength);
+  // Compat : total toutes catégories confondues (assiduité globale)
+  const doneAll = cardio.done + strength.done, missedAll = cardio.missed + strength.missed;
+  const assiduityAll = (doneAll + missedAll) > 0 ? Math.round(doneAll / (doneAll + missedAll) * 100) : null;
+  return {
+    cardio: cardioStats, strength: strengthStats,
+    done: doneAll, missed: missedAll, remaining: cardio.remaining + strength.remaining,
+    total: cardioStats.total + strengthStats.total, assiduity: assiduityAll,
+  };
 }
 
 /** Estimation du temps de course en secondes depuis la VMA
@@ -1847,6 +1846,39 @@ function getVmaFromState() {
   return null;
 }
 
+/** Convertit un VO2max en VMA en se calibrant sur la VMA "actuelle" réelle
+ *  (celle de getVmaFromState, qui priorise la VMA calculée par Garmin
+ *  lui-même quand disponible). Sans cette calibration, convertir une
+ *  ancienne valeur VO2max (historique, début de plan) avec la formule
+ *  générique sexuée pouvait donner un résultat incohérent avec "aujourd'hui"
+ *  quand Garmin utilise en interne un facteur légèrement différent - même
+ *  VO2max affiché, temps différent. En se calibrant sur le couple
+ *  (VO2max actuel, VMA actuelle réelle), la conversion reste TOUJOURS
+ *  cohérente avec "Estimation actuelle", quelle que soit la source. */
+function vo2ToVmaCalibrated(vo2) {
+  const currentVma = getVmaFromState();
+  const currentVo2 = typeof _latestVO2Max !== 'undefined' ? _latestVO2Max : null;
+  if (currentVma > 0 && currentVo2 > 3.5) {
+    return (vo2 - 3.5) * (currentVma / (currentVo2 - 3.5));
+  }
+  const profile = JSON.parse(localStorage.getItem('suivi_sport_profile') || '{}');
+  const sexFactor = (profile.sex || 'M') === 'F' ? 0.315 : 0.313;
+  return (vo2 - 3.5) * sexFactor;
+}
+
+/** Inverse de vo2ToVmaCalibrated - pour afficher un "VO2max projeté" cohérent
+ *  avec la VMA projetée calculée (même calibration). */
+function vmaToVo2Calibrated(vma) {
+  const currentVma = getVmaFromState();
+  const currentVo2 = typeof _latestVO2Max !== 'undefined' ? _latestVO2Max : null;
+  if (currentVma > 0 && currentVo2 > 3.5) {
+    return vma / (currentVma / (currentVo2 - 3.5)) + 3.5;
+  }
+  const profile = JSON.parse(localStorage.getItem('suivi_sport_profile') || '{}');
+  const sexFactor = (profile.sex || 'M') === 'F' ? 0.315 : 0.313;
+  return vma / sexFactor + 3.5;
+}
+
 /** Convertit un texte de temps cible (ex: "4h30" ou "4:30") en secondes */
 function parseTargetTime(str) {
   if (!str) return null;
@@ -1872,7 +1904,7 @@ function getRemainingVmaGainPct(weeksTotal, weeks) {
   if (!weeksTotal) return 0;
   const now = Date.now();
   const elapsedWeeks = (weeks || []).filter(w => w.weekDate < now).length;
-  const cardioAssiduity = computeCardioAssiduity(weeks);
+  const cardioAssiduity = computeSessionStats(weeks).cardio.assiduity;
   const assiduityRatio = cardioAssiduity !== null ? 0.3 + 0.7 * (cardioAssiduity / 100) : 1;
   const weeksRemaining = Math.max(0, weeksTotal - elapsedWeeks);
   return getVO2maxGainPct(weeksTotal) * (weeksRemaining / weeksTotal) * assiduityRatio;
@@ -1931,9 +1963,24 @@ function vo2HistorySincePlanStart(weeks, vo2History) {
 /** VO2max estimé au "début de plan" : la valeur la plus proche disponible
  *  depuis le démarrage réel du plan (voir vo2HistorySincePlanStart), jamais
  *  une valeur d'avant. Utilise la même logique que la semaine 1 de la
- *  courbe pour que les deux restent toujours cohérents entre eux. */
+ *  courbe pour que les deux restent toujours cohérents entre eux.
+ *  Trois phases dans le temps :
+ *  1. Avant le début du plan (semaine 1 pas encore commencée) : on affiche
+ *     la valeur actuelle, qui continuera de s'ajuster tant que le plan n'a
+ *     pas réellement démarré.
+ *  2. Pendant la semaine 1 : la valeur continue de s'ajuster en temps réel
+ *     (vo2ValueAtDate remonte naturellement jusqu'à "maintenant" puisque la
+ *     fin de semaine 1 est encore dans le futur).
+ *  3. Après le dimanche de la semaine 1 : la valeur se fige définitivement
+ *     à ce qui était connu à cette date, même si le VO2max évolue ensuite. */
 function getStartVo2(weeks, vo2History) {
   if (!weeks || weeks.length === 0) return null;
+  const now = Date.now();
+  if (weeks[0].weekDate > now) {
+    // Semaine 1 pas encore commencée : pas de "début de plan" à proprement
+    // parler, on reflète simplement l'état actuel
+    return vo2History.length > 0 ? vo2History[vo2History.length - 1].value : null;
+  }
   const sincePlan = vo2HistorySincePlanStart(weeks, vo2History);
   const weekEndTs = weeks[0].weekDate + 7 * 86400000;
   return vo2ValueAtDate(sincePlan, weekEndTs);
@@ -1996,19 +2043,21 @@ function renderEstimations(goal, weeks, dplusM, distKmOverride) {
   const vo2History = buildAnchoredVo2History();
   const vo2Start = getStartVo2(weeks, vo2History);
   if (vo2Start != null && weeks.length > 0) {
-    const profile = JSON.parse(localStorage.getItem('suivi_sport_profile') || '{}');
-    const sexFactor = (profile.sex || 'M') === 'F' ? 0.315 : 0.313;
-    const vmaStart = (vo2Start - 3.5) * sexFactor;
+    const vmaStart = vo2ToVmaCalibrated(vo2Start);
     const secsStart = estimateRaceTime(vmaStart, distKm, dplusM, isTrail);
     el('goals-vo2-start') && (el('goals-vo2-start').textContent = Math.round(vo2Start * 10) / 10);
     el('goals-time-start') && (el('goals-time-start').textContent = fmtSecsToTime(secsStart));
     el('goals-start-date') && (el('goals-start-date').textContent =
       '(' + new Date(weeks[0].weekDate).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' }) + ')');
+  } else {
+    el('goals-vo2-start') && (el('goals-vo2-start').textContent = '—');
+    el('goals-time-start') && (el('goals-time-start').textContent = '—');
+    el('goals-start-date') && (el('goals-start-date').textContent = '');
   }
 
   const gainPct = getRemainingVmaGainPct(weeksTotal, weeks);
   const vmaEnd = vma * (1 + gainPct);
-  const vo2maxEnd = parseFloat((vmaEnd * 1000 / 60 * 0.2 + 3.5).toFixed(1));
+  const vo2maxEnd = parseFloat(vmaToVo2Calibrated(vmaEnd).toFixed(1));
   const secsEnd = estimateRaceTime(vmaEnd, distKm, dplusM, isTrail);
   const delta = secsNow && secsEnd ? secsNow - secsEnd : null;
 
@@ -2067,11 +2116,9 @@ function renderObjectifsChart(weeks, goal, dplusM, distKmOverride) {
   // toujours cohérents entre eux (même valeur en fin de plan).
   const vmaEnd = vma * (1 + getRemainingVmaGainPct(weeksTotal, weeks));
 
-  // Conversion VO2max -> VMA (même formule sexuée que getVmaFromState, pour
-  // rester cohérent avec la VMA "actuelle" affichée dans le bloc Estimations)
-  const profile = JSON.parse(localStorage.getItem('suivi_sport_profile') || '{}');
-  const sexFactor = (profile.sex || 'M') === 'F' ? 0.315 : 0.313;
-  const vo2ToVma = (vo2) => (vo2 - 3.5) * sexFactor;
+  // Conversion VO2max -> VMA calibrée sur la VMA actuelle réelle (voir
+  // vo2ToVmaCalibrated), pour rester cohérent avec le bloc Estimations
+  const vo2ToVma = vo2ToVmaCalibrated;
 
   // Historique quotidien réel du VO2max (source Garmin), utilisé pour que la
   // portion "passée" de la courbe reflète les séances réellement effectuées
@@ -2155,6 +2202,30 @@ function renderObjectifsChart(weeks, goal, dplusM, distKmOverride) {
   });
 }
 
+/** Alerte d'assiduité pour une catégorie de séances (course/trail ou
+ *  renforcement) - séparées car elles n'ont pas le même enjeu : le
+ *  cardio fait progresser la VO2max/l'allure de course, le renforcement
+ *  prévient les blessures et améliore l'économie de course sans se voir
+ *  sur la VO2max. */
+function buildAssiduityAlert(bucket, kind) {
+  if (bucket.assiduity === null || (bucket.done + bucket.missed) < 3) return null;
+  if (kind === 'cardio') {
+    if (bucket.assiduity >= 90) return { cls: 'green', icon: '🟢', title: 'Excellente régularité course/trail',
+      msg: 'Vous êtes parfaitement dans les temps sur vos séances course/trail — ce sont elles qui font progresser votre VO2max, continuez ainsi !' };
+    if (bucket.assiduity >= 70) return { cls: 'yellow', icon: '🟡', title: 'Bonne assiduité course/trail',
+      msg: `${bucket.missed} séance(s) course/trail manquée(s) — ce sont elles qui font évoluer votre VO2max, essayez de rattraper les séances clés (fractionné, sortie longue).` };
+    return { cls: 'red', icon: '🔴', title: 'Assiduité course/trail insuffisante',
+      msg: 'Beaucoup de séances course/trail manquées — ce sont elles qui font progresser votre VO2max et votre allure de course, concentrez-vous en priorité sur les sorties longues.' };
+  }
+  // Renforcement : pas d'impact direct sur la VO2max, jamais d'alerte rouge alarmiste
+  if (bucket.assiduity >= 90) return { cls: 'green', icon: '🟢', title: 'Excellente régularité renforcement',
+    msg: 'Vous suivez bien vos séances de renforcement — ça ne se voit pas sur la VO2max, mais ça réduit le risque de blessure et améliore votre économie de course.' };
+  if (bucket.assiduity >= 70) return { cls: 'yellow', icon: '🟡', title: 'Bonne assiduité renforcement',
+    msg: `${bucket.missed} séance(s) de renforcement manquée(s) — moins prioritaire que les sorties course, mais utile pour la prévention des blessures.` };
+  return { cls: 'yellow', icon: '🟠', title: 'Renforcement à ne pas négliger',
+    msg: 'Peu de séances de renforcement faites — sans impact direct sur la VO2max, mais elles protègent contre les blessures à mesure que le volume de course augmente.' };
+}
+
 /** Alertes contextuelles (Bloc 5) */
 function renderGoalsAlerts(goal, weeks, stats) {
   const container = document.getElementById('goals-alerts-section');
@@ -2165,17 +2236,11 @@ function renderGoalsAlerts(goal, weeks, stats) {
   const daysLeft = compTs ? Math.ceil((compTs - Date.now()) / 86400000) : null;
   const alerts = [];
 
-  if (stats.assiduity !== null && (stats.done + stats.missed) >= 3) {
-    if (stats.assiduity >= 90)
-      alerts.push({ cls: 'green',  icon: '🟢', title: 'Excellente régularité',
-        msg: 'Vous êtes parfaitement dans les temps — continuez ainsi !' });
-    else if (stats.assiduity >= 70)
-      alerts.push({ cls: 'yellow', icon: '🟡', title: 'Bonne progression',
-        msg: `${stats.missed} séance(s) manquée(s) — pensez à rattraper les séances clés.` });
-    else
-      alerts.push({ cls: 'red',    icon: '🔴', title: 'Assiduité insuffisante',
-        msg: 'Beaucoup de séances manquées — concentrez-vous sur les sorties longues.' });
-  }
+  const cardioAlert = buildAssiduityAlert(stats.cardio, 'cardio');
+  if (cardioAlert) alerts.push(cardioAlert);
+  const strengthAlert = buildAssiduityAlert(stats.strength, 'strength');
+  if (strengthAlert) alerts.push(strengthAlert);
+
   if (daysLeft !== null) {
     if (daysLeft <= 0)
       alerts.push({ cls: 'blue', icon: '🏁', title: 'Le jour J est arrivé !',
@@ -2258,16 +2323,21 @@ function renderObjectifsBlocks(goal, weeks) {
     metaEl.innerHTML = items.map(t => `<span class="goals-race-meta-chip">${t}</span>`).join('');
   }
 
-  // Compteurs séances
+  // Compteurs séances, ventilés course/trail vs renforcement
   const stats = computeSessionStats(weeks);
-  el('goals-sess-done')      && (el('goals-sess-done').textContent = stats.done);
-  el('goals-sess-missed')    && (el('goals-sess-missed').textContent = stats.missed);
-  el('goals-sess-remaining') && (el('goals-sess-remaining').textContent = stats.remaining);
-  if (el('goals-assiduity')) {
-    el('goals-assiduity').textContent = stats.assiduity !== null ? stats.assiduity + '%' : '—';
-    el('goals-assiduity').style.color = stats.assiduity === null ? ''
-      : stats.assiduity >= 90 ? '#22c55e' : stats.assiduity >= 70 ? '#f59e0b' : '#ef4444';
-  }
+  const fillBucket = (suffix, bucket) => {
+    el('goals-sess-done-' + suffix)      && (el('goals-sess-done-' + suffix).textContent = bucket.done);
+    el('goals-sess-missed-' + suffix)    && (el('goals-sess-missed-' + suffix).textContent = bucket.missed);
+    el('goals-sess-remaining-' + suffix) && (el('goals-sess-remaining-' + suffix).textContent = bucket.remaining);
+    const aEl = el('goals-assiduity-' + suffix);
+    if (aEl) {
+      aEl.textContent = bucket.assiduity !== null ? bucket.assiduity + '%' : '—';
+      aEl.style.color = bucket.assiduity === null ? ''
+        : bucket.assiduity >= 90 ? '#22c55e' : bucket.assiduity >= 70 ? '#f59e0b' : '#ef4444';
+    }
+  };
+  fillBucket('cardio', stats.cardio);
+  fillBucket('ppg', stats.strength);
 
   // D+ input (trail uniquement)
   const dplusRow = el('goals-dplus-row');
