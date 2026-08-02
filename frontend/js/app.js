@@ -2501,6 +2501,14 @@ function showAdminNav(userEmail) {
   if (navAdmin && userEmail && userEmail.toLowerCase() === ADMIN_EMAIL.toLowerCase()) {
     navAdmin.style.display = 'flex';
   }
+  const btnExport = document.getElementById('btn-export-plan-xlsx');
+  if (btnExport && userEmail && userEmail.toLowerCase() === ADMIN_EMAIL.toLowerCase()) {
+    btnExport.style.display = 'inline-flex';
+  }
+}
+
+function exportPlanXlsx() {
+  window.location.href = `${API}/api/campus/export-plan-xlsx`;
 }
 
 async function loadAdminInfo() {

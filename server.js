@@ -50,6 +50,7 @@ const {
   buildGarminFunctions
 } = require('./garmin_client');
 const { getZoneRange, annotatePaceZones, ZONE_LABELS } = require('./zones');
+const { buildPlanWorkbook } = require('./xlsx_export');
 const {
   campusLogin,
   getActiveGoal,
@@ -132,6 +133,17 @@ function requireCampusToken(req, res, next) {
   const token = getCampusToken(req);
   if (!token) return res.status(401).json({ error: 'Non connect©   Campus Coach' });
   req.campusToken = token;
+  next();
+}
+
+// Meme constante que frontend/js/app.js (ADMIN_EMAIL) - export du plan
+// reserve au compte admin, seul a partager son plan a des amis externes
+const ADMIN_EMAIL = 'shiznogoud@gmail.com';
+function requireAdmin(req, res, next) {
+  const s = getSession(req);
+  if (!s || !s.email || s.email.toLowerCase() !== ADMIN_EMAIL.toLowerCase()) {
+    return res.status(403).json({ error: 'Reserve au compte admin' });
+  }
   next();
 }
 
@@ -1360,6 +1372,38 @@ app.get('/api/campus/export-plan', requireCampusToken, async (req, res) => {
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('Content-Disposition', 'attachment; filename=plan.aplus');
     res.json(exportData);
+  } catch(err) { handleError(res, err); }
+});
+
+// Export du plan actif en fichier Excel (.xlsx) presentable a des amis qui
+// n'utilisent pas Allure+ - reserve au compte admin. Reprend la meme logique
+// de resolution que /api/campus/training (plan importe prioritaire si pas
+// de token Campus, sinon plan Campus Coach en direct) pour fonctionner que
+// le plan actif soit importe ou reellement connecte a Campus Coach.
+app.get('/api/campus/export-plan-xlsx', requireAdmin, async (req, res) => {
+  try {
+    const token = getCampusToken(req);
+    const importedFile = path.join(__dirname, 'imported_plan.json');
+    let goal, weeks;
+
+    if (!token && fs.existsSync(importedFile)) {
+      const data = JSON.parse(fs.readFileSync(importedFile, 'utf8'));
+      goal = data.goal;
+      weeks = data.weeks;
+    } else if (token) {
+      goal = await getActiveGoal(token);
+      if (!goal?._id) return res.status(404).json({ error: 'Aucun plan actif trouve sur Campus Coach' });
+      weeks = await getFullTrainingPlan(token, goal._id);
+    } else {
+      return res.status(404).json({ error: 'Aucun plan actif', noPlan: true });
+    }
+
+    const workbook = await buildPlanWorkbook(goal, Array.isArray(weeks) ? weeks : []);
+    const safeName = (goal?.name || goal?.goalTitle || 'plan').replace(/[^a-zA-Z0-9-_]+/g, '_');
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="plan-${safeName}.xlsx"`);
+    await workbook.xlsx.write(res);
+    res.end();
   } catch(err) { handleError(res, err); }
 });
 
