@@ -3058,23 +3058,28 @@ body.plans-active {
 
 /* ── Sessions inline dans avancement du plan ─────────────────── */
 .goals-sessions-by-type {
-  display: flex; flex-direction: column; gap: 8px;
+  display: flex; flex-direction: column; gap: 5px;
   margin-top: 6px; padding-top: 6px;
   border-top: 1px solid var(--border-light);
 }
+.gsi-row {
+  display: flex; align-items: center; gap: 8px;
+}
 .gsi-row-label {
-  font-size: 0.68rem; font-weight: 700;
-  color: var(--text-muted); margin-bottom: 3px;
+  font-size: 0.66rem; font-weight: 700;
+  color: var(--text-muted); white-space: nowrap;
+  flex: 0 0 auto; width: 54px;
 }
 .goals-sessions-inline {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 6px;
+  flex: 1 1 auto;
 }
 .gsi-item {
   display: flex; flex-direction: row;
-  align-items: center; justify-content: center; gap: 5px;
-  padding: 6px 4px;
+  align-items: center; justify-content: center; gap: 4px;
+  padding: 4px 4px;
   border-radius: 8px;
   background: var(--bg-hover);
 }
