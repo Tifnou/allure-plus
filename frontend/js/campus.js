@@ -1900,6 +1900,45 @@ function vo2ValueAtDate(history, ts) {
   return last ? last.value : history[0].value;
 }
 
+/** Historique VO2max avec un point d'ancrage sur "aujourd'hui" (voir
+ *  vo2ValueAtDate) - partagé entre le bloc Estimations et la courbe pour
+ *  qu'ils restent toujours cohérents entre eux. */
+function buildAnchoredVo2History() {
+  const history = (typeof _vo2maxSeries !== 'undefined' ? _vo2maxSeries : [])
+    .filter(p => p && p.date && typeof p.value === 'number')
+    .map(p => ({ ts: new Date(p.date).getTime(), value: p.value }))
+    .sort((a, b) => a.ts - b.ts);
+  if (typeof _latestVO2Max !== 'undefined' && _latestVO2Max > 0) {
+    const nowTs = Date.now();
+    if (history.length === 0 || history[history.length - 1].ts < nowTs) {
+      history.push({ ts: nowTs, value: _latestVO2Max });
+    }
+  }
+  return history;
+}
+
+/** Exclut toute mesure antérieure au début du plan. Si le plan a été créé
+ *  puis réellement démarré plus tard (ex: 12 jours sans séance avant la
+ *  première sortie), la dernière valeur Garmin connue avant le début peut
+ *  dater d'avant cette pause et n'a plus rien à voir avec l'état réel au
+ *  démarrage du plan - il ne faut jamais remonter jusque-là. */
+function vo2HistorySincePlanStart(weeks, vo2History) {
+  if (!weeks || weeks.length === 0) return vo2History;
+  const planStartTs = weeks[0].weekDate;
+  return vo2History.filter(h => h.ts >= planStartTs);
+}
+
+/** VO2max estimé au "début de plan" : la valeur la plus proche disponible
+ *  depuis le démarrage réel du plan (voir vo2HistorySincePlanStart), jamais
+ *  une valeur d'avant. Utilise la même logique que la semaine 1 de la
+ *  courbe pour que les deux restent toujours cohérents entre eux. */
+function getStartVo2(weeks, vo2History) {
+  if (!weeks || weeks.length === 0) return null;
+  const sincePlan = vo2HistorySincePlanStart(weeks, vo2History);
+  const weekEndTs = weeks[0].weekDate + 7 * 86400000;
+  return vo2ValueAtDate(sincePlan, weekEndTs);
+}
+
 /** Distance en km depuis le goal (fallback planCategory.distLabel) */
 function getDistFromGoal(goal) {
   const d = goal.specificData || {};
@@ -1951,6 +1990,21 @@ function renderEstimations(goal, weeks, dplusM, distKmOverride) {
   if (vo2El) { vo2El.textContent = vo2max; vo2El.style.color = vo2Color; vo2El.style.fontWeight = '700'; }
   el('goals-time-current') && (el('goals-time-current').textContent = fmtSecsToTime(secsNow));
   el('goals-pace-current') && (el('goals-pace-current').textContent = isTrail ? '' : fmtPaceFromSecs(distKm, secsNow));
+
+  // Bloc "Début de plan" : VO2max/temps estimé à la fin de la semaine 1
+  // (voir getStartVo2), pour situer le point de départ réel du plan
+  const vo2History = buildAnchoredVo2History();
+  const vo2Start = getStartVo2(weeks, vo2History);
+  if (vo2Start != null && weeks.length > 0) {
+    const profile = JSON.parse(localStorage.getItem('suivi_sport_profile') || '{}');
+    const sexFactor = (profile.sex || 'M') === 'F' ? 0.315 : 0.313;
+    const vmaStart = (vo2Start - 3.5) * sexFactor;
+    const secsStart = estimateRaceTime(vmaStart, distKm, dplusM, isTrail);
+    el('goals-vo2-start') && (el('goals-vo2-start').textContent = Math.round(vo2Start * 10) / 10);
+    el('goals-time-start') && (el('goals-time-start').textContent = fmtSecsToTime(secsStart));
+    el('goals-start-date') && (el('goals-start-date').textContent =
+      '(' + new Date(weeks[0].weekDate).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' }) + ')');
+  }
 
   const gainPct = getRemainingVmaGainPct(weeksTotal, weeks);
   const vmaEnd = vma * (1 + gainPct);
@@ -2021,21 +2075,11 @@ function renderObjectifsChart(weeks, goal, dplusM, distKmOverride) {
 
   // Historique quotidien réel du VO2max (source Garmin), utilisé pour que la
   // portion "passée" de la courbe reflète les séances réellement effectuées
-  // au lieu d'une simple interpolation théorique
-  const vo2History = (typeof _vo2maxSeries !== 'undefined' ? _vo2maxSeries : [])
-    .filter(p => p && p.date && typeof p.value === 'number')
-    .map(p => ({ ts: new Date(p.date).getTime(), value: p.value }))
-    .sort((a, b) => a.ts - b.ts);
-  // Ancrer la fin de l'historique sur la valeur actuelle authentique (celle
-  // affichée sur Synthèse) : garantit que la moyenne ponderee converge
-  // exactement vers "aujourd'hui" pour la semaine en cours, au lieu de
-  // deriver a cause d'un dernier releve Garmin isole
-  if (typeof _latestVO2Max !== 'undefined' && _latestVO2Max > 0) {
-    const nowTs = Date.now();
-    if (vo2History.length === 0 || vo2History[vo2History.length - 1].ts < nowTs) {
-      vo2History.push({ ts: nowTs, value: _latestVO2Max });
-    }
-  }
+  // au lieu d'une simple interpolation théorique. On exclut tout ce qui est
+  // antérieur au début du plan (voir vo2HistorySincePlanStart) : sinon, un
+  // plan créé puis démarré plus tard (pause avant la 1ère séance) remonterait
+  // à tort jusqu'à une valeur d'avant cette pause.
+  const vo2History = vo2HistorySincePlanStart(weeks, buildAnchoredVo2History());
 
   // Temps cible (ligne horizontale verte)
   const saved = JSON.parse(localStorage.getItem('suivi_personal_goals') || '{}');
@@ -2050,7 +2094,8 @@ function renderObjectifsChart(weeks, goal, dplusM, distKmOverride) {
     labels.push('S' + w);
     if (w <= elapsedWeeks) {
       // Semaine passée : VMA réelle = dernière valeur VO2max connue à la fin
-      // de cette semaine (ce que Garmin affichait réellement à ce moment-là)
+      // de cette semaine (ce que Garmin affichait réellement à ce moment-là),
+      // jamais antérieure au début du plan (vo2History déjà filtré plus haut)
       const weekEndTs = weeks[w - 1] ? weeks[w - 1].weekDate + 7 * 86400000 : null;
       const vo2Week = weekEndTs != null ? vo2ValueAtDate(vo2History, weekEndTs) : null;
       if (vo2Week != null) {

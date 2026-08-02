@@ -1954,8 +1954,12 @@ body::before{
   padding: 10px 14px; border-radius: 9px;
   background: var(--bg-hover);
 }
+.goals-est-start { border-left: 3px solid var(--text-muted); }
 .goals-est-current { border-left: 3px solid var(--accent); }
 .goals-est-projected { border-left: 3px solid #f97316; }
+.goals-est-label #goals-start-date {
+  text-transform: none; font-weight: 500; letter-spacing: normal;
+}
 .goals-est-label {
   font-size: 10px; font-weight: 700;
   color: var(--text-muted); text-transform: uppercase;
