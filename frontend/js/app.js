@@ -1418,6 +1418,50 @@ async function loadSleepInto(canvasId) {
   } catch(e) { console.error('Sleep:', e); }
 }
 
+// ─── Bien-être (Synthèse) : FC, Body Battery, Pas, Sommeil ─────
+const SLEEP_QUALIFIER_FR = { POOR: 'Mauvais', FAIR: 'Passable', GOOD: 'Bon', EXCELLENT: 'Excellent' };
+
+async function loadWellnessRow() {
+  const set = (id, val) => { const e = el(id); if (e) e.textContent = val; };
+  try {
+    const [hrJson, stepsJson, sleepJson, bbJson] = await Promise.all([
+      fetch(`${API}/api/heartrate?days=7`).then(r => r.json()).catch(() => ({ data: [] })),
+      fetch(`${API}/api/steps?days=1`).then(r => r.json()).catch(() => ({ data: [] })),
+      fetch(`${API}/api/sleep?days=3`).then(r => r.json()).catch(() => ({ data: [] })),
+      fetch(`${API}/api/body-battery`).then(r => r.json()).catch(() => ({ data: null })),
+    ]);
+
+    const hrPoints = (hrJson.data || []).filter(d => d.data?.restingHeartRate > 0);
+    if (hrPoints.length > 0) {
+      const avg = Math.round(hrPoints.reduce((s, d) => s + d.data.restingHeartRate, 0) / hrPoints.length);
+      set('wellness-hr-value', hrPoints[hrPoints.length - 1].data.restingHeartRate);
+      set('wellness-hr-sub', `Moy. 7j : ${avg} bpm`);
+    }
+
+    const stepsPoints = (stepsJson.data || []).filter(d => typeof d.steps === 'number');
+    if (stepsPoints.length > 0) {
+      set('wellness-steps-value', stepsPoints[0].steps.toLocaleString('fr-FR'));
+    }
+
+    const sleepPoints = (sleepJson.data || []).filter(d => d.sleepScore);
+    if (sleepPoints.length > 0) {
+      const last = sleepPoints[sleepPoints.length - 1];
+      const h = Math.floor(last.sleepTimeSeconds / 3600);
+      const m = Math.round((last.sleepTimeSeconds % 3600) / 60);
+      set('wellness-sleep-value', last.sleepScore);
+      set('wellness-sleep-sub', `${SLEEP_QUALIFIER_FR[last.sleepScoreQualifier] || ''} · ${h}h${String(m).padStart(2, '0')}`);
+    }
+
+    if (bbJson.data) {
+      set('wellness-bb-value', bbJson.data.current);
+      set('wellness-bb-sub', `+${bbJson.data.charged} chargée · ${bbJson.data.drained} dépensée`);
+    } else {
+      const card = el('wellness-bb-card');
+      if (card) card.style.display = 'none';
+    }
+  } catch (e) { console.error('Bien-être:', e); }
+}
+
 // ─── Sports donut ──────────────────────────────
 let sportsChart = null;
 function renderSportsChart(breakdown) {
@@ -1669,7 +1713,7 @@ async function refreshAll() {
   if (btn) { btn.classList.add('spinning'); btn.disabled = true; }
   try {
     await fetch(`${API}/api/refresh`, { method: 'POST' });
-    await Promise.all([loadDashboard(), loadHeartRate(), loadSleep()]);
+    await Promise.all([loadDashboard(), loadHeartRate(), loadSleep(), loadWellnessRow()]);
     // Recharger les donnees admin si on est sur la page admin
     if (document.getElementById('page-admin')?.classList.contains('active')) {
       await Promise.all([loadAdminInfo(), loadAdminLogs()]);
@@ -2756,7 +2800,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (filterMonth) filterMonth.addEventListener('change', () => renderAllActivities(_allActivities, getCurrentSportFilter()));
   // Status + chargement initial
   await checkStatus();
-  await Promise.all([loadDashboard(), loadHeartRate(), loadSleep()]);
+  await Promise.all([loadDashboard(), loadHeartRate(), loadSleep(), loadWellnessRow()]);
 
   // Initialiser le sélecteur d'années complet (2010 → année courante)
   populateYearSelector();

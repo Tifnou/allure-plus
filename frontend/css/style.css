@@ -564,6 +564,18 @@ body::before{
 #page-profile .card-header{margin-bottom:10px;}
 #page-profile .card-title{font-size:12.5px;}
 
+/* ═══════════════════════════════════════════════
+   PAGE SYNTHÈSE — densité resserrée (n'affecte aucune autre page)
+═══════════════════════════════════════════════ */
+#page-dashboard .stat-card{padding:14px 16px;}
+#page-dashboard .stat-card-icon{margin-bottom:8px;}
+#page-dashboard .stat-value{font-size:28px;}
+#page-dashboard .card{padding:14px 16px;}
+#page-dashboard .card-header{margin-bottom:10px;}
+#page-dashboard .card-title{font-size:12.5px;}
+
+.profile-ind-icon{font-size:17px;margin-bottom:4px;display:block;}
+
 .profile-layout{display:grid;grid-template-columns:340px 1fr;gap:12px;align-items:start;}
 .profile-form-col{display:flex;flex-direction:column;gap:12px;}
 .profile-results-col{display:flex;flex-direction:column;gap:12px;}

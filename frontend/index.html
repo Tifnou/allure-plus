@@ -12,7 +12,7 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <link rel="stylesheet" href="css/style.css?v=1785744493663" />
+  <link rel="stylesheet" href="css/style.css?v=1785750471144" />
   <link rel="stylesheet" href="css/plans.css" />
 </head>
 <body>
@@ -342,6 +342,49 @@
           <span class="stat-tag" id="stat-vo2max-trend" style="display:none"></span>
         </div>
       </div>
+
+      <!-- Bien-être (données Garmin du jour) -->
+      <section class="card card--wide" id="section-wellness" style="margin-bottom:16px">
+        <div class="card-header">
+          <h2 class="card-title"><span class="card-title-icon">&#x1F4AA;</span> Bien-être</h2>
+        </div>
+        <div class="profile-indicators">
+          <div class="profile-ind-card">
+            <span class="profile-ind-icon">&#x2764;&#xFE0F;</span>
+            <div style="display:flex;align-items:baseline;gap:4px">
+              <div class="profile-ind-value" id="wellness-hr-value">--</div>
+              <div class="profile-ind-unit">bpm</div>
+            </div>
+            <div class="profile-ind-label">Fréquence cardiaque</div>
+            <div class="profile-ind-sub" id="wellness-hr-sub">Repos</div>
+          </div>
+          <div class="profile-ind-card" id="wellness-bb-card">
+            <span class="profile-ind-icon">&#x1F50B;</span>
+            <div style="display:flex;align-items:baseline;gap:4px">
+              <div class="profile-ind-value" id="wellness-bb-value">--</div>
+            </div>
+            <div class="profile-ind-label">Body Battery</div>
+            <div class="profile-ind-sub" id="wellness-bb-sub"></div>
+          </div>
+          <div class="profile-ind-card">
+            <span class="profile-ind-icon">&#x1F463;</span>
+            <div style="display:flex;align-items:baseline;gap:4px">
+              <div class="profile-ind-value" id="wellness-steps-value">--</div>
+              <div class="profile-ind-unit">pas</div>
+            </div>
+            <div class="profile-ind-label">Pas</div>
+            <div class="profile-ind-sub">Aujourd'hui</div>
+          </div>
+          <div class="profile-ind-card">
+            <span class="profile-ind-icon">&#x1F634;</span>
+            <div style="display:flex;align-items:baseline;gap:4px">
+              <div class="profile-ind-value" id="wellness-sleep-value">--</div>
+            </div>
+            <div class="profile-ind-label">Score de sommeil</div>
+            <div class="profile-ind-sub" id="wellness-sleep-sub"></div>
+          </div>
+        </div>
+      </section>
 
       <!-- Dernière sortie -->
       <section class="card card--wide" id="section-last-run" style="margin-bottom:16px">
@@ -964,7 +1007,7 @@
 
   </div><!-- /app-content -->
 
-  <script src="js/app.js?v=1785747399910"></script>
+  <script src="js/app.js?v=1785750471144"></script>
   <script src="js/campus.js?v=1785747399910"></script>
   <script src="js/plans.js"></script>
   <!-- ... MODAL LOGS ........................... -->

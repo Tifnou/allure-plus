@@ -616,6 +616,23 @@ app.get('/api/sleep', requireSession, async (req, res) => {
   } catch (err) { handleError(res, err); }
 });
 
+// Pas
+app.get('/api/steps', requireSession, async (req, res) => {
+  try {
+    const days = parseInt(req.query.days) || 7;
+    const data = await req.session.fns.getStepsData(days);
+    res.json({ data });
+  } catch (err) { handleError(res, err); }
+});
+
+// Body Battery
+app.get('/api/body-battery', requireSession, async (req, res) => {
+  try {
+    const data = await req.session.fns.getBodyBatteryData();
+    res.json({ data });
+  } catch (err) { handleError(res, err); }
+});
+
 // Profil Garmin
 app.get('/api/profile', requireSession, async (req, res) => {
   try {

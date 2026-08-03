@@ -201,6 +201,8 @@ async function getSleepData(days = 30) {
           deepSleepSeconds:  s.deepSleepSeconds  || 0,
           lightSleepSeconds: s.lightSleepSeconds || 0,
           remSleepSeconds:   s.remSleepSeconds   || 0,
+          sleepScore: (s.sleepScores && s.sleepScores.overall) ? s.sleepScores.overall.value : null,
+          sleepScoreQualifier: (s.sleepScores && s.sleepScores.overall) ? s.sleepScores.overall.qualifierKey : null,
         };
       } catch (e) {
         console.log(`💤 Sleep ${dateStr}: ${e.message?.slice(0,60) || 'vide'}`);
@@ -216,6 +218,60 @@ async function getSleepData(days = 30) {
 
     console.log(`💤 Sleep: ${results.length} nuits trouvées sur ${days} jours`);
     return results;
+  });
+}
+
+async function getStepsData(days = 7) {
+  return getCachedData(`steps_${days}`, async () => {
+    const gc = await getGarminClient();
+    const results = [];
+    const today = new Date();
+    for (let i = 0; i < days; i++) {
+      const d = new Date(today);
+      d.setDate(d.getDate() - i);
+      try {
+        const steps = await gc.getSteps(d);
+        if (typeof steps === 'number') {
+          results.push({ date: d.toISOString().split('T')[0], steps });
+        }
+      } catch (e) {}
+    }
+    return results;
+  });
+}
+
+// Body Battery : non expose par la lib garmin-connect. On reutilise
+// l'endpoint prive dailyStress (meme famille que le stress), qui renvoie
+// aussi bodyBatteryValuesArray : [timestampMs, status, level, version].
+// Charge/depense du jour = somme des deltas positifs/negatifs consecutifs
+// (verifie : reproduit exactement les valeurs affichees par Garmin Connect).
+async function getBodyBatteryData() {
+  return getCachedData('body_battery', async () => {
+    const gc = await getGarminClient();
+    const fmt = (d) => {
+      const pad = (n) => String(n).padStart(2, '0');
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    };
+    const today = fmt(new Date());
+    try {
+      const res = await gc.get(`https://connectapi.garmin.com/wellness-service/wellness/dailyStress/${today}`);
+      const arr = res && Array.isArray(res.bodyBatteryValuesArray) ? res.bodyBatteryValuesArray : [];
+      if (arr.length === 0) return null;
+      let charged = 0, drained = 0;
+      for (let i = 1; i < arr.length; i++) {
+        const diff = arr[i][2] - arr[i - 1][2];
+        if (diff > 0) charged += diff; else drained += diff;
+      }
+      return {
+        date: today,
+        current: arr[arr.length - 1][2],
+        charged,
+        drained,
+      };
+    } catch (e) {
+      console.log('Body Battery indisponible:', e.message);
+      return null;
+    }
   });
 }
 
@@ -515,6 +571,8 @@ function buildGarminFunctions(gc) {
             deepSleepSeconds:  s.deepSleepSeconds  || 0,
             lightSleepSeconds: s.lightSleepSeconds || 0,
             remSleepSeconds:   s.remSleepSeconds   || 0,
+            sleepScore: (s.sleepScores && s.sleepScores.overall) ? s.sleepScores.overall.value : null,
+            sleepScoreQualifier: (s.sleepScores && s.sleepScores.overall) ? s.sleepScores.overall.qualifierKey : null,
           };
         } catch(e) { return null; }
       });
@@ -527,9 +585,51 @@ function buildGarminFunctions(gc) {
     });
   }
 
+  async function getStepsData(days = 7) {
+    return cached(`steps_${days}`, async () => {
+      const results = [];
+      const today = new Date();
+      for (let i = 0; i < days; i++) {
+        const d = new Date(today);
+        d.setDate(d.getDate() - i);
+        try {
+          const steps = await gc.getSteps(d);
+          if (typeof steps === 'number') {
+            results.push({ date: d.toISOString().split('T')[0], steps });
+          }
+        } catch (e) {}
+      }
+      return results;
+    });
+  }
+
+  async function getBodyBatteryData() {
+    return cached('body_battery', async () => {
+      const fmt = (d) => {
+        const pad = (n) => String(n).padStart(2, '0');
+        return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+      };
+      const today = fmt(new Date());
+      try {
+        const res = await gc.get(`https://connectapi.garmin.com/wellness-service/wellness/dailyStress/${today}`);
+        const arr = res && Array.isArray(res.bodyBatteryValuesArray) ? res.bodyBatteryValuesArray : [];
+        if (arr.length === 0) return null;
+        let charged = 0, drained = 0;
+        for (let i = 1; i < arr.length; i++) {
+          const diff = arr[i][2] - arr[i - 1][2];
+          if (diff > 0) charged += diff; else drained += diff;
+        }
+        return { date: today, current: arr[arr.length - 1][2], charged, drained };
+      } catch (e) {
+        console.log('Body Battery indisponible:', e.message);
+        return null;
+      }
+    });
+  }
+
   function clearCache() { Object.keys(cache).forEach(k => delete cache[k]); }
 
-  return { getActivities, getActivitiesForYear, getUserProfile, getHeartRateData, getVO2MaxData, getVO2MaxHistory, getSleepData, clearCache };
+  return { getActivities, getActivitiesForYear, getUserProfile, getHeartRateData, getVO2MaxData, getVO2MaxHistory, getSleepData, getStepsData, getBodyBatteryData, clearCache };
 }
 
 module.exports = {
@@ -539,6 +639,8 @@ module.exports = {
   getVO2MaxData,
   getVO2MaxHistory,
   getSleepData,
+  getStepsData,
+  getBodyBatteryData,
   computeStats,
   getLastRunActivities,
   getPersonalRecords,
