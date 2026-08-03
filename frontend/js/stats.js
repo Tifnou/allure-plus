@@ -1,9 +1,10 @@
 /* ═══════════════════════════════════════════════
    PAGE STATISTIQUES
-   Agrégations annuelles, comparaison, régularité,
-   progression et cumuls — calculées côté client à
-   partir de _allActivities (même source que la page
-   Activités, même cache _fullyLoadedYears).
+   Une ligne par année (dépliable), filtres par type
+   d'activité (comme la page Activités), et une modale
+   de comparaison pour 2-3 années cochées.
+   Données depuis _allActivities / _fullyLoadedYears
+   (même cache que la page Activités).
 ═══════════════════════════════════════════════ */
 
 const STATS_SPORT_LABELS_FR = {
@@ -29,22 +30,37 @@ const STATS_WEEKDAYS_FR = ['Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi
 const EARTH_CIRCUMFERENCE_KM = 40075;
 const EVEREST_HEIGHT_M = 8849;
 
-let _statsMainYear = new Date().getFullYear();
+let _statsSportFilter = 'all';
+let _statsExpandedYear = null;
 let _statsCompareYears = new Set();
-let _statsDistance = '10km';
-let _statsInitialized = false;
+let _statsModalDistance = '10km';
 
-let statsComparisonChart = null;
-let statsMonthlyKmChart = null;
-let statsMonthlyDplusChart = null;
-let statsMonthlyVo2Chart = null;
-let statsSportChart = null;
-let statsWeekdayChart = null;
-let statsProgressionChart = null;
+let statsRowKmChart = null;
+let statsRowDplusChart = null;
+let statsRowVo2Chart = null;
+let statsRowSportChart = null;
+let statsRowWeekdayChart = null;
+let statsModalComparisonChart = null;
+let statsModalProgressionChart = null;
 
-// ─── Chargement à la demande d'une année (même logique que le filtre
-// Activités : fetch /api/activities/year/:year, merge dans _allActivities,
-// marque l'année comme complète dans _fullyLoadedYears) ─────────────────
+// ─── Filtre par type d'activité (même logique que renderAllActivities) ──
+function statsSportMatch(activityType, filter) {
+  if (filter === 'all') return true;
+  const t = (activityType || '').toLowerCase();
+  if (filter === 'running') return t === 'running' || t === 'treadmill_running' || (t.includes('run') && !t.includes('trail'));
+  if (filter === 'trail')   return t.includes('trail');
+  if (filter === 'cycling') return t === 'cycling' || t.includes('cycl') || t.includes('bike');
+  if (filter === 'cardio')  return t.includes('cardio') || t.includes('fitness') || t.includes('indoor') || t.includes('strength') || t.includes('hiit') || t.includes('muscul');
+  if (filter === 'walking') return t.includes('walk') || t === 'walking';
+  return true;
+}
+
+function isRunOrTrail(a) {
+  const t = (a.activityType || '').toLowerCase();
+  return t.includes('running') || t.includes('trail');
+}
+
+// ─── Chargement à la demande d'une année ────────────────────────────────
 async function ensureYearLoaded(year) {
   if (_fullyLoadedYears.has(year)) return;
   const resp = await fetch(`${API}/api/activities/year/${year}`);
@@ -57,34 +73,30 @@ async function ensureYearLoaded(year) {
   _fullyLoadedYears.add(year);
 }
 
-function getActivitiesForYearLocal(year) {
+function getActivitiesForYearLocal(year, filter) {
   return _allActivities.filter(a => {
     const d = new Date(a.date || a.startTimeLocal || a.startTimeGMT || '');
-    return !isNaN(d) && d.getFullYear() === year;
+    return !isNaN(d) && d.getFullYear() === year && statsSportMatch(a.activityType, filter);
   });
 }
 
-function isRunOrTrail(a) {
-  const t = (a.activityType || '').toLowerCase();
-  return t.includes('running') || t.includes('trail');
-}
-
 function startOfWeekMonday(d) {
-  const day = (d.getDay() + 6) % 7; // 0 = Lundi
+  const day = (d.getDay() + 6) % 7;
   const monday = new Date(d);
   monday.setHours(0,0,0,0);
   monday.setDate(d.getDate() - day);
   return monday;
 }
 
-// ─── Agrégation pure d'une année d'activités ───────────────────────────
+// ─── Agrégation pure d'une année d'activités (déjà filtrées) ────────────
 function computeYearStats(activities, year) {
-  const totals = { km: 0, kmRun: 0, activities: activities.length, hours: 0, calories: 0, elevation: 0 };
+  const totals = { km: 0, kmRun: 0, activities: activities.length, hours: 0, calories: 0, elevation: 0, vo2maxAvg: null };
   const sportBreakdown = {};
   const monthly = Array.from({length:12}, (_,i) => ({ month:i, km:0, elevation:0, count:0, vo2max:null, _lastVo2Date:null }));
   const byWeekday = Array.from({length:7}, (_,i) => ({ day:i, count:0, km:0 }));
   const activeDaySet = new Set();
   const weekKm = {};
+  let vo2Sum = 0, vo2Count = 0;
 
   activities.forEach(a => {
     const km = (a.distanceKm || 0);
@@ -96,6 +108,7 @@ function computeYearStats(activities, year) {
     totals.hours += (a.durationSec || 0) / 3600;
     totals.calories += a.calories || 0;
     totals.elevation += a.elevationGain || 0;
+    if (a.vO2MaxValue > 0) { vo2Sum += a.vO2MaxValue; vo2Count++; }
 
     const type = a.activityType || 'other';
     if (!sportBreakdown[type]) sportBreakdown[type] = { count:0, km:0, hours:0, elevation:0 };
@@ -123,8 +136,8 @@ function computeYearStats(activities, year) {
     weekKm[weekKey] = (weekKm[weekKey] || 0) + km;
   });
   monthly.forEach(m => delete m._lastVo2Date);
+  totals.vo2maxAvg = vo2Count > 0 ? Math.round((vo2Sum / vo2Count) * 10) / 10 : null;
 
-  // Régularité : plus longue série de jours consécutifs actifs dans l'année
   const now = new Date();
   const isCurrentYear = year === now.getFullYear();
   const yearEnd = isCurrentYear ? now : new Date(year, 11, 31);
@@ -139,187 +152,362 @@ function computeYearStats(activities, year) {
   const activePct = dayCount > 0 ? Math.round((activeDaySet.size / dayCount) * 100) : 0;
   const avgWeeklyKm = dayCount > 0 ? (totals.km / (dayCount / 7)) : 0;
 
-  // Pics : semaine et mois avec le plus de km
-  let bestWeek = null;
-  Object.entries(weekKm).forEach(([wk, km]) => {
-    if (!bestWeek || km > bestWeek.km) bestWeek = { weekStart: wk, km };
-  });
   let bestMonth = null;
   monthly.forEach(m => { if (!bestMonth || m.km > bestMonth.km) bestMonth = m; });
 
   return {
     year, totals, sportBreakdown, monthly, byWeekday,
     consistency: { activeDays: activeDaySet.size, dayCount, activePct, longestStreak, avgWeeklyKm },
-    peaks: { bestWeek, bestMonth },
+    peaks: { bestMonth },
   };
 }
 
-// ─── Point d'entrée (routeur) ──────────────────────────────────────────
+// ─── Point d'entrée (routeur) ────────────────────────────────────────────
+let _statsPageInitialized = false;
+
 async function renderStatsPage() {
-  populateStatsYearSelector();
-  const yearSel = el('stats-year');
-  if (yearSel && yearSel.value) _statsMainYear = parseInt(yearSel.value);
-
-  try {
-    await ensureYearLoaded(_statsMainYear);
-  } catch (e) {
-    if (typeof showToast === 'function') showToast('Erreur de chargement : ' + e.message, 'error');
-  }
-  await refreshStatsView();
-
-  if (!_statsInitialized) {
-    _statsInitialized = true;
-    if (yearSel) yearSel.addEventListener('change', async () => {
-      _statsMainYear = parseInt(yearSel.value);
-      if (typeof showToast === 'function') showToast('⏳ Chargement de ' + _statsMainYear + '…', 'loading', 0);
-      try { await ensureYearLoaded(_statsMainYear); } catch (e) {}
-      const lt = document.getElementById('app-toast-loading');
-      if (lt) { lt.style.opacity = '0'; setTimeout(() => lt.remove(), 300); }
-      populateStatsYearSelector();
-      await refreshStatsView();
+  if (!_statsPageInitialized) {
+    _statsPageInitialized = true;
+    document.querySelectorAll('#stats-filters .filter-pill').forEach(pill => {
+      pill.addEventListener('click', async () => {
+        document.querySelectorAll('#stats-filters .filter-pill').forEach(p => p.classList.remove('active'));
+        pill.classList.add('active');
+        _statsSportFilter = pill.dataset.filter;
+        await renderStatsYearsList();
+      });
     });
+    const compareBtn = el('stats-compare-btn');
+    if (compareBtn) compareBtn.addEventListener('click', () => openStatsCompareModal());
   }
+  try { await ensureYearLoaded(new Date().getFullYear()); } catch (e) {}
+  await renderStatsYearsList();
 }
 
-async function refreshStatsView() {
-  const activities = getActivitiesForYearLocal(_statsMainYear);
-  const stats = computeYearStats(activities, _statsMainYear);
-
-  renderStatsKpis(stats);
-  renderStatsCompareChips();
-  await renderStatsComparison();
-  renderStatsMonthlyCharts(stats);
-  renderStatsSportDonut(stats);
-  renderStatsConsistency(stats);
-  renderStatsDistancePills();
-  await renderStatsProgression();
-  renderStatsFunFacts();
-}
-
-// ─── Sélecteur d'année principal ───────────────────────────────────────
-function populateStatsYearSelector() {
-  const yearSel = el('stats-year');
-  if (!yearSel) return;
-  const prevVal = yearSel.value || String(_statsMainYear);
-  yearSel.innerHTML = '';
-
+function getStatsYearRange() {
   let earliest = new Date().getFullYear();
   _allActivities.forEach(a => {
     const d = new Date(a.date || a.startTimeLocal || a.startTimeGMT || '');
     if (!isNaN(d) && d.getFullYear() < earliest) earliest = d.getFullYear();
   });
   earliest = Math.min(earliest, 2010);
-
   const currentYear = new Date().getFullYear();
-  for (let y = currentYear; y >= earliest; y--) {
-    const opt = document.createElement('option');
-    opt.value = String(y);
-    opt.textContent = String(y);
-    yearSel.appendChild(opt);
-  }
-  if (yearSel.querySelector(`option[value="${prevVal}"]`)) yearSel.value = prevVal;
-  else yearSel.value = String(currentYear);
+  const years = [];
+  for (let y = currentYear; y >= earliest; y--) years.push(y);
+  return years;
 }
 
-// ─── KPIs de l'année principale ─────────────────────────────────────────
-function renderStatsKpis(stats) {
-  const el2 = el('stats-kpis');
-  if (!el2) return;
-  const t = stats.totals;
-  el2.innerHTML = `
-    <div class="stat-card">
-      <span class="stat-card-icon">&#x1F3C3;</span>
-      <div class="stat-value">${t.km.toFixed(1)}</div>
-      <div class="stat-label">Kilomètres</div>
-      <div class="stat-sub">dont ${t.kmRun.toFixed(1)} km en course</div>
-    </div>
-    <div class="stat-card">
-      <span class="stat-card-icon">&#x26A1;</span>
-      <div class="stat-value">${t.activities}</div>
-      <div class="stat-label">Activités</div>
-      <div class="stat-sub">${t.hours.toFixed(1)}h d'entraînement</div>
-    </div>
-    <div class="stat-card">
-      <span class="stat-card-icon">&#x26F0;&#xFE0F;</span>
-      <div class="stat-value">${Math.round(t.elevation).toLocaleString('fr-FR')}</div>
-      <div class="stat-label">D+ (m)</div>
-    </div>
-    <div class="stat-card">
-      <span class="stat-card-icon">&#x1F525;</span>
-      <div class="stat-value">${Math.round(t.calories).toLocaleString('fr-FR')}</div>
-      <div class="stat-label">Calories</div>
+// ─── Liste des lignes par année ──────────────────────────────────────────
+async function renderStatsYearsList() {
+  const container = el('stats-years-list');
+  if (!container) return;
+  const years = getStatsYearRange();
+
+  container.innerHTML = years.map(y => {
+    const loaded = _fullyLoadedYears.has(y);
+    const checked = _statsCompareYears.has(y) ? 'checked' : '';
+    const expanded = _statsExpandedYear === y;
+    let cells;
+    if (loaded) {
+      const s = computeYearStats(getActivitiesForYearLocal(y, _statsSportFilter), y);
+      cells = `
+        <div class="stats-year-cell">${s.totals.activities}<span>activités</span></div>
+        <div class="stats-year-cell">${s.totals.km.toFixed(1)}<span>km</span></div>
+        <div class="stats-year-cell">${Math.round(s.totals.elevation).toLocaleString('fr-FR')}<span>D+ (m)</span></div>
+        <div class="stats-year-cell">${s.totals.vo2maxAvg ?? '—'}<span>VO&#x2082;max moy.</span></div>
+        <div class="stats-year-cell">${Math.round(s.totals.calories).toLocaleString('fr-FR')}<span>calories</span></div>
+      `;
+    } else {
+      cells = `<div class="stats-year-cell stats-year-cell--loading" style="grid-column:span 5">Cliquez pour charger…</div>`;
+    }
+    return `
+      <div class="stats-year-row ${expanded ? 'stats-year-row--expanded' : ''}" data-year="${y}">
+        <div class="stats-year-row-header" data-year="${y}">
+          <label class="stats-year-checkbox" onclick="event.stopPropagation()">
+            <input type="checkbox" data-year="${y}" ${checked}>
+          </label>
+          <div class="stats-year-cell stats-year-cell--year">${y}</div>
+          ${cells}
+          <div class="stats-year-chevron">&#x25BC;</div>
+        </div>
+        <div class="stats-year-row-detail" data-year="${y}" style="display:${expanded ? '' : 'none'}"></div>
+      </div>
+    `;
+  }).join('');
+
+  container.querySelectorAll('.stats-year-row-header').forEach(header => {
+    header.addEventListener('click', () => toggleStatsYearRow(parseInt(header.dataset.year)));
+  });
+  container.querySelectorAll('.stats-year-checkbox input').forEach(cb => {
+    cb.addEventListener('change', () => toggleStatsCompareYear(parseInt(cb.dataset.year), cb));
+  });
+
+  if (_statsExpandedYear !== null && years.includes(_statsExpandedYear)) {
+    await renderStatsRowDetail(_statsExpandedYear);
+  }
+}
+
+async function toggleStatsYearRow(year) {
+  if (_statsExpandedYear === year) {
+    _statsExpandedYear = null;
+    await renderStatsYearsList();
+    return;
+  }
+  const row = document.querySelector(`.stats-year-row[data-year="${year}"]`);
+  const detail = document.querySelector(`.stats-year-row-detail[data-year="${year}"]`);
+  if (!_fullyLoadedYears.has(year)) {
+    if (detail) detail.innerHTML = `<div class="table-loading">Chargement de ${year}…</div>`;
+    if (detail) detail.style.display = '';
+    try { await ensureYearLoaded(year); } catch (e) {
+      if (typeof showToast === 'function') showToast('Erreur de chargement : ' + e.message, 'error');
+      return;
+    }
+  }
+  _statsExpandedYear = year;
+  await renderStatsYearsList();
+}
+
+async function toggleStatsCompareYear(year, checkbox) {
+  let didFetch = false;
+  if (checkbox.checked) {
+    if (_statsCompareYears.size >= 3) {
+      checkbox.checked = false;
+      if (typeof showToast === 'function') showToast('Maximum 3 années à comparer', 'info');
+      return;
+    }
+    if (!_fullyLoadedYears.has(year)) {
+      didFetch = true;
+      try {
+        if (typeof showToast === 'function') showToast('⏳ Chargement de ' + year + '…', 'loading', 0);
+        await ensureYearLoaded(year);
+        const lt = document.getElementById('app-toast-loading');
+        if (lt) { lt.style.opacity = '0'; setTimeout(() => lt.remove(), 300); }
+      } catch (e) { checkbox.checked = false; return; }
+    }
+    _statsCompareYears.add(year);
+  } else {
+    _statsCompareYears.delete(year);
+  }
+  renderStatsCompareBar();
+  if (didFetch) await renderStatsYearsList();
+}
+
+function renderStatsCompareBar() {
+  const bar = el('stats-compare-bar');
+  const chips = el('stats-compare-bar-chips');
+  const btn = el('stats-compare-btn');
+  if (!bar) return;
+  if (_statsCompareYears.size === 0) { bar.style.display = 'none'; return; }
+  bar.style.display = '';
+  const years = Array.from(_statsCompareYears).sort((a,b) => a - b);
+  if (chips) {
+    chips.innerHTML = years.map(y => `
+      <span class="stats-remove-chip">${y}<button type="button" data-year="${y}" aria-label="Retirer ${y}">&times;</button></span>
+    `).join('');
+    chips.querySelectorAll('button').forEach(b => b.addEventListener('click', async () => {
+      const y = parseInt(b.dataset.year);
+      _statsCompareYears.delete(y);
+      renderStatsCompareBar();
+      await renderStatsYearsList();
+      if (isStatsModalOpen()) renderStatsCompareModalContent();
+    }));
+  }
+  if (btn) btn.disabled = years.length < 2;
+}
+
+// ─── Détail (tuiles) d'une ligne dépliée ────────────────────────────────
+async function renderStatsRowDetail(year) {
+  const detail = document.querySelector(`.stats-year-row-detail[data-year="${year}"]`);
+  if (!detail) return;
+  const stats = computeYearStats(getActivitiesForYearLocal(year, _statsSportFilter), year);
+  const showSportTile = _statsSportFilter === 'all';
+
+  detail.innerHTML = `
+    <div class="stats-tile-grid">
+      <div class="stats-tile">
+        <div class="stats-tile-title">&#x1F4C8; Km par mois</div>
+        <div class="chart-container"><canvas id="stats-row-km-chart"></canvas></div>
+      </div>
+      <div class="stats-tile">
+        <div class="stats-tile-title">&#x26F0;&#xFE0F; D+ par mois</div>
+        <div class="chart-container"><canvas id="stats-row-dplus-chart"></canvas></div>
+      </div>
+      <div class="stats-tile">
+        <div class="stats-tile-title">&#x1FAC1; VO&#x2082;max par mois</div>
+        <div class="chart-container"><canvas id="stats-row-vo2-chart"></canvas></div>
+      </div>
+      ${showSportTile ? `
+      <div class="stats-tile">
+        <div class="stats-tile-title">&#x1F3AF; Répartition par sport</div>
+        <div class="chart-container"><canvas id="stats-row-sport-chart"></canvas></div>
+        <div class="sports-legend" id="stats-row-sport-legend" style="margin-top:6px"></div>
+      </div>` : ''}
+      <div class="stats-tile stats-tile--consistency">
+        <div class="stats-tile-title">&#x1F5D3;&#xFE0F; Régularité</div>
+        <div class="stats-tile-mini-stat"><span>Plus longue série</span><b>${stats.consistency.longestStreak} j</b></div>
+        <div class="stats-tile-mini-stat"><span>Jours actifs</span><b>${stats.consistency.activePct}%</b></div>
+        <div class="stats-tile-mini-stat"><span>Km / semaine</span><b>${stats.consistency.avgWeeklyKm.toFixed(1)}</b></div>
+        <div class="stats-tile-mini-stat"><span>Meilleur mois</span><b>${stats.peaks.bestMonth ? STATS_MONTHS_FR[stats.peaks.bestMonth.month] : '—'}</b></div>
+      </div>
+      <div class="stats-tile">
+        <div class="stats-tile-title">&#x1F4C5; Par jour de semaine</div>
+        <div class="chart-container"><canvas id="stats-row-weekday-chart"></canvas></div>
+      </div>
     </div>
   `;
+
+  const labels = STATS_MONTHS_FR;
+  if (statsRowKmChart) { statsRowKmChart.destroy(); statsRowKmChart = null; }
+  const kmCanvas = el('stats-row-km-chart');
+  if (kmCanvas) statsRowKmChart = new Chart(kmCanvas.getContext('2d'), {
+    type: 'bar',
+    data: { labels, datasets: [{ data: stats.monthly.map(m => Math.round(m.km*10)/10), backgroundColor:'rgba(37,99,235,0.65)', borderRadius:3 }] },
+    options: statsTileChartOptions(),
+  });
+
+  if (statsRowDplusChart) { statsRowDplusChart.destroy(); statsRowDplusChart = null; }
+  const dplusCanvas = el('stats-row-dplus-chart');
+  if (dplusCanvas) statsRowDplusChart = new Chart(dplusCanvas.getContext('2d'), {
+    type: 'bar',
+    data: { labels, datasets: [{ data: stats.monthly.map(m => Math.round(m.elevation)), backgroundColor:'rgba(217,119,6,0.65)', borderRadius:3 }] },
+    options: statsTileChartOptions(),
+  });
+
+  if (statsRowVo2Chart) { statsRowVo2Chart.destroy(); statsRowVo2Chart = null; }
+  const vo2Canvas = el('stats-row-vo2-chart');
+  if (vo2Canvas) statsRowVo2Chart = new Chart(vo2Canvas.getContext('2d'), {
+    type: 'line',
+    data: { labels, datasets: [{ data: stats.monthly.map(m => m.vo2max), borderColor:'#7C3AED', backgroundColor:'rgba(124,58,237,0.07)',
+      borderWidth:2, pointRadius:2, tension:0.4, fill:true, spanGaps:true }] },
+    options: statsTileChartOptions(),
+  });
+
+  if (statsRowWeekdayChart) { statsRowWeekdayChart.destroy(); statsRowWeekdayChart = null; }
+  const wdCanvas = el('stats-row-weekday-chart');
+  if (wdCanvas) statsRowWeekdayChart = new Chart(wdCanvas.getContext('2d'), {
+    type: 'bar',
+    data: { labels: ['L','M','M','J','V','S','D'], datasets: [{ data: stats.byWeekday.map(d => Math.round(d.km*10)/10), backgroundColor:'rgba(22,163,74,0.65)', borderRadius:3 }] },
+    options: statsTileChartOptions(),
+  });
+
+  if (statsRowSportChart) { statsRowSportChart.destroy(); statsRowSportChart = null; }
+  if (showSportTile) {
+    const sportCanvas = el('stats-row-sport-chart');
+    const legend = el('stats-row-sport-legend');
+    const entries = Object.entries(stats.sportBreakdown).filter(([,v]) => v.count > 0).sort((a,b) => b[1].km - a[1].km);
+    if (sportCanvas && entries.length > 0) {
+      const sportLabels = entries.map(([k]) => STATS_SPORT_LABELS_FR[k] || k.replace(/_/g,' '));
+      statsRowSportChart = new Chart(sportCanvas.getContext('2d'), {
+        type: 'doughnut',
+        data: { labels: sportLabels, datasets: [{ data: entries.map(([,v]) => v.count), backgroundColor: STATS_SPORT_COLORS, borderWidth:0, hoverOffset:4 }] },
+        options: { responsive:true, maintainAspectRatio:false, cutout:'65%',
+          plugins:{ legend:{display:false}, tooltip:{backgroundColor:'#111', titleColor:'#fff', bodyColor:'#ADADAD', padding:8, cornerRadius:8, displayColors:true } } },
+      });
+      if (legend) legend.innerHTML = entries.map(([, v], i) => `
+        <div class="legend-item"><div class="legend-dot" style="background:${STATS_SPORT_COLORS[i % STATS_SPORT_COLORS.length]}"></div><span>${sportLabels[i]} — ${v.count}</span></div>
+      `).join('');
+    }
+  }
 }
 
-// ─── Chips de comparaison ───────────────────────────────────────────────
-function renderStatsCompareChips() {
-  const wrap = el('stats-compare-chips');
-  if (!wrap) return;
-  const currentYear = new Date().getFullYear();
-  let earliest = currentYear;
-  _allActivities.forEach(a => {
-    const d = new Date(a.date || a.startTimeLocal || '');
-    if (!isNaN(d) && d.getFullYear() < earliest) earliest = d.getFullYear();
-  });
-  earliest = Math.min(earliest, 2010);
-
-  const years = [];
-  for (let y = currentYear; y >= earliest; y--) if (y !== _statsMainYear) years.push(y);
-
-  wrap.innerHTML = years.map(y => `
-    <button type="button" class="stats-chip ${_statsCompareYears.has(y) ? 'stats-chip--active' : ''}" data-year="${y}">
-      ${y}
-    </button>
-  `).join('');
-
-  wrap.querySelectorAll('.stats-chip').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      const y = parseInt(btn.dataset.year);
-      if (_statsCompareYears.has(y)) {
-        _statsCompareYears.delete(y);
-      } else {
-        if (_statsCompareYears.size >= 2) { if (typeof showToast === 'function') showToast('Maximum 2 années de comparaison', 'info'); return; }
-        _statsCompareYears.add(y);
-        try { await ensureYearLoaded(y); } catch (e) {}
-        await renderStatsProgression();
-        renderStatsFunFacts();
-      }
-      renderStatsCompareChips();
-      await renderStatsComparison();
-    });
-  });
+function statsTileChartOptions() {
+  const base = chartOptions();
+  return { ...base,
+    plugins: { ...base.plugins, legend: { display:false } },
+    scales: { x: { ...base.scales.x, ticks: { ...base.scales.x.ticks, font: { size: 9 } } },
+              y: { ...base.scales.y, ticks: { ...base.scales.y.ticks, font: { size: 9 } } } },
+  };
 }
 
-// ─── Comparaison entre années ────────────────────────────────────────────
-async function renderStatsComparison() {
-  const section = el('stats-comparison-section');
-  if (!section) return;
-  if (_statsCompareYears.size === 0) { section.style.display = 'none'; return; }
-  section.style.display = '';
+// ─── Modale de comparaison ───────────────────────────────────────────────
+function isStatsModalOpen() { return !!document.getElementById('stats-compare-modal'); }
 
-  const years = [_statsMainYear, ..._statsCompareYears].sort((a,b) => a - b);
-  const statsPerYear = years.map(y => computeYearStats(getActivitiesForYearLocal(y), y));
+function openStatsCompareModal() {
+  if (_statsCompareYears.size < 2) return;
+  if (isStatsModalOpen()) return;
+  const backdrop = document.createElement('div');
+  backdrop.className = 'stats-modal-backdrop';
+  backdrop.id = 'stats-compare-modal';
+  backdrop.innerHTML = `
+    <div class="stats-modal" onclick="event.stopPropagation()">
+      <div class="stats-modal-header">
+        <h2>Comparaison entre années</h2>
+        <button class="stats-modal-close" id="stats-modal-close-btn">&times;</button>
+      </div>
+      <div class="stats-modal-chips" id="stats-modal-chips"></div>
+      <div id="stats-modal-content"></div>
+    </div>
+  `;
+  document.body.appendChild(backdrop);
+  backdrop.addEventListener('click', closeStatsCompareModal);
+  document.getElementById('stats-modal-close-btn').addEventListener('click', closeStatsCompareModal);
+  renderStatsCompareModalContent();
+}
 
-  const table = el('stats-comparison-table');
+function closeStatsCompareModal() {
+  if (statsModalComparisonChart) { statsModalComparisonChart.destroy(); statsModalComparisonChart = null; }
+  if (statsModalProgressionChart) { statsModalProgressionChart.destroy(); statsModalProgressionChart = null; }
+  const modal = document.getElementById('stats-compare-modal');
+  if (modal) modal.remove();
+}
+
+function renderStatsCompareModalContent() {
+  if (_statsCompareYears.size < 2) { closeStatsCompareModal(); return; }
+  const years = Array.from(_statsCompareYears).sort((a,b) => a - b);
+
+  const chips = document.getElementById('stats-modal-chips');
+  if (chips) {
+    chips.innerHTML = years.map(y => `
+      <span class="stats-remove-chip">${y}<button type="button" data-year="${y}" aria-label="Retirer ${y}">&times;</button></span>
+    `).join('');
+    chips.querySelectorAll('button').forEach(b => b.addEventListener('click', async () => {
+      const y = parseInt(b.dataset.year);
+      _statsCompareYears.delete(y);
+      renderStatsCompareBar();
+      await renderStatsYearsList();
+      renderStatsCompareModalContent();
+    }));
+  }
+
+  const content = document.getElementById('stats-modal-content');
+  if (!content) return;
+  if (years.length < 2) { closeStatsCompareModal(); return; }
+
+  const statsPerYear = years.map(y => computeYearStats(getActivitiesForYearLocal(y, _statsSportFilter), y));
+
+  content.innerHTML = `
+    <div class="stats-modal-section">
+      <div class="stats-modal-section-title">Vue d'ensemble</div>
+      <div class="stats-compare-table" id="stats-modal-table"></div>
+      <div class="chart-container" style="height:220px;margin-top:12px"><canvas id="stats-modal-comparison-chart"></canvas></div>
+    </div>
+    <div class="stats-modal-section">
+      <div class="stats-modal-section-title">Progression de l'allure</div>
+      <div class="stats-distance-pills" id="stats-modal-distance-pills"></div>
+      <div class="chart-container" style="height:220px;margin-top:12px"><canvas id="stats-modal-progression-chart"></canvas></div>
+      <div class="stats-note" id="stats-modal-progression-note"></div>
+    </div>
+    <div class="stats-modal-section">
+      <div class="stats-modal-section-title">Cumul sur ces années</div>
+      <div class="stats-funfacts-grid" id="stats-modal-funfacts"></div>
+    </div>
+  `;
+
+  const table = document.getElementById('stats-modal-table');
   if (table) {
     table.innerHTML = `
-      <div class="stats-compare-table">
-        <div class="stats-compare-row stats-compare-row--head">
-          <div></div>${years.map(y => `<div>${y}</div>`).join('')}
-        </div>
-        <div class="stats-compare-row"><div>Km</div>${statsPerYear.map(s => `<div>${s.totals.km.toFixed(1)}</div>`).join('')}</div>
-        <div class="stats-compare-row"><div>D+ (m)</div>${statsPerYear.map(s => `<div>${Math.round(s.totals.elevation).toLocaleString('fr-FR')}</div>`).join('')}</div>
-        <div class="stats-compare-row"><div>Activités</div>${statsPerYear.map(s => `<div>${s.totals.activities}</div>`).join('')}</div>
-        <div class="stats-compare-row"><div>Heures</div>${statsPerYear.map(s => `<div>${s.totals.hours.toFixed(1)}</div>`).join('')}</div>
-      </div>
+      <div class="stats-compare-row stats-compare-row--head"><div></div>${years.map(y => `<div>${y}</div>`).join('')}</div>
+      <div class="stats-compare-row"><div>Km</div>${statsPerYear.map(s => `<div>${s.totals.km.toFixed(1)}</div>`).join('')}</div>
+      <div class="stats-compare-row"><div>D+ (m)</div>${statsPerYear.map(s => `<div>${Math.round(s.totals.elevation).toLocaleString('fr-FR')}</div>`).join('')}</div>
+      <div class="stats-compare-row"><div>Activités</div>${statsPerYear.map(s => `<div>${s.totals.activities}</div>`).join('')}</div>
+      <div class="stats-compare-row"><div>Heures</div>${statsPerYear.map(s => `<div>${s.totals.hours.toFixed(1)}</div>`).join('')}</div>
+      <div class="stats-compare-row"><div>VO&#x2082;max moy.</div>${statsPerYear.map(s => `<div>${s.totals.vo2maxAvg ?? '—'}</div>`).join('')}</div>
     `;
   }
 
-  const canvas = el('stats-comparison-chart');
-  if (canvas) {
-    if (statsComparisonChart) statsComparisonChart.destroy();
-    statsComparisonChart = new Chart(canvas.getContext('2d'), {
+  if (statsModalComparisonChart) { statsModalComparisonChart.destroy(); statsModalComparisonChart = null; }
+  const compCanvas = document.getElementById('stats-modal-comparison-chart');
+  if (compCanvas) {
+    statsModalComparisonChart = new Chart(compCanvas.getContext('2d'), {
       type: 'bar',
       data: {
         labels: ['Km', 'D+ (÷10, m)', 'Activités'],
@@ -330,217 +518,98 @@ async function renderStatsComparison() {
           borderRadius: 4,
         })),
       },
-      options: chartOptions(),
+      options: { ...chartOptions(), plugins: { ...chartOptions().plugins, legend: { display: true, position: 'bottom', labels: { boxWidth: 10, font: { size: 11 } } } } },
     });
   }
+
+  renderStatsModalDistancePills(years);
+  renderStatsModalProgression(years);
+  renderStatsModalFunFacts(years, statsPerYear);
 }
 
-// ─── Graphiques mensuels (km, D+, VO2max) ───────────────────────────────
-function renderStatsMonthlyCharts(stats) {
-  const labels = STATS_MONTHS_FR;
-
-  const kmCanvas = el('stats-monthly-km-chart');
-  if (kmCanvas) {
-    if (statsMonthlyKmChart) statsMonthlyKmChart.destroy();
-    statsMonthlyKmChart = new Chart(kmCanvas.getContext('2d'), {
-      type: 'bar',
-      data: { labels, datasets: [{ label:'Km', data: stats.monthly.map(m => Math.round(m.km*10)/10),
-        backgroundColor:'rgba(37,99,235,0.65)', borderRadius:4 }] },
-      options: chartOptions(),
-    });
-  }
-
-  const dplusCanvas = el('stats-monthly-dplus-chart');
-  if (dplusCanvas) {
-    if (statsMonthlyDplusChart) statsMonthlyDplusChart.destroy();
-    statsMonthlyDplusChart = new Chart(dplusCanvas.getContext('2d'), {
-      type: 'bar',
-      data: { labels, datasets: [{ label:'D+', data: stats.monthly.map(m => Math.round(m.elevation)),
-        backgroundColor:'rgba(217,119,6,0.65)', borderRadius:4 }] },
-      options: chartOptions(),
-    });
-  }
-
-  const vo2Canvas = el('stats-monthly-vo2max-chart');
-  if (vo2Canvas) {
-    if (statsMonthlyVo2Chart) statsMonthlyVo2Chart.destroy();
-    statsMonthlyVo2Chart = new Chart(vo2Canvas.getContext('2d'), {
-      type: 'line',
-      data: { labels, datasets: [{ label:'VO₂max', data: stats.monthly.map(m => m.vo2max),
-        borderColor:'#7C3AED', backgroundColor:'rgba(124,58,237,0.07)', borderWidth:2,
-        pointBackgroundColor:'#7C3AED', pointRadius:4, tension:0.4, fill:true, spanGaps:true }] },
-      options: chartOptions(),
-    });
-  }
-}
-
-// ─── Donut répartition par sport ────────────────────────────────────────
-function renderStatsSportDonut(stats) {
-  const canvas = el('stats-sport-chart');
-  const legend = el('stats-sport-legend');
-  if (!canvas) return;
-
-  const entries = Object.entries(stats.sportBreakdown).filter(([,v]) => v.count > 0).sort((a,b) => b[1].km - a[1].km);
-  if (entries.length === 0) { if (legend) legend.innerHTML = ''; if (statsSportChart) { statsSportChart.destroy(); statsSportChart = null; } return; }
-
-  const labels = entries.map(([k]) => STATS_SPORT_LABELS_FR[k] || k.replace(/_/g,' '));
-  const values = entries.map(([,v]) => v.count);
-
-  if (statsSportChart) statsSportChart.destroy();
-  statsSportChart = new Chart(canvas.getContext('2d'), {
-    type: 'doughnut',
-    data: { labels, datasets: [{ data: values, backgroundColor: STATS_SPORT_COLORS, borderWidth:0, hoverOffset:4 }] },
-    options: { responsive:true, maintainAspectRatio:false, cutout:'70%',
-      plugins: { legend:{display:false}, tooltip:{backgroundColor:'#111', titleColor:'#fff', bodyColor:'#ADADAD', padding:8, cornerRadius:8, displayColors:true } } },
-  });
-
-  if (legend) {
-    legend.innerHTML = entries.map(([, v], i) => `
-      <div class="legend-item">
-        <div class="legend-dot" style="background:${STATS_SPORT_COLORS[i % STATS_SPORT_COLORS.length]}"></div>
-        <span>${labels[i]} — ${v.count} · ${v.km.toFixed(0)} km · ${v.hours.toFixed(0)}h${v.elevation > 0 ? ' · ' + Math.round(v.elevation) + 'm D+' : ''}</span>
-      </div>
-    `).join('');
-  }
-}
-
-// ─── Régularité ──────────────────────────────────────────────────────────
-function renderStatsConsistency(stats) {
-  const kpis = el('stats-consistency-kpis');
-  if (kpis) {
-    const c = stats.consistency;
-    kpis.innerHTML = `
-      <div class="profile-ind-card">
-        <div class="profile-ind-value">${c.longestStreak}</div>
-        <div class="profile-ind-label">Plus longue série</div>
-        <div class="profile-ind-sub">jours consécutifs actifs</div>
-      </div>
-      <div class="profile-ind-card">
-        <div class="profile-ind-value">${c.activePct}%</div>
-        <div class="profile-ind-label">Jours actifs</div>
-        <div class="profile-ind-sub">${c.activeDays} / ${c.dayCount} jours</div>
-      </div>
-      <div class="profile-ind-card">
-        <div class="profile-ind-value">${c.avgWeeklyKm.toFixed(1)}</div>
-        <div class="profile-ind-label">Km / semaine</div>
-        <div class="profile-ind-sub">moyenne sur l'année</div>
-      </div>
-      <div class="profile-ind-card">
-        <div class="profile-ind-value">${stats.peaks.bestMonth ? STATS_MONTHS_FR[stats.peaks.bestMonth.month] : '—'}</div>
-        <div class="profile-ind-label">Meilleur mois</div>
-        <div class="profile-ind-sub">${stats.peaks.bestMonth ? stats.peaks.bestMonth.km.toFixed(1) + ' km' : ''}</div>
-      </div>
-    `;
-  }
-
-  const canvas = el('stats-weekday-chart');
-  if (canvas) {
-    if (statsWeekdayChart) statsWeekdayChart.destroy();
-    statsWeekdayChart = new Chart(canvas.getContext('2d'), {
-      type: 'bar',
-      data: { labels: STATS_WEEKDAYS_FR, datasets: [{ label:'Km', data: stats.byWeekday.map(d => Math.round(d.km*10)/10),
-        backgroundColor:'rgba(22,163,74,0.65)', borderRadius:4 }] },
-      options: chartOptions(),
-    });
-  }
-}
-
-// ─── Sélecteur de distance (progression) ────────────────────────────────
-function renderStatsDistancePills() {
-  const wrap = el('stats-distance-pills');
+function renderStatsModalDistancePills(years) {
+  const wrap = document.getElementById('stats-modal-distance-pills');
   if (!wrap) return;
   wrap.innerHTML = Object.entries(STATS_DISTANCE_BANDS).map(([key, band]) => `
-    <button type="button" class="stats-pill ${_statsDistance === key ? 'stats-pill--active' : ''}" data-distance="${key}">${band.label}</button>
+    <button type="button" class="stats-pill ${_statsModalDistance === key ? 'stats-pill--active' : ''}" data-distance="${key}">${band.label}</button>
   `).join('');
   wrap.querySelectorAll('.stats-pill').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      _statsDistance = btn.dataset.distance;
-      renderStatsDistancePills();
-      await renderStatsProgression();
+    btn.addEventListener('click', () => {
+      _statsModalDistance = btn.dataset.distance;
+      renderStatsModalDistancePills(years);
+      renderStatsModalProgression(years);
     });
   });
 }
 
-// ─── Progression : meilleure allure par mois sur les années chargées ────
-async function renderStatsProgression() {
-  const band = STATS_DISTANCE_BANDS[_statsDistance];
-  const canvas = el('stats-progression-chart');
-  const note = el('stats-progression-note');
+// Allure = temps/km, exprimée en secondes/km. Le graphique affiche le
+// format "M:SS/km" (via formatPace, comme partout ailleurs dans l'appli) —
+// PAS une valeur décimale de minutes (ex: "5.8"), qui ne veut rien dire.
+function renderStatsModalProgression(years) {
+  const band = STATS_DISTANCE_BANDS[_statsModalDistance];
+  const canvas = document.getElementById('stats-modal-progression-chart');
+  const note = document.getElementById('stats-modal-progression-note');
   if (!canvas) return;
 
-  const loadedYears = Array.from(_fullyLoadedYears).sort();
   const byMonth = {};
-  _allActivities.forEach(a => {
-    if (!isRunOrTrail(a)) return;
-    const dist = (a.distanceKm || 0) * 1000;
-    if (dist < band.threshold || dist > band.max) return;
-    const d = new Date(a.date || a.startTimeLocal || '');
-    if (isNaN(d)) return;
-    const key = d.toISOString().slice(0,7);
-    const pace = a.durationSec / (dist / 1000);
-    if (!byMonth[key] || pace < byMonth[key]) byMonth[key] = pace;
+  years.forEach(y => {
+    getActivitiesForYearLocal(y, _statsSportFilter).forEach(a => {
+      if (!isRunOrTrail(a)) return;
+      const dist = (a.distanceKm || 0) * 1000;
+      if (dist < band.threshold || dist > band.max) return;
+      const d = new Date(a.date || a.startTimeLocal || '');
+      if (isNaN(d)) return;
+      const key = d.toISOString().slice(0,7);
+      const pace = a.durationSec / (dist / 1000); // secondes/km
+      if (!byMonth[key] || pace < byMonth[key]) byMonth[key] = pace;
+    });
   });
 
   const labels = Object.keys(byMonth).sort();
-  const values = labels.map(k => byMonth[k] / 60);
+  const values = labels.map(k => byMonth[k]);
 
-  if (statsProgressionChart) statsProgressionChart.destroy();
-  statsProgressionChart = new Chart(canvas.getContext('2d'), {
+  if (statsModalProgressionChart) { statsModalProgressionChart.destroy(); statsModalProgressionChart = null; }
+  const base = chartOptions();
+  statsModalProgressionChart = new Chart(canvas.getContext('2d'), {
     type: 'line',
-    data: { labels, datasets: [{ label: `Allure ${band.label} (min/km)`, data: values,
+    data: { labels, datasets: [{ label: `Allure ${band.label}`, data: values,
       borderColor:'#2563EB', backgroundColor:'rgba(37,99,235,0.07)', borderWidth:2,
       pointBackgroundColor:'#2563EB', pointRadius:4, tension:0.4, fill:true, spanGaps:true }] },
-    options: { ...chartOptions(), scales: { ...chartOptions().scales,
-      y: { ...chartOptions().scales.y, reverse: true } } },
+    options: {
+      ...base,
+      scales: {
+        x: base.scales.x,
+        y: { ...base.scales.y, reverse: true, ticks: { ...base.scales.y.ticks, callback: (v) => formatPace(v) } },
+      },
+      plugins: { ...base.plugins, tooltip: { ...base.plugins.tooltip, callbacks: { label: (ctx) => formatPace(ctx.parsed.y) } } },
+    },
   });
 
   if (note) {
-    const earliestLoaded = loadedYears.length > 0 ? Math.min(...loadedYears) : new Date().getFullYear();
-    note.innerHTML = labels.length === 0
-      ? `Aucune sortie ${band.label} trouvée sur les années chargées (${loadedYears.join(', ') || 'aucune'}).`
-      : `Basé sur les années chargées : ${loadedYears.join(', ')}. `
-        + `<button type="button" class="btn-text-link" id="stats-load-more-year">Charger ${earliestLoaded - 1}</button>`;
-    const btn = document.getElementById('stats-load-more-year');
-    if (btn) btn.addEventListener('click', async () => {
-      const y = earliestLoaded - 1;
-      if (typeof showToast === 'function') showToast('⏳ Chargement de ' + y + '…', 'loading', 0);
-      try { await ensureYearLoaded(y); } catch (e) {}
-      const lt = document.getElementById('app-toast-loading');
-      if (lt) { lt.style.opacity = '0'; setTimeout(() => lt.remove(), 300); }
-      await renderStatsProgression();
-      renderStatsFunFacts();
-    });
+    note.textContent = labels.length === 0
+      ? `Aucune sortie ${band.label} trouvée sur ${years.join(', ')}.`
+      : `Basé sur les années comparées : ${years.join(', ')}.`;
   }
 }
 
-// ─── Cumuls "fun" sur les années chargées ────────────────────────────────
-function renderStatsFunFacts() {
-  const grid = el('stats-funfacts');
-  const note = el('stats-funfacts-note');
+function renderStatsModalFunFacts(years, statsPerYear) {
+  const grid = document.getElementById('stats-modal-funfacts');
   if (!grid) return;
-
-  const loadedYears = Array.from(_fullyLoadedYears).sort();
-  let totalKm = 0, totalElevation = 0;
-  loadedYears.forEach(y => {
-    const s = computeYearStats(getActivitiesForYearLocal(y), y);
-    totalKm += s.totals.km;
-    totalElevation += s.totals.elevation;
-  });
-
+  const totalKm = statsPerYear.reduce((s, y) => s + y.totals.km, 0);
+  const totalElevation = statsPerYear.reduce((s, y) => s + y.totals.elevation, 0);
   const earthPct = (totalKm / EARTH_CIRCUMFERENCE_KM) * 100;
   const everestCount = totalElevation / EVEREST_HEIGHT_M;
 
   grid.innerHTML = `
     <div class="stats-funfact-card">
       <div class="stats-funfact-value">${Math.round(totalKm).toLocaleString('fr-FR')} km</div>
-      <div class="stats-funfact-label">Distance cumulée</div>
+      <div class="stats-funfact-label">Distance cumulée (${years.join(', ')})</div>
       <div class="stats-funfact-sub">${earthPct.toFixed(1)}% du tour de la Terre (${EARTH_CIRCUMFERENCE_KM.toLocaleString('fr-FR')} km)</div>
     </div>
     <div class="stats-funfact-card">
       <div class="stats-funfact-value">${Math.round(totalElevation).toLocaleString('fr-FR')} m</div>
-      <div class="stats-funfact-label">D+ cumulé</div>
+      <div class="stats-funfact-label">D+ cumulé (${years.join(', ')})</div>
       <div class="stats-funfact-sub">${everestCount.toFixed(1)}x l'Everest (${EVEREST_HEIGHT_M.toLocaleString('fr-FR')} m)</div>
     </div>
   `;
-  if (note) note.textContent = `Calculé sur les années chargées : ${loadedYears.join(', ') || 'aucune'}.`;
 }
