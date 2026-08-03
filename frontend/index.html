@@ -12,7 +12,7 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <link rel="stylesheet" href="css/style.css?v=1785763415410" />
+  <link rel="stylesheet" href="css/style.css?v=1785764786137" />
   <link rel="stylesheet" href="css/plans.css" />
 </head>
 <body>
@@ -92,23 +92,18 @@
         </svg>
         Objectifs
       </a>
-      <a class="nav-item nav-item--disabled" data-page="records" id="nav-records">
+      <a class="nav-item" data-page="records" id="nav-records">
         <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
           <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
         </svg>
         Records
-      
-        <span class="nav-coming-soon">Bientôt</span>
       </a>
-      <!-- FIX 6 : Statistiques -->
-      <a class="nav-item nav-item--disabled" data-page="stats" id="nav-stats">
+      <a class="nav-item" data-page="stats" id="nav-stats">
         <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
           <line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/>
           <line x1="6" y1="20" x2="6" y2="14"/><line x1="2" y1="20" x2="22" y2="20"/>
         </svg>
         Statistiques
-      
-        <span class="nav-coming-soon">Bientôt</span>
       </a>
       <!-- Plans d'entraînement -->
       <a class="nav-item" data-page="plans" id="nav-plans" onclick="initPlansPage()">
@@ -638,6 +633,89 @@
       </div>
     </div>
 
+    <!-- PAGE : STATISTIQUES -->
+    <div class="page" id="page-stats">
+      <div class="page-header">
+        <div>
+          <h1 class="page-title">Statistiques</h1>
+          <div class="page-subtitle">Vue d'ensemble de votre activité</div>
+        </div>
+        <div class="stats-year-controls">
+          <select id="stats-year" class="activity-filter-select"></select>
+          <div class="stats-compare-chips" id="stats-compare-chips"></div>
+        </div>
+      </div>
+
+      <div class="hero-stats" id="stats-kpis"></div>
+
+      <section class="card card--wide" id="stats-comparison-section" style="display:none;margin-top:16px">
+        <div class="card-header">
+          <h2 class="card-title"><span class="card-title-icon">&#x1F4CA;</span> Comparaison entre années</h2>
+        </div>
+        <div id="stats-comparison-table"></div>
+        <div class="chart-container" style="height:240px;margin-top:12px">
+          <canvas id="stats-comparison-chart"></canvas>
+        </div>
+      </section>
+
+      <div class="dashboard-grid" style="margin-top:16px">
+        <section class="card" id="section-stats-monthly-km">
+          <div class="card-header">
+            <h2 class="card-title"><span class="card-title-icon">&#x1F4C8;</span> Km par mois</h2>
+          </div>
+          <div class="chart-container"><canvas id="stats-monthly-km-chart"></canvas></div>
+        </section>
+        <section class="card" id="section-stats-monthly-dplus">
+          <div class="card-header">
+            <h2 class="card-title"><span class="card-title-icon">&#x26F0;&#xFE0F;</span> D+ par mois</h2>
+          </div>
+          <div class="chart-container"><canvas id="stats-monthly-dplus-chart"></canvas></div>
+        </section>
+        <section class="card" id="section-stats-monthly-vo2max">
+          <div class="card-header">
+            <h2 class="card-title"><span class="card-title-icon">&#x1FAC1;</span> VO&#x2082;max par mois</h2>
+          </div>
+          <div class="chart-container"><canvas id="stats-monthly-vo2max-chart"></canvas></div>
+        </section>
+        <section class="card" id="section-stats-sport">
+          <div class="card-header">
+            <h2 class="card-title"><span class="card-title-icon">&#x1F3AF;</span> Répartition par sport</h2>
+          </div>
+          <div class="chart-container" style="height:180px"><canvas id="stats-sport-chart"></canvas></div>
+          <div class="sports-legend" id="stats-sport-legend"></div>
+        </section>
+      </div>
+
+      <section class="card card--wide" id="section-stats-consistency" style="margin-top:16px">
+        <div class="card-header">
+          <h2 class="card-title"><span class="card-title-icon">&#x1F5D3;&#xFE0F;</span> Régularité</h2>
+        </div>
+        <div class="profile-indicators" id="stats-consistency-kpis"></div>
+        <div class="chart-container" style="height:200px;margin-top:12px">
+          <canvas id="stats-weekday-chart"></canvas>
+        </div>
+      </section>
+
+      <section class="card card--wide" id="section-stats-progression" style="margin-top:16px">
+        <div class="card-header">
+          <h2 class="card-title"><span class="card-title-icon">&#x1F3C3;</span> Progression de l'allure</h2>
+        </div>
+        <div class="stats-distance-pills" id="stats-distance-pills"></div>
+        <div class="chart-container" style="height:240px;margin-top:12px">
+          <canvas id="stats-progression-chart"></canvas>
+        </div>
+        <div id="stats-progression-note" class="stats-note"></div>
+      </section>
+
+      <section class="card card--wide" id="section-stats-funfacts" style="margin-top:16px">
+        <div class="card-header">
+          <h2 class="card-title"><span class="card-title-icon">&#x1F30D;</span> Cumul depuis le début</h2>
+        </div>
+        <div class="stats-funfacts-grid" id="stats-funfacts"></div>
+        <div id="stats-funfacts-note" class="stats-note"></div>
+      </section>
+    </div>
+
     <!-- "?"? PAGE : ENTRAZNEMENTS "?"? -->
     <div class="page" id="page-training">
       <div class="page-header">
@@ -1013,8 +1091,9 @@
 
   </div><!-- /app-content -->
 
-  <script src="js/app.js?v=1785750939943"></script>
-  <script src="js/campus.js?v=1785763415410"></script>
+  <script src="js/app.js?v=1785764786137"></script>
+  <script src="js/campus.js?v=1785764786137"></script>
+  <script src="js/stats.js?v=1785764917002"></script>
   <script src="js/plans.js"></script>
   <!-- ... MODAL LOGS ........................... -->
   <div id="logs-modal" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.55);backdrop-filter:blur(4px);" onclick="if(event.target===this)closeLogsModal()">

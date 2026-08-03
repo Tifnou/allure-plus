@@ -575,6 +575,35 @@ body::before{
 #page-dashboard .card-title{font-size:12.5px;}
 
 .profile-ind-icon{font-size:17px;margin-bottom:4px;display:block;}
+
+/* ═══════════════════════════════════════════════
+   PAGE STATISTIQUES
+═══════════════════════════════════════════════ */
+.stats-year-controls{display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
+.stats-compare-chips{display:flex;gap:6px;flex-wrap:wrap;}
+.stats-chip{font-size:12px;font-weight:600;padding:5px 12px;border-radius:20px;border:1px solid var(--border);background:var(--bg-white);color:var(--text-secondary);cursor:pointer;transition:var(--transition);}
+.stats-chip:hover{border-color:var(--accent);color:var(--accent-text);}
+.stats-chip--active{background:var(--accent-light);border-color:var(--accent);color:var(--accent-text);}
+
+.stats-compare-table{display:flex;flex-direction:column;gap:2px;font-size:13px;}
+.stats-compare-row{display:grid;grid-template-columns:120px repeat(auto-fit,minmax(70px,1fr));gap:8px;padding:6px 0;border-bottom:1px solid var(--border-light);}
+.stats-compare-row--head{font-weight:700;color:var(--text-primary);border-bottom:2px solid var(--border);}
+.stats-compare-row div{text-align:right;}
+.stats-compare-row div:first-child{text-align:left;color:var(--text-secondary);}
+
+.stats-distance-pills{display:flex;gap:6px;flex-wrap:wrap;}
+.stats-pill{font-size:12px;font-weight:600;padding:6px 14px;border-radius:20px;border:1px solid var(--border);background:var(--bg-white);color:var(--text-secondary);cursor:pointer;transition:var(--transition);}
+.stats-pill:hover{border-color:var(--accent);color:var(--accent-text);}
+.stats-pill--active{background:var(--accent);border-color:var(--accent);color:#fff;}
+
+.stats-note{font-size:12px;color:var(--text-muted);margin-top:8px;}
+.stats-note .btn-text-link{font-size:12px;}
+
+.stats-funfacts-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;}
+.stats-funfact-card{background:var(--bg-hover);border-radius:var(--radius-md);padding:16px 18px;}
+.stats-funfact-value{font-size:26px;font-weight:700;color:var(--text-primary);font-variant-numeric:tabular-nums;}
+.stats-funfact-label{font-size:12px;font-weight:600;color:var(--text-secondary);margin-top:2px;}
+.stats-funfact-sub{font-size:11px;color:var(--text-muted);margin-top:4px;}
 #page-dashboard .wellness-indicators-5{grid-template-columns:repeat(5,1fr);}
 @media(max-width:1100px){#page-dashboard .wellness-indicators-5{grid-template-columns:repeat(3,1fr);}#page-dashboard .wellness-indicators-5 .profile-ind-card:nth-child(3){border-right:none;}}
 @media(max-width:700px){#page-dashboard .wellness-indicators-5{grid-template-columns:repeat(2,1fr);}#page-dashboard .wellness-indicators-5 .profile-ind-card:nth-child(3){border-right:1px solid var(--border);}#page-dashboard .wellness-indicators-5 .profile-ind-card:nth-child(2n){border-right:none;}}

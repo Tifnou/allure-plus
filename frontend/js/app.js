@@ -138,6 +138,7 @@ function navigateTo(pageId) {
   }
   if (pageId === 'records')    renderRecordsFull(_records);
   if (pageId === 'health')     renderHealthPage();
+  if (pageId === 'stats')      renderStatsPage();
   if (pageId === 'profile')    renderProfile();
   if (pageId === 'admin')      { loadAdminInfo(); loadAdminLogs(); }
   if (pageId === 'goals')      { if (typeof loadGoalsPage === 'function') loadGoalsPage(); }
@@ -1225,7 +1226,7 @@ function renderRecordsFull(records) {
   const container = el('records-list-full');
   if (!container || !records) return;
 
-  const labels = { km5:'5 km', km10:'10 km', halfMarathon:'Semi', marathon:'Marathon' };
+  const labels = { '1km':'1 km', '5km':'5 km', '10km':'10 km', semi:'Semi', marathon:'Marathon' };
 
   container.innerHTML = Object.entries(records).map(([key, rec]) => {
     if (!rec?.best) return `
