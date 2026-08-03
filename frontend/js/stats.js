@@ -207,6 +207,14 @@ async function renderStatsYearsList() {
   const hasOlder = allYears.length > STATS_YEARS_PAGE_SIZE;
   const years = _statsShowOlderYears ? allYears : allYears.slice(0, STATS_YEARS_PAGE_SIZE);
 
+  const headerHtml = `
+    <div class="stats-years-header">
+      <div></div><div></div>
+      <div>Activités</div><div>Km</div><div>D+ (m)</div><div>VO&#x2082;max moy.</div><div>Calories</div>
+      <div></div>
+    </div>
+  `;
+
   const rowsHtml = years.map(y => {
     const loaded = _fullyLoadedYears.has(y);
     const checked = _statsCompareYears.has(y) ? 'checked' : '';
@@ -215,11 +223,11 @@ async function renderStatsYearsList() {
     if (loaded) {
       const s = computeYearStats(getActivitiesForYearLocal(y, _statsSportFilter), y);
       cells = `
-        <div class="stats-year-cell">${s.totals.activities}<span>activités</span></div>
-        <div class="stats-year-cell">${s.totals.km.toFixed(1)}<span>km</span></div>
-        <div class="stats-year-cell">${Math.round(s.totals.elevation).toLocaleString('fr-FR')}<span>D+ (m)</span></div>
-        <div class="stats-year-cell">${s.totals.vo2maxAvg ?? '—'}<span>VO&#x2082;max moy.</span></div>
-        <div class="stats-year-cell">${Math.round(s.totals.calories).toLocaleString('fr-FR')}<span>calories</span></div>
+        <div class="stats-year-cell">${s.totals.activities}</div>
+        <div class="stats-year-cell">${s.totals.km.toFixed(1)}</div>
+        <div class="stats-year-cell">${Math.round(s.totals.elevation).toLocaleString('fr-FR')}</div>
+        <div class="stats-year-cell">${s.totals.vo2maxAvg ?? '—'}</div>
+        <div class="stats-year-cell">${Math.round(s.totals.calories).toLocaleString('fr-FR')}</div>
       `;
     } else {
       cells = `<div class="stats-year-cell stats-year-cell--loading" style="grid-column:span 5">Cliquez pour charger…</div>`;
@@ -239,11 +247,11 @@ async function renderStatsYearsList() {
     `;
   }).join('');
 
-  const footerHtml = (hasOlder && !_statsShowOlderYears)
-    ? `<div class="stats-years-footer"><button type="button" class="btn-text-link" id="stats-show-older-years">Afficher les années plus anciennes (${allYears.length - STATS_YEARS_PAGE_SIZE})</button></div>`
+  const footerHtml = hasOlder
+    ? `<div class="stats-years-footer"><button type="button" class="btn-text-link" id="stats-toggle-older-years">${_statsShowOlderYears ? 'Réduire' : `Afficher les années plus anciennes (${allYears.length - STATS_YEARS_PAGE_SIZE})`}</button></div>`
     : '';
 
-  container.innerHTML = rowsHtml + footerHtml;
+  container.innerHTML = headerHtml + rowsHtml + footerHtml;
 
   container.querySelectorAll('.stats-year-row-header').forEach(header => {
     header.addEventListener('click', () => toggleStatsYearRow(parseInt(header.dataset.year)));
@@ -251,9 +259,9 @@ async function renderStatsYearsList() {
   container.querySelectorAll('.stats-year-checkbox input').forEach(cb => {
     cb.addEventListener('change', () => toggleStatsCompareYear(parseInt(cb.dataset.year), cb));
   });
-  const showOlderBtn = document.getElementById('stats-show-older-years');
-  if (showOlderBtn) showOlderBtn.addEventListener('click', async () => {
-    _statsShowOlderYears = true;
+  const toggleOlderBtn = document.getElementById('stats-toggle-older-years');
+  if (toggleOlderBtn) toggleOlderBtn.addEventListener('click', async () => {
+    _statsShowOlderYears = !_statsShowOlderYears;
     await renderStatsYearsList();
   });
 
@@ -355,7 +363,6 @@ async function renderStatsRowDetail(year) {
       <div class="stats-tile">
         <div class="stats-tile-title">&#x1F3AF; Répartition par sport</div>
         <div class="chart-container"><canvas id="stats-row-sport-chart"></canvas></div>
-        <div class="sports-legend" id="stats-row-sport-legend" style="margin-top:6px"></div>
       </div>` : ''}
       <div class="stats-tile stats-tile--consistency">
         <div class="stats-tile-title">&#x1F5D3;&#xFE0F; Régularité</div>
@@ -408,19 +415,34 @@ async function renderStatsRowDetail(year) {
   if (statsRowSportChart) { statsRowSportChart.destroy(); statsRowSportChart = null; }
   if (showSportTile) {
     const sportCanvas = el('stats-row-sport-chart');
-    const legend = el('stats-row-sport-legend');
     const entries = Object.entries(stats.sportBreakdown).filter(([,v]) => v.count > 0).sort((a,b) => b[1].km - a[1].km);
     if (sportCanvas && entries.length > 0) {
       const sportLabels = entries.map(([k]) => STATS_SPORT_LABELS_FR[k] || k.replace(/_/g,' '));
+      const colors = entries.map((_, i) => STATS_SPORT_COLORS[i % STATS_SPORT_COLORS.length]);
       statsRowSportChart = new Chart(sportCanvas.getContext('2d'), {
-        type: 'doughnut',
-        data: { labels: sportLabels, datasets: [{ data: entries.map(([,v]) => v.count), backgroundColor: STATS_SPORT_COLORS, borderWidth:0, hoverOffset:4 }] },
-        options: { responsive:true, maintainAspectRatio:false, cutout:'65%',
-          plugins:{ legend:{display:false}, tooltip:{backgroundColor:'#111', titleColor:'#fff', bodyColor:'#ADADAD', padding:8, cornerRadius:8, displayColors:true } } },
+        type: 'bar',
+        data: { labels: sportLabels, datasets: [{ data: entries.map(([,v]) => v.count), backgroundColor: colors, borderRadius: 3 }] },
+        options: {
+          indexAxis: 'y',
+          responsive: true, maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              backgroundColor:'#111', titleColor:'#fff', bodyColor:'#ADADAD', padding:8, cornerRadius:8, displayColors:false,
+              callbacks: {
+                label: (ctx) => {
+                  const v = entries[ctx.dataIndex][1];
+                  return `${v.count} activités · ${v.km.toFixed(0)} km · ${v.hours.toFixed(0)}h`;
+                },
+              },
+            },
+          },
+          scales: {
+            x: { grid: { color: 'rgba(0,0,0,0.04)', drawBorder: false }, ticks: { color:'#ADADAD', font:{ size:9 } }, border: { display:false } },
+            y: { grid: { display: false }, ticks: { color:'#ADADAD', font:{ size:10 } }, border: { display:false } },
+          },
+        },
       });
-      if (legend) legend.innerHTML = entries.map(([, v], i) => `
-        <div class="legend-item"><div class="legend-dot" style="background:${STATS_SPORT_COLORS[i % STATS_SPORT_COLORS.length]}"></div><span>${sportLabels[i]} — ${v.count}</span></div>
-      `).join('');
     }
   }
 }
