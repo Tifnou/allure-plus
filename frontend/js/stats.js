@@ -25,15 +25,18 @@ const STATS_DISTANCE_BANDS = {
 };
 
 const STATS_MONTHS_FR = ['Jan','Fév','Mar','Avr','Mai','Juin','Juil','Aoû','Sep','Oct','Nov','Déc'];
+const STATS_MONTHS_FULL_FR = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
 const STATS_WEEKDAYS_FR = ['Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi','Dimanche'];
 
 const EARTH_CIRCUMFERENCE_KM = 40075;
 const EVEREST_HEIGHT_M = 8849;
+const STATS_YEARS_PAGE_SIZE = 10;
 
 let _statsSportFilter = 'all';
 let _statsExpandedYear = null;
 let _statsCompareYears = new Set();
 let _statsModalDistance = '10km';
+let _statsShowOlderYears = false;
 
 let statsRowKmChart = null;
 let statsRowDplusChart = null;
@@ -200,9 +203,11 @@ function getStatsYearRange() {
 async function renderStatsYearsList() {
   const container = el('stats-years-list');
   if (!container) return;
-  const years = getStatsYearRange();
+  const allYears = getStatsYearRange();
+  const hasOlder = allYears.length > STATS_YEARS_PAGE_SIZE;
+  const years = _statsShowOlderYears ? allYears : allYears.slice(0, STATS_YEARS_PAGE_SIZE);
 
-  container.innerHTML = years.map(y => {
+  const rowsHtml = years.map(y => {
     const loaded = _fullyLoadedYears.has(y);
     const checked = _statsCompareYears.has(y) ? 'checked' : '';
     const expanded = _statsExpandedYear === y;
@@ -234,11 +239,22 @@ async function renderStatsYearsList() {
     `;
   }).join('');
 
+  const footerHtml = (hasOlder && !_statsShowOlderYears)
+    ? `<div class="stats-years-footer"><button type="button" class="btn-text-link" id="stats-show-older-years">Afficher les années plus anciennes (${allYears.length - STATS_YEARS_PAGE_SIZE})</button></div>`
+    : '';
+
+  container.innerHTML = rowsHtml + footerHtml;
+
   container.querySelectorAll('.stats-year-row-header').forEach(header => {
     header.addEventListener('click', () => toggleStatsYearRow(parseInt(header.dataset.year)));
   });
   container.querySelectorAll('.stats-year-checkbox input').forEach(cb => {
     cb.addEventListener('change', () => toggleStatsCompareYear(parseInt(cb.dataset.year), cb));
+  });
+  const showOlderBtn = document.getElementById('stats-show-older-years');
+  if (showOlderBtn) showOlderBtn.addEventListener('click', async () => {
+    _statsShowOlderYears = true;
+    await renderStatsYearsList();
   });
 
   if (_statsExpandedYear !== null && years.includes(_statsExpandedYear)) {
@@ -346,7 +362,7 @@ async function renderStatsRowDetail(year) {
         <div class="stats-tile-mini-stat"><span>Plus longue série</span><b>${stats.consistency.longestStreak} j</b></div>
         <div class="stats-tile-mini-stat"><span>Jours actifs</span><b>${stats.consistency.activePct}%</b></div>
         <div class="stats-tile-mini-stat"><span>Km / semaine</span><b>${stats.consistency.avgWeeklyKm.toFixed(1)}</b></div>
-        <div class="stats-tile-mini-stat"><span>Meilleur mois</span><b>${stats.peaks.bestMonth ? STATS_MONTHS_FR[stats.peaks.bestMonth.month] : '—'}</b></div>
+        <div class="stats-tile-mini-stat"><span>Meilleur mois</span><b>${stats.peaks.bestMonth ? STATS_MONTHS_FULL_FR[stats.peaks.bestMonth.month] : '—'}</b></div>
       </div>
       <div class="stats-tile">
         <div class="stats-tile-title">&#x1F4C5; Par jour de semaine</div>
@@ -450,6 +466,48 @@ function closeStatsCompareModal() {
   if (modal) modal.remove();
 }
 
+// Ligne de tableau comparatif avec fleches (vert = meilleure valeur, rouge =
+// moins bonne) - ne s'affiche que s'il y a un ecart reel entre les annees.
+function buildCompareRow(label, values) {
+  const nums = values.map(v => v.raw);
+  const valid = nums.filter(v => typeof v === 'number' && !isNaN(v));
+  const max = valid.length ? Math.max(...valid) : null;
+  const min = valid.length ? Math.min(...valid) : null;
+  const showArrows = valid.length >= 2 && max !== min;
+  const cells = values.map(v => {
+    let arrow = '';
+    if (showArrows && typeof v.raw === 'number') {
+      if (v.raw === max) arrow = '<span class="stats-arrow stats-arrow--up">&#x25B2;</span>';
+      else if (v.raw === min) arrow = '<span class="stats-arrow stats-arrow--down">&#x25BC;</span>';
+    }
+    return `<div>${arrow}${v.display}</div>`;
+  });
+  return `<div class="stats-compare-row"><div>${label}</div>${cells.join('')}</div>`;
+}
+
+function buildCompareTable(years, statsPerYear) {
+  return `
+    <div class="stats-compare-row stats-compare-row--head"><div></div>${years.map(y => `<div>${y}</div>`).join('')}</div>
+    ${buildCompareRow('Km', statsPerYear.map(s => ({ raw: s.totals.km, display: s.totals.km.toFixed(1) })))}
+    ${buildCompareRow('D+ (m)', statsPerYear.map(s => ({ raw: s.totals.elevation, display: Math.round(s.totals.elevation).toLocaleString('fr-FR') })))}
+    ${buildCompareRow('Activités', statsPerYear.map(s => ({ raw: s.totals.activities, display: String(s.totals.activities) })))}
+    ${buildCompareRow('Heures', statsPerYear.map(s => ({ raw: s.totals.hours, display: s.totals.hours.toFixed(1) })))}
+    ${buildCompareRow('VO&#x2082;max moy.', statsPerYear.map(s => ({ raw: s.totals.vo2maxAvg, display: s.totals.vo2maxAvg ?? '—' })))}
+  `;
+}
+
+// Restreint les activites d'une annee a la meme fenetre "1er janvier -
+// cutoffDate" qu'une autre annee, pour comparer equitablement une annee
+// en cours (incomplete) a une annee complete.
+function computeSamePeriodStats(year, filter, cutoffDate) {
+  const cutoffInYear = new Date(year, cutoffDate.getMonth(), cutoffDate.getDate(), 23, 59, 59, 999);
+  const activities = getActivitiesForYearLocal(year, filter).filter(a => {
+    const d = new Date(a.date || a.startTimeLocal || '');
+    return !isNaN(d) && d <= cutoffInYear;
+  });
+  return computeYearStats(activities, year);
+}
+
 function renderStatsCompareModalContent() {
   if (_statsCompareYears.size < 2) { closeStatsCompareModal(); return; }
   const years = Array.from(_statsCompareYears).sort((a,b) => a - b);
@@ -474,12 +532,23 @@ function renderStatsCompareModalContent() {
 
   const statsPerYear = years.map(y => computeYearStats(getActivitiesForYearLocal(y, _statsSportFilter), y));
 
+  const today = new Date();
+  const currentYear = today.getFullYear();
+  const hasIncompleteYear = years.includes(currentYear) && years.some(y => y !== currentYear);
+  const cutoffLabel = today.toLocaleDateString('fr-FR', { day:'numeric', month:'long' });
+
   content.innerHTML = `
     <div class="stats-modal-section">
       <div class="stats-modal-section-title">Vue d'ensemble</div>
       <div class="stats-compare-table" id="stats-modal-table"></div>
       <div class="chart-container" style="height:220px;margin-top:12px"><canvas id="stats-modal-comparison-chart"></canvas></div>
     </div>
+    ${hasIncompleteYear ? `
+    <div class="stats-modal-section">
+      <div class="stats-modal-section-title">Sur la même période (1er janvier – ${cutoffLabel})</div>
+      <div class="stats-compare-table" id="stats-modal-same-period-table"></div>
+      <div class="stats-note">${currentYear} n'est pas terminée : comparaison équitable sur la même fenêtre de dates.</div>
+    </div>` : ''}
     <div class="stats-modal-section">
       <div class="stats-modal-section-title">Progression de l'allure</div>
       <div class="stats-distance-pills" id="stats-modal-distance-pills"></div>
@@ -493,15 +562,12 @@ function renderStatsCompareModalContent() {
   `;
 
   const table = document.getElementById('stats-modal-table');
-  if (table) {
-    table.innerHTML = `
-      <div class="stats-compare-row stats-compare-row--head"><div></div>${years.map(y => `<div>${y}</div>`).join('')}</div>
-      <div class="stats-compare-row"><div>Km</div>${statsPerYear.map(s => `<div>${s.totals.km.toFixed(1)}</div>`).join('')}</div>
-      <div class="stats-compare-row"><div>D+ (m)</div>${statsPerYear.map(s => `<div>${Math.round(s.totals.elevation).toLocaleString('fr-FR')}</div>`).join('')}</div>
-      <div class="stats-compare-row"><div>Activités</div>${statsPerYear.map(s => `<div>${s.totals.activities}</div>`).join('')}</div>
-      <div class="stats-compare-row"><div>Heures</div>${statsPerYear.map(s => `<div>${s.totals.hours.toFixed(1)}</div>`).join('')}</div>
-      <div class="stats-compare-row"><div>VO&#x2082;max moy.</div>${statsPerYear.map(s => `<div>${s.totals.vo2maxAvg ?? '—'}</div>`).join('')}</div>
-    `;
+  if (table) table.innerHTML = buildCompareTable(years, statsPerYear);
+
+  if (hasIncompleteYear) {
+    const samePeriodStats = years.map(y => computeSamePeriodStats(y, _statsSportFilter, today));
+    const spTable = document.getElementById('stats-modal-same-period-table');
+    if (spTable) spTable.innerHTML = buildCompareTable(years, samePeriodStats);
   }
 
   if (statsModalComparisonChart) { statsModalComparisonChart.destroy(); statsModalComparisonChart = null; }

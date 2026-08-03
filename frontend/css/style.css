@@ -579,6 +579,7 @@ body::before{
 /* ═══════════════════════════════════════════════
    PAGE STATISTIQUES
 ═══════════════════════════════════════════════ */
+#stats-filters{margin-bottom:16px;}
 .stats-compare-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:var(--accent-light);border:1px solid var(--accent);border-radius:var(--radius-md);padding:10px 14px;margin-bottom:14px;}
 .stats-compare-bar-label{font-size:12px;font-weight:700;color:var(--accent-text);}
 .stats-compare-bar-chips{display:flex;gap:6px;flex-wrap:wrap;}
@@ -600,8 +601,16 @@ body::before{
 .stats-year-cell span{display:block;font-size:10px;color:var(--text-muted);font-weight:500;margin-top:1px;}
 .stats-year-cell--loading{color:var(--text-muted);font-style:italic;font-size:12px;}
 .stats-year-chevron{font-size:11px;color:var(--text-muted);transition:transform var(--transition);}
-.stats-year-row--expanded .stats-year-chevron{transform:rotate(180deg);}
+.stats-year-row--expanded .stats-year-chevron{transform:rotate(180deg);color:var(--accent);}
 .stats-year-row-detail{padding:4px 18px 18px;}
+.stats-year-row--expanded{background:var(--accent-light);}
+.stats-year-row--expanded .stats-year-row-header{background:transparent;border-left:3px solid var(--accent);padding-left:15px;}
+.stats-year-row--expanded .stats-year-cell--year{color:var(--accent-text);}
+.stats-years-footer{padding:14px 18px;text-align:center;}
+
+.stats-arrow{font-size:10px;margin-right:4px;}
+.stats-arrow--up{color:var(--green);}
+.stats-arrow--down{color:var(--red);}
 
 .stats-tile-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;}
 @media(max-width:900px){.stats-tile-grid{grid-template-columns:repeat(2,1fr);}}
