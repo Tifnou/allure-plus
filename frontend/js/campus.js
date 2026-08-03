@@ -73,6 +73,24 @@ function fmtWeekRange(ts) {
   return `${start.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })} → ${end.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' })}`;
 }
 
+/** Minuit local de la date donnée (ignore l'heure) - les weekDate fournis
+ *  par Campus ne sont pas toujours à minuit pile (ex: stockés à midi UTC),
+ *  ce qui décalait la bascule "semaine en cours" à midi au lieu de minuit.
+ *  Comparer les dates normalisées au jour près évite ce décalage. */
+function startOfDay(ts) {
+  const d = new Date(ts);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
+/** "now" tombe-t-il dans la semaine calendaire de weekDate (7 jours, au
+ *  jour près) ? Remplace les comparaisons directes now/weekDate en
+ *  millisecondes, sensibles à l'heure exacte stockée par Campus. */
+function isNowInWeek(now, weekDate) {
+  const dayNow = startOfDay(now), dayWeek = startOfDay(weekDate);
+  return dayNow >= dayWeek && dayNow < dayWeek + 7 * 86400000;
+}
+
 // Traduction des zones d'allure (anglais → français)
 // ─── Table de référence Allure+ (Campus Coach definitions officielles) ───────
 // Campus indique le TYPE d'effort (S60, S30, EF...) → Allure+ calcule la valeur exacte
@@ -775,7 +793,7 @@ function renderTrainingPlan(goal, weeks) {
   const now = Date.now();
 
   // Trouver la semaine courante
-  let currentIdx = weeks.findIndex(w => now >= w.weekDate && now < (w.weekDate + 7 * 86400000));
+  let currentIdx = weeks.findIndex(w => isNowInWeek(now, w.weekDate));
   if (currentIdx === -1) currentIdx = weeks.length > 0 ? 0 : -1;
   campusState.selectedWeekIdx = currentIdx;
 
@@ -785,7 +803,7 @@ function renderTrainingPlan(goal, weeks) {
   const typeMap  = { 'trail-v2': 'Trail', 'marathon': 'Marathon', 'semi': 'Semi', '10k': '10 km' };
   const typeLabel = typeMap[goalType] || goalType || '';
   const totalWeeks = goal?.durationInWeeks || weeks.length;
-  const elapsed = weeks.filter(w => w.weekDate < now).length;
+  const elapsed = weeks.filter(w => startOfDay(w.weekDate) < startOfDay(now)).length;
   const pct = totalWeeks > 0 ? Math.round((elapsed / totalWeeks) * 100) : 0;
   const compDate = goal?.competitionDate;
   const daysLeft = compDate ? Math.max(0, Math.ceil((new Date(compDate).getTime() - now) / 86400000)) : null;
@@ -845,7 +863,7 @@ function renderTrainingPlan(goal, weeks) {
       <div class="week-tabs" id="week-tabs">
         ${weeks.map((w, i) => {
           const isCurrent = i === currentIdx;
-          const isPast    = (w.weekDate + 7 * 86400000) < now;
+          const isPast    = startOfDay(w.weekDate + 7 * 86400000) < startOfDay(now);
           const theme     = w.context?.cycleTheme?.replace(/-/g, ' ') || '';
           return `
             <button class="week-tab${i === campusState.selectedWeekIdx ? ' week-tab--active' : ''}${isCurrent ? ' week-tab--current' : ''}${isPast && i !== campusState.selectedWeekIdx ? ' week-tab--past' : ''}"
@@ -929,7 +947,7 @@ function renderSessionList(weekIdx) {
   const ctx = week.context || {};
   const theme = ctx.cycleTheme?.replace(/-/g, ' ') || '';
   const now = Date.now();
-  const isCurrent = now >= week.weekDate && now < (week.weekDate + 7 * 86400000);
+  const isCurrent = isNowInWeek(now, week.weekDate);
 
   const weekHeader = `
     <div class="session-week-header">
@@ -1840,7 +1858,7 @@ function computeSessionStats(weeks) {
   const cardio = _emptySessionBucket();
   const strength = _emptySessionBucket();
   (weeks || []).forEach(week => {
-    const weekPassed = (week.weekDate + 7 * 86400000) < now;
+    const weekPassed = startOfDay(week.weekDate + 7 * 86400000) < startOfDay(now);
     (week.sessions || []).forEach(session => {
       const bucket = isStrengthSession(session) ? strength : cardio;
       const key = (week._id || '') + '_' + session.trainingIndex;
@@ -1955,7 +1973,7 @@ function getVO2maxGainPct(weeksTotal) {
 function getRemainingVmaGainPct(weeksTotal, weeks) {
   if (!weeksTotal) return 0;
   const now = Date.now();
-  const elapsedWeeks = (weeks || []).filter(w => w.weekDate < now).length;
+  const elapsedWeeks = (weeks || []).filter(w => startOfDay(w.weekDate) < startOfDay(now)).length;
   const cardioAssiduity = computeSessionStats(weeks).cardio.assiduity;
   const assiduityRatio = cardioAssiduity !== null ? 0.3 + 0.7 * (cardioAssiduity / 100) : 1;
   const weeksRemaining = Math.max(0, weeksTotal - elapsedWeeks);
@@ -2028,7 +2046,7 @@ function vo2HistorySincePlanStart(weeks, vo2History) {
 function getStartVo2(weeks, vo2History) {
   if (!weeks || weeks.length === 0) return null;
   const now = Date.now();
-  if (weeks[0].weekDate > now) {
+  if (startOfDay(weeks[0].weekDate) > startOfDay(now)) {
     // Semaine 1 pas encore commencée : pas de "début de plan" à proprement
     // parler, on reflète simplement l'état actuel
     return vo2History.length > 0 ? vo2History[vo2History.length - 1].value : null;
@@ -2161,7 +2179,7 @@ function renderObjectifsChart(weeks, goal, dplusM, distKmOverride) {
   const vma = getVmaFromState();
   if (!vma || !distKm || weeksTotal < 2) return;
 
-  const elapsedWeeks = weeks.filter(w => w.weekDate < now).length;
+  const elapsedWeeks = weeks.filter(w => startOfDay(w.weekDate) < startOfDay(now)).length;
 
   // Même formule que le bloc Estimations (gain pondéré par l'assiduité réelle
   // et le nombre de semaines restantes) pour que les deux blocs soient
@@ -2545,7 +2563,7 @@ function updateGoalsPage(goal, weeks = []) {
 
   const now    = Date.now();
   const total  = goal.durationInWeeks || weeks.length;
-  const elapsed = weeks.filter(w => w.weekDate < now).length;
+  const elapsed = weeks.filter(w => startOfDay(w.weekDate) < startOfDay(now)).length;
   const left   = Math.max(0, total - elapsed);
   const pct    = total > 0 ? Math.round((elapsed / total) * 100) : 0;
 
@@ -2568,7 +2586,7 @@ function updateGoalsPage(goal, weeks = []) {
   }
 
   // Thème semaine courante
-  const currentWeek = weeks.find(w => now >= w.weekDate && now < w.weekDate + 7 * 86400000);
+  const currentWeek = weeks.find(w => isNowInWeek(now, w.weekDate));
   if (currentWeek?.context?.cycleDescription && el('goals-cycle-theme')) {
     el('goals-cycle-theme').innerHTML = `<div class="goals-theme-desc">
       <strong>Thème semaine en cours :</strong> ${currentWeek.context.cycleDescription}
@@ -2636,9 +2654,9 @@ function renderCyclesFromWeeks(weeks, now) {
     const firstWeekDate = c.weeks[0].weekDate;
     const lastWeekDate  = c.weeks[c.weeks.length - 1].weekDate + 7 * 86400000;
     let statusLabel, statusCls;
-    if (lastWeekDate < now) {
+    if (startOfDay(lastWeekDate) < startOfDay(now)) {
       statusLabel = 'Passé'; statusCls = 'cycle-status--past';
-    } else if (firstWeekDate > now) {
+    } else if (startOfDay(firstWeekDate) > startOfDay(now)) {
       statusLabel = 'À venir'; statusCls = 'cycle-status--future';
     } else {
       statusLabel = 'En cours'; statusCls = 'cycle-status--ongoing';
