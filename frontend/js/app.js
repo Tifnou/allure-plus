@@ -771,7 +771,21 @@ async function loadAndDrawRoute(activityId, distLabel, durLabel) {
   }
 }
 
-function drawRouteTrace(canvas, points) {
+/** Lisse un tracé GPS (moyenne glissante sur lat/lon) pour atténuer le bruit
+ *  naturel du GPS (petits zigzags) sans déformer la forme générale du
+ *  parcours - même principe que le lissage du profil d'élévation. */
+function smoothRoutePoints(points, windowSize = 5) {
+  const half = Math.floor(windowSize / 2);
+  return points.map((_, i) => {
+    const start = Math.max(0, i - half), end = Math.min(points.length, i + half + 1);
+    const slice = points.slice(start, end);
+    const lat = slice.reduce((s, p) => s + p.lat, 0) / slice.length;
+    const lon = slice.reduce((s, p) => s + p.lon, 0) / slice.length;
+    return { lat, lon };
+  });
+}
+
+function drawRouteTrace(canvas, rawPoints) {
   const wrapper = canvas.parentElement;
   const W = wrapper.clientWidth  || 480;
   const H = wrapper.clientHeight || 360;
@@ -779,6 +793,8 @@ function drawRouteTrace(canvas, points) {
   canvas.height = H;
   canvas.style.zIndex = '2';
   const ctx = canvas.getContext('2d');
+
+  const points = smoothRoutePoints(rawPoints);
 
   // -- Initialiser la carte Leaflet (fond OSM) --
   const mapDiv = document.getElementById('route-map');
@@ -850,42 +866,31 @@ function drawRouteTrace(canvas, points) {
 
     ctx.clearRect(0, 0, W, H);
 
-    if (coords.length >= 2) drawPath(coords, 3, 0.22, 0, '80,80,100');
+    if (coords.length >= 2) drawPath(coords, 3, 0.20, 0, '80,80,100');
 
     const visible = coords.slice(0, progress + 1);
     if (visible.length >= 2) {
-      drawPath(visible, 16, 0.07, 9);
-      drawPath(visible,  9, 0.18, 4);
-      drawPath(visible,  4, 0.72, 0);
-      drawPath(visible,  2, 1.00, 0);
+      // Rendu simplifié : un seul halo doux + une ligne nette (au lieu de
+      // 4 couches superposées type "néon", jugé trop chargé/brouillon)
+      drawPath(visible, 7, 0.16, 3);
+      drawPath(visible, 3, 1.00, 0);
     }
 
-    ctx.save();
-    ctx.shadowColor = '#16a34a'; ctx.shadowBlur = 14;
-    ctx.fillStyle = '#ffffff';
-    ctx.beginPath(); ctx.arc(coords[0].x, coords[0].y, 7, 0, Math.PI*2); ctx.fill();
-    ctx.fillStyle = '#16a34a';
-    ctx.beginPath(); ctx.arc(coords[0].x, coords[0].y, 5, 0, Math.PI*2); ctx.fill();
-    ctx.restore();
+    // Marqueur plat (anneau blanc + point de couleur), sans halo ni ombre
+    function drawFlatMarker(x, y, color, radius) {
+      ctx.save();
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath(); ctx.arc(x, y, radius + 2, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = color;
+      ctx.beginPath(); ctx.arc(x, y, radius, 0, Math.PI*2); ctx.fill();
+      ctx.restore();
+    }
+
+    drawFlatMarker(coords[0].x, coords[0].y, '#16a34a', 5);
 
     const cur = visible.length > 0 ? visible[visible.length-1] : coords[0];
     const isEnd = raw >= 1;
-    ctx.save();
-    ctx.shadowColor = '#f97316'; ctx.shadowBlur = isEnd ? 22 : 14;
-    if (!isEnd) {
-      ctx.globalAlpha = 0.25; ctx.fillStyle = '#f97316';
-      ctx.beginPath(); ctx.arc(cur.x, cur.y, 11, 0, Math.PI*2); ctx.fill();
-      ctx.globalAlpha = 1;
-    }
-    ctx.fillStyle = '#ffffff';
-    ctx.beginPath(); ctx.arc(cur.x, cur.y, isEnd ? 9 : 7, 0, Math.PI*2); ctx.fill();
-    ctx.fillStyle = '#f97316';
-    ctx.beginPath(); ctx.arc(cur.x, cur.y, isEnd ? 6 : 4.5, 0, Math.PI*2); ctx.fill();
-    if (isEnd) {
-      ctx.globalAlpha = 0.2;
-      ctx.beginPath(); ctx.arc(cur.x, cur.y, 16, 0, Math.PI*2); ctx.fill();
-    }
-    ctx.restore();
+    drawFlatMarker(cur.x, cur.y, '#f97316', isEnd ? 6 : 4.5);
 
     if (raw < 1) requestAnimationFrame(drawFrame);
   }
