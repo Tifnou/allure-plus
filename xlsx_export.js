@@ -115,13 +115,6 @@ function formatSessionShorthand(session, goalType) {
   return parts.join(' + ');
 }
 
-/** Zone "dominante" d'une seance (premiere zone hors EF/RECOVER, sinon EF) - sert
- *  a teinter legerement la ligne de la seance dans le plan. */
-function dominantZone(session, goalType) {
-  const zones = annotatePaceZones(session, goalType).map(z => z.resolvedZone).filter(Boolean);
-  return zones.find(z => z !== 'EF' && z !== 'RECOVER') || zones[0] || 'EF';
-}
-
 // Nombre total de colonnes utilisees par le tableau d'allures (partage avec
 // le plan, sur le meme onglet) : Prénom, VO2max, Sexe, VMA + 2 col/zone
 const PACE_TOTAL_COLS = 4 + PACE_TABLE_ZONES.length * 2;
@@ -245,13 +238,27 @@ function buildPacesBlock(sheet, goal, startRow) {
   return r + 1; // ligne vide de separation avant le plan
 }
 
+const RACE_DAY_FILL = 'FEF3C7'; // meme jaune que la case "Date de la course"
+const FRAME = { style: 'thin', color: { argb: argb('9CA3AF') } };
+
 /** Bloc "Plan" (semaine par semaine) juste en dessous du bloc Allures, sur
  *  le meme onglet. Le theme du cycle n'est repete que lors d'un changement
- *  de cycle. Chaque seance affiche un jour + une date reels, calcules
- *  depuis une case "date de la course" modifiable (semaines a 4 ou 5
- *  sorties/semaine uniquement - les autres restent sans jour fixe). */
-function buildPlanBlock(sheet, goal, weeks, startRow) {
+ *  de cycle. Chaque seance affiche un jour + une date reels.
+ *
+ *  Les dates se calent sur le LUNDI de la semaine de course (calcule depuis
+ *  la case "date de la course", modifiable) : changer la date de course de
+ *  quelques jours seulement (ex: 17 -> 18, meme semaine) ne decale donc PAS
+ *  les semaines precedentes - seul un changement de semaine entiere les
+ *  decale, comme dans la vraie vie. La semaine de course elle-meme n'a pas
+ *  de jour fixe (taper, pas un rythme hebdo normal) SAUF la seance de
+ *  competition, qui affiche la vraie date de course saisie et son vrai jour
+ *  (calcule, pas suppose "dimanche").
+ *
+ *  Chaque semaine est encadree, les lignes restent en fond blanc sauf le
+ *  jour de course (legerement mis en valeur). */
+function buildPlanBlock(sheet, goal, weeks, startRow, options) {
   const goalType = goal?.goalType || '';
+  const raceDayDurationSec = options?.raceDayDurationSec;
   const HEADERS = ['Jour', 'Date', 'Type', 'Détail', 'Durée', 'D+', 'Commentaire'];
   let r = startRow;
 
@@ -269,17 +276,35 @@ function buildPlanBlock(sheet, goal, weeks, startRow) {
   raceDateCell.value = originalCompDate || '';
   raceDateCell.numFmt = 'dd/mm/yyyy';
   raceDateCell.font = { bold: true, color: { argb: argb('b91c1c') } };
-  raceDateCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: argb('FEF3C7') } };
+  raceDateCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: argb(RACE_DAY_FILL) } };
   const raceDateRef = `$B$${r}`;
+  r += 1;
+
+  // Lundi de la semaine de course (calcule une seule fois, tout le reste
+  // des dates en decoule) - WEEKDAY(d,2) renvoie 1=lundi...7=dimanche.
+  sheet.getCell(r, 1).value = 'Lundi de cette semaine-là (calculé) :';
+  sheet.getCell(r, 1).font = { italic: true, size: 9, color: { argb: argb('888888') } };
+  const mondayCell = sheet.getCell(r, 2);
+  mondayCell.value = { formula: `${raceDateRef}-WEEKDAY(${raceDateRef},2)+1` };
+  mondayCell.numFmt = 'dd/mm/yyyy';
+  mondayCell.font = { italic: true, size: 9, color: { argb: argb('888888') } };
+  const mondayRef = `$B$${r}`;
   r += 1;
 
   sheet.mergeCells(r, 1, r, SHEET_COLS);
   const noteCell = sheet.getCell(r, 1);
-  noteCell.value = "Modifiez la date de la course ci-dessus : toutes les dates des séances ci-dessous s'ajustent automatiquement.";
+  noteCell.value = "Modifiez la date de la course ci-dessus : les semaines s'ajustent automatiquement (un changement de quelques jours dans la même semaine ne décale rien).";
   noteCell.font = { italic: true, color: { argb: argb('666666') } };
   r += 2;
 
   const originalCompTs = originalCompDate ? originalCompDate.getTime() : null;
+  // Lundi de la semaine de course dans les donnees d'origine (pour calculer
+  // le decalage en semaines entieres de chaque semaine par rapport a elle)
+  let originalRaceWeekMondayTs = null;
+  if (originalCompTs != null) {
+    const raceWeek = (weeks || []).find(w => originalCompTs >= w.weekDate && originalCompTs < w.weekDate + 7 * 86400000);
+    originalRaceWeekMondayTs = raceWeek ? raceWeek.weekDate : null;
+  }
   let lastTheme = null;
 
   (weeks || []).forEach((week) => {
@@ -291,9 +316,13 @@ function buildPlanBlock(sheet, goal, weeks, startRow) {
     const showTheme = theme && theme !== lastTheme;
     if (theme) lastTheme = theme;
 
-    const weekOffsetDays = (originalCompTs != null) ? Math.round((week.weekDate - originalCompTs) / 86400000) : null;
-    const dayPattern = DAY_PATTERNS[sessions.length] || null;
+    const weeksBeforeRace = (originalRaceWeekMondayTs != null)
+      ? Math.round((originalRaceWeekMondayTs - week.weekDate) / (7 * 86400000))
+      : null;
+    const isRaceWeek = weeksBeforeRace === 0;
+    const dayPattern = (!isRaceWeek && weeksBeforeRace != null) ? (DAY_PATTERNS[sessions.length] || null) : null;
 
+    const weekFirstRow = r;
     sheet.mergeCells(r, 1, r, SHEET_COLS);
     const bannerCell = sheet.getCell(r, 1);
     bannerCell.value = `${showTheme ? theme + '  ' : ''}${totalSec ? '(durée totale : ' + fmtHM(totalSec) + ')' : ''}`.trim() || ' ';
@@ -313,26 +342,41 @@ function buildPlanBlock(sheet, goal, weeks, startRow) {
     r += 1;
 
     sessions.forEach((session, i) => {
-      const zone = dominantZone(session, goalType);
-      const tint = lightenHex(ZONE_COLORS[zone] || ZONE_COLORS.EF, 0.82);
       const elev = session.stats?.expectedElevationGain || session.stats?.maxExpectedElevationGain || 0;
       const hill = isHillSession(session);
+      const isRaceSession = (session.trainingCategory || '').includes('competition');
       const typeName = (session.displayName || session.name || '') + (hill ? ' (côte)' : '');
+      const rowFill = isRaceSession ? RACE_DAY_FILL : null;
 
-      const hasDay = dayPattern && dayPattern[i] && weekOffsetDays != null;
-      const dayName = hasDay ? dayPattern[i][0] : '';
+      const hasDay = dayPattern && dayPattern[i];
+      // La durée brute Campus (session.stats.expectedDuration) du jour de
+      // course n'est pas calibrée à l'utilisateur (distance/D+/VMA validés) -
+      // on utilise l'estimation "Fin de plan" transmise par le frontend, qui
+      // reprend exactement le même calcul que le bloc Estimations.
+      const durationSec = (isRaceSession && raceDayDurationSec != null) ? raceDayDurationSec : (session.stats?.expectedDuration || 0);
 
-      const rowVals = [dayName, null, typeName, formatSessionShorthand(session, goalType), fmtHM(session.stats?.expectedDuration || 0), elev > 0 ? `+${Math.round(elev)}m` : '', session.description || ''];
+      const rowVals = [null, null, typeName, formatSessionShorthand(session, goalType), fmtHM(durationSec), elev > 0 ? `+${Math.round(elev)}m` : '', session.description || ''];
       rowVals.forEach((v, ci) => {
         const col = ci + 1;
-        if (col === 6 + 1) { // Commentaire : cellule fusionnée sur le reste de la largeur
+        if (col === 7) { // Commentaire : cellule fusionnée sur le reste de la largeur
           sheet.mergeCells(r, col, r, SHEET_COLS);
         }
         const cell = sheet.getCell(r, col);
-        if (col === 2) {
-          if (hasDay) {
+        if (col === 1) {
+          // Jour : seance de competition = jour reel (formule, pas suppose),
+          // sinon jour fixe du motif hebdo, sinon vide (semaine de course/atypique)
+          if (isRaceSession) {
+            cell.value = { formula: `CHOOSE(WEEKDAY(${raceDateRef},2),"Lundi","Mardi","Mercredi","Jeudi","Vendredi","Samedi","Dimanche")` };
+          } else {
+            cell.value = hasDay ? dayPattern[i][0] : '';
+          }
+        } else if (col === 2) {
+          if (isRaceSession) {
+            cell.value = { formula: raceDateRef };
+            cell.numFmt = 'dd/mm/yyyy';
+          } else if (hasDay) {
             const dayOffset = dayPattern[i][1];
-            cell.value = { formula: `${raceDateRef}+${weekOffsetDays + dayOffset}` };
+            cell.value = { formula: `${mondayRef}-${weeksBeforeRace}*7+${dayOffset}` };
             cell.numFmt = 'dd/mm/yyyy';
           } else {
             cell.value = '';
@@ -340,18 +384,34 @@ function buildPlanBlock(sheet, goal, weeks, startRow) {
         } else {
           cell.value = v;
         }
-        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: argb(tint) } };
+        if (rowFill) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: argb(rowFill) } };
         cell.alignment = { wrapText: col === 4 || col === 7, vertical: 'middle' };
       });
       r += 1;
     });
+
+    // Cadre autour de cette semaine (bandeau + en-tetes + seances)
+    const weekLastRow = r - 1;
+    for (let c = 1; c <= SHEET_COLS; c++) {
+      const top = sheet.getCell(weekFirstRow, c);
+      top.border = Object.assign({}, top.border, { top: FRAME });
+      const bottom = sheet.getCell(weekLastRow, c);
+      bottom.border = Object.assign({}, bottom.border, { bottom: FRAME });
+    }
+    for (let rr = weekFirstRow; rr <= weekLastRow; rr++) {
+      const left = sheet.getCell(rr, 1);
+      left.border = Object.assign({}, left.border, { left: FRAME });
+      const right = sheet.getCell(rr, SHEET_COLS);
+      right.border = Object.assign({}, right.border, { right: FRAME });
+    }
+
     r += 1; // ligne vide entre semaines
   });
 }
 
 /** Construit le classeur complet : un seul onglet avec le tableau d'allures
  *  en haut et le plan semaine par semaine juste en dessous. */
-async function buildPlanWorkbook(goal, weeks) {
+async function buildPlanWorkbook(goal, weeks, options) {
   const wb = new ExcelJS.Workbook();
   wb.creator = 'Allure+';
   wb.created = new Date();
@@ -366,7 +426,7 @@ async function buildPlanWorkbook(goal, weeks) {
   for (let c = 7; c <= SHEET_COLS; c++) sheet.getColumn(c).width = 9;
 
   const planStartRow = buildPacesBlock(sheet, goal, 1);
-  buildPlanBlock(sheet, goal, weeks, planStartRow);
+  buildPlanBlock(sheet, goal, weeks, planStartRow, options);
 
   return wb;
 }

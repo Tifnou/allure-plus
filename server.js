@@ -1384,11 +1384,11 @@ app.get('/api/campus/export-plan', requireCampusToken, async (req, res) => {
 // exporter le mauvais plan (ou aucun) meme quand un plan est bien affiche.
 app.post('/api/campus/export-plan-xlsx', requireAdmin, async (req, res) => {
   try {
-    const { goal, weeks } = req.body || {};
+    const { goal, weeks, raceDayDurationSec } = req.body || {};
     if (!goal || !Array.isArray(weeks) || weeks.length === 0) {
       return res.status(400).json({ error: 'Aucun plan charge a exporter' });
     }
-    const workbook = await buildPlanWorkbook(goal, weeks);
+    const workbook = await buildPlanWorkbook(goal, weeks, { raceDayDurationSec });
     const safeName = (goal?.name || goal?.goalTitle || 'plan').replace(/[^a-zA-Z0-9-_]+/g, '_');
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="plan-${safeName}.xlsx"`);

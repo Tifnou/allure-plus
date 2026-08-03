@@ -759,10 +759,26 @@ async function exportPlanXlsx() {
   const originalText = btn ? btn.textContent : null;
   if (btn) { btn.disabled = true; btn.textContent = '⏳ Génération...'; }
   try {
+    // Meme calcul que le bloc Estimations (Fin de plan) / la carte "Jour de
+    // course" - envoyé au serveur car xlsx_export.js (côté serveur) n'a pas
+    // accès à la distance/D+ validés ni à la VO2max de l'utilisateur, donc
+    // ne peut pas recalculer lui-même la durée calibrée du jour de course.
+    const planId = goal._id || 'plan';
+    const savedDist  = parseFloat(localStorage.getItem('suivi_objectif_dist_'  + planId)) || 0;
+    const savedDplus = parseInt(localStorage.getItem('suivi_objectif_dplus_' + planId)) || 0;
+    const isTrailGoal = (goal.goalType || '').toLowerCase().includes('trail');
+    const vma = getVmaFromState();
+    let raceDayDurationSec = null;
+    if (savedDist > 0 && vma) {
+      const weeksTotal = goal.durationInWeeks || weeks.length;
+      const vmaEnd = vma * (1 + getRemainingVmaGainPct(weeksTotal, weeks));
+      raceDayDurationSec = estimateRaceTime(vmaEnd, savedDist, savedDplus, isTrailGoal);
+    }
+
     const res = await fetch(`${API}/api/campus/export-plan-xlsx`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ goal, weeks }),
+      body: JSON.stringify({ goal, weeks, raceDayDurationSec }),
     });
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
@@ -863,7 +879,11 @@ function renderTrainingPlan(goal, weeks) {
       <div class="week-tabs" id="week-tabs">
         ${weeks.map((w, i) => {
           const isCurrent = i === currentIdx;
-          const isPast    = startOfDay(w.weekDate + 7 * 86400000) < startOfDay(now);
+          // Basé sur currentIdx (déjà calculé au jour près) plutôt qu'un
+          // recalcul de date séparé : évite tout écart de frontière entre
+          // les deux (ex: la semaine qui vient de se terminer hier restait
+          // affichée "à venir" faute d'être strictement avant aujourd'hui).
+          const isPast    = currentIdx >= 0 && i < currentIdx;
           const theme     = w.context?.cycleTheme?.replace(/-/g, ' ') || '';
           return `
             <button class="week-tab${i === campusState.selectedWeekIdx ? ' week-tab--active' : ''}${isCurrent ? ' week-tab--current' : ''}${isPast && i !== campusState.selectedWeekIdx ? ' week-tab--past' : ''}"
@@ -995,24 +1015,27 @@ function renderSessionCard(session, idx, weekIdx, weekId, isCurrentWeek) {
 
   const isOpen = idx === campusState.openSessionIdx && weekIdx === campusState.selectedWeekIdx;
 
-  // Estimation trail (Naismith) : sépare plat/descente et montée
+  // Estimation "Fin de plan" : meme methode que le bloc Estimations de
+  // performance (Objectifs) - distance/D+ valides par l'utilisateur et VMA
+  // projetee en fin de plan, PAS la duree brute de Campus (goal.specificData
+  // est souvent vide sur un plan trail-v2, ce qui faisait retomber sur
+  // l'estimation generique de Campus au lieu du calcul calibre Allure+).
   const isComp = (session.trainingCategory || '').includes('competition');
   let displayDuration = duration;
   let isTrailEstimate = false;
   if (isComp) {
-    const goalData     = campusState.goal?.specificData || {};
-    const distKm       = goalData.distance     || 0;
-    const elevGain     = goalData.elevationGain || 0;
-    const vo2local     = typeof _latestVO2Max !== 'undefined' ? _latestVO2Max : null;
-    const profLocal    = JSON.parse(localStorage.getItem('suivi_sport_profile') || '{}');
-    const sexLocal     = profLocal.sex || 'M';
-    const factorL      = sexLocal === 'F' ? 0.315 : 0.313;
-    const vmaLocal     = vo2local ? Math.round((vo2local - 3.5) * factorL * 10) / 10 : null;
-    if (distKm > 0 && elevGain > 0 && vmaLocal) {
-      const equivDist     = distKm + elevGain / 100;
-      const trailSpeedKmh = vmaLocal * 0.60;
-      displayDuration  = Math.round((equivDist / trailSpeedKmh) * 3600);
-      isTrailEstimate  = true;
+    const compGoal  = campusState.goal;
+    const compWeeks = campusState.weeks;
+    const planId    = compGoal?._id || 'plan';
+    const savedDist  = parseFloat(localStorage.getItem('suivi_objectif_dist_'  + planId)) || 0;
+    const savedDplus = parseInt(localStorage.getItem('suivi_objectif_dplus_' + planId)) || 0;
+    const isTrailGoal = (compGoal?.goalType || '').toLowerCase().includes('trail');
+    const vma = getVmaFromState();
+    if (savedDist > 0 && vma && compWeeks) {
+      const weeksTotal = compGoal?.durationInWeeks || compWeeks.length;
+      const vmaEnd = vma * (1 + getRemainingVmaGainPct(weeksTotal, compWeeks));
+      displayDuration = estimateRaceTime(vmaEnd, savedDist, savedDplus, isTrailGoal);
+      isTrailEstimate = isTrailGoal;
     }
   }
   const durationHtml = displayDuration
