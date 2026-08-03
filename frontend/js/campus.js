@@ -1150,18 +1150,66 @@ function sanitizeCoachText(text) {
     .trim();
 }
 
+const PPG_DIFFICULTY_FR = {
+  easy: 'Facile', moderate: 'Modéré', hard: 'Difficile',
+  very_hard: 'Très difficile', recovery: 'Récupération',
+};
+
+const PPG_TIME_UNIT_FR = { seconds: 'sec', minutes: 'min' };
+
+// Duree/repetitions d'un exercice PPG, tel qu'affiche par Campus Coach
+// (ex: "30 sec" ou "15 répétitions") - source : exercice.durations[] ou
+// exercice.repeat selon que Campus modelise l'exercice en temps ou en reps.
+function formatPPGExerciseMeta(ex) {
+  if (Array.isArray(ex.durations) && ex.durations.length > 0) {
+    const d = ex.durations[0];
+    const unit = PPG_TIME_UNIT_FR[d.timeUnit] || d.timeUnit;
+    return `${d.value} ${unit}`;
+  }
+  if (ex.repeat) return `${ex.repeat} répétitions`;
+  return '';
+}
+
+// Reconstruit les blocs d'une seance de renforcement (PPG) tels que Campus
+// Coach les affiche : series repetees (block.repeat), chaque exercice avec
+// sa duree/reps + niveau d'effort, et la recuperation entre series a la fin
+// du bloc (exercice special exerciseType==='recuperation').
+function formatPPGBlocksHtml(blocks) {
+  if (!Array.isArray(blocks) || blocks.length === 0) return '';
+  const blocksHtml = blocks.map(block => {
+    const all = block.exercises || block || [];
+    const recovery = all.find(e => e.exerciseType === 'recuperation');
+    const exercises = all.filter(e => e.exerciseType !== 'recuperation' && e.name);
+    if (exercises.length === 0) return '';
+    const rows = exercises.map(ex => {
+      const meta = formatPPGExerciseMeta(ex);
+      const effort = ex.difficulty && ex.difficulty !== 'recovery' ? (PPG_DIFFICULTY_FR[ex.difficulty] || ex.difficulty) : '';
+      const metaText = [meta, effort ? `effort ${effort.toLowerCase()}` : ''].filter(Boolean).join(' · ');
+      return `<li><span class="ppg-ex-name">${ex.name}</span>${metaText ? `<span class="ppg-ex-meta">${metaText}</span>` : ''}</li>`;
+    }).join('');
+    const repeatBadge = block.repeat > 1 ? `<span class="ppg-block-repeat">× ${block.repeat}</span>` : '';
+    const recoveryHtml = recovery ? `<div class="ppg-block-recovery">Récupération : ${formatPPGExerciseMeta(recovery)}</div>` : '';
+    return `
+      <div class="ppg-block">
+        ${repeatBadge}
+        <ul>${rows}</ul>
+        ${recoveryHtml}
+      </div>`;
+  }).join('');
+  return `
+    <div class="session-exercises-list">
+      <div class="session-detail-section-title">Exercices</div>
+      ${blocksHtml}
+    </div>`;
+}
+
 // "?"? Panneau de détail d'une séance "?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?
 function renderSessionDetail(session, weekId, isCurrentWeek) {
   const isPPG = session.sport === 'ppg' || session.trainingCategory === 'gpp';
 
   // "?"? Affichage simplifié pour les séances PPG/Renforcement "?"?
   if (isPPG) {
-    const exerciseNames = (session.exercisesBlocks || []).flatMap(b => b.exercises || b || []).map(e => e.name).filter(Boolean);
-    const exercisesHtml = exerciseNames.length > 0 ? `
-      <div class="session-exercises-list">
-        <div class="session-detail-section-title">Exercices</div>
-        <ul>${exerciseNames.map(n => `<li>${n}</li>`).join('')}</ul>
-      </div>` : '';
+    const exercisesHtml = formatPPGBlocksHtml(session.exercisesBlocks || []);
     return `
       <div class="session-detail-panel" onclick="event.stopPropagation()">
         ${session.description ? `

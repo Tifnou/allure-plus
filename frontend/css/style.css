@@ -2129,6 +2129,14 @@ body::before{
   color: #444;
   line-height: 1.7;
 }
+.ppg-block { position: relative; margin-top: 12px; padding: 10px 12px; background: var(--bg-hover); border-radius: var(--radius-sm); }
+.ppg-block:first-child { margin-top: 4px; }
+.ppg-block ul { margin-top: 0; }
+.ppg-block li { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.ppg-ex-name { flex: 1; }
+.ppg-ex-meta { font-size: 11px; color: var(--text-muted); white-space: nowrap; font-weight: 600; }
+.ppg-block-repeat { position: absolute; top: 8px; right: 10px; font-size: 11px; font-weight: 700; color: var(--accent-text); background: var(--accent-light); border-radius: 20px; padding: 2px 8px; }
+.ppg-block-recovery { margin-top: 6px; font-size: 12px; color: var(--text-secondary); font-style: italic; }
 
 /* ─── Profile running category ─────────────────── */
 .profile-run-cat {
