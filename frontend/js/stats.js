@@ -64,16 +64,51 @@ function isRunOrTrail(a) {
 }
 
 // ─── Chargement à la demande d'une année ────────────────────────────────
+// Cache navigateur (localStorage) pour les annees passees et closes -
+// evite de re-interroger Garmin a chaque rechargement de page pour des
+// donnees qui ne changeront plus jamais. L'annee en cours n'est jamais
+// mise en cache ici (elle continue de se recharger normalement).
+const YEAR_CACHE_PREFIX = 'allure_year_cache_v1_';
+
+function loadYearFromCache(year) {
+  try {
+    const raw = localStorage.getItem(YEAR_CACHE_PREFIX + year);
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) { return null; }
+}
+
+function saveYearToCache(year, activities) {
+  try {
+    localStorage.setItem(YEAR_CACHE_PREFIX + year, JSON.stringify(activities));
+  } catch (e) {} // quota depassee ou stockage indisponible : on ignore simplement
+}
+
 async function ensureYearLoaded(year) {
   if (_fullyLoadedYears.has(year)) return;
+  const isPastYear = year < new Date().getFullYear();
+
+  if (isPastYear) {
+    const cached = loadYearFromCache(year);
+    if (cached) {
+      _allActivities = _allActivities.filter(a => {
+        const d = new Date(a.date || a.startTimeLocal || a.startTimeGMT || '');
+        return isNaN(d) || d.getFullYear() !== year;
+      }).concat(cached);
+      _fullyLoadedYears.add(year);
+      return;
+    }
+  }
+
   const resp = await fetch(`${API}/api/activities/year/${year}`);
   if (!resp.ok) throw new Error(`Erreur ${resp.status}`);
   const data = await resp.json();
+  const activities = data.activities || [];
   _allActivities = _allActivities.filter(a => {
     const d = new Date(a.date || a.startTimeLocal || a.startTimeGMT || '');
     return isNaN(d) || d.getFullYear() !== year;
-  }).concat(data.activities || []);
+  }).concat(activities);
   _fullyLoadedYears.add(year);
+  if (isPastYear) saveYearToCache(year, activities);
 }
 
 function getActivitiesForYearLocal(year, filter) {

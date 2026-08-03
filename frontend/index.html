@@ -12,7 +12,7 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <link rel="stylesheet" href="css/style.css?v=1785772436309" />
+  <link rel="stylesheet" href="css/style.css?v=1785785317038" />
   <link rel="stylesheet" href="css/plans.css" />
 </head>
 <body>
@@ -346,11 +346,17 @@
           <div class="stat-label">Jours sans activité</div>
           <span class="stat-tag" id="stat-days-tag"></span>
         </div>
-        <div class="stat-card">
+        <div class="stat-card stat-card--vo2">
           <span class="stat-card-icon">&#x1FAC1;</span>
-          <div class="stat-value" id="stat-vo2max"></div>
           <div class="stat-label">VO&#x2082;max estimée</div>
-          <span class="stat-tag" id="stat-vo2max-trend" style="display:none"></span>
+          <div class="vo2-bar-wrap" id="dash-vo2-bar-wrap"></div>
+          <div class="profile-vo2-value" id="stat-vo2max"></div>
+          <div class="profile-vo2-unit">mL/kg/min</div>
+          <div class="profile-vo2-label" id="dash-vo2-label"></div>
+          <div class="dash-vo2-footer">
+            <div id="dash-vo2-run-cat" class="profile-run-cat" style="display:none"></div>
+            <span class="stat-tag" id="stat-vo2max-trend" style="display:none"></span>
+          </div>
         </div>
       </div>
 
@@ -1054,9 +1060,9 @@
 
   </div><!-- /app-content -->
 
-  <script src="js/app.js?v=1785780707980"></script>
+  <script src="js/app.js?v=1785785317038"></script>
   <script src="js/campus.js?v=1785771021295"></script>
-  <script src="js/stats.js?v=1785771021295"></script>
+  <script src="js/stats.js?v=1785785317038"></script>
   <script src="js/plans.js"></script>
   <!-- ... MODAL LOGS ........................... -->
   <div id="logs-modal" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.55);backdrop-filter:blur(4px);" onclick="if(event.target===this)closeLogsModal()">

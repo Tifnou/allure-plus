@@ -381,7 +381,7 @@ function renderHeroStats(stats) {
 
   // VO2max
   if (stats.latestVO2Max) {
-    setVal('stat-vo2max', stats.latestVO2Max.toFixed(1));
+    setVal('stat-vo2max', stats.latestVO2Max.toFixed(0));
     // TASK 1 — Color the VO2max stat number
     const vo2StatEl = el('stat-vo2max');
     const profile = JSON.parse(localStorage.getItem('suivi_sport_profile') || '{}');
@@ -394,9 +394,22 @@ function renderHeroStats(stats) {
       if (m < 0 || (m === 0 && now.getDate() < b.getDate())) a--;
       return a;
     })() : (profile.age || null);
+    const vo2ForClass = (typeof stats.vo2MaxPrecise === 'number') ? stats.vo2MaxPrecise : stats.latestVO2Max;
     if (vo2StatEl && typeof vo2maxGarminColor === 'function') {
-      const vo2ForClass = (typeof stats.vo2MaxPrecise === 'number') ? stats.vo2MaxPrecise : stats.latestVO2Max;
       vo2StatEl.style.color = vo2maxGarminColor(vo2ForClass, profSex, profAge);
+    }
+    if (typeof vo2maxLabel === 'function') setVal('dash-vo2-label', vo2maxLabel(vo2ForClass, profSex, profAge));
+    if (typeof renderVo2Bar === 'function') {
+      const barEl = el('dash-vo2-bar-wrap');
+      if (barEl) barEl.innerHTML = renderVo2Bar(vo2ForClass, profSex, profAge);
+    }
+    if (typeof calcRunningCategory === 'function') {
+      const runCat = calcRunningCategory(profAge, profSex);
+      const runCatEl = el('dash-vo2-run-cat');
+      if (runCatEl) {
+        runCatEl.textContent = runCat || '';
+        runCatEl.style.display = runCat ? '' : 'none';
+      }
     }
     const series = stats.vo2maxSeries || [];
     if (series.length >= 2) {
