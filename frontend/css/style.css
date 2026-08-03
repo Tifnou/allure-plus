@@ -1278,20 +1278,20 @@ body::before{
 }
 /* Semaines passées (terminées) */
 .week-tab--past:not(.week-tab--active) {
-  background: var(--bg);
-  border-color: var(--border-light);
+  background: var(--red-bg);
+  border-color: var(--red);
   opacity: 0.55;
 }
 .week-tab--past:not(.week-tab--active) .week-tab-num {
-  color: var(--text-muted);
+  color: var(--red);
 }
 .week-tab--past:not(.week-tab--active) .week-tab-theme {
-  color: var(--text-muted);
+  color: var(--red);
 }
 .week-tab--past:not(.week-tab--active):hover {
-  opacity: 0.75;
-  border-color: var(--border);
-  background: var(--bg-hover);
+  opacity: 0.8;
+  border-color: var(--red);
+  background: var(--red-bg);
 }
 .week-tab-num {
   font-size: 12px;
