@@ -4,9 +4,9 @@
 // Allure+ : un tableau d'allures personnalisees en haut (chacun tape son
 // prenom, sa VO2max et son sexe, les allures se calculent via de vraies
 // formules de tableur - une ligne Route et une ligne Trail par personne),
-// puis le plan semaine par semaine juste en dessous, sur le meme onglet
-// (Seance 1, Seance 2... au lieu de jours calendaires, puisque chaque ami
-// suit le plan a son rythme).
+// puis le plan semaine par semaine juste en dessous, sur le meme onglet,
+// avec jour/date reels calcules depuis une case "date de la course"
+// modifiable (une seule formule a la racine, tout le reste en decoule).
 //
 // Reutilise zones.js (source de verite des zones Allure+) pour que les
 // zones et allures exportees soient exactement celles de l'application.
@@ -23,9 +23,19 @@ const ZONE_COLORS = {
 };
 // Correction trail par zone (memes valeurs que calcAllureRefTrail, campus.js)
 const TRAIL_CORR = { EF: 0.07, TEMPO: 0.07, AS42: 0.07, SWEET_SPOT: 0.07, AS21: 0.07, S60: 0.07, S30: 0.07, AS10: 0.08, VMA: 0.10 };
-const ZONE_SHORT = { RECOVER: 'Récup', EF: 'EF', TEMPO: 'TEMPO', AS42: 'AS42', SWEET_SPOT: 'SWEET SPOT', AS21: 'AS21', S60: 'S60', AS10: 'AS10', S30: 'S30', VMA: 'VMA' };
+// RECOVER s'affiche "EF" dans le detail compact du plan (convention du
+// coach : echauffement/recup entre repetitions/retour au calme sont tous
+// notes "EF", jamais un mot a part - confirme sur l'ancien tableau modele).
+const ZONE_SHORT = { RECOVER: 'EF', EF: 'EF', TEMPO: 'TEMPO', AS42: 'AS42', SWEET_SPOT: 'SWEET SPOT', AS21: 'AS21', S60: 'S60', AS10: 'AS10', S30: 'S30', VMA: 'VMA' };
 // Zones utilisees dans le tableau d'allures personnalisees (RECOVER exclue : "allure libre", pas de cible)
 const PACE_TABLE_ZONES = Object.keys(ALLURE_PLUS_ZONES).filter(z => z !== 'RECOVER');
+// Jours assignes selon le nombre de sorties course/trail de la semaine -
+// seuls 4 et 5 sorties/semaine ont un jour fixe ; les autres cas (ex.
+// semaines post-competition a 3 sorties) restent libres, sans date.
+const DAY_PATTERNS = {
+  4: [['Mardi', 1], ['Jeudi', 3], ['Samedi', 5], ['Dimanche', 6]],
+  5: [['Mardi', 1], ['Mercredi', 2], ['Jeudi', 3], ['Samedi', 5], ['Dimanche', 6]],
+};
 
 function argb(hex) { return 'FF' + hex.toUpperCase(); }
 
@@ -64,13 +74,11 @@ function fmtHM(seconds) {
   return `${h}:${String(m).padStart(2, '0')}`;
 }
 
-/** Reconstruit un texte compact ("15' EF + 4x8' S60 r=3'30 + Récup") depuis
+/** Reconstruit un texte compact ("15' EF + 6x3' S60 r=1'30 EF + 5' EF") depuis
  *  les zones d'allure reelles de la seance (annotatePaceZones), en detectant
- *  les motifs repetes (travail/recuperation alternes N fois).
- *  Le tout premier segment, s'il resout en RECOVER, est etiquete
- *  "Échauffement" plutot que "Récup" - un long segment confort en debut de
- *  seance (ex: sortie longue) n'est pas une "recuperation" mais bien la
- *  mise en route, meme si sa zone/allure cible est identique. */
+ *  les motifs repetes (travail/recuperation alternes N fois). RECOVER
+ *  s'affiche toujours "EF" (echauffement, recup entre repetitions, retour
+ *  au calme sont tous notes EF dans cette notation compacte). */
 function formatSessionShorthand(session, goalType) {
   const list = annotatePaceZones(session, goalType)
     .map(z => ({ zone: z.resolvedZone || 'EF', duration: Math.round(z.duration || 0) }))
@@ -81,7 +89,6 @@ function formatSessionShorthand(session, goalType) {
   let i = 0;
   while (i < list.length) {
     const work = list[i];
-    const isFirst = i === 0;
     // Motif alterne travail/recup repete N fois
     if (work.zone !== 'RECOVER' && i + 1 < list.length && list[i + 1].zone === 'RECOVER') {
       const rec = list[i + 1];
@@ -93,7 +100,7 @@ function formatSessionShorthand(session, goalType) {
       ) { reps++; j += 2; }
       if (j < list.length && list[j].zone === work.zone && list[j].duration === work.duration) { reps++; j++; }
       if (reps >= 2) {
-        parts.push(`${reps}x${fmtDurCompact(work.duration)} ${ZONE_SHORT[work.zone] || work.zone} r=${fmtDurCompact(rec.duration)}`);
+        parts.push(`${reps}x${fmtDurCompact(work.duration)} ${ZONE_SHORT[work.zone] || work.zone} r=${fmtDurCompact(rec.duration)} ${ZONE_SHORT.RECOVER}`);
         i = j;
         continue;
       }
@@ -101,13 +108,8 @@ function formatSessionShorthand(session, goalType) {
     // Sinon, simple repetition de segments identiques consecutifs
     let reps = 1, j = i + 1;
     while (j < list.length && list[j].zone === work.zone && list[j].duration === work.duration) { reps++; j++; }
-    if (work.zone === 'RECOVER') {
-      parts.push(isFirst ? 'Échauffement' : 'Récup');
-    } else if (reps >= 2) {
-      parts.push(`${reps}x${fmtDurCompact(work.duration)} ${ZONE_SHORT[work.zone] || work.zone}`);
-    } else {
-      parts.push(`${fmtDurCompact(work.duration)} ${ZONE_SHORT[work.zone] || work.zone}`);
-    }
+    const label = ZONE_SHORT[work.zone] || work.zone;
+    parts.push(reps >= 2 ? `${reps}x${fmtDurCompact(work.duration)} ${label}` : `${fmtDurCompact(work.duration)} ${label}`);
     i = j;
   }
   return parts.join(' + ');
@@ -123,19 +125,21 @@ function dominantZone(session, goalType) {
 // Nombre total de colonnes utilisees par le tableau d'allures (partage avec
 // le plan, sur le meme onglet) : Prénom, VO2max, Sexe, VMA + 2 col/zone
 const PACE_TOTAL_COLS = 4 + PACE_TABLE_ZONES.length * 2;
-const PLAN_COLS = 5; // Séance, Type, Détail, Durée, D+
-const SHEET_COLS = Math.max(PACE_TOTAL_COLS, PLAN_COLS);
+const SHEET_COLS = PACE_TOTAL_COLS;
+const NB_ATHLETES = 3;
 
 /** Bloc "Allures" en haut de l'onglet : chaque coureur occupe 2 lignes
  *  (Route puis Trail), la ligne Trail applique la correction terrain et
  *  reference la VMA de la ligne Route juste au-dessus (VO2max/Sexe saisis
- *  une seule fois). Retourne la ligne suivante libre. */
+ *  une seule fois). Un cadre entoure tout le bloc et une bordure sépare
+ *  chaque coureur du suivant. Retourne la ligne suivante libre. */
 function buildPacesBlock(sheet, goal, startRow) {
   let r = startRow;
   sheet.mergeCells(r, 1, r, SHEET_COLS);
   const titleCell = sheet.getCell(r, 1);
   titleCell.value = `Zones d'allure personnalisées — ${goal?.name || goal?.goalTitle || 'Plan Allure+'}`;
   titleCell.font = { bold: true, size: 14 };
+  const blockFirstRow = r;
   r += 1;
 
   sheet.mergeCells(r, 1, r, SHEET_COLS);
@@ -182,7 +186,6 @@ function buildPacesBlock(sheet, goal, startRow) {
   });
   r = headerRow2 + 1;
 
-  const NB_ATHLETES = 7;
   for (let a = 0; a < NB_ATHLETES; a++) {
     const routeRow = r, trailRow = r + 1;
     const B = `B${routeRow}`, C = `C${routeRow}`, D = `D${routeRow}`, DT = `D${trailRow}`;
@@ -214,20 +217,42 @@ function buildPacesBlock(sheet, goal, startRow) {
         trailCell.font = { italic: true, color: { argb: argb('555555') } };
       });
     });
+
+    // Séparation visuelle nette entre chaque coureur
+    const sepStyle = { style: 'medium', color: { argb: argb('9CA3AF') } };
+    for (let c = 1; c <= SHEET_COLS; c++) {
+      sheet.getCell(trailRow, c).border = Object.assign({}, sheet.getCell(trailRow, c).border, { bottom: sepStyle });
+    }
     r = trailRow + 1;
   }
+  const blockLastRow = r - 1;
 
-  sheet.views = (sheet.views || []).concat([]);
+  // Cadre autour de tout le bloc Allures
+  const thin = { style: 'thin', color: { argb: argb('9CA3AF') } };
+  for (let c = 1; c <= SHEET_COLS; c++) {
+    const top = sheet.getCell(blockFirstRow, c);
+    top.border = Object.assign({}, top.border, { top: thin });
+    const bottom = sheet.getCell(blockLastRow, c);
+    bottom.border = Object.assign({}, bottom.border, { bottom: thin });
+  }
+  for (let rr = blockFirstRow; rr <= blockLastRow; rr++) {
+    const left = sheet.getCell(rr, 1);
+    left.border = Object.assign({}, left.border, { left: thin });
+    const right = sheet.getCell(rr, SHEET_COLS);
+    right.border = Object.assign({}, right.border, { right: thin });
+  }
+
   return r + 1; // ligne vide de separation avant le plan
 }
 
 /** Bloc "Plan" (semaine par semaine) juste en dessous du bloc Allures, sur
  *  le meme onglet. Le theme du cycle n'est repete que lors d'un changement
- *  de cycle (pas a chaque semaine), et une ligne "Description" est ajoutee
- *  sous chaque seance quand le coach a redige un texte. */
+ *  de cycle. Chaque seance affiche un jour + une date reels, calcules
+ *  depuis une case "date de la course" modifiable (semaines a 4 ou 5
+ *  sorties/semaine uniquement - les autres restent sans jour fixe). */
 function buildPlanBlock(sheet, goal, weeks, startRow) {
   const goalType = goal?.goalType || '';
-  const HEADERS = ['Séance', 'Type', 'Détail', 'Durée', 'D+'];
+  const HEADERS = ['Jour', 'Date', 'Type', 'Détail', 'Durée', 'D+', 'Commentaire'];
   let r = startRow;
 
   sheet.mergeCells(r, 1, r, SHEET_COLS);
@@ -235,75 +260,90 @@ function buildPlanBlock(sheet, goal, weeks, startRow) {
   title.value = `Plan d'entraînement — ${goal?.name || goal?.goalTitle || ''}`;
   title.font = { bold: true, size: 14 };
   r += 1;
+
+  // Case "date de la course" - toutes les dates du plan en decoulent par formule
+  sheet.getCell(r, 1).value = 'Date de la course :';
+  sheet.getCell(r, 1).font = { bold: true };
+  const raceDateCell = sheet.getCell(r, 2);
+  const originalCompDate = goal?.competitionDate ? new Date(goal.competitionDate) : null;
+  raceDateCell.value = originalCompDate || '';
+  raceDateCell.numFmt = 'dd/mm/yyyy';
+  raceDateCell.font = { bold: true, color: { argb: argb('b91c1c') } };
+  raceDateCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: argb('FEF3C7') } };
+  const raceDateRef = `$B$${r}`;
+  r += 1;
+
   sheet.mergeCells(r, 1, r, SHEET_COLS);
   const noteCell = sheet.getCell(r, 1);
-  noteCell.value = "Chaque \"Séance N\" est à faire dans l'ordre, au rythme de chacun (pas de dates fixes).";
+  noteCell.value = "Modifiez la date de la course ci-dessus : toutes les dates des séances ci-dessous s'ajustent automatiquement.";
   noteCell.font = { italic: true, color: { argb: argb('666666') } };
   r += 2;
 
+  const originalCompTs = originalCompDate ? originalCompDate.getTime() : null;
   let lastTheme = null;
-  (weeks || []).forEach((week, wIdx) => {
+
+  (weeks || []).forEach((week) => {
     // Seules les séances course/trail sont exportées - le renforcement (gpp)
     // n'a pas sa place ici (pas de zone d'allure Allure+ pertinente pour lui).
-    const sessions = (week.sessions || []).filter(s => !isStrengthSession(s));
+    const sessions = (week.sessions || []).filter(s => !isStrengthSession(s) && !((s.trainingCategory || '').includes('rest') || s.sport === 'rest'));
     const totalSec = sessions.reduce((s, sess) => s + (sess.stats?.expectedDuration || 0), 0);
     const theme = week?.context?.cycleDescription || week?.context?.cycleTheme || '';
-    // Le thème n'est affiché que lors d'un changement de cycle, pas à chaque semaine
     const showTheme = theme && theme !== lastTheme;
     if (theme) lastTheme = theme;
 
+    const weekOffsetDays = (originalCompTs != null) ? Math.round((week.weekDate - originalCompTs) / 86400000) : null;
+    const dayPattern = DAY_PATTERNS[sessions.length] || null;
+
     sheet.mergeCells(r, 1, r, SHEET_COLS);
     const bannerCell = sheet.getCell(r, 1);
-    bannerCell.value = `Semaine ${wIdx + 1}${showTheme ? ' — ' + theme : ''}${totalSec ? '  (durée totale : ' + fmtHM(totalSec) + ')' : ''}`;
+    bannerCell.value = `${showTheme ? theme + '  ' : ''}${totalSec ? '(durée totale : ' + fmtHM(totalSec) + ')' : ''}`.trim() || ' ';
     bannerCell.font = { bold: true, color: { argb: argb('1f2937') } };
     bannerCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: argb('D4E8D4') } };
     bannerCell.alignment = { wrapText: true };
     r += 1;
 
     HEADERS.forEach((h, i) => {
-      const cell = sheet.getCell(r, i + 1);
+      const col = i + 1;
+      if (h === 'Commentaire') sheet.mergeCells(r, col, r, SHEET_COLS);
+      const cell = sheet.getCell(r, col);
       cell.value = h;
       cell.font = { bold: true, size: 10 };
       cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: argb('F3F4F6') } };
     });
     r += 1;
 
-    let seanceNum = 1;
-    sessions.forEach(session => {
-      const isRest = (session.trainingCategory || '').includes('rest') || (session.sport === 'rest');
-      if (isRest) return;
+    sessions.forEach((session, i) => {
       const zone = dominantZone(session, goalType);
       const tint = lightenHex(ZONE_COLORS[zone] || ZONE_COLORS.EF, 0.82);
       const elev = session.stats?.expectedElevationGain || session.stats?.maxExpectedElevationGain || 0;
       const hill = isHillSession(session);
       const typeName = (session.displayName || session.name || '') + (hill ? ' (côte)' : '');
 
-      const rowVals = [
-        `Séance ${seanceNum}`,
-        typeName,
-        formatSessionShorthand(session, goalType),
-        fmtHM(session.stats?.expectedDuration || 0),
-        elev > 0 ? `+${Math.round(elev)}m` : '',
-      ];
-      rowVals.forEach((v, i) => {
-        const cell = sheet.getCell(r, i + 1);
-        cell.value = v;
+      const hasDay = dayPattern && dayPattern[i] && weekOffsetDays != null;
+      const dayName = hasDay ? dayPattern[i][0] : '';
+
+      const rowVals = [dayName, null, typeName, formatSessionShorthand(session, goalType), fmtHM(session.stats?.expectedDuration || 0), elev > 0 ? `+${Math.round(elev)}m` : '', session.description || ''];
+      rowVals.forEach((v, ci) => {
+        const col = ci + 1;
+        if (col === 6 + 1) { // Commentaire : cellule fusionnée sur le reste de la largeur
+          sheet.mergeCells(r, col, r, SHEET_COLS);
+        }
+        const cell = sheet.getCell(r, col);
+        if (col === 2) {
+          if (hasDay) {
+            const dayOffset = dayPattern[i][1];
+            cell.value = { formula: `${raceDateRef}+${weekOffsetDays + dayOffset}` };
+            cell.numFmt = 'dd/mm/yyyy';
+          } else {
+            cell.value = '';
+          }
+        } else {
+          cell.value = v;
+        }
         cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: argb(tint) } };
-        cell.alignment = { wrapText: i === 2, vertical: 'middle' };
+        cell.alignment = { wrapText: col === 4 || col === 7, vertical: 'middle' };
       });
       r += 1;
-
-      if (session.description) {
-        sheet.mergeCells(r, 1, r, SHEET_COLS);
-        const descCell = sheet.getCell(r, 1);
-        descCell.value = session.description;
-        descCell.font = { italic: true, size: 10, color: { argb: argb('555555') } };
-        descCell.alignment = { wrapText: true, vertical: 'top' };
-        descCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: argb(tint) } };
-        r += 1;
-      }
-
-      seanceNum++;
     });
     r += 1; // ligne vide entre semaines
   });
@@ -317,11 +357,13 @@ async function buildPlanWorkbook(goal, weeks) {
   wb.created = new Date();
 
   const sheet = wb.addWorksheet('Plan Allure+');
-  sheet.getColumn(1).width = 16;
-  sheet.getColumn(2).width = 28;
-  sheet.getColumn(3).width = 55;
-  sheet.getColumn(4).width = 10;
-  for (let c = 5; c <= SHEET_COLS; c++) sheet.getColumn(c).width = 9;
+  sheet.getColumn(1).width = 14;
+  sheet.getColumn(2).width = 13;
+  sheet.getColumn(3).width = 28;
+  sheet.getColumn(4).width = 55;
+  sheet.getColumn(5).width = 10;
+  sheet.getColumn(6).width = 10;
+  for (let c = 7; c <= SHEET_COLS; c++) sheet.getColumn(c).width = 9;
 
   const planStartRow = buildPacesBlock(sheet, goal, 1);
   buildPlanBlock(sheet, goal, weeks, planStartRow);
