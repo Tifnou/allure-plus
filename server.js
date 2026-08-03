@@ -149,8 +149,44 @@ app.delete('/api/bg-images/:filename', requireSession, (req, res) => {
     const filePath = path.join(imgDir, filename);
     if (path.dirname(filePath) !== imgDir) return res.status(400).json({ error: 'Nom de fichier invalide' });
     if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    const thumbPath = path.join(imgDir, 'thumbs', filename);
+    if (fs.existsSync(thumbPath)) fs.unlinkSync(thumbPath);
     res.json({ ok: true });
   } catch (err) { handleError(res, err); }
+});
+
+// Vignettes legeres pour la modale de gestion des photos de fond (les
+// photos originales ne sont jamais touchees - generation a la demande,
+// mise en cache sur disque dans Images/thumbs/).
+const sharp = require('sharp');
+const BG_THUMBS_DIR = path.join(__dirname, 'Images', 'thumbs');
+try { fs.mkdirSync(BG_THUMBS_DIR, { recursive: true }); } catch (e) {}
+const bgThumbGenerating = new Map(); // filename -> Promise en cours (evite les generations concurrentes du meme fichier)
+
+app.get('/bg-thumbs/:filename', async (req, res) => {
+  const filename = req.params.filename;
+  const imgDir = path.join(__dirname, 'Images');
+  if (!filename || filename.includes('..') || filename.includes('/') || filename.includes('\\')) {
+    return res.status(400).send('Nom de fichier invalide');
+  }
+  const srcPath = path.join(imgDir, filename);
+  const thumbPath = path.join(BG_THUMBS_DIR, filename);
+  if (path.dirname(srcPath) !== imgDir) return res.status(400).send('Nom de fichier invalide');
+  try {
+    const srcStat = fs.statSync(srcPath);
+    const needsGeneration = !fs.existsSync(thumbPath) || fs.statSync(thumbPath).mtimeMs < srcStat.mtimeMs;
+    if (needsGeneration) {
+      if (!bgThumbGenerating.has(filename)) {
+        const job = sharp(srcPath).resize(320, 240, { fit: 'cover' }).jpeg({ quality: 70 }).toFile(thumbPath)
+          .finally(() => bgThumbGenerating.delete(filename));
+        bgThumbGenerating.set(filename, job);
+      }
+      await bgThumbGenerating.get(filename);
+    }
+    res.sendFile(thumbPath);
+  } catch (err) {
+    res.status(404).send('Introuvable');
+  }
 });
 
 // f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬

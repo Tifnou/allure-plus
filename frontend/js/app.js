@@ -2708,9 +2708,10 @@ async function renderBgManagerGrid() {
   if (images.length === 0) { grid.innerHTML = '<div class="table-loading">Aucune image</div>'; return; }
   grid.innerHTML = images.map(url => {
     const filename = url.split('/').pop();
+    const thumbUrl = '/bg-thumbs/' + encodeURIComponent(filename);
     return `
       <div class="bgmgr-item">
-        <img src="${url}" alt="${filename}" loading="lazy" />
+        <img src="${thumbUrl}" alt="${filename}" />
         <button class="bgmgr-item-remove" data-filename="${filename}" title="Supprimer">&times;</button>
       </div>
     `;

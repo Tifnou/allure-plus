@@ -1226,7 +1226,7 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
 }
 .goals-progress-marker{
   position:absolute; top:50%; font-size:16px; line-height:1;
-  transform:translate(-50%,-50%); transition:left .6s ease; pointer-events:none;
+  transform:translate(-50%,-50%) scaleX(-1); transition:left .6s ease; pointer-events:none;
 }
 .goals-cycle-theme{
   font-family:var(--font-body); font-size:11px; color:var(--text-secondary);

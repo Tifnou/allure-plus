@@ -24,7 +24,7 @@ ArchitecturesInstallIn64BitMode=x64compatible
 Name: "french"; MessagesFile: "compiler:Languages\French.isl"
 
 [Files]
-Source: "..\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion; Excludes: "\node_modules,\node_modules\*,\.git,\.git\*,\.claude,\.claude\*,\installer,\installer\*,\.env,\.campus_token,\.garmin_tokens,\.garmin_tokens\*,\cache.json,\imported_plan.json,\*.log,\Allure+.lnk,\uploads,\uploads\*"
+Source: "..\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion; Excludes: "\node_modules,\node_modules\*,\.git,\.git\*,\.claude,\.claude\*,\installer,\installer\*,\.env,\.campus_token,\.garmin_tokens,\.garmin_tokens\*,\cache.json,\imported_plan.json,\*.log,\Allure+.lnk,\uploads,\uploads\*,\Images\thumbs,\Images\thumbs\*"
 
 [Icons]
 Name: "{group}\Allure+"; Filename: "{app}\start.bat"; WorkingDir: "{app}"; IconFilename: "{app}\logo-allure.ico"
