@@ -633,6 +633,14 @@ app.get('/api/body-battery', requireSession, async (req, res) => {
   } catch (err) { handleError(res, err); }
 });
 
+// Statut d'entrainement
+app.get('/api/training-status', requireSession, async (req, res) => {
+  try {
+    const data = await req.session.fns.getTrainingStatusData();
+    res.json({ data });
+  } catch (err) { handleError(res, err); }
+});
+
 // Profil Garmin
 app.get('/api/profile', requireSession, async (req, res) => {
   try {

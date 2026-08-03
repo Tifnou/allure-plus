@@ -12,7 +12,7 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <link rel="stylesheet" href="css/style.css?v=1785750471144" />
+  <link rel="stylesheet" href="css/style.css?v=1785750939943" />
   <link rel="stylesheet" href="css/plans.css" />
 </head>
 <body>
@@ -348,7 +348,13 @@
         <div class="card-header">
           <h2 class="card-title"><span class="card-title-icon">&#x1F4AA;</span> Bien-être</h2>
         </div>
-        <div class="profile-indicators">
+        <div class="profile-indicators wellness-indicators-5">
+          <div class="profile-ind-card">
+            <span class="profile-ind-icon" id="wellness-ts-icon">&#x1F3C3;</span>
+            <div class="profile-ind-value" id="wellness-ts-value" style="font-size:15px">--</div>
+            <div class="profile-ind-label">Statut d'entraînement</div>
+            <div class="profile-ind-sub" id="wellness-ts-sub"></div>
+          </div>
           <div class="profile-ind-card">
             <span class="profile-ind-icon">&#x2764;&#xFE0F;</span>
             <div style="display:flex;align-items:baseline;gap:4px">
@@ -1007,7 +1013,7 @@
 
   </div><!-- /app-content -->
 
-  <script src="js/app.js?v=1785750471144"></script>
+  <script src="js/app.js?v=1785750939943"></script>
   <script src="js/campus.js?v=1785747399910"></script>
   <script src="js/plans.js"></script>
   <!-- ... MODAL LOGS ........................... -->

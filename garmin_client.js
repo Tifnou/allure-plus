@@ -275,6 +275,34 @@ async function getBodyBatteryData() {
   });
 }
 
+// Statut d'entrainement : non expose par la lib garmin-connect. Endpoint
+// prive utilise par Garmin Connect lui-meme pour son propre widget.
+async function getTrainingStatusData() {
+  return getCachedData('training_status', async () => {
+    const gc = await getGarminClient();
+    const fmt = (d) => {
+      const pad = (n) => String(n).padStart(2, '0');
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    };
+    const today = fmt(new Date());
+    try {
+      const res = await gc.get(`https://connectapi.garmin.com/metrics-service/metrics/trainingstatus/aggregated/${today}?viewType=year&currentTrainingStatusFallbackToLast=true`);
+      const byDevice = res?.mostRecentTrainingStatus?.latestTrainingStatusData || {};
+      const entry = Object.values(byDevice)[0];
+      if (!entry) return null;
+      return {
+        trainingStatus: entry.trainingStatus,
+        phrase: entry.trainingStatusFeedbackPhrase,
+        sinceDate: entry.sinceDate,
+        calendarDate: entry.calendarDate,
+      };
+    } catch (e) {
+      console.log('Statut entrainement indisponible:', e.message);
+      return null;
+    }
+  });
+}
+
 
 // ─────────────────────────────────────────────
 // Calculs / agrégations
@@ -627,9 +655,34 @@ function buildGarminFunctions(gc) {
     });
   }
 
+  async function getTrainingStatusData() {
+    return cached('training_status', async () => {
+      const fmt = (d) => {
+        const pad = (n) => String(n).padStart(2, '0');
+        return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+      };
+      const today = fmt(new Date());
+      try {
+        const res = await gc.get(`https://connectapi.garmin.com/metrics-service/metrics/trainingstatus/aggregated/${today}?viewType=year&currentTrainingStatusFallbackToLast=true`);
+        const byDevice = res?.mostRecentTrainingStatus?.latestTrainingStatusData || {};
+        const entry = Object.values(byDevice)[0];
+        if (!entry) return null;
+        return {
+          trainingStatus: entry.trainingStatus,
+          phrase: entry.trainingStatusFeedbackPhrase,
+          sinceDate: entry.sinceDate,
+          calendarDate: entry.calendarDate,
+        };
+      } catch (e) {
+        console.log('Statut entrainement indisponible:', e.message);
+        return null;
+      }
+    });
+  }
+
   function clearCache() { Object.keys(cache).forEach(k => delete cache[k]); }
 
-  return { getActivities, getActivitiesForYear, getUserProfile, getHeartRateData, getVO2MaxData, getVO2MaxHistory, getSleepData, getStepsData, getBodyBatteryData, clearCache };
+  return { getActivities, getActivitiesForYear, getUserProfile, getHeartRateData, getVO2MaxData, getVO2MaxHistory, getSleepData, getStepsData, getBodyBatteryData, getTrainingStatusData, clearCache };
 }
 
 module.exports = {
@@ -641,6 +694,7 @@ module.exports = {
   getSleepData,
   getStepsData,
   getBodyBatteryData,
+  getTrainingStatusData,
   computeStats,
   getLastRunActivities,
   getPersonalRecords,

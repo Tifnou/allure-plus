@@ -1418,17 +1418,33 @@ async function loadSleepInto(canvasId) {
   } catch(e) { console.error('Sleep:', e); }
 }
 
-// ─── Bien-être (Synthèse) : FC, Body Battery, Pas, Sommeil ─────
+// ─── Bien-être (Synthèse) : FC, Body Battery, Pas, Sommeil, Statut ─────
 const SLEEP_QUALIFIER_FR = { POOR: 'Mauvais', FAIR: 'Passable', GOOD: 'Bon', EXCELLENT: 'Excellent' };
+
+// Couleurs approchées de celles utilisées par Garmin Connect pour chaque
+// statut d'entrainement (non documentées officiellement, calées au plus
+// pres de la capture d'ecran fournie pour STRAINED).
+const TRAINING_STATUS_MAP = {
+  0: { label: 'Aucun statut',    color: '#9CA3AF' },
+  1: { label: 'Décrochage',      color: '#60A5FA' },
+  2: { label: 'Récupération',    color: '#3B82F6' },
+  3: { label: 'Maintien',        color: '#22C55E' },
+  4: { label: 'Productif',       color: '#16A34A' },
+  5: { label: 'Pic de forme',    color: '#06B6D4' },
+  6: { label: 'Surcharge',       color: '#F59E0B' },
+  7: { label: 'Improductif',     color: '#EF4444' },
+  8: { label: 'Sous tension',    color: '#DB2777' },
+};
 
 async function loadWellnessRow() {
   const set = (id, val) => { const e = el(id); if (e) e.textContent = val; };
   try {
-    const [hrJson, stepsJson, sleepJson, bbJson] = await Promise.all([
+    const [hrJson, stepsJson, sleepJson, bbJson, tsJson] = await Promise.all([
       fetch(`${API}/api/heartrate?days=7`).then(r => r.json()).catch(() => ({ data: [] })),
       fetch(`${API}/api/steps?days=1`).then(r => r.json()).catch(() => ({ data: [] })),
       fetch(`${API}/api/sleep?days=3`).then(r => r.json()).catch(() => ({ data: [] })),
       fetch(`${API}/api/body-battery`).then(r => r.json()).catch(() => ({ data: null })),
+      fetch(`${API}/api/training-status`).then(r => r.json()).catch(() => ({ data: null })),
     ]);
 
     const hrPoints = (hrJson.data || []).filter(d => d.data?.restingHeartRate > 0);
@@ -1458,6 +1474,24 @@ async function loadWellnessRow() {
     } else {
       const card = el('wellness-bb-card');
       if (card) card.style.display = 'none';
+    }
+
+    if (tsJson.data) {
+      const info = TRAINING_STATUS_MAP[tsJson.data.trainingStatus] || { label: tsJson.data.phrase || '—', color: '#9CA3AF' };
+      set('wellness-ts-value', info.label);
+      const valEl = el('wellness-ts-value');
+      if (valEl) valEl.style.color = info.color;
+      const iconEl = el('wellness-ts-icon');
+      if (iconEl) {
+        iconEl.style.background = info.color;
+        iconEl.style.borderRadius = '50%';
+        iconEl.style.display = 'inline-flex';
+        iconEl.style.alignItems = 'center';
+        iconEl.style.justifyContent = 'center';
+        iconEl.style.width = '26px';
+        iconEl.style.height = '26px';
+      }
+      set('wellness-ts-sub', tsJson.data.sinceDate ? `Depuis le ${formatDateShort(tsJson.data.sinceDate)}` : '');
     }
   } catch (e) { console.error('Bien-être:', e); }
 }
