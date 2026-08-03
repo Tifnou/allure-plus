@@ -52,12 +52,6 @@
     </div>
 
     <nav class="sidebar-nav">
-      <button class="nav-item" id="btn-bg-manager" title="Gérer les photos de fond" type="button">
-        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-          <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
-        </svg>
-        Photos de fond
-      </button>
       <a class="nav-item" data-page="profile" id="nav-profile">
         <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
           <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
@@ -132,6 +126,21 @@
     </nav>
 
     <div class="sidebar-footer">
+      <button class="nav-item" id="btn-bg-manager" title="Gérer les photos de fond" type="button">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
+        </svg>
+        Photos de fond
+      </button>
+
+      <button class="btn-refresh" id="refresh-btn" onclick="refreshAll()" title="Actualiser les données Garmin">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/>
+          <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+        </svg>
+        <span>Actualiser les données</span>
+      </button>
+
       <!-- Voyant statut serveur -->
       <div class="server-status-bar" id="server-status-bar">
         <div class="server-led" id="server-led"></div>
@@ -1045,7 +1054,7 @@
 
   </div><!-- /app-content -->
 
-  <script src="js/app.js?v=1785779662550"></script>
+  <script src="js/app.js?v=1785780707980"></script>
   <script src="js/campus.js?v=1785771021295"></script>
   <script src="js/stats.js?v=1785771021295"></script>
   <script src="js/plans.js"></script>

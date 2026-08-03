@@ -1378,6 +1378,8 @@ async function loadHeartRateInto(canvasId) {
       if (canvas) canvas.style.display = 'none';
       return;
     }
+    const existingHr = Chart.getChart(canvas);
+    if (existingHr) existingHr.destroy();
     new Chart(canvas.getContext('2d'), {
       type: 'line',
       data: {
@@ -1407,6 +1409,8 @@ async function loadSleepInto(canvasId) {
     const labels = points.map(d => (d.calendarDate || d.date)?.slice(5));
     const values = points.map(d => Math.round(d.sleepTimeSeconds / 3600 * 10) / 10);
 
+    const existingSleep = Chart.getChart(canvas);
+    if (existingSleep) existingSleep.destroy();
     new Chart(canvas.getContext('2d'), {
       type: 'bar',
       data: { labels, datasets: [{
