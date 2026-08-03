@@ -12,7 +12,7 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <link rel="stylesheet" href="css/style.css?v=1785768049903" />
+  <link rel="stylesheet" href="css/style.css?v=1785771021295" />
   <link rel="stylesheet" href="css/plans.css" />
 </head>
 <body>
@@ -46,11 +46,18 @@
         <div class="brand-name">Allure+</div>
         <div class="brand-user" id="sidebar-username"></div>
       </div>
-      <!-- TEMP: repère de version IA, à retirer plus tard -->
-      <span id="ai-version-badge" style="margin-left:auto;font-size:10px;font-weight:700;padding:3px 8px;border-radius:6px;background:#6b46c1;color:#fff;letter-spacing:0.02em;white-space:nowrap;">Version test</span>
+      <button class="btn-theme-sidebar" id="btn-theme-toggle" title="Passer en mode sombre">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+      </button>
     </div>
 
     <nav class="sidebar-nav">
+      <button class="nav-item" id="btn-bg-manager" title="Gérer les photos de fond" type="button">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
+        </svg>
+        Photos de fond
+      </button>
       <a class="nav-item" data-page="profile" id="nav-profile">
         <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
           <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
@@ -312,7 +319,7 @@
       <!-- Hero Stats -->
       <div class="hero-stats">
         <div class="stat-card">
-          <span class="stat-card-icon">&#x1F3C3;</span>
+          <span class="stat-card-icon gendered-emoji" data-kind="running">&#x1F3C3;</span>
           <div class="stat-value" id="stat-km-year"></div>
           <div class="stat-label">Kilomètres cette année</div>
           <div class="stat-sub" id="stat-km-run">dont km en course</div>
@@ -345,7 +352,7 @@
         </div>
         <div class="profile-indicators wellness-indicators-5">
           <div class="profile-ind-card">
-            <span class="profile-ind-icon" id="wellness-ts-icon">&#x1F3C3;</span>
+            <span class="profile-ind-icon gendered-emoji" data-kind="running" id="wellness-ts-icon">&#x1F3C3;</span>
             <div class="profile-ind-value" id="wellness-ts-value" style="font-size:15px">--</div>
             <div class="profile-ind-label">Statut d'entraînement</div>
             <div class="profile-ind-sub" id="wellness-ts-sub"></div>
@@ -391,7 +398,7 @@
       <section class="card card--wide" id="section-last-run" style="margin-bottom:16px">
         <div class="card-header">
           <h2 class="card-title">
-            <span class="card-title-icon">&#x1F3C3;</span>
+            <span class="card-title-icon gendered-emoji" data-kind="running">&#x1F3C3;</span>
             Dernière sortie course
           </h2>
           <button class="btn-text-link" id="see-all-runs">Voir tout »</button>
@@ -827,11 +834,12 @@
             </div>
             <div class="goals-progress-track" style="margin-top:6px">
               <div class="goals-progress-fill" id="goals-progress-fill" style="width:0%"></div>
+              <span class="goals-progress-marker" id="goals-progress-marker" style="left:0%"></span>
             </div>
             <!-- Séances intégrées dans la carte avancement, ventilées par catégorie -->
             <div class="goals-sessions-by-type">
               <div class="gsi-row">
-                <div class="gsi-row-label">&#x1F3C3; Course</div>
+                <div class="gsi-row-label"><span class="gendered-emoji" data-kind="running">&#x1F3C3;</span> Course</div>
                 <div class="goals-sessions-inline">
                   <div class="gsi-item">
                     <span class="gsi-icon">&#x2705;</span>
@@ -1037,9 +1045,9 @@
 
   </div><!-- /app-content -->
 
-  <script src="js/app.js?v=1785764786137"></script>
-  <script src="js/campus.js?v=1785764786137"></script>
-  <script src="js/stats.js?v=1785768215104"></script>
+  <script src="js/app.js?v=1785771021295"></script>
+  <script src="js/campus.js?v=1785771021295"></script>
+  <script src="js/stats.js?v=1785771021295"></script>
   <script src="js/plans.js"></script>
   <!-- ... MODAL LOGS ........................... -->
   <div id="logs-modal" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.55);backdrop-filter:blur(4px);" onclick="if(event.target===this)closeLogsModal()">
@@ -1081,10 +1089,15 @@
 
 
 
-  <!-- Bouton thème flottant (top-right fixe) -->
-  <button class="btn-theme-floating" id="btn-theme-toggle" title="Passer en mode sombre">
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
-  </button>
+  <!-- Avatar utilisateur (top-right fixe) -->
+  <div class="avatar-frame" id="avatar-frame" title="Photo de profil">
+    <div class="avatar-frame-inner" id="avatar-frame-inner">A+</div>
+    <button class="avatar-frame-add" id="avatar-frame-add" title="Ajouter une photo">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+    </button>
+    <button class="avatar-frame-remove" id="avatar-frame-remove" title="Supprimer la photo" style="display:none">&times;</button>
+    <input type="file" accept="image/*" id="avatar-file-input" style="display:none" />
+  </div>
 
 </body>
 </html>

@@ -251,6 +251,7 @@ body::before{
   user-select:none;
 }
 .nav-item:hover{background:var(--bg-hover);color:var(--text-primary);}
+button.nav-item{background:none;border:none;width:100%;text-align:left;font-family:inherit;margin:0;}
 .nav-item.active{
   background:var(--accent-light);
   color:var(--accent-text);
@@ -446,7 +447,7 @@ body::before{
 
 /* ─── Stat card content ─── */
 .stat-card-icon{font-size:16px;margin-bottom:16px;display:block;opacity:0.6;}
-.stat-value{font-size:40px;font-weight:300;color:var(--text-primary);line-height:1;letter-spacing:-0.03em;margin-bottom:4px;}
+.stat-value{font-size:40px;font-weight:700;color:var(--text-primary);line-height:1;letter-spacing:-0.03em;margin-bottom:4px;}
 .stat-label{font-size:10px;color:var(--text-secondary);font-weight:500;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:6px;font-family:var(--font-body);}
 .stat-sub{font-size:12px;color:var(--text-muted);font-family:var(--font-body);}
 .stat-tag{display:inline-flex;align-items:center;gap:3px;font-size:11px;font-weight:500;font-family:var(--font-body);padding:2px 7px;border-radius:20px;margin-top:6px;}
@@ -567,7 +568,7 @@ body::before{
 /* ═══════════════════════════════════════════════
    PAGE SYNTHÈSE — densité resserrée (n'affecte aucune autre page)
 ═══════════════════════════════════════════════ */
-#page-dashboard .stat-card{padding:14px 16px;}
+#page-dashboard .stat-card{padding:14px 16px;text-align:center;}
 #page-dashboard .stat-card-icon{margin-bottom:8px;}
 #page-dashboard .stat-value{font-size:28px;}
 #page-dashboard .card{padding:14px 16px;}
@@ -1215,12 +1216,17 @@ body::before{
   color:var(--text-muted); margin-top:2px; text-transform:uppercase; letter-spacing:0.03em;
 }
 .goals-progress-track{
+  position:relative;
   width:100%; height:5px; background:var(--bg);
-  border-radius:3px; overflow:hidden;
+  border-radius:3px; overflow:visible;
 }
 .goals-progress-fill{
   height:100%; background:linear-gradient(90deg,var(--accent),#6366f1);
-  border-radius:3px; transition:width .6s ease;
+  border-radius:3px; transition:width .6s ease; overflow:hidden;
+}
+.goals-progress-marker{
+  position:absolute; top:50%; font-size:16px; line-height:1;
+  transform:translate(-50%,-50%); transition:left .6s ease; pointer-events:none;
 }
 .goals-cycle-theme{
   font-family:var(--font-body); font-size:11px; color:var(--text-secondary);
@@ -2434,33 +2440,92 @@ body::before{
   margin-top: 2px;
 }
 
-/* ─── Bouton thème flottant (top-right) ─── */
-.btn-theme-floating {
-  position: fixed;
-  top: 14px;
-  right: 18px;
-  z-index: 999;
+/* ─── Bouton thème (dans la sidebar, remplace le badge "Version test") ─── */
+.btn-theme-sidebar {
+  margin-left: auto;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 34px;
-  height: 34px;
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
   border-radius: 50%;
   border: 1px solid var(--border);
   background: var(--bg-white);
   color: var(--text-secondary);
   cursor: pointer;
-  box-shadow: var(--shadow-sm);
   transition: background var(--transition), color var(--transition),
-              border-color var(--transition), transform 0.25s, box-shadow var(--transition);
+              border-color var(--transition), transform 0.25s;
 }
-.btn-theme-floating:hover {
+.btn-theme-sidebar:hover {
   color: var(--brand-green);
   border-color: var(--brand-green);
   transform: rotate(20deg);
-  box-shadow: 0 0 0 3px rgba(108,184,64,0.18);
 }
-.btn-theme-floating svg { display: block; }
+.btn-theme-sidebar svg { display: block; }
+
+/* ─── Avatar utilisateur (top-right fixe) ─── */
+.avatar-frame {
+  position: fixed;
+  top: 14px;
+  right: 18px;
+  z-index: 999;
+  width: 84px;
+  height: 84px;
+}
+.avatar-frame-inner {
+  width: 84px;
+  height: 84px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  font-weight: 700;
+  color: #fff;
+  background: linear-gradient(135deg, var(--accent), var(--brand-green));
+  border: 3px solid var(--bg-white);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+.avatar-frame-inner img { width: 100%; height: 100%; object-fit: cover; }
+.avatar-frame-add {
+  position: absolute;
+  bottom: -4px;
+  right: -4px;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 3px solid var(--bg-white);
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+  box-shadow: var(--shadow-sm);
+  transition: transform var(--transition);
+}
+.avatar-frame-add svg { width: 18px; height: 18px; }
+.avatar-frame-add:hover { transform: scale(1.1); }
+.avatar-frame-remove {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: none;
+  background: var(--red);
+  color: #fff;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+  display: none;
+}
+.avatar-frame.has-avatar:hover .avatar-frame-remove { display: flex; }
 
 /* ─── Admin page ─── */
 /* Cartes compactes, alignées à gauche (pas étirées sur toute la largeur),
@@ -3359,6 +3424,44 @@ body.plans-active .app-content { background: transparent !important; }
 .confirm-modal-btn--confirm { background: var(--accent); color: #fff; }
 .confirm-modal-btn--danger  { background: #ef4444; color: #fff; }
 @keyframes slideUp { from { opacity:0; transform:translateY(20px); } to { opacity:1; transform:translateY(0); } }
+
+/* ─── Modale de gestion des photos de fond ─── */
+.bgmgr-modal-backdrop {
+  position: fixed; inset: 0; z-index: 10000;
+  background: rgba(5,7,15,0.65);
+  backdrop-filter: blur(6px);
+  display: flex; align-items: center; justify-content: center;
+  animation: fadeIn .18s ease;
+  padding: 24px;
+}
+.bgmgr-modal {
+  background: var(--bg-white);
+  border-radius: 18px;
+  padding: 24px 26px;
+  width: min(720px, 94vw);
+  max-height: 88vh;
+  overflow-y: auto;
+  box-shadow: 0 24px 80px rgba(0,0,0,0.35);
+  animation: slideUp .22s ease;
+}
+.bgmgr-modal-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+.bgmgr-modal-header h2 { font-size: 17px; font-weight: 700; color: var(--text-primary); margin: 0; }
+.bgmgr-modal-close { border: none; background: var(--bg-hover); color: var(--text-secondary); width: 30px; height: 30px; border-radius: 50%; cursor: pointer; font-size: 18px; line-height: 1; }
+.bgmgr-modal-close:hover { background: var(--red-bg); color: var(--red); }
+.bgmgr-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; }
+.bgmgr-item { position: relative; border-radius: var(--radius-md); overflow: hidden; aspect-ratio: 4/3; background: var(--bg-hover); }
+.bgmgr-item img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.bgmgr-item-remove {
+  position: absolute; top: 6px; right: 6px;
+  width: 24px; height: 24px; border-radius: 50%;
+  border: none; background: rgba(17,17,17,0.7); color: #fff;
+  font-size: 15px; line-height: 1; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  opacity: 0; transition: opacity var(--transition);
+}
+.bgmgr-item:hover .bgmgr-item-remove { opacity: 1; }
+.bgmgr-item-remove:hover { background: var(--red); }
+.bgmgr-footer { margin-top: 16px; display: flex; justify-content: flex-end; }
 
 /* ═══════════════════════════════════════════════════════
    WATERMARK — approche badge nette (sans blend-mode)

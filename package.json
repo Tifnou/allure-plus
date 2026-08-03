@@ -18,6 +18,7 @@
     "exceljs": "^4.4.0",
     "express": "^5.2.1",
     "garmin-connect": "^1.6.2",
+    "multer": "^2.2.0",
     "uuid": "^14.0.1"
   }
 }

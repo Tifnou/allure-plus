@@ -2452,7 +2452,7 @@ function renderObjectifsBlocks(goal, weeks) {
   // Badge type course (TRAIL / ROUTE)
   const typeBadgeEl = el('goals-race-type-badge');
   if (typeBadgeEl) {
-    typeBadgeEl.textContent = isTrail ? '🏔 Trail' : '🏃 Route';
+    typeBadgeEl.textContent = isTrail ? '🏔 Trail' : personEmoji('running') + ' Route';
     typeBadgeEl.className = 'goals-race-type-badge ' + (isTrail ? 'goals-race-type-badge--trail' : 'goals-race-type-badge--road');
   }
 
@@ -2643,6 +2643,8 @@ function updateGoalsPage(goal, weeks = []) {
   el('goals-weeks-left') && (el('goals-weeks-left').textContent = left);
   el('goals-pct')        && (el('goals-pct').textContent        = pct + '%');
   el('goals-progress-fill') && (el('goals-progress-fill').style.width = pct + '%');
+  const marker = el('goals-progress-marker');
+  if (marker) { marker.style.left = pct + '%'; marker.textContent = personEmoji('running'); }
 
   // Course cible
   const compDate = goal.competitionDate;
@@ -2787,7 +2789,7 @@ function buildPacesTableHTML() {
   const vmaKmh = (vo2 && vo2 > 3.5) ? Math.round((vo2 - 3.5) * factorVma * 10) / 10 : null;
 
   const colHeader = isTrail
-    ? `<div class="paces-col-header"><span class="paces-col-zone"></span><span class="paces-col-road">&#x1F3C3; Route /km</span><span class="paces-col-trail">&#x1F3D4; Trail /km</span></div>`
+    ? `<div class="paces-col-header"><span class="paces-col-zone"></span><span class="paces-col-road">${personEmoji('running')} Route /km</span><span class="paces-col-trail">&#x1F3D4; Trail /km</span></div>`
     : `<div class="paces-col-header"><span class="paces-col-zone"></span><span class="paces-col-road">Allure /km</span></div>`;
 
   const rows = CAMPUS_ZONES.map(z => {
@@ -2807,7 +2809,7 @@ function buildPacesTableHTML() {
 
   const typeLabel = isTrail
     ? '<span class="paces-type-badge paces-type-badge--trail">&#x1F3D4; Trail</span>'
-    : '<span class="paces-type-badge paces-type-badge--road">&#x1F3C3; Route</span>';
+    : '<span class="paces-type-badge paces-type-badge--road">' + personEmoji('running') + ' Route</span>';
   const vmaNote = vmaKmh ? '<span class="paces-vma-badge">VMA ' + vmaKmh + ' km/h</span>' : '';
 
   return '<div class="paces-card-title-row"><h2 class="card-title" style="margin:0">&#x23F1; Allures de course</h2><div class="paces-badges">' + typeLabel + vmaNote + '</div></div>' + colHeader + '<div class="paces-list">' + rows + '</div>';

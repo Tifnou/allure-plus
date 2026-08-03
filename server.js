@@ -84,6 +84,75 @@ app.get('/api/bg-images', (req, res) => {
   } catch(e) { res.json([]); }
 });
 
+// Avatar utilisateur + upload des images de fond
+const multer = require('multer');
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 8 * 1024 * 1024 } });
+const UPLOADS_DIR = path.join(__dirname, 'uploads');
+try { fs.mkdirSync(UPLOADS_DIR, { recursive: true }); } catch (e) {}
+app.use('/uploads', express.static(UPLOADS_DIR));
+
+function findAvatarFile() {
+  try {
+    return fs.readdirSync(UPLOADS_DIR).find(f => /^avatar\.[a-z0-9]+$/i.test(f)) || null;
+  } catch (e) { return null; }
+}
+
+app.get('/api/avatar', requireSession, (req, res) => {
+  const f = findAvatarFile();
+  res.json({ url: f ? '/uploads/' + f : null });
+});
+
+app.post('/api/avatar', requireSession, upload.single('avatar'), (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'Aucun fichier recu' });
+    const ext = (path.extname(req.file.originalname) || '.jpg').toLowerCase();
+    if (!/^\.(jpe?g|png|webp|gif)$/.test(ext)) return res.status(400).json({ error: "Format d'image non supporte" });
+    const existing = findAvatarFile();
+    if (existing) fs.unlinkSync(path.join(UPLOADS_DIR, existing));
+    fs.writeFileSync(path.join(UPLOADS_DIR, 'avatar' + ext), req.file.buffer);
+    res.json({ url: '/uploads/avatar' + ext });
+  } catch (err) { handleError(res, err); }
+});
+
+app.delete('/api/avatar', requireSession, (req, res) => {
+  try {
+    const f = findAvatarFile();
+    if (f) fs.unlinkSync(path.join(UPLOADS_DIR, f));
+    res.json({ ok: true });
+  } catch (err) { handleError(res, err); }
+});
+
+// Ajout / suppression des images du diaporama de fond
+app.post('/api/bg-images', requireSession, upload.single('image'), (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'Aucun fichier recu' });
+    const ext = (path.extname(req.file.originalname) || '.jpg').toLowerCase();
+    if (!/^\.(jpe?g|png|webp|gif)$/.test(ext)) return res.status(400).json({ error: "Format d'image non supporte" });
+    const base = path.basename(req.file.originalname, path.extname(req.file.originalname))
+      .replace(/[^a-zA-Z0-9-_]+/g, '_') || 'photo';
+    const imgDir = path.join(__dirname, 'Images');
+    let filename = base + ext;
+    let i = 1;
+    while (fs.existsSync(path.join(imgDir, filename))) { filename = `${base}_${i}${ext}`; i++; }
+    fs.writeFileSync(path.join(imgDir, filename), req.file.buffer);
+    res.json({ url: '/bg-images/' + filename });
+  } catch (err) { handleError(res, err); }
+});
+
+app.delete('/api/bg-images/:filename', requireSession, (req, res) => {
+  try {
+    const filename = req.params.filename;
+    if (!filename || filename.includes('..') || filename.includes('/') || filename.includes('\\')) {
+      return res.status(400).json({ error: 'Nom de fichier invalide' });
+    }
+    const imgDir = path.join(__dirname, 'Images');
+    const filePath = path.join(imgDir, filename);
+    if (path.dirname(filePath) !== imgDir) return res.status(400).json({ error: 'Nom de fichier invalide' });
+    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    res.json({ ok: true });
+  } catch (err) { handleError(res, err); }
+});
+
 // f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬
 // Gestion des sessions en m©moire
 // f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬

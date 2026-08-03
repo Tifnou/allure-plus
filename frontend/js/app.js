@@ -1655,18 +1655,17 @@ function initHeatmapTooltip(wrapper) {
   }
 
   const SPORT_ICON = {
-    running: '🏃', trail: '🏔️', cycling: '🚴', walking: '🚶',
-    cardio: '💪', strength_training: '🏋️', hiit: '🔥', swimming: '🏊',
+    trail: '🏔️', cardio: '💪', hiit: '🔥', swimming: '🏊',
     default: '🏅',
   };
 
   function getSportEmoji(type) {
     const t = (type || '').toLowerCase();
     if (t.includes('trail'))    return SPORT_ICON.trail;
-    if (t.includes('run'))      return SPORT_ICON.running;
-    if (t.includes('cycl') || t.includes('bike')) return SPORT_ICON.cycling;
-    if (t.includes('walk'))     return SPORT_ICON.walking;
-    if (t.includes('strength') || t.includes('muscul')) return SPORT_ICON.strength_training;
+    if (t.includes('run'))      return personEmoji('running');
+    if (t.includes('cycl') || t.includes('bike')) return personEmoji('cycling');
+    if (t.includes('walk'))     return personEmoji('walking');
+    if (t.includes('strength') || t.includes('muscul')) return personEmoji('strength');
     if (t.includes('hiit'))     return SPORT_ICON.hiit;
     if (t.includes('cardio') || t.includes('fitness') || t.includes('indoor')) return SPORT_ICON.cardio;
     if (t.includes('swim'))     return SPORT_ICON.swimming;
@@ -2051,7 +2050,7 @@ function renderProfile() {
               <div class="weight-loss-item">🎯 Poids à perdre : <span>${tolose} kg</span></div>
               <div class="weight-loss-item">📅 Durée estimée : <span>~${weeks} semaines</span> (à rythme sportif)</div>
               <div class="weight-loss-item">⚖️ Rythme : <span>0.25–0.5 kg/semaine</span> (déficit ~300–500 kcal/jour)</div>
-              <div class="weight-loss-item">🏃 Privilégier : <span>sorties Z2 longues</span> + alimentation qualitative</div>
+              <div class="weight-loss-item">${personEmoji('running')} Privilégier : <span>sorties Z2 longues</span> + alimentation qualitative</div>
               <div class="weight-loss-item">❌ À éviter : <span>régime sevère</span> — risque de perte musculaire</div>
             </div>
           </div>`;
@@ -2194,7 +2193,7 @@ function renderProfile() {
       '<div class="rpt-table">'
       + '<div class="rpt-head">'
         + '<div class="rpt-cell rpt-zone">Zone</div>'
-        + '<div class="rpt-cell rpt-route">🏃 Route <span class="rpt-unit-hd">/km</span></div>'
+        + '<div class="rpt-cell rpt-route">' + personEmoji('running') + ' Route <span class="rpt-unit-hd">/km</span></div>'
         + '<div class="rpt-cell rpt-trail">🏔 Trail <span class="rpt-unit-hd">/km</span></div>'
       + '</div>'
       + paceRow(APZ.EF)
@@ -2247,6 +2246,7 @@ function initProfileForm() {
       };
       saveProfileData(data);
       renderProfile();
+      applyGenderedEmojis();
       // Mini feedback visuel
       const btn = form.querySelector('.btn-save-profile');
       const orig = btn.innerHTML;
@@ -2571,6 +2571,160 @@ async function initBgSlideshow() {
   setInterval(showNext, 120_000);
 }
 
+// ══════════════════════════════════════════════════════
+// AVATAR UTILISATEUR
+// ══════════════════════════════════════════════════════
+async function loadAvatar() {
+  const frame = el('avatar-frame');
+  const inner = el('avatar-frame-inner');
+  if (!frame || !inner) return;
+  try {
+    const res = await fetch(`${API}/api/avatar`);
+    const data = await res.json();
+    if (data.url) {
+      inner.innerHTML = `<img src="${data.url}?t=${Date.now()}" alt="Avatar" />`;
+      frame.classList.add('has-avatar');
+    } else {
+      inner.textContent = 'A+';
+      frame.classList.remove('has-avatar');
+    }
+  } catch (e) {
+    inner.textContent = 'A+';
+    frame.classList.remove('has-avatar');
+  }
+}
+
+function initAvatarUpload() {
+  const addBtn = el('avatar-frame-add');
+  const removeBtn = el('avatar-frame-remove');
+  const fileInput = el('avatar-file-input');
+
+  if (addBtn && fileInput) addBtn.addEventListener('click', () => fileInput.click());
+
+  if (fileInput) fileInput.addEventListener('change', async () => {
+    const file = fileInput.files[0];
+    if (!file) return;
+    const formData = new FormData();
+    formData.append('avatar', file);
+    try {
+      const res = await fetch(`${API}/api/avatar`, { method: 'POST', body: formData });
+      if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || `Erreur ${res.status}`); }
+      await loadAvatar();
+      if (typeof showToast === 'function') showToast('Photo de profil mise à jour', 'success');
+    } catch (e) {
+      if (typeof showToast === 'function') showToast('Erreur : ' + e.message, 'error');
+    }
+    fileInput.value = '';
+  });
+
+  if (removeBtn) removeBtn.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    try {
+      await fetch(`${API}/api/avatar`, { method: 'DELETE' });
+      await loadAvatar();
+    } catch (e) {}
+  });
+}
+
+// ══════════════════════════════════════════════════════
+// EMOJIS GENRÉS (selon le sexe renseigné dans le Profil)
+// ══════════════════════════════════════════════════════
+function personEmoji(kind) {
+  const sex = loadProfileData().sex || 'M';
+  const MAP = {
+    running:  sex === 'F' ? '🏃🏽‍♀️' : '🏃🏽‍♂️',
+    cycling:  sex === 'F' ? '🚴🏽‍♀️' : '🚴🏽‍♂️',
+    walking:  sex === 'F' ? '🚶🏽‍♀️' : '🚶🏽‍♂️',
+    strength: sex === 'F' ? '🏋🏽‍♀️' : '🏋🏽‍♂️',
+  };
+  return MAP[kind] || MAP.running;
+}
+
+function applyGenderedEmojis() {
+  document.querySelectorAll('.gendered-emoji').forEach(elm => {
+    elm.textContent = personEmoji(elm.dataset.kind || 'running');
+  });
+}
+
+// ══════════════════════════════════════════════════════
+// GESTION DES PHOTOS DE FOND (modale)
+// ══════════════════════════════════════════════════════
+function initBgManagerButton() {
+  const btn = el('btn-bg-manager');
+  if (btn) btn.addEventListener('click', openBgManagerModal);
+}
+
+async function openBgManagerModal() {
+  if (document.getElementById('bgmgr-modal')) return;
+  const bd = document.createElement('div');
+  bd.className = 'bgmgr-modal-backdrop';
+  bd.id = 'bgmgr-modal';
+  bd.innerHTML = `
+    <div class="bgmgr-modal" onclick="event.stopPropagation()">
+      <div class="bgmgr-modal-header">
+        <h2>Photos de fond</h2>
+        <button class="bgmgr-modal-close" id="bgmgr-modal-close">&times;</button>
+      </div>
+      <div class="bgmgr-grid" id="bgmgr-grid"></div>
+      <div class="bgmgr-footer">
+        <button class="btn-sheets" id="bgmgr-add-btn">+ Ajouter une image</button>
+        <input type="file" accept="image/*" id="bgmgr-file-input" style="display:none" />
+      </div>
+    </div>
+  `;
+  document.body.appendChild(bd);
+  bd.addEventListener('click', closeBgManagerModal);
+  document.getElementById('bgmgr-modal-close').addEventListener('click', closeBgManagerModal);
+  document.getElementById('bgmgr-add-btn').addEventListener('click', () => document.getElementById('bgmgr-file-input').click());
+  document.getElementById('bgmgr-file-input').addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const formData = new FormData();
+    formData.append('image', file);
+    try {
+      const res = await fetch(`${API}/api/bg-images`, { method: 'POST', body: formData });
+      if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || `Erreur ${res.status}`); }
+      await renderBgManagerGrid();
+      if (typeof showToast === 'function') showToast('Image ajoutée', 'success');
+    } catch (err) {
+      if (typeof showToast === 'function') showToast('Erreur : ' + err.message, 'error');
+    }
+    e.target.value = '';
+  });
+  await renderBgManagerGrid();
+}
+
+function closeBgManagerModal() {
+  const modal = document.getElementById('bgmgr-modal');
+  if (modal) modal.remove();
+}
+
+async function renderBgManagerGrid() {
+  const grid = document.getElementById('bgmgr-grid');
+  if (!grid) return;
+  grid.innerHTML = '<div class="table-loading">Chargement…</div>';
+  let images = [];
+  try { images = await fetch(`${API}/api/bg-images`).then(r => r.json()); } catch (e) {}
+  if (images.length === 0) { grid.innerHTML = '<div class="table-loading">Aucune image</div>'; return; }
+  grid.innerHTML = images.map(url => {
+    const filename = url.split('/').pop();
+    return `
+      <div class="bgmgr-item">
+        <img src="${url}" alt="${filename}" loading="lazy" />
+        <button class="bgmgr-item-remove" data-filename="${filename}" title="Supprimer">&times;</button>
+      </div>
+    `;
+  }).join('');
+  grid.querySelectorAll('.bgmgr-item-remove').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      try {
+        await fetch(`${API}/api/bg-images/${encodeURIComponent(btn.dataset.filename)}`, { method: 'DELETE' });
+        await renderBgManagerGrid();
+      } catch (e) {}
+    });
+  });
+}
+
 // ═══════════════════════════════════════════════
 // INIT
 // ═══════════════════════════════════════════════
@@ -2732,6 +2886,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   try { initThemeToggle(); } catch(e) { console.error('initThemeToggle failed:', e); }
   initBgSlideshow(); // async, pas de throw critique
   try { initProfileForm(); } catch(e) { console.error('initProfileForm failed:', e); }
+  try { initAvatarUpload(); loadAvatar(); } catch(e) { console.error('initAvatarUpload failed:', e); }
+  try { initBgManagerButton(); } catch(e) { console.error('initBgManagerButton failed:', e); }
+  applyGenderedEmojis();
   // Précharger les plans en arrière-plan dès le démarrage (évite le délai à l'ouverture de la page)
   if (typeof prefetchPlans === 'function') prefetchPlans();
   const refreshBtn = el('refresh-btn');
