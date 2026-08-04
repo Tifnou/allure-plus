@@ -14,6 +14,46 @@
   background: transparent;
 }
 
+/* ── Bandeau d'info : catalogue + plan actif ── */
+.plans-info-banner {
+  max-width: 600px;
+  margin-bottom: 20px;
+}
+.plans-info-card {
+  background: var(--bg-white);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 16px 20px;
+  margin-bottom: 10px;
+  box-shadow: var(--shadow-sm);
+}
+.plans-info-card-title {
+  font-weight: 700; font-size: 15px;
+  display: flex; align-items: center; gap: 8px;
+  margin-bottom: 6px;
+}
+.plans-info-card-text {
+  color: var(--text-secondary); font-size: 13.5px; line-height: 1.5;
+  margin-bottom: 12px;
+}
+.plans-info-stats { display: flex; flex-wrap: wrap; gap: 8px; }
+.plans-info-stat-chip {
+  background: var(--bg-secondary, rgba(148,163,184,0.12));
+  border-radius: 20px; padding: 6px 12px;
+  font-size: 12.5px; font-weight: 600;
+  white-space: nowrap;
+}
+.plans-active-warning {
+  display: flex; align-items: flex-start; gap: 12px;
+  background: #fffbeb; color: #92400e;
+  border: 1px solid rgba(245,158,11,0.35);
+  border-radius: 12px; padding: 14px 18px;
+  font-size: 0.88rem; line-height: 1.5;
+}
+[data-theme="dark"] .plans-active-warning { background: #2a1f08; color: #fde68a; border-color: rgba(245,158,11,0.35); }
+.plans-active-warning-icon { font-size: 1.25rem; flex-shrink: 0; margin-top: 1px; }
+.plans-active-warning-title { display: block; margin-bottom: 3px; font-weight: 700; }
+
 /* ── Carte centrale du wizard ── */
 .plans-card {
   background: var(--bg-white);

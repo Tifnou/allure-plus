@@ -47,9 +47,77 @@ async function initPlansPage() {
 
   showView('wizard');
   renderWizardStep();
+  renderPlansInfoBanner();
 }
 
 function showPlansLoading(show) { /* no-op — spinner supprimé */ }
+
+// ─── Bandeau d'info : catalogue de plans + alerte plan actif ────
+async function renderPlansInfoBanner() {
+  const el = id => document.getElementById(id);
+  const banner = el('plans-info-banner');
+  if (!banner) return;
+
+  const plans = plansState.allPlans;
+  const total = plans.length;
+  const routePlans = plans.filter(p => p.sport === 'R');
+  const trailPlans = plans.filter(p => p.sport === 'T');
+
+  const durees = plans.map(p => p.duree).filter(Boolean);
+  const seancesArr = plans.map(p => p.seances).filter(Boolean);
+  const dureeMin = durees.length ? Math.min(...durees) : null;
+  const dureeMax = durees.length ? Math.max(...durees) : null;
+  const seancesMin = seancesArr.length ? Math.min(...seancesArr) : null;
+  const seancesMax = seancesArr.length ? Math.max(...seancesArr) : null;
+
+  // Ordre "naturel" des distances plutôt qu'alphabétique
+  const ROUTE_ORDER = ['5 km', '10 km', '20 km', 'Semi-marathon', 'Marathon'];
+  const TRAIL_ORDER = ['Court (< 21 km)', 'Moyen (21–42 km)', 'Long (42–80 km)', 'Ultra (> 80 km)'];
+  const orderedUnique = (labels, order) => {
+    const set = new Set(labels.filter(Boolean));
+    const known = order.filter(l => set.has(l));
+    const rest = [...set].filter(l => !order.includes(l));
+    return [...known, ...rest];
+  };
+  const routeDistances = orderedUnique(routePlans.map(p => p.distLabel), ROUTE_ORDER);
+  const trailDistances = orderedUnique(trailPlans.map(p => p.distLabel), TRAIL_ORDER);
+
+  const statsHtml = `
+    <div class="plans-info-card">
+      <div class="plans-info-card-title">📚 Ce que vous trouverez ici</div>
+      <div class="plans-info-card-text">Un catalogue de ${total} plans d'entraînement prêts à l'emploi, adaptés à votre niveau de reprise (régulier, petite pause ou longue coupure).</div>
+      <div class="plans-info-stats">
+        <span class="plans-info-stat-chip">🏃 ${routePlans.length} plans Route${routeDistances.length ? ' · ' + routeDistances.join(', ') : ''}</span>
+        <span class="plans-info-stat-chip">⛰️ ${trailPlans.length} plans Trail${trailDistances.length ? ' · ' + trailDistances.join(', ') : ''}</span>
+        ${dureeMin != null ? `<span class="plans-info-stat-chip">🗓️ ${dureeMin === dureeMax ? dureeMin : dureeMin + '–' + dureeMax} semaines</span>` : ''}
+        ${seancesMin != null ? `<span class="plans-info-stat-chip">📅 ${seancesMin === seancesMax ? seancesMin : seancesMin + '–' + seancesMax} séances/semaine</span>` : ''}
+      </div>
+    </div>
+  `;
+
+  // S'assure que campusState.goal (plan actif) est chargé, même si on arrive
+  // directement sur cette page sans être passé par Entraînements/Objectifs.
+  if (typeof preloadPlanState === 'function') {
+    try { await preloadPlanState(); } catch (_) { /* silencieux */ }
+  }
+  const activeGoal = (typeof campusState !== 'undefined') ? campusState.goal : null;
+
+  let warningHtml = '';
+  if (activeGoal) {
+    const name = activeGoal.name || activeGoal.goalTitle || 'Plan en cours';
+    warningHtml = `
+      <div class="plans-active-warning">
+        <span class="plans-active-warning-icon">⚠️</span>
+        <div>
+          <span class="plans-active-warning-title">Un plan est déjà en cours : « ${name} »</span>
+          Choisir et charger un nouveau plan ci-dessous <strong>remplacera entièrement</strong> ce plan (séances et progression réinitialisées). Pensez à l'exporter depuis l'onglet Entraînements si vous voulez le reprendre plus tard.
+        </div>
+      </div>
+    `;
+  }
+
+  banner.innerHTML = statsHtml + warningHtml;
+}
 
 function showView(view) {
   // view: 'wizard' | 'results' | 'detail'
