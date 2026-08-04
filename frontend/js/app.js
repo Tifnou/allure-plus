@@ -252,6 +252,10 @@ async function checkStatus() {
     if (profileBadge) profileBadge.style.display =
       (!(profile.birthDate || profile.age) || !profile.height || !profile.weight) ? 'inline-flex' : 'none';
 
+    // Numéro de version de l'appli
+    const versionEl = el('app-version');
+    if (versionEl && data.version) versionEl.textContent = 'v' + data.version;
+
   } catch {
     // Serveur hors ligne → voyant rouge + overlay
     setLed('led-ko', 'Serveur hors ligne');

@@ -324,6 +324,7 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
 .btn-refresh.spinning svg{animation:spin 0.7s linear infinite;}
 @keyframes spin{to{transform:rotate(360deg);}}
 .last-updated{font-size:11px;color:var(--text-muted);font-family:var(--font-body);}
+.app-version{font-size:10px;color:var(--text-muted);font-family:var(--font-body);opacity:0.6;margin-top:2px;}
 
 .server-controls{display:flex;gap:6px;flex-direction:column;}
 .btn-restart{

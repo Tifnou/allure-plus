@@ -63,6 +63,7 @@ const {
 } = require('./campus_client');
 
 const app  = express();
+const APP_VERSION = require('./package.json').version;
 const PORT = process.env.PORT || 3001;
 
 app.use(cors());
@@ -411,6 +412,7 @@ app.get('/api/status', (req, res) => {
     displayName:    s?.displayName || null,
     envEmail:       ENV_EMAIL || null,
     campusEnabled:  CAMPUS_ENABLED,
+    version:        APP_VERSION,
   });
 });
 
