@@ -727,10 +727,17 @@ app.get('/api/records', requireSession, async (req, res) => {
     const result = {};
     RECORD_KEYS.forEach(key => {
       const override = overrides[key];
+      const computedBest = computed[key]?.best || null;
       if (override) {
+        // Une correction manuelle reste affichee telle quelle, mais si une
+        // activite Garmin recente la bat, on le signale (sans jamais
+        // l'ecraser silencieusement) - le choix reste a l'utilisateur.
         result[key] = { best: override, edited: true };
+        if (computedBest && computedBest.duration < override.duration) {
+          result[key].betterCandidate = computedBest;
+        }
       } else {
-        result[key] = { best: computed[key]?.best || null, edited: false };
+        result[key] = { best: computedBest, edited: false };
       }
     });
     res.json(result);

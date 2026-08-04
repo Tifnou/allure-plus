@@ -55,6 +55,7 @@ async function initRecordsPage() {
     _racesData = races || [];
     renderRecordsBandeau();
     renderRacesTable();
+    checkForBetterComputedRecords();
   } catch (e) {
     if (container) container.innerHTML = '<div class="table-loading">Erreur de chargement.</div>';
     if (wrap) wrap.innerHTML = '';
@@ -196,30 +197,98 @@ function openRecordEditModal(key, prefill = null) {
 // showToast() ne fait pas confiance au HTML du message (textContent, pas
 // innerHTML) - on construit donc un vrai bouton DOM pour la suggestion,
 // plutot que d'essayer d'injecter un <button> dans un toast classique.
-function showRecordSuggestionBanner(matchKey, matchLabel, best) {
+// showToast() ne fait pas confiance au HTML du message (textContent, pas
+// innerHTML) - on construit donc un vrai bouton DOM plutot que d'essayer
+// d'injecter un <button> dans un toast classique.
+function showSuggestionBanner({ message, acceptLabel = 'Mettre à jour', onAccept, onResolve }) {
   document.getElementById('record-suggestion-banner')?.remove();
   const banner = document.createElement('div');
   banner.id = 'record-suggestion-banner';
   banner.className = 'record-suggestion-banner';
 
   const text = document.createElement('span');
-  text.textContent = `🏆 Cette course bat votre record du ${matchLabel} !`;
+  text.textContent = message;
   banner.appendChild(text);
 
   const updateBtn = document.createElement('button');
   updateBtn.className = 'toast-action-btn';
-  updateBtn.textContent = 'Mettre à jour';
-  updateBtn.onclick = () => { banner.remove(); openRecordEditModal(matchKey, best); };
+  updateBtn.textContent = acceptLabel;
+  updateBtn.onclick = () => { banner.remove(); onAccept?.(); onResolve?.(true); };
   banner.appendChild(updateBtn);
 
   const closeBtn = document.createElement('button');
   closeBtn.className = 'record-suggestion-close';
   closeBtn.textContent = '×';
-  closeBtn.onclick = () => banner.remove();
+  closeBtn.onclick = () => { banner.remove(); onResolve?.(false); };
   banner.appendChild(closeBtn);
 
   document.body.appendChild(banner);
-  setTimeout(() => { if (document.body.contains(banner)) banner.remove(); }, 15000);
+  setTimeout(() => {
+    if (document.body.contains(banner)) { banner.remove(); onResolve?.(false); }
+  }, 15000);
+}
+function showRecordSuggestionBanner(matchKey, matchLabel, best) {
+  showSuggestionBanner({
+    message: `🏆 Cette course bat votre record du ${matchLabel} !`,
+    acceptLabel: 'Mettre à jour',
+    onAccept: () => openRecordEditModal(matchKey, best),
+  });
+}
+
+// ─── Une activite Garmin recente bat-elle un record corrige manuellement ? ──
+// Ne s'applique qu'aux records avec une correction manuelle (edited:true) :
+// sans correction, le record est deja 100% automatique. Ne remplace jamais
+// silencieusement - propose seulement, et retient un refus pour ne pas
+// reproposer la meme activite en boucle a chaque visite de la page.
+const RECORD_DISMISS_KEY = 'suivi_record_suggestion_dismissed';
+function isCandidateDismissed(key, candidate) {
+  try {
+    const m = JSON.parse(localStorage.getItem(RECORD_DISMISS_KEY) || '{}');
+    const d = m[key];
+    return !!d && d.date === candidate.date && d.duration === candidate.duration;
+  } catch (e) { return false; }
+}
+function dismissCandidate(key, candidate) {
+  try {
+    const m = JSON.parse(localStorage.getItem(RECORD_DISMISS_KEY) || '{}');
+    m[key] = { date: candidate.date, duration: candidate.duration };
+    localStorage.setItem(RECORD_DISMISS_KEY, JSON.stringify(m));
+  } catch (e) { /* silencieux */ }
+}
+
+let _betterCandidateQueue = [];
+
+function checkForBetterComputedRecords() {
+  _betterCandidateQueue = RECORD_ORDER
+    .filter(key => _recordsData[key]?.betterCandidate && !isCandidateDismissed(key, _recordsData[key].betterCandidate))
+    .map(key => ({ key, label: RECORD_LABELS[key], candidate: _recordsData[key].betterCandidate }));
+  showNextBetterCandidate();
+}
+
+function showNextBetterCandidate() {
+  if (_betterCandidateQueue.length === 0) return;
+  const { key, label, candidate } = _betterCandidateQueue[0];
+  showSuggestionBanner({
+    message: `🏃 Une activité récente bat votre record du ${label} corrigé manuellement (${formatTime(candidate.duration)} contre ${formatTime(_recordsData[key].best.duration)} actuellement) — l'adopter comme nouveau record ?`,
+    acceptLabel: 'Adopter',
+    onAccept: async () => {
+      try {
+        await fetch(`/api/records/${key}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: candidate.name, date: candidate.date, distanceM: candidate.distance, durationSec: candidate.duration }),
+        });
+        _recordsData = await fetch('/api/records').then(r => r.json());
+        renderRecordsBandeau();
+        showToast('Record mis à jour', 'success');
+      } catch (e) { showToast('Erreur : ' + e.message, 'error'); }
+    },
+    onResolve: (accepted) => {
+      if (!accepted) dismissCandidate(key, candidate);
+      _betterCandidateQueue.shift();
+      showNextBetterCandidate();
+    },
+  });
 }
 
 // Distance exacte (tolerance identique au calcul Garmin) qui bat le record actuel
