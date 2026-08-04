@@ -83,6 +83,27 @@ function saveYearToCache(year, activities) {
   } catch (e) {} // quota depassee ou stockage indisponible : on ignore simplement
 }
 
+function mergeYearActivities(year, activities) {
+  _allActivities = _allActivities.filter(a => {
+    const d = new Date(a.date || a.startTimeLocal || a.startTimeGMT || '');
+    return isNaN(d) || d.getFullYear() !== year;
+  }).concat(activities);
+  _fullyLoadedYears.add(year);
+}
+
+// Charge en memoire (sans requete reseau) toute annee passee deja presente
+// dans le cache localStorage - utilise au rendu de la liste pour afficher
+// directement les chiffres au lieu de "Cliquez pour charger", tant que le
+// cache n'a pas ete vide.
+function preloadCachedYears(years) {
+  const currentYear = new Date().getFullYear();
+  years.forEach(y => {
+    if (_fullyLoadedYears.has(y) || y >= currentYear) return;
+    const cached = loadYearFromCache(y);
+    if (cached) mergeYearActivities(y, cached);
+  });
+}
+
 async function ensureYearLoaded(year) {
   if (_fullyLoadedYears.has(year)) return;
   const isPastYear = year < new Date().getFullYear();
@@ -90,11 +111,7 @@ async function ensureYearLoaded(year) {
   if (isPastYear) {
     const cached = loadYearFromCache(year);
     if (cached) {
-      _allActivities = _allActivities.filter(a => {
-        const d = new Date(a.date || a.startTimeLocal || a.startTimeGMT || '');
-        return isNaN(d) || d.getFullYear() !== year;
-      }).concat(cached);
-      _fullyLoadedYears.add(year);
+      mergeYearActivities(year, cached);
       return;
     }
   }
@@ -103,11 +120,7 @@ async function ensureYearLoaded(year) {
   if (!resp.ok) throw new Error(`Erreur ${resp.status}`);
   const data = await resp.json();
   const activities = data.activities || [];
-  _allActivities = _allActivities.filter(a => {
-    const d = new Date(a.date || a.startTimeLocal || a.startTimeGMT || '');
-    return isNaN(d) || d.getFullYear() !== year;
-  }).concat(activities);
-  _fullyLoadedYears.add(year);
+  mergeYearActivities(year, activities);
   if (isPastYear) saveYearToCache(year, activities);
 }
 
@@ -241,6 +254,7 @@ async function renderStatsYearsList() {
   const allYears = getStatsYearRange();
   const hasOlder = allYears.length > STATS_YEARS_PAGE_SIZE;
   const years = _statsShowOlderYears ? allYears : allYears.slice(0, STATS_YEARS_PAGE_SIZE);
+  preloadCachedYears(years);
 
   const headerHtml = `
     <div class="stats-years-header">
