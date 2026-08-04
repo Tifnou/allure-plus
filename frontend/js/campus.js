@@ -356,6 +356,32 @@ function clearSessionStatus(weekId, trainingIndex) {
   renderSessionList(campusState.selectedWeekIdx);
 }
 
+// Les semaines des plans du catalogue portent un _id fige dans le fichier
+// .aplus (identique a chaque chargement) : on l'utilise pour detecter si CE
+// plan precis a deja des seances marquees Fait/Manque d'une utilisation
+// anterieure (ex: la meme course rechargee des annees plus tard).
+function planHasResidualProgress(weeks) {
+  try {
+    const weekIds = new Set((weeks || []).map(w => w._id).filter(Boolean));
+    if (weekIds.size === 0) return false;
+    const map = _getLocalDoneMap();
+    return Object.keys(map).some(k => weekIds.has(k.split('_')[0]));
+  } catch (e) { return false; }
+}
+// Purge uniquement les marques appartenant aux semaines de CE plan (jamais
+// les marques d'autres plans, meme charges en parallele).
+function purgeLocalDoneForWeeks(weeks) {
+  try {
+    const weekIds = new Set((weeks || []).map(w => w._id).filter(Boolean));
+    const map = _getLocalDoneMap();
+    let changed = false;
+    Object.keys(map).forEach(k => {
+      if (weekIds.has(k.split('_')[0])) { delete map[k]; changed = true; }
+    });
+    if (changed) localStorage.setItem(LOCAL_DONE_KEY, JSON.stringify(map));
+  } catch (e) { /* silencieux */ }
+}
+
 // ......................................................
 // PAGE ENTRAZNEMENTS
 // ......................................................

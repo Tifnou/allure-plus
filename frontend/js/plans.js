@@ -639,6 +639,25 @@ async function loadPlanFromCatalog(planId) {
     data.goal.raceWeekIndex = raceWeekIdx;
     data.goal.postCompWeeks = postCompWeeks;
 
+    // Ce plan précis (mêmes _id de semaines, figés dans le fichier .aplus) a-t-il
+    // déjà des séances marquées Fait/Manqué d'une utilisation antérieure ?
+    // (ex: la même course rechargée des années plus tard, ou un simple test
+    // d'un autre plan puis retour à celui-ci). On demande plutôt que d'écraser
+    // silencieusement ou de conserver silencieusement.
+    if (typeof planHasResidualProgress === 'function' && planHasResidualProgress(data.weeks)) {
+      const wipeProgress = await showConfirmModal({
+        title: 'Ce plan a déjà été suivi',
+        message: 'Des séances de ce plan sont déjà marquées « Fait » ou « Manqué » depuis une utilisation précédente. Voulez-vous repartir d\'un plan vierge pour cette nouvelle course, ou reprendre cette progression telle quelle ?',
+        confirmLabel: 'Repartir d\'un plan vierge',
+        cancelLabel: 'Reprendre la progression',
+        danger: true,
+        icon: '🔄',
+      });
+      if (wipeProgress && typeof purgeLocalDoneForWeeks === 'function') {
+        purgeLocalDoneForWeeks(data.weeks);
+      }
+    }
+
     // ── Nettoyage TOTAL des données de l'ancien plan ───────────────────────
     // Purge toutes les clés suivi_objectif_* quelle que soit leur valeur
     Object.keys(localStorage).forEach(k => {
