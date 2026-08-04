@@ -556,6 +556,55 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
 .record-time{font-size:15px;font-weight:500;color:var(--text-primary);font-family:var(--font-mono);}
 .record-pace{font-size:11px;color:var(--text-muted);margin-top:1px;font-family:var(--font-body);}
 
+.record-right-group{display:flex;align-items:center;gap:12px;}
+.record-edit-btn{border:1px solid var(--border);background:var(--bg);color:var(--text-muted);width:28px;height:28px;border-radius:50%;cursor:pointer;font-size:13px;flex-shrink:0;}
+.record-edit-btn:hover{border-color:var(--accent);color:var(--accent);}
+.record-edited-badge{display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:600;color:#b45309;background:rgba(245,158,11,0.12);border-radius:10px;padding:1px 8px 1px 7px;margin-left:6px;text-transform:uppercase;letter-spacing:0.03em;}
+[data-theme="dark"] .record-edited-badge{color:#fde68a;background:rgba(245,158,11,0.18);}
+.record-reset-link{border:none;background:none;color:inherit;cursor:pointer;font-size:12px;padding:0;line-height:1;}
+
+/* ─── Mes courses (tableau en saisie libre) ─── */
+.races-card{margin-top:20px;}
+.races-toolbar{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:16px;}
+.races-toolbar-title{font-size:15px;font-weight:700;color:var(--text-primary);margin:0;}
+.races-toolbar-actions{display:flex;gap:8px;flex-wrap:wrap;}
+.btn-races-toolbar{border:1px solid var(--border);background:var(--bg);color:var(--text-secondary);font-size:12.5px;font-weight:600;padding:8px 14px;border-radius:20px;cursor:pointer;font-family:var(--font-body);transition:all var(--transition);}
+.btn-races-toolbar:hover{border-color:var(--accent);color:var(--accent);}
+
+.races-table-scroll{overflow-x:auto;}
+.races-table{width:100%;border-collapse:collapse;font-family:var(--font-body);font-size:12.5px;}
+.races-table thead th{text-align:left;font-size:10.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.05em;padding:8px 10px;border-bottom:1px solid var(--border);white-space:nowrap;}
+.races-table tbody td{padding:9px 10px;border-bottom:1px solid var(--border-light);color:var(--text-primary);white-space:nowrap;}
+.races-table tbody tr:last-child td{border-bottom:none;}
+.races-name-cell{white-space:normal;min-width:160px;font-weight:500;}
+.races-mono{font-family:var(--font-mono);}
+.races-actions{text-align:right;}
+.race-action-btn{border:none;background:none;color:var(--text-muted);cursor:pointer;font-size:13px;padding:2px 4px;}
+.race-action-btn:hover{color:var(--accent);}
+.race-group-start td{border-top:2px solid var(--border);}
+.race-row--best{background:var(--accent-light);}
+.race-row--best td:first-child{border-left:3px solid var(--accent);padding-left:7px;}
+.race-trophy{cursor:help;margin-left:2px;}
+.race-cert-link{text-decoration:none;}
+.race-cert-empty{color:var(--text-muted);}
+
+/* Formulaires modales Records/Courses (reutilise .stats-modal / .form-input / .btn-wizard-*) */
+.race-form-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px 16px;}
+.race-form-computed{display:flex;gap:20px;font-size:13px;color:var(--text-secondary);margin:14px 0;}
+.race-form-computed strong{color:var(--text-primary);font-family:var(--font-mono);}
+.race-modal-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:18px;}
+.type-toggle{display:flex;gap:0;}
+.type-toggle-btn{flex:1;padding:8px 12px;font-family:var(--font-body);font-size:13px;font-weight:500;border:1px solid var(--border);background:var(--bg);color:var(--text-secondary);cursor:pointer;transition:all var(--transition);}
+.type-toggle-btn:first-child{border-radius:var(--radius-sm) 0 0 var(--radius-sm);}
+.type-toggle-btn:last-child{border-radius:0 var(--radius-sm) var(--radius-sm) 0;border-left:none;}
+.type-toggle-btn.active{background:var(--accent);border-color:var(--accent);color:#fff;}
+.toast-action-btn{margin-left:10px;border:none;background:rgba(255,255,255,0.25);color:#fff;font-weight:700;font-size:12px;padding:4px 10px;border-radius:8px;cursor:pointer;}
+.toast-action-btn:hover{background:rgba(255,255,255,0.4);}
+.record-suggestion-banner{position:fixed;bottom:28px;right:24px;z-index:10000;padding:14px 16px;border-radius:14px;font-size:13.5px;font-weight:600;color:#fff;max-width:400px;box-shadow:0 6px 24px rgba(0,0,0,0.28);display:flex;align-items:center;gap:6px;background:#10b981;animation:fadeIn .2s ease;}
+.record-suggestion-close{border:none;background:none;color:#fff;opacity:0.7;cursor:pointer;font-size:16px;line-height:1;margin-left:2px;padding:0 2px;}
+.record-suggestion-close:hover{opacity:1;}
+@media(max-width:560px){.race-form-grid{grid-template-columns:1fr;}}
+
 /* ═══════════════════════════════════════════════
    PAGE PROFIL
 ═══════════════════════════════════════════════ */

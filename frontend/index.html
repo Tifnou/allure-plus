@@ -12,7 +12,7 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <link rel="stylesheet" href="css/style.css?v=1785830801007" />
+  <link rel="stylesheet" href="css/style.css?v=1785837712863" />
   <link rel="stylesheet" href="css/plans.css?v=1785834176454" />
 </head>
 <body>
@@ -97,7 +97,7 @@
         <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
           <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
         </svg>
-        Records
+        Records et courses
       </a>
       <a class="nav-item" data-page="stats" id="nav-stats">
         <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -647,11 +647,26 @@
     <!-- "?"? PAGE : RECORDS "?"? -->
     <div class="page" id="page-records">
       <div class="page-header">
-        <h1 class="page-title">Records personnels</h1>
+        <h1 class="page-title">Records et courses</h1>
         <div class="page-subtitle">Vos meilleures performances</div>
       </div>
       <div class="card card--fullwidth">
         <div class="records-list" id="records-list-full">
+          <div class="table-loading">Chargement…</div>
+        </div>
+      </div>
+
+      <div class="card card--fullwidth races-card">
+        <div class="races-toolbar">
+          <h2 class="races-toolbar-title">Mes courses</h2>
+          <div class="races-toolbar-actions">
+            <button class="btn-races-toolbar" onclick="openRaceModal()">+ Ajouter une course</button>
+            <button class="btn-races-toolbar" onclick="exportRecordsData()">⬇ Exporter</button>
+            <button class="btn-races-toolbar" onclick="document.getElementById('races-import-input').click()">⬆ Importer</button>
+            <input type="file" id="races-import-input" accept=".json" style="display:none" onchange="importRecordsData(event)" />
+          </div>
+        </div>
+        <div id="races-table-wrap">
           <div class="table-loading">Chargement…</div>
         </div>
       </div>
@@ -1064,9 +1079,10 @@
 
   </div><!-- /app-content -->
 
-  <script src="js/app.js?v=1785830801007"></script>
+  <script src="js/app.js?v=1785836652296"></script>
   <script src="js/campus.js?v=1785833021375"></script>
   <script src="js/stats.js?v=1785829724241"></script>
+  <script src="js/records.js?v=1785837712863"></script>
   <script src="js/plans.js?v=1785834176454"></script>
   <!-- ... MODAL LOGS ........................... -->
   <div id="logs-modal" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.55);backdrop-filter:blur(4px);" onclick="if(event.target===this)closeLogsModal()">

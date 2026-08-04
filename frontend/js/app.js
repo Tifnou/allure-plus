@@ -136,7 +136,7 @@ function navigateTo(pageId) {
     }
     renderAllActivities(_allActivities, 'all');
   }
-  if (pageId === 'records')    renderRecordsFull(_records);
+  if (pageId === 'records')    { if (typeof initRecordsPage === 'function') initRecordsPage(); }
   if (pageId === 'health')     renderHealthPage();
   if (pageId === 'stats')      renderStatsPage();
   if (pageId === 'profile')    renderProfile();
@@ -331,10 +331,9 @@ async function loadDashboard() {
   try {
     const res = await fetch(`${API}/api/dashboard`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const { stats, lastRuns, allActivities, records, lastUpdated } = await res.json();
+    const { stats, lastRuns, allActivities, lastUpdated } = await res.json();
 
     _allActivities = allActivities || lastRuns || [];
-    _records = records || {};
     _vo2maxSeries = stats.vo2maxSeries || [];
     // Stocker VO2max le plus récent pour le Profil
     if (_vo2maxSeries.length > 0) {
@@ -1241,40 +1240,7 @@ async function loadActivityAnalysis(activity) {
 
 
 
-// ─── Records page ──────────────────────────────
-function renderRecordsFull(records) {
-  const container = el('records-list-full');
-  if (!container || !records) return;
-
-  const labels = { '1km':'1 km', '5km':'5 km', '10km':'10 km', semi:'Semi', marathon:'Marathon' };
-
-  container.innerHTML = Object.entries(records).map(([key, rec]) => {
-    if (!rec?.best) return `
-      <div class="record-item">
-        <div class="record-left">
-          <span class="record-distance">${labels[key] || key}</span>
-          <div><div class="record-name" style="color:var(--text-muted)">Pas encore de donnée</div></div>
-        </div>
-        <div class="record-right"><div class="record-time" style="color:var(--text-muted)">—</div></div>
-      </div>`;
-
-    const { best } = rec;
-    return `
-      <div class="record-item">
-        <div class="record-left">
-          <span class="record-distance">${labels[key] || key}</span>
-          <div>
-            <div class="record-name">${best.name || labels[key]}</div>
-            <div class="record-date">${formatDate(best.date)}</div>
-          </div>
-        </div>
-        <div class="record-right">
-          <div class="record-time">${formatTime(best.duration)}</div>
-          <div class="record-pace">${formatPace(best.pace)}</div>
-        </div>
-      </div>`;
-  }).join('');
-}
+// ─── Records page : voir frontend/js/records.js (initRecordsPage) ──
 
 // ═══════════════════════════════════════════════
 // CHARTS OPTIONS

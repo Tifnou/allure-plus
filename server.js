@@ -3,6 +3,7 @@ const express  = require('express');
 const cors     = require('cors');
 const path     = require('path');
 const fs       = require('fs');
+const crypto   = require('crypto');
 
 // â?,â?,â?, Logger fichier (admin /api/logs) â?,â?,â?,â?,â?,â?,â?,â?,â?,â?,â?,â?,â?,â?,â?,â?,â?,â?,â?,â?,â?,â?,â?,â?,
 const _logFile = path.join(__dirname, 'server.log');
@@ -96,6 +97,23 @@ function findAvatarFile() {
   try {
     return fs.readdirSync(UPLOADS_DIR).find(f => /^avatar\.[a-z0-9]+$/i.test(f)) || null;
   } catch (e) { return null; }
+}
+
+// Donnees utilisateur persistantes (records corriges, courses saisies) —
+// fichiers plats jamais ecrases par une mise a jour/reinstallation (comme uploads/)
+const DATA_DIR = path.join(__dirname, 'data');
+try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch (e) {}
+const RECORDS_OVERRIDES_FILE = path.join(DATA_DIR, 'records_overrides.json');
+const RACES_FILE             = path.join(DATA_DIR, 'races.json');
+
+function readJsonSafe(filePath, fallback) {
+  try {
+    if (!fs.existsSync(filePath)) return fallback;
+    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  } catch (e) { return fallback; }
+}
+function writeJsonSafe(filePath, data) {
+  fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
 }
 
 app.get('/api/avatar', requireSession, (req, res) => {
@@ -655,6 +673,184 @@ app.get('/api/activities/year/:year', requireSession, async (req, res) => {
       vO2MaxValue:     a.vO2MaxValue
     }));
     res.json({ year, activities: mapped, count: mapped.length });
+  } catch (err) { handleError(res, err); }
+});
+
+// ─── Records personnels : calcul Garmin + corrections manuelles ───────
+const RECORD_KEYS = ['1km', '5km', '10km', 'semi', 'marathon'];
+
+app.get('/api/records', requireSession, async (req, res) => {
+  try {
+    const { getActivities } = req.session.fns;
+    const activities = await getActivities(200);
+    const computed = getPersonalRecords(activities);
+    const overrides = readJsonSafe(RECORDS_OVERRIDES_FILE, {});
+    const result = {};
+    RECORD_KEYS.forEach(key => {
+      const override = overrides[key];
+      if (override) {
+        result[key] = { best: override, edited: true };
+      } else {
+        result[key] = { best: computed[key]?.best || null, edited: false };
+      }
+    });
+    res.json(result);
+  } catch (err) { handleError(res, err); }
+});
+
+app.put('/api/records/:distance', requireSession, (req, res) => {
+  try {
+    const distance = req.params.distance;
+    if (!RECORD_KEYS.includes(distance)) return res.status(400).json({ error: 'Distance inconnue' });
+    const { name, date, durationSec, distanceM } = req.body || {};
+    if (!name || !date || !durationSec || !distanceM) {
+      return res.status(400).json({ error: 'Champs manquants (name, date, durationSec, distanceM)' });
+    }
+    const overrides = readJsonSafe(RECORDS_OVERRIDES_FILE, {});
+    overrides[distance] = {
+      name: String(name).slice(0, 200),
+      date,
+      duration: Number(durationSec),
+      distance: Number(distanceM),
+      pace: Number(durationSec) / (Number(distanceM) / 1000),
+    };
+    writeJsonSafe(RECORDS_OVERRIDES_FILE, overrides);
+    res.json({ success: true, record: overrides[distance] });
+  } catch (err) { handleError(res, err); }
+});
+
+app.delete('/api/records/:distance', requireSession, (req, res) => {
+  try {
+    const distance = req.params.distance;
+    if (!RECORD_KEYS.includes(distance)) return res.status(400).json({ error: 'Distance inconnue' });
+    const overrides = readJsonSafe(RECORDS_OVERRIDES_FILE, {});
+    delete overrides[distance];
+    writeJsonSafe(RECORDS_OVERRIDES_FILE, overrides);
+    res.json({ success: true });
+  } catch (err) { handleError(res, err); }
+});
+
+// ─── Courses personnelles (saisie libre) ──────────────────────────────
+app.get('/api/races', requireSession, (req, res) => {
+  const races = readJsonSafe(RACES_FILE, []);
+  races.sort((a, b) => {
+    const byName = (a.name || '').localeCompare(b.name || '', 'fr', { sensitivity: 'base' });
+    if (byName !== 0) return byName;
+    return new Date(a.date) - new Date(b.date);
+  });
+  res.json(races);
+});
+
+app.post('/api/races', requireSession, (req, res) => {
+  try {
+    const { name, type, date, distanceKm, durationSec, elevationGain, vo2max } = req.body || {};
+    if (!name || !['route', 'trail'].includes(type) || !date || !distanceKm || !durationSec) {
+      return res.status(400).json({ error: 'Champs obligatoires manquants (name, type, date, distanceKm, durationSec)' });
+    }
+    const races = readJsonSafe(RACES_FILE, []);
+    const race = {
+      id: crypto.randomUUID(),
+      name: String(name).slice(0, 200),
+      type,
+      date,
+      distanceKm: Number(distanceKm),
+      durationSec: Number(durationSec),
+      elevationGain: elevationGain != null && elevationGain !== '' ? Number(elevationGain) : null,
+      vo2max: vo2max != null && vo2max !== '' ? Number(vo2max) : null,
+    };
+    races.push(race);
+    writeJsonSafe(RACES_FILE, races);
+    res.json({ success: true, race });
+  } catch (err) { handleError(res, err); }
+});
+
+app.put('/api/races/:id', requireSession, (req, res) => {
+  try {
+    const races = readJsonSafe(RACES_FILE, []);
+    const idx = races.findIndex(r => r.id === req.params.id);
+    if (idx === -1) return res.status(404).json({ error: 'Course introuvable' });
+    const { name, type, date, distanceKm, durationSec, elevationGain, vo2max } = req.body || {};
+    if (!name || !['route', 'trail'].includes(type) || !date || !distanceKm || !durationSec) {
+      return res.status(400).json({ error: 'Champs obligatoires manquants' });
+    }
+    races[idx] = {
+      ...races[idx],
+      name: String(name).slice(0, 200),
+      type, date,
+      distanceKm: Number(distanceKm),
+      durationSec: Number(durationSec),
+      elevationGain: elevationGain != null && elevationGain !== '' ? Number(elevationGain) : null,
+      vo2max: vo2max != null && vo2max !== '' ? Number(vo2max) : null,
+    };
+    writeJsonSafe(RACES_FILE, races);
+    res.json({ success: true, race: races[idx] });
+  } catch (err) { handleError(res, err); }
+});
+
+app.delete('/api/races/:id', requireSession, (req, res) => {
+  try {
+    const races = readJsonSafe(RACES_FILE, []);
+    const race = races.find(r => r.id === req.params.id);
+    if (race?.certificateFile) {
+      try { fs.unlinkSync(path.join(UPLOADS_DIR, race.certificateFile)); } catch (e) {}
+    }
+    const filtered = races.filter(r => r.id !== req.params.id);
+    writeJsonSafe(RACES_FILE, filtered);
+    res.json({ success: true });
+  } catch (err) { handleError(res, err); }
+});
+
+// Diplome de course (PDF ou image), stocke dans uploads/ comme l'avatar
+app.post('/api/races/:id/certificate', requireSession, upload.single('certificate'), (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'Aucun fichier recu' });
+    const ext = (path.extname(req.file.originalname) || '.pdf').toLowerCase();
+    if (!/^\.(pdf|jpe?g|png)$/.test(ext)) return res.status(400).json({ error: 'Format non supporte (PDF, JPG ou PNG)' });
+    const races = readJsonSafe(RACES_FILE, []);
+    const idx = races.findIndex(r => r.id === req.params.id);
+    if (idx === -1) return res.status(404).json({ error: 'Course introuvable' });
+    if (races[idx].certificateFile) {
+      try { fs.unlinkSync(path.join(UPLOADS_DIR, races[idx].certificateFile)); } catch (e) {}
+    }
+    const filename = 'race-' + races[idx].id + ext;
+    fs.writeFileSync(path.join(UPLOADS_DIR, filename), req.file.buffer);
+    races[idx].certificateFile = filename;
+    writeJsonSafe(RACES_FILE, races);
+    res.json({ success: true, certificateUrl: '/uploads/' + filename });
+  } catch (err) { handleError(res, err); }
+});
+
+app.delete('/api/races/:id/certificate', requireSession, (req, res) => {
+  try {
+    const races = readJsonSafe(RACES_FILE, []);
+    const idx = races.findIndex(r => r.id === req.params.id);
+    if (idx === -1) return res.status(404).json({ error: 'Course introuvable' });
+    if (races[idx].certificateFile) {
+      try { fs.unlinkSync(path.join(UPLOADS_DIR, races[idx].certificateFile)); } catch (e) {}
+    }
+    delete races[idx].certificateFile;
+    writeJsonSafe(RACES_FILE, races);
+    res.json({ success: true });
+  } catch (err) { handleError(res, err); }
+});
+
+// ─── Export / import des records + courses (changement de PC, reinstall) ──
+app.get('/api/records-export', requireSession, (req, res) => {
+  const records_overrides = readJsonSafe(RECORDS_OVERRIDES_FILE, {});
+  const races = readJsonSafe(RACES_FILE, []);
+  res.setHeader('Content-Disposition', 'attachment; filename=allure-plus-records.json');
+  res.json({ records_overrides, races, exportedAt: new Date().toISOString() });
+});
+
+app.post('/api/records-import', requireSession, (req, res) => {
+  try {
+    const { records_overrides, races } = req.body || {};
+    if (typeof records_overrides !== 'object' || records_overrides === null || !Array.isArray(races)) {
+      return res.status(400).json({ error: 'Structure invalide (records_overrides ou races manquant)' });
+    }
+    writeJsonSafe(RECORDS_OVERRIDES_FILE, records_overrides);
+    writeJsonSafe(RACES_FILE, races);
+    res.json({ success: true, racesCount: races.length });
   } catch (err) { handleError(res, err); }
 });
 
