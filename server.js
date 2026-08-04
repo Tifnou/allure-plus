@@ -737,7 +737,10 @@ app.get('/api/records', requireSession, async (req, res) => {
           result[key].betterCandidate = computedBest;
         }
       } else {
-        result[key] = { best: computedBest, edited: false };
+        // Aucune saisie manuelle -> aucun record affiche (pas de deduction
+        // automatique depuis Garmin sur ce champ tant qu'il n'a jamais ete
+        // renseigne). La premiere valeur doit toujours venir d'une saisie.
+        result[key] = { best: null, edited: false };
       }
     });
     res.json(result);
