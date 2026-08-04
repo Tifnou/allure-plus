@@ -2306,6 +2306,11 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
   border-color: var(--accent, #2563EB);
   box-shadow: 0 0 0 3px rgba(37,99,235,0.1);
 }
+.activity-search-input {
+  width: 220px;
+  cursor: text;
+}
+.activity-search-input::placeholder { color: var(--text-muted); }
 
 
 

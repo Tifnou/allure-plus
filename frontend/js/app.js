@@ -560,7 +560,10 @@ function renderAllActivities(activities, filter = 'all', yearOverride = null) {
     const date = new Date(a.startTimeLocal || a.startTimeGMT || a.beginTimestamp || a.date);
     const yearMatch  = !yearFilter  || date.getFullYear() === yearFilter;
     const monthMatch = !monthFilter || (date.getMonth() + 1) === monthFilter;
-    return sportMatch && yearMatch && monthMatch;
+    // Recherche par nom d'activité (colonne "Activité")
+    const searchTerm = (el('filter-search')?.value || '').trim().toLowerCase();
+    const nameMatch = !searchTerm || (a.name || '').toLowerCase().includes(searchTerm);
+    return sportMatch && yearMatch && monthMatch && nameMatch;
   });
 
   if (filtered.length === 0) {
@@ -3012,6 +3015,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     renderAllActivities(_allActivities, getCurrentSportFilter(), year || null);
   });
   if (filterMonth) filterMonth.addEventListener('change', () => renderAllActivities(_allActivities, getCurrentSportFilter()));
+  const filterSearch = el('filter-search');
+  if (filterSearch) filterSearch.addEventListener('input', () => renderAllActivities(_allActivities, getCurrentSportFilter()));
   // Status + chargement initial
   await checkStatus();
   await Promise.all([loadDashboard(), loadHeartRate(), loadSleep(), loadWellnessRow()]);
