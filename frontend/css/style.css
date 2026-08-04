@@ -325,6 +325,7 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
 @keyframes spin{to{transform:rotate(360deg);}}
 .last-updated{font-size:11px;color:var(--text-muted);font-family:var(--font-body);}
 .app-version{font-size:10px;color:var(--text-muted);font-family:var(--font-body);opacity:0.6;margin-top:2px;}
+.sidebar-footer-divider{height:1px;background:var(--border-light);margin:4px 0;}
 
 .server-controls{display:flex;gap:6px;flex-direction:column;}
 .btn-restart{
@@ -934,25 +935,22 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
 }
 @keyframes badgePulse{0%,100%{box-shadow:0 0 0 0 rgba(239,68,68,0.4);}50%{box-shadow:0 0 0 5px rgba(239,68,68,0);}}
 
-/* ─── Sidebar user info ─── */
-.sidebar-user{
-  display:flex;flex-direction:column;gap:4px;
-  padding:8px 0 4px;border-top:1px solid var(--border-light);
-  margin-bottom:4px;
+/* ─── Sidebar : compte connecté + déconnexion (même ligne, icône sobre) ─── */
+.sidebar-account{
+  display:flex;align-items:center;justify-content:space-between;gap:8px;
+  padding:2px 2px;
 }
-.sidebar-user-email{
-  font-family:var(--font-body);font-size:10px;color:var(--text-muted);
+.sidebar-account-email{
+  font-family:var(--font-body);font-size:10.5px;color:var(--text-muted);
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
-  padding:0 2px;
 }
-.btn-logout{
-  display:flex;align-items:center;gap:5px;width:100%;
-  padding:5px 8px;
-  background:none;border:1px solid var(--border);border-radius:6px;
-  font-family:var(--font-body);font-size:11px;color:var(--text-muted);
-  cursor:pointer;transition:all var(--transition);
+.btn-logout-icon{
+  display:flex;align-items:center;justify-content:center;flex-shrink:0;
+  width:22px;height:22px;padding:0;
+  background:none;border:none;border-radius:6px;
+  color:var(--text-muted);cursor:pointer;transition:all var(--transition);
 }
-.btn-logout:hover{background:rgba(239,68,68,0.06);border-color:rgba(239,68,68,0.3);color:#dc2626;}
+.btn-logout-icon:hover{background:rgba(239,68,68,0.08);color:#dc2626;}
 
 /* Animations */
 @keyframes fadeIn{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:translateY(0);}}
@@ -2680,12 +2678,9 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
   :root { --sidebar-w: 60px; }
 }
 
-/* ─── Nav item Admin ─── */
+/* ─── Nav item Admin (juste sous Plans d'entraînement, ordre naturel) ─── */
 .nav-item--admin {
   display: none;  /* caché par défaut, JS l'affiche si admin */
-  margin-top: auto;
-  border-top: 1px solid var(--border-light);
-  padding-top: 6px;
 }
 .nav-item--admin .nav-icon { stroke: var(--text-muted); }
 .nav-item--admin:hover .nav-icon { stroke: var(--brand-green); }

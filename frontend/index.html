@@ -12,7 +12,7 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <link rel="stylesheet" href="css/style.css?v=1785838212576" />
+  <link rel="stylesheet" href="css/style.css?v=1785838870442" />
   <link rel="stylesheet" href="css/plans.css?v=1785834176454" />
 </head>
 <body>
@@ -140,23 +140,25 @@
         </svg>
         <span>Actualiser les données</span>
       </button>
+      <div class="last-updated" id="last-updated"></div>
 
-      <!-- Voyant statut serveur -->
-      <div class="server-status-bar" id="server-status-bar">
+      <div class="sidebar-footer-divider"></div>
+
+      <!-- Voyant statut serveur : confirme que le serveur local Allure+ repond
+           (utile pour detecter une panne du process node.exe, pas juste decoratif) -->
+      <div class="server-status-bar" id="server-status-bar" title="Confirme que le serveur local Allure+ repond">
         <div class="server-led" id="server-led"></div>
         <span class="server-status-text" id="server-status-text">Connexion...?</span>
       </div>
 
-      <!-- Compte connecté + déconnexion -->
-      <div class="sidebar-user" id="sidebar-user" style="display:none">
-        <div class="sidebar-user-email" id="sidebar-user-email"></div>
-        <button class="btn-logout" id="btn-logout" onclick="handleLogout()" title="Changer de compte">
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
-          <span>Changer de compte</span>
+      <!-- Compte connecté + déconnexion (icône sobre, même ligne) -->
+      <div class="sidebar-account" id="sidebar-user" style="display:none">
+        <span class="sidebar-account-email" id="sidebar-user-email"></span>
+        <button class="btn-logout-icon" id="btn-logout" onclick="handleLogout()" title="Changer de compte">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
         </button>
       </div>
 
-      <div class="last-updated" id="last-updated"></div>
       <div class="app-version" id="app-version"></div>
     </div>
   </aside>
