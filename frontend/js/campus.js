@@ -2698,6 +2698,20 @@ function updateGoalsPage(goal, weeks = []) {
     ticksEl.innerHTML = '';
   }
 
+  // Numero de semaine au-dessus de chaque section : colore une fois passee
+  // (semaine <= elapsed), neutre pour les semaines a venir.
+  const labelsEl = el('goals-progress-weeklabels');
+  if (labelsEl && total > 0) {
+    labelsEl.innerHTML = Array.from({ length: total }, (_, i) => {
+      const w = i + 1;
+      const centerPct = (i + 0.5) / total * 100;
+      const done = w <= elapsed;
+      return `<span class="goals-progress-weeklabel${done ? ' goals-progress-weeklabel--done' : ''}" style="left:${centerPct}%">${w}</span>`;
+    }).join('');
+  } else if (labelsEl) {
+    labelsEl.innerHTML = '';
+  }
+
   // Course cible
   const compDate = goal.competitionDate;
   if (compDate) {
