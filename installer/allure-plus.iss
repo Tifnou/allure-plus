@@ -1,5 +1,5 @@
 #define MyAppName "Allure+"
-#define MyAppVersion "1.2.0"
+#define MyAppVersion "1.3.0"
 #define MyAppPublisher "Allure+"
 
 [Setup]
@@ -11,7 +11,7 @@ DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=no
 OutputDir=Output
-OutputBaseFilename=AllurePlus_Setup
+OutputBaseFilename=AllurePlus_Setup_v{#MyAppVersion}
 SetupIconFile=..\logo-allure.ico
 UninstallDisplayIcon={app}\logo-allure.ico
 Compression=lzma2
