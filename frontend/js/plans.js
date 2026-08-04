@@ -133,24 +133,18 @@ function showView(view) {
 
 // ─── WIZARD ──────────────────────────────────────────────────
 
-// Libellés D+ lisibles pour le wizard
-const DPLUS_DISPLAY = {
-  '0_1000':    { label: '< 1 000 m D+',        desc: 'Terrain peu accidenté' },
-  '1000_2000': { label: '1 000 – 2 000 m D+', desc: 'D+ modéré, belles montées' },
-  '2000_3000': { label: '2 000 – 3 000 m D+', desc: 'D+ élevé, course exigeante' },
-  '3000_9999': { label: '> 3 000 m D+',        desc: 'Montagne, très exigeant' },
-};
-
-// Formate une plage "1200_2200" en libellé lisible pour les plages non prévues
-// dans DPLUS_DISPLAY ci-dessus (ex: plages spécifiques à certains plans).
+// Formate une plage "3500_5000" en libellé lisible ("3 500 – 5 000 m D+").
+// Le descriptif sémantique (Peu vallonné / Vallonné / Montagneux / Très
+// montagneux) vient du champ dplusTier renvoyé par le serveur (voir
+// TRAIL_DPLUS_TIERS dans server.js) plutôt que d'être redeviné ici.
 function formatDplusRange(val) {
   const parts = String(val).split('_').map(Number);
-  if (parts.length !== 2 || parts.some(isNaN)) return { label: val, desc: '' };
+  if (parts.length !== 2 || parts.some(isNaN)) return { label: val };
   const [lo, hi] = parts;
   const fmt = n => n.toLocaleString('fr-FR');
-  if (hi >= 9999) return { label: `> ${fmt(lo)} m D+`, desc: 'Montagne, très exigeant' };
-  if (lo <= 0)     return { label: `< ${fmt(hi)} m D+`, desc: 'Terrain peu accidenté' };
-  return { label: `${fmt(lo)} – ${fmt(hi)} m D+`, desc: 'D+ spécifique à cette course' };
+  if (hi >= 9999) return { label: `> ${fmt(lo)} m D+` };
+  if (lo <= 0)     return { label: `< ${fmt(hi)} m D+` };
+  return { label: `${fmt(lo)} – ${fmt(hi)} m D+` };
 }
 
 function getAvailableOptions(step) {
@@ -238,8 +232,9 @@ function renderWizardStep() {
       question: 'Quel est le D+ de votre course ?',
       subtitle: 'Le dénivelé positif permet d\'adapter l\'entraînement spécifique trail.',
       options: opts.map(val => {
-        const d = DPLUS_DISPLAY[val] || formatDplusRange(val);
-        return { value: val, label: d.label, desc: d.desc };
+        const d = formatDplusRange(val);
+        const tier = plansState.allPlans.find(p => p.dplusLabel === val)?.dplusTier;
+        return { value: val, label: d.label, desc: tier || '' };
       }),
       key: 'dplusLabel',
     },

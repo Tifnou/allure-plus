@@ -1870,6 +1870,44 @@ function getAllPlanFiles(dir) {
   return result;
 }
 
+// Référence D+ par catégorie de distance trail (tableau établi avec l'utilisateur) :
+// chaque catégorie de distance a ses propres paliers de dénivelé positif, un D+
+// "important" pour un trail court n'a pas le même sens qu'un D+ "important" pour
+// un ultra-trail. Palier haut = [min, max), dernier palier = [min, +l'infini).
+const TRAIL_DPLUS_TIERS = {
+  court: [ // < 21 km
+    { label: 'Peu vallonné',      min: 0,    max: 300  },
+    { label: 'Vallonné',          min: 300,  max: 700  },
+    { label: 'Montagneux',        min: 700,  max: 1200 },
+    { label: 'Très montagneux',   min: 1200, max: null },
+  ],
+  moyen: [ // 21-42 km
+    { label: 'Peu vallonné',      min: 0,    max: 600  },
+    { label: 'Vallonné',          min: 600,  max: 1200 },
+    { label: 'Montagneux',        min: 1200, max: 2200 },
+    { label: 'Très montagneux',   min: 2200, max: null },
+  ],
+  long: [ // 42-80 km
+    { label: 'Peu vallonné',      min: 0,    max: 2000 },
+    { label: 'Vallonné',          min: 2000, max: 3500 },
+    { label: 'Montagneux',        min: 3500, max: 5000 },
+    { label: 'Très montagneux',   min: 5000, max: null },
+  ],
+  ultra: [ // > 80 km
+    { label: 'Peu vallonné',      min: 0,    max: 2500 },
+    { label: 'Vallonné',          min: 2500, max: 4000 },
+    { label: 'Montagneux',        min: 4000, max: 6000 },
+    { label: 'Très montagneux',   min: 6000, max: null },
+  ],
+};
+
+function findDplusTierLabel(distCat, dplusMin) {
+  const tiers = TRAIL_DPLUS_TIERS[distCat];
+  if (!tiers || dplusMin == null) return null;
+  const tier = tiers.find(t => dplusMin >= t.min && (t.max === null || dplusMin < t.max));
+  return tier ? tier.label : null;
+}
+
 function parsePlanMeta(filePath) {
   const filename = path.basename(filePath);
   const raw = JSON.parse(fs.readFileSync(filePath, 'utf8'));
@@ -1889,7 +1927,7 @@ function parsePlanMeta(filePath) {
   const seances = seancesStr ? parseInt(seancesStr) : (goal.sessionsPerWeek  || 0);
 
   let distCat = '', distLabel = '', niveau = '';
-  let dplusMin = null, dplusMax = null, dplusLabel = null;
+  let dplusMin = null, dplusMax = null, dplusLabel = null, dplusTier = null;
 
   if (sport === 'R') {
     // Route: R_SEMI_12S_4J_ACTIF  ou  R_MARATHON_...
@@ -1935,11 +1973,12 @@ function parsePlanMeta(filePath) {
       niveau = parts[parts.length - 1];
     }
 
-    // Calcul du label D+
+    // Label D+ : toujours la plage exacte du fichier (jamais de bucket générique
+    // qui écraserait des plages distinctes comme 2000-3500 et 3500-5000), plus
+    // le palier sémantique correspondant à la catégorie de distance.
     if (dplusMin !== null && dplusMax !== null) {
-      if (dplusMax <= 1000)       dplusLabel = '0_1000';
-      else if (dplusMin >= 3000)  dplusLabel = '3000_9999';
-      else                        dplusLabel = dplusMin + '_' + dplusMax;
+      dplusLabel = dplusMin + '_' + dplusMax;
+      dplusTier  = findDplusTierLabel(distCat, dplusMin);
     }
   }
 
@@ -2035,7 +2074,7 @@ function parsePlanMeta(filePath) {
     totalWeeks: weeks.length,
     sessions:   sessionCounts,
     totalDurMin, estKm, estDplusM, cycles, weeksSummary,
-    dplusMin, dplusMax, dplusLabel,
+    dplusMin, dplusMax, dplusLabel, dplusTier,
     dplus: dplusMin, // compatibilité affichage
   };
 }
@@ -2085,6 +2124,7 @@ app.get('/api/plans/load/:id', (req, res) => {
         sportLabel: meta.sportLabel,
         distLabel:  meta.distLabel,
         dplusLabel: meta.dplusLabel,
+        dplusTier:  meta.dplusTier,
         dplusMin:   meta.dplusMin,
         dplusMax:   meta.dplusMax,
       };
