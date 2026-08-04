@@ -884,7 +884,8 @@ function renderTrainingPlan(goal, weeks) {
           // les deux (ex: la semaine qui vient de se terminer hier restait
           // affichée "à venir" faute d'être strictement avant aujourd'hui).
           const isPast    = currentIdx >= 0 && i < currentIdx;
-          const theme     = w.context?.cycleTheme?.replace(/-/g, ' ') || '';
+          const rawTheme  = w.context?.cycleTheme || '';
+          const theme     = rawTheme ? (THEME_LABELS[rawTheme] || rawTheme.replace(/-/g, ' ')) : '';
           return `
             <button class="week-tab${i === campusState.selectedWeekIdx ? ' week-tab--active' : ''}${isCurrent ? ' week-tab--current' : ''}${isPast && i !== campusState.selectedWeekIdx ? ' week-tab--past' : ''}"
               onclick="selectWeek(${i})" id="week-tab-${i}">
@@ -965,7 +966,8 @@ function renderSessionList(weekIdx) {
 
   const sessions = week.sessions || [];
   const ctx = week.context || {};
-  const theme = ctx.cycleTheme?.replace(/-/g, ' ') || '';
+  const rawTheme = ctx.cycleTheme || '';
+  const theme = rawTheme ? (THEME_LABELS[rawTheme] || rawTheme.replace(/-/g, ' ')) : '';
   const now = Date.now();
   const isCurrent = isNowInWeek(now, week.weekDate);
 
@@ -2709,7 +2711,7 @@ function renderCyclesFromWeeks(weeks, now) {
     if (!cycleMap.has(theme)) {
       cycleMap.set(theme, {
         theme,
-        label: theme.replace(/-/g, ' '),
+        label: THEME_LABELS[theme] || theme.replace(/-/g, ' '),
         description: w.context?.cycleDescription || '',
         weeks: [],
       });

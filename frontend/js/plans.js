@@ -344,7 +344,9 @@ const THEME_LABELS = {
   'base':            'Base',
   'specifique':      'Spécifique',
   // Trail spécifiques (depuis Campus)
-  'short-recovery':  'Short Recovery',
+  'short-recovery':  'Reprise courte',
+  'mid-recovery':    'Reprise moyenne',
+  'long-recovery':   'Reprise longue',
   'S60_Cote':        'S60 Côte',
   'Affutage':        'Affûtage',
   'Post-competition':'Post-compétition',
