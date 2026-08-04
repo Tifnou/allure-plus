@@ -2669,15 +2669,34 @@ function updateGoalsPage(goal, weeks = []) {
   // sa date de debut est passee (voir renderObjectifsChart/getRemainingVmaGainPct)
   const elapsed = weeks.filter(w => startOfDay(w.weekDate + 7 * 86400000) <= startOfDay(now)).length;
   const left   = Math.max(0, total - elapsed);
-  const pct    = total > 0 ? Math.round((elapsed / total) * 100) : 0;
+
+  // Position du curseur/de la barre : continue au fil des jours (pas juste
+  // par semaine entiere) pour qu'un coureur au 2e jour de sa 2e semaine soit
+  // place proportionnellement entre S1 et S2, pas plaque sur l'un ou l'autre.
+  // Le % affiche suit la meme base pour rester coherent avec le remplissage.
+  const W7 = 7 * 86400000;
+  const planStartMs = weeks[0]?.weekDate ?? now;
+  const totalDurationMs = total * W7;
+  const elapsedMs = Math.min(Math.max(now - planStartMs, 0), totalDurationMs);
+  const pctExact = totalDurationMs > 0 ? (elapsedMs / totalDurationMs) * 100 : 0;
 
   // Stats progression
   el('goals-weeks-done') && (el('goals-weeks-done').textContent = elapsed);
   el('goals-weeks-left') && (el('goals-weeks-left').textContent = left);
-  el('goals-pct')        && (el('goals-pct').textContent        = pct + '%');
-  el('goals-progress-fill') && (el('goals-progress-fill').style.width = pct + '%');
+  el('goals-pct')        && (el('goals-pct').textContent        = Math.round(pctExact) + '%');
+  el('goals-progress-fill') && (el('goals-progress-fill').style.width = pctExact + '%');
   const marker = el('goals-progress-marker');
-  if (marker) { marker.style.left = pct + '%'; marker.textContent = personEmoji('running'); }
+  if (marker) { marker.style.left = pctExact + '%'; marker.textContent = personEmoji('running'); }
+
+  // Graduations : une section par semaine du plan
+  const ticksEl = el('goals-progress-ticks');
+  if (ticksEl && total > 1) {
+    ticksEl.innerHTML = Array.from({ length: total - 1 }, (_, i) =>
+      `<span class="goals-progress-tick" style="left:${(i + 1) / total * 100}%"></span>`
+    ).join('');
+  } else if (ticksEl) {
+    ticksEl.innerHTML = '';
+  }
 
   // Course cible
   const compDate = goal.competitionDate;

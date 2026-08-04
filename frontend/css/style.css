@@ -1280,6 +1280,9 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
   position:absolute; top:50%; font-size:16px; line-height:1;
   transform:translate(-50%,-50%) scaleX(-1); transition:left .6s ease; pointer-events:none;
 }
+.goals-progress-ticks{ position:absolute; inset:0; pointer-events:none; }
+.goals-progress-tick{ position:absolute; top:0; bottom:0; width:1px; background:rgba(0,0,0,0.14); }
+[data-theme="dark"] .goals-progress-tick{ background:rgba(255,255,255,0.18); }
 .goals-cycle-theme{
   font-family:var(--font-body); font-size:11px; color:var(--text-secondary);
   line-height:1.5;
