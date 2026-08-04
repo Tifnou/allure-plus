@@ -2595,6 +2595,7 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
   justify-content: start;
 }
 #page-admin .admin-logs-card { grid-column: 1 / -1; }
+#page-admin .admin-dplus-card { grid-column: 1 / -1; }
 #page-admin .card { background: #ffffff !important; backdrop-filter: none !important; padding: 14px 16px; }
 [data-theme="dark"] #page-admin .card { background: #12151f !important; }
 #page-admin .card-header { margin-bottom: 8px; }
@@ -2622,6 +2623,20 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
 }
 .admin-status-dot--ok  { background: var(--green); }
 .admin-status-dot--err { background: var(--red); }
+.admin-dplus-table-wrap { overflow-x: auto; }
+.admin-dplus-table { width: 100%; border-collapse: collapse; font-family: var(--font-body); font-size: 12px; }
+.admin-dplus-table thead th {
+  text-align: left; font-size: 10.5px; font-weight: 700; color: var(--text-muted);
+  text-transform: uppercase; letter-spacing: 0.05em; padding: 6px 10px;
+  border-bottom: 1px solid var(--border); white-space: nowrap;
+}
+.admin-dplus-table tbody td { padding: 8px 10px; border-bottom: 1px solid var(--border-light); white-space: nowrap; font-family: var(--font-mono); font-size: 11.5px; }
+.admin-dplus-table tbody tr:last-child td { border-bottom: none; }
+.admin-dplus-cat { font-family: var(--font-body) !important; font-weight: 600; color: var(--text-primary); }
+.admin-dplus-dist { font-family: var(--font-body) !important; color: var(--text-muted); }
+.admin-dplus-note { margin-top: 10px; font-size: 11px; color: var(--text-muted); font-family: var(--font-body); }
+.admin-dplus-note code { background: var(--bg-hover); border-radius: 4px; padding: 1px 5px; font-family: var(--font-mono); }
+
 .admin-logs-pre {
   background: var(--bg);
   border: 1px solid var(--border);

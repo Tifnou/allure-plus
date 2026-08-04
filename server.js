@@ -435,6 +435,44 @@ app.get('/api/status', (req, res) => {
 });
 
 // Admin info d©taill©
+// Référence D+ par catégorie de distance trail (tableau établi avec l'utilisateur) :
+// chaque catégorie de distance a ses propres paliers de dénivelé positif, un D+
+// "important" pour un trail court n'a pas le même sens qu'un D+ "important" pour
+// un ultra-trail. Palier haut = [min, max), dernier palier = [min, +l'infini).
+const TRAIL_DPLUS_TIERS = {
+  court: [ // < 21 km
+    { label: 'Peu vallonné',      min: 0,    max: 300  },
+    { label: 'Vallonné',          min: 300,  max: 700  },
+    { label: 'Montagneux',        min: 700,  max: 1200 },
+    { label: 'Très montagneux',   min: 1200, max: null },
+  ],
+  moyen: [ // 21-42 km
+    { label: 'Peu vallonné',      min: 0,    max: 600  },
+    { label: 'Vallonné',          min: 600,  max: 1200 },
+    { label: 'Montagneux',        min: 1200, max: 2200 },
+    { label: 'Très montagneux',   min: 2200, max: null },
+  ],
+  long: [ // 42-80 km
+    { label: 'Peu vallonné',      min: 0,    max: 2000 },
+    { label: 'Vallonné',          min: 2000, max: 3500 },
+    { label: 'Montagneux',        min: 3500, max: 5000 },
+    { label: 'Très montagneux',   min: 5000, max: null },
+  ],
+  ultra: [ // > 80 km
+    { label: 'Peu vallonné',      min: 0,    max: 2500 },
+    { label: 'Vallonné',          min: 2500, max: 4000 },
+    { label: 'Montagneux',        min: 4000, max: 6000 },
+    { label: 'Très montagneux',   min: 6000, max: null },
+  ],
+};
+
+function findDplusTierLabel(distCat, dplusMin) {
+  const tiers = TRAIL_DPLUS_TIERS[distCat];
+  if (!tiers || dplusMin == null) return null;
+  const tier = tiers.find(t => dplusMin >= t.min && (t.max === null || dplusMin < t.max));
+  return tier ? tier.label : null;
+}
+
 app.get('/api/admin-info', (req, res) => {
   const mem = process.memoryUsage();
   const upSec = Math.floor(process.uptime());
@@ -461,6 +499,7 @@ app.get('/api/admin-info', (req, res) => {
     garmin:  { connected: garminConnected, email: garminEmail },
     campus:  { connected: campusConnected, email: campusEmail },
     adminEmail: ENV_EMAIL || null,
+    dplusTiers: TRAIL_DPLUS_TIERS,
   });
 });
 
@@ -1868,44 +1907,6 @@ function getAllPlanFiles(dir) {
     }
   });
   return result;
-}
-
-// Référence D+ par catégorie de distance trail (tableau établi avec l'utilisateur) :
-// chaque catégorie de distance a ses propres paliers de dénivelé positif, un D+
-// "important" pour un trail court n'a pas le même sens qu'un D+ "important" pour
-// un ultra-trail. Palier haut = [min, max), dernier palier = [min, +l'infini).
-const TRAIL_DPLUS_TIERS = {
-  court: [ // < 21 km
-    { label: 'Peu vallonné',      min: 0,    max: 300  },
-    { label: 'Vallonné',          min: 300,  max: 700  },
-    { label: 'Montagneux',        min: 700,  max: 1200 },
-    { label: 'Très montagneux',   min: 1200, max: null },
-  ],
-  moyen: [ // 21-42 km
-    { label: 'Peu vallonné',      min: 0,    max: 600  },
-    { label: 'Vallonné',          min: 600,  max: 1200 },
-    { label: 'Montagneux',        min: 1200, max: 2200 },
-    { label: 'Très montagneux',   min: 2200, max: null },
-  ],
-  long: [ // 42-80 km
-    { label: 'Peu vallonné',      min: 0,    max: 2000 },
-    { label: 'Vallonné',          min: 2000, max: 3500 },
-    { label: 'Montagneux',        min: 3500, max: 5000 },
-    { label: 'Très montagneux',   min: 5000, max: null },
-  ],
-  ultra: [ // > 80 km
-    { label: 'Peu vallonné',      min: 0,    max: 2500 },
-    { label: 'Vallonné',          min: 2500, max: 4000 },
-    { label: 'Montagneux',        min: 4000, max: 6000 },
-    { label: 'Très montagneux',   min: 6000, max: null },
-  ],
-};
-
-function findDplusTierLabel(distCat, dplusMin) {
-  const tiers = TRAIL_DPLUS_TIERS[distCat];
-  if (!tiers || dplusMin == null) return null;
-  const tier = tiers.find(t => dplusMin >= t.min && (t.max === null || dplusMin < t.max));
-  return tier ? tier.label : null;
 }
 
 function parsePlanMeta(filePath) {

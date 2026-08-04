@@ -2785,10 +2785,52 @@ async function loadAdminInfo() {
         </div>
       `;
     }
+    // Référence D+ trail (repère pour la création de plans)
+    const dplusEl = document.getElementById('admin-dplus-tiers');
+    if (dplusEl && data.dplusTiers) renderAdminDplusTiers(dplusEl, data.dplusTiers);
   } catch(e) {
     const el = document.getElementById('admin-server-info');
     if (el) el.innerHTML = '<div class="table-loading">Erreur chargement</div>';
   }
+}
+
+const ADMIN_DPLUS_CATS = [
+  { key: 'court', label: 'Trail court', dist: '< 21 km' },
+  { key: 'moyen', label: 'Trail moyen', dist: '21 – 42 km' },
+  { key: 'long',  label: 'Trail long',  dist: '42 – 80 km' },
+  { key: 'ultra', label: 'Ultra-trail',  dist: '> 80 km' },
+];
+
+function renderAdminDplusTiers(el, dplusTiers) {
+  const fmtRange = t => t.max == null
+    ? `${t.min.toLocaleString('fr-FR')} m et plus`
+    : `${t.min.toLocaleString('fr-FR')} – ${t.max.toLocaleString('fr-FR')} m`;
+
+  const tierNames = (dplusTiers.long || dplusTiers.moyen || []).map(t => t.label);
+
+  el.innerHTML = `
+    <div class="admin-dplus-table-wrap">
+      <table class="admin-dplus-table">
+        <thead>
+          <tr>
+            <th>Catégorie</th>
+            <th>Distance</th>
+            ${tierNames.map(n => `<th>${n}</th>`).join('')}
+          </tr>
+        </thead>
+        <tbody>
+          ${ADMIN_DPLUS_CATS.map(cat => `
+            <tr>
+              <td class="admin-dplus-cat">${cat.label}</td>
+              <td class="admin-dplus-dist">${cat.dist}</td>
+              ${(dplusTiers[cat.key] || []).map(t => `<td>${fmtRange(t)}</td>`).join('')}
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>
+    <div class="admin-dplus-note">Utilisé pour nommer les plans du catalogue trail (ex : <code>T_42_80_16S_4J_3500_5000_ACTIF.aplus</code>).</div>
+  `;
 }
 
 async function loadAdminLogs() {
