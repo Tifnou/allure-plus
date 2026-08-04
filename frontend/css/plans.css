@@ -37,6 +37,7 @@
   margin-bottom: 12px;
 }
 .plans-info-stats { display: flex; flex-wrap: wrap; gap: 8px; }
+.plans-info-stats + .plans-info-stats { margin-top: 8px; }
 .plans-info-stat-chip {
   background: var(--bg-secondary, rgba(148,163,184,0.12));
   border-radius: 20px; padding: 6px 12px;

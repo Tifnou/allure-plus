@@ -89,6 +89,8 @@ async function renderPlansInfoBanner() {
       <div class="plans-info-stats">
         <span class="plans-info-stat-chip">🏃 ${routePlans.length} plans Route${routeDistances.length ? ' · ' + routeDistances.join(', ') : ''}</span>
         <span class="plans-info-stat-chip">⛰️ ${trailPlans.length} plans Trail${trailDistances.length ? ' · ' + trailDistances.join(', ') : ''}</span>
+      </div>
+      <div class="plans-info-stats">
         ${dureeMin != null ? `<span class="plans-info-stat-chip">🗓️ ${dureeMin === dureeMax ? dureeMin : dureeMin + '–' + dureeMax} semaines</span>` : ''}
         ${seancesMin != null ? `<span class="plans-info-stat-chip">📅 ${seancesMin === seancesMax ? seancesMin : seancesMin + '–' + seancesMax} séances/semaine</span>` : ''}
       </div>
