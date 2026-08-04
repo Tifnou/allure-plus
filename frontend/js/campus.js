@@ -2072,7 +2072,10 @@ function getVO2maxGainPct(weeksTotal) {
 function getRemainingVmaGainPct(weeksTotal, weeks) {
   if (!weeksTotal) return 0;
   const now = Date.now();
-  const elapsedWeeks = (weeks || []).filter(w => startOfDay(w.weekDate) < startOfDay(now)).length;
+  // Une semaine ne compte comme "ecoulee" qu'une fois terminee (7 jours
+  // apres son debut), pas des que sa date de debut est passee - sinon la
+  // semaine en cours est comptee comme deja terminee des le 2e jour.
+  const elapsedWeeks = (weeks || []).filter(w => startOfDay(w.weekDate + 7 * 86400000) <= startOfDay(now)).length;
   const cardioAssiduity = computeSessionStats(weeks).cardio.assiduity;
   const assiduityRatio = cardioAssiduity !== null ? 0.3 + 0.7 * (cardioAssiduity / 100) : 1;
   const weeksRemaining = Math.max(0, weeksTotal - elapsedWeeks);
@@ -2278,7 +2281,7 @@ function renderObjectifsChart(weeks, goal, dplusM, distKmOverride) {
   const vma = getVmaFromState();
   if (!vma || !distKm || weeksTotal < 2) return;
 
-  const elapsedWeeks = weeks.filter(w => startOfDay(w.weekDate) < startOfDay(now)).length;
+  const elapsedWeeks = weeks.filter(w => startOfDay(w.weekDate + 7 * 86400000) <= startOfDay(now)).length;
 
   // Même formule que le bloc Estimations (gain pondéré par l'assiduité réelle
   // et le nombre de semaines restantes) pour que les deux blocs soient
@@ -2662,7 +2665,9 @@ function updateGoalsPage(goal, weeks = []) {
 
   const now    = Date.now();
   const total  = goal.durationInWeeks || weeks.length;
-  const elapsed = weeks.filter(w => startOfDay(w.weekDate) < startOfDay(now)).length;
+  // Une semaine ne compte comme "ecoulee" qu'une fois terminee, pas des que
+  // sa date de debut est passee (voir renderObjectifsChart/getRemainingVmaGainPct)
+  const elapsed = weeks.filter(w => startOfDay(w.weekDate + 7 * 86400000) <= startOfDay(now)).length;
   const left   = Math.max(0, total - elapsed);
   const pct    = total > 0 ? Math.round((elapsed / total) * 100) : 0;
 
