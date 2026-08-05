@@ -2680,6 +2680,36 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
 }
 .avatar-frame.has-avatar:hover .avatar-frame-remove { display: flex; }
 
+/* ─── PPS (Pass Prevention Sante) — sous l'avatar, fixe ─── */
+.pps-buttons{position:fixed;top:106px;right:18px;z-index:998;display:flex;gap:6px;}
+.pps-btn{
+  border:none;cursor:pointer;border-radius:20px;padding:4px 11px;font-family:var(--font-body);
+  font-size:10.5px;font-weight:700;letter-spacing:0.03em;color:#fff;
+  box-shadow:0 2px 8px rgba(0,0,0,0.18);transition:transform var(--transition),opacity var(--transition);
+}
+.pps-btn:hover{transform:translateY(-1px);}
+.pps-btn--empty{background:var(--text-muted);opacity:0.5;}
+.pps-btn--unknown{background:var(--text-muted);opacity:0.85;}
+.pps-btn--green{background:#16A34A;}
+.pps-btn--orange{background:#D97706;}
+.pps-btn--red{background:#DC2626;}
+
+.pps-panel{
+  position:fixed;z-index:1000;width:270px;background:var(--bg-white);border:1px solid var(--border);
+  border-radius:12px;padding:14px 16px;box-shadow:0 12px 32px rgba(0,0,0,0.24);
+}
+[data-theme="dark"] .pps-panel{background:var(--bg-white);}
+.pps-panel-title{font-family:var(--font-body);font-size:12px;font-weight:700;color:var(--text-primary);margin-bottom:10px;}
+.pps-panel-row{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:5px 0;font-family:var(--font-body);font-size:12.5px;}
+.pps-panel-label{color:var(--text-muted);font-size:10.5px;text-transform:uppercase;letter-spacing:0.03em;}
+.pps-panel-value{color:var(--text-primary);font-weight:600;font-family:var(--font-mono);flex:1;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.pps-copy-btn{border:none;background:none;color:var(--text-muted);cursor:pointer;padding:2px;display:flex;flex-shrink:0;}
+.pps-copy-btn:hover{color:var(--accent);}
+.pps-panel-actions{display:flex;align-items:center;gap:10px;margin-top:10px;padding-top:10px;border-top:1px solid var(--border-light);}
+.pps-delete-btn{border:none;background:none;color:var(--text-muted);cursor:pointer;padding:2px;margin-left:auto;display:flex;}
+.pps-delete-btn:hover{color:var(--red);}
+@media(max-width:720px){.pps-buttons{top:96px;}}
+
 /* ─── Admin page ─── */
 /* Cartes compactes, alignées à gauche (pas étirées sur toute la largeur),
    fond opaque pour rester lisible malgré la photo de fond translucide. */

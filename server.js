@@ -107,6 +107,7 @@ const RECORDS_OVERRIDES_FILE = path.join(DATA_DIR, 'records_overrides.json');
 const RACES_FILE             = path.join(DATA_DIR, 'races.json');
 const WEIGHT_HISTORY_FILE    = path.join(DATA_DIR, 'weight_history.json');
 const HEALTH_SNAPSHOTS_FILE  = path.join(DATA_DIR, 'health_snapshots.json');
+const PPS_FILE                = path.join(DATA_DIR, 'pps.json');
 
 function readJsonSafe(filePath, fallback) {
   try {
@@ -965,6 +966,78 @@ app.delete('/api/weight-history/:date', requireSession, (req, res) => {
     const history = readJsonSafe(WEIGHT_HISTORY_FILE, []);
     const filtered = history.filter(e => e.date !== req.params.date);
     writeJsonSafe(WEIGHT_HISTORY_FILE, filtered);
+    res.json({ success: true });
+  } catch (err) { handleError(res, err); }
+});
+
+// ─── PPS (Pass Prevention Sante) ───────────────────────────────────────
+// Jusqu'a 2 PPS (nom de naissance / nom marital : une inscription a une
+// course a pu etre faite avec l'un ou l'autre). PDF stocke dans uploads/,
+// numero + date d'expiration extraits automatiquement a l'import (best
+// effort - le texte d'un PDF n'est pas toujours extrait dans l'ordre
+// visuel), corrigibles manuellement via PUT si l'extraction se trompe.
+app.get('/api/pps', requireSession, (req, res) => {
+  res.json(readJsonSafe(PPS_FILE, []));
+});
+
+app.post('/api/pps', requireSession, upload.single('pdf'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'Aucun fichier recu' });
+    if (req.file.mimetype !== 'application/pdf' && !/\.pdf$/i.test(req.file.originalname || '')) {
+      return res.status(400).json({ error: 'Le fichier doit etre un PDF' });
+    }
+    const list = readJsonSafe(PPS_FILE, []);
+    if (list.length >= 2) {
+      return res.status(400).json({ error: 'Deux PPS sont deja enregistres — supprimez-en un avant d\'en ajouter un nouveau' });
+    }
+
+    let number = null, expiryDate = null;
+    try {
+      const { PDFParse } = require('pdf-parse');
+      const parser = new PDFParse({ data: req.file.buffer });
+      const parsed = await parser.getText();
+      const text = parsed.text || '';
+      // Numero PPS : "P" suivi d'alphanumerique incluant au moins un
+      // chiffre (evite de matcher un mot comme "PREVENTION").
+      const numMatch = text.match(/\bP(?=[A-Z0-9]*\d)[A-Z0-9]{8,12}\b/);
+      if (numMatch) number = numMatch[0];
+      // Date de validite : cherchee pres du mot "EXPIRE" pour ne pas
+      // confondre avec la date de naissance, elle aussi au format JJ/MM/AAAA.
+      const dateMatch = text.match(/EXPIRE[^\d]{0,20}(\d{2})\/(\d{2})\/(\d{4})/i);
+      if (dateMatch) expiryDate = `${dateMatch[3]}-${dateMatch[2]}-${dateMatch[1]}`;
+      await parser.destroy();
+    } catch (e) { console.log('Extraction PDF PPS impossible:', e.message); }
+
+    const id = crypto.randomUUID();
+    const filename = 'pps-' + id + '.pdf';
+    fs.writeFileSync(path.join(UPLOADS_DIR, filename), req.file.buffer);
+    const entry = { id, number, expiryDate, filename, uploadedAt: new Date().toISOString() };
+    list.push(entry);
+    writeJsonSafe(PPS_FILE, list);
+    res.json({ success: true, entry });
+  } catch (err) { handleError(res, err); }
+});
+
+app.put('/api/pps/:id', requireSession, (req, res) => {
+  try {
+    const list = readJsonSafe(PPS_FILE, []);
+    const idx = list.findIndex(e => e.id === req.params.id);
+    if (idx === -1) return res.status(404).json({ error: 'PPS introuvable' });
+    const { number, expiryDate } = req.body || {};
+    if (number != null) list[idx].number = String(number).slice(0, 40);
+    if (expiryDate != null) list[idx].expiryDate = expiryDate;
+    writeJsonSafe(PPS_FILE, list);
+    res.json({ success: true, entry: list[idx] });
+  } catch (err) { handleError(res, err); }
+});
+
+app.delete('/api/pps/:id', requireSession, (req, res) => {
+  try {
+    const list = readJsonSafe(PPS_FILE, []);
+    const entry = list.find(e => e.id === req.params.id);
+    if (entry?.filename) { try { fs.unlinkSync(path.join(UPLOADS_DIR, entry.filename)); } catch (e) {} }
+    const filtered = list.filter(e => e.id !== req.params.id);
+    writeJsonSafe(PPS_FILE, filtered);
     res.json({ success: true });
   } catch (err) { handleError(res, err); }
 });

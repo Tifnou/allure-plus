@@ -2735,6 +2735,173 @@ function initAvatarUpload() {
 }
 
 // ══════════════════════════════════════════════════════
+// PPS (Pass Prévention Santé) — jusqu'à 2, sous l'avatar
+// ══════════════════════════════════════════════════════
+const PPS_ICON_COPY  = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+const PPS_ICON_TRASH = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>';
+
+let _ppsList = [];
+
+function ppsStatus(entry) {
+  if (!entry) return 'empty';
+  if (!entry.expiryDate) return 'unknown';
+  const expiry = new Date(entry.expiryDate);
+  const now = new Date();
+  const oneMonthBefore = new Date(expiry);
+  oneMonthBefore.setMonth(oneMonthBefore.getMonth() - 1);
+  if (now >= expiry) return 'red';
+  if (now >= oneMonthBefore) return 'orange';
+  return 'green';
+}
+
+function renderPpsButtons() {
+  for (let slot = 0; slot < 2; slot++) {
+    const btn = el(`pps-btn-${slot}`);
+    if (!btn) continue;
+    const entry = _ppsList[slot];
+    btn.className = 'pps-btn pps-btn--' + ppsStatus(entry);
+    btn.title = entry ? `PPS${entry.number ? ' ' + entry.number : ''}` : 'Ajouter un PPS';
+  }
+}
+
+async function loadPpsList() {
+  try { _ppsList = await fetch(`${API}/api/pps`).then(r => r.json()); }
+  catch (e) { _ppsList = []; }
+  renderPpsButtons();
+}
+
+function closePpsPanel() {
+  const panel = el('pps-panel');
+  if (panel) { panel.style.display = 'none'; panel.removeAttribute('data-entry-id'); }
+}
+
+function renderPpsPanelContent(panel, entry, editing) {
+  if (editing) {
+    panel.innerHTML = `
+      <div class="pps-panel-title">Vérifier les informations du PPS</div>
+      <div class="form-row">
+        <span class="form-label">Numéro PPS</span>
+        <input type="text" class="form-input" id="pps-edit-number" style="max-width:100%" value="${escapeHtml(entry.number || '')}" placeholder="Ex : P2FE48867F8" />
+      </div>
+      <div class="form-row">
+        <span class="form-label">Date de validité</span>
+        <input type="date" class="form-input" id="pps-edit-date" style="max-width:100%" value="${entry.expiryDate || ''}" />
+      </div>
+      <div class="pps-panel-actions">
+        <button type="button" class="btn-text-link" id="pps-cancel-btn">Annuler</button>
+        <button type="button" class="btn-wizard-next" id="pps-save-btn" style="margin-left:auto">Enregistrer</button>
+      </div>`;
+    el('pps-cancel-btn').onclick = () => renderPpsPanelContent(panel, entry, false);
+    el('pps-save-btn').onclick = async () => {
+      const number = el('pps-edit-number').value.trim();
+      const expiryDate = el('pps-edit-date').value;
+      try {
+        const res = await fetch(`${API}/api/pps/${entry.id}`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ number, expiryDate }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Erreur');
+        await loadPpsList();
+        showToast('PPS mis à jour', 'success');
+        closePpsPanel();
+      } catch (e) { showToast('Erreur : ' + e.message, 'error'); }
+    };
+    return;
+  }
+
+  const dateLabel = entry.expiryDate ? formatDate(entry.expiryDate) : 'Non renseignée';
+  panel.innerHTML = `
+    <div class="pps-panel-row">
+      <span class="pps-panel-label">N° PPS</span>
+      <span class="pps-panel-value">${escapeHtml(entry.number || '—')}</span>
+      <button type="button" class="pps-copy-btn" id="pps-copy-btn" title="Copier le numéro">${PPS_ICON_COPY}</button>
+    </div>
+    <div class="pps-panel-row">
+      <span class="pps-panel-label">Validité</span>
+      <span class="pps-panel-value">${dateLabel}</span>
+    </div>
+    <div class="pps-panel-actions">
+      <a href="/uploads/${encodeURIComponent(entry.filename)}" target="_blank" rel="noopener" class="btn-text-link">Télécharger le PDF</a>
+      <button type="button" class="btn-text-link" id="pps-edit-btn">Corriger</button>
+      <button type="button" class="pps-delete-btn" id="pps-delete-btn" title="Supprimer">${PPS_ICON_TRASH}</button>
+    </div>`;
+  el('pps-edit-btn').onclick = () => renderPpsPanelContent(panel, entry, true);
+  el('pps-copy-btn').onclick = () => {
+    navigator.clipboard.writeText(entry.number || '').then(() => showToast('Numéro copié', 'success'));
+  };
+  el('pps-delete-btn').onclick = async () => {
+    const ok = await showConfirmModal({ title: 'Supprimer ce PPS ?', message: 'Le document sera définitivement supprimé.', confirmLabel: 'Supprimer', danger: true, icon: PPS_ICON_TRASH });
+    if (!ok) return;
+    await fetch(`${API}/api/pps/${entry.id}`, { method: 'DELETE' });
+    await loadPpsList();
+    closePpsPanel();
+  };
+}
+
+function togglePpsPanel(entry, btnEl, forceEdit) {
+  const panel = el('pps-panel');
+  if (!panel) return;
+  const alreadyOpenForThis = panel.style.display !== 'none' && panel.dataset.entryId === entry.id;
+  if (alreadyOpenForThis && !forceEdit) { closePpsPanel(); return; }
+
+  const rect = btnEl.getBoundingClientRect();
+  panel.style.display = '';
+  panel.style.top = (rect.bottom + 8) + 'px';
+  panel.style.right = (window.innerWidth - rect.right) + 'px';
+  panel.dataset.entryId = entry.id;
+  renderPpsPanelContent(panel, entry, !!forceEdit || !entry.number || !entry.expiryDate);
+}
+
+function initPpsButtons() {
+  const fileInput = el('pps-file-input');
+  let pendingSlot = null;
+
+  for (let slot = 0; slot < 2; slot++) {
+    const btn = el(`pps-btn-${slot}`);
+    if (!btn || !fileInput) continue;
+    btn.addEventListener('click', () => {
+      const entry = _ppsList[slot];
+      if (!entry) {
+        if (_ppsList.length >= 2) { showToast('Deux PPS sont déjà enregistrés — supprimez-en un avant d\'en ajouter un nouveau', 'info'); return; }
+        pendingSlot = slot;
+        fileInput.click();
+      } else {
+        togglePpsPanel(entry, btn);
+      }
+    });
+  }
+
+  fileInput.addEventListener('change', async () => {
+    const file = fileInput.files[0];
+    fileInput.value = '';
+    if (!file) return;
+    const fd = new FormData();
+    fd.append('pdf', file);
+    try {
+      showToast('Import du PPS en cours…', 'loading', 0);
+      const res = await fetch(`${API}/api/pps`, { method: 'POST', body: fd });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Erreur');
+      await loadPpsList();
+      showToast('PPS importé', 'success');
+      const idx = _ppsList.findIndex(e => e.id === data.entry.id);
+      const btn = el(`pps-btn-${idx}`);
+      if (btn) togglePpsPanel(data.entry, btn, true);
+    } catch (e) {
+      showToast('Erreur : ' + e.message, 'error');
+    }
+  });
+
+  document.addEventListener('click', (e) => {
+    const panel = el('pps-panel');
+    if (panel && panel.style.display !== 'none' && !panel.contains(e.target) && !e.target.closest('.pps-btn')) {
+      closePpsPanel();
+    }
+  });
+}
+
+// ══════════════════════════════════════════════════════
 // EMOJIS GENRÉS (selon le sexe renseigné dans le Profil)
 // ══════════════════════════════════════════════════════
 function personEmoji(kind) {
@@ -3039,6 +3206,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   try { initProfileForm(); } catch(e) { console.error('initProfileForm failed:', e); }
   try { await loadWeightHistory(); checkWeightReminderToast(); } catch(e) { console.error('loadWeightHistory failed:', e); }
   try { initAvatarUpload(); loadAvatar(); } catch(e) { console.error('initAvatarUpload failed:', e); }
+  try { initPpsButtons(); loadPpsList(); } catch(e) { console.error('initPpsButtons failed:', e); }
   try { initBgManagerButton(); } catch(e) { console.error('initBgManagerButton failed:', e); }
   applyGenderedEmojis();
   // Précharger les plans en arrière-plan dès le démarrage (évite le délai à l'ouverture de la page)
