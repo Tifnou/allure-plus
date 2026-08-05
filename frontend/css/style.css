@@ -366,6 +366,32 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
   border-radius: 14px;
   padding: 10px 20px;
   box-shadow: 0 2px 12px rgba(0,0,0,0.07);
+  /* Figee en haut au scroll, sur toutes les pages - on sait toujours ou l'on est */
+  position: sticky;
+  top: 0;
+  z-index: 50;
+}
+/* Santé/Performance : en-tête + onglets Santé/Performance figes ensemble,
+   comme un seul bloc (meme principe que .act-header-sticky/Activités) */
+.health-sticky-header{
+  position: sticky; top: 0; z-index: 50;
+  background: rgba(255,255,255,0.72);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  border: 1px solid rgba(255,255,255,0.55);
+  border-radius: 14px;
+  padding: 10px 20px 14px;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.07);
+  margin-bottom: 24px;
+}
+.health-sticky-header .page-header{
+  position: static; background: none; border: none; box-shadow: none;
+  padding: 0; margin-bottom: 10px;
+}
+[data-theme="dark"] .health-sticky-header{
+  background: rgba(14,17,30,0.78);
+  border-color: rgba(255,255,255,0.09);
+  box-shadow: 0 2px 16px rgba(0,0,0,0.32);
 }
 [data-theme="dark"] .page-header {
   background: rgba(14,17,30,0.78);

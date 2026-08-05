@@ -12,7 +12,7 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <link rel="stylesheet" href="css/style.css?v=1785916355152" />
+  <link rel="stylesheet" href="css/style.css?v=1785916355153" />
   <link rel="stylesheet" href="css/plans.css?v=1785834176454" />
 </head>
 <body>
@@ -612,13 +612,15 @@
 
     <!-- ── PAGE : SANTÉ/PERFORMANCE ── -->
     <div class="page" id="page-health">
-      <div class="page-header">
-        <h1 class="page-title">Santé/Performance</h1>
-        <div class="page-subtitle">Vos indicateurs de forme et de performance</div>
-      </div>
-      <div class="filter-pills" id="health-category-tabs" style="margin-bottom:20px">
-        <button type="button" class="filter-pill active" data-cat="sante">Santé</button>
-        <button type="button" class="filter-pill" data-cat="performance">Performance</button>
+      <div class="health-sticky-header">
+        <div class="page-header">
+          <h1 class="page-title">Santé/Performance</h1>
+          <div class="page-subtitle">Vos indicateurs de forme et de performance</div>
+        </div>
+        <div class="filter-pills" id="health-category-tabs">
+          <button type="button" class="filter-pill active" data-cat="sante">Santé</button>
+          <button type="button" class="filter-pill" data-cat="performance">Performance</button>
+        </div>
       </div>
       <div id="health-content"></div>
     </div>
