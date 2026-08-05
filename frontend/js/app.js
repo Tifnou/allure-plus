@@ -43,7 +43,7 @@ function formatDuration(seconds) {
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);
   const s = Math.floor(seconds % 60);
-  if (h > 0) return `${h}h${String(m).padStart(2,'0')}`;
+  if (h > 0) return `${h}h${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
   return `${m}:${String(s).padStart(2,'0')}`;
 }
 
@@ -653,6 +653,27 @@ function renderAllActivities(activities, filter = 'all', yearOverride = null) {
   });
 }
 
+// ─── Envoi d'une activite vers "Mes courses" (page Records) ───────────
+function isRaceEligibleActivity(activity) {
+  const t = (activity.activityType || '').toLowerCase();
+  return (t.includes('run') || t.includes('trail')) && activity.distanceKm > 0 && activity.durationSec > 0;
+}
+
+function sendActivityToRaces(activity) {
+  const isTrail = (activity.activityType || '').toLowerCase().includes('trail');
+  const prefill = {
+    name: activity.name || '',
+    type: isTrail ? 'trail' : 'route',
+    date: (activity.date || '').slice(0, 10),
+    distanceKm: activity.distanceKm || null,
+    durationSec: activity.durationSec || null,
+    elevationGain: activity.elevationGain ? Math.round(activity.elevationGain) : null,
+    vo2max: activity.vO2MaxValue || null,
+  };
+  navigateTo('records');
+  if (typeof openRaceModal === 'function') openRaceModal(null, prefill);
+}
+
 // ─── Detail d une activite ─────────────────────────────────────────
 function showActivityDetail(activity) {
   if (!activity) return;
@@ -690,8 +711,14 @@ function showActivityDetail(activity) {
         <div class="activity-stat"><div class="activity-stat-value">${cal}</div><div class="activity-stat-label">Calories</div></div>
         <div class="activity-stat"><div class="activity-stat-value">${activity.vO2MaxValue || '\u2014'}</div><div class="activity-stat-label">VO2max estimee</div></div>
       </div>
-      ${activity.id ? `<a href="https://connect.garmin.com/modern/activity/${activity.id}" target="_blank" class="activity-link">Voir sur Garmin Connect</a>` : ''}
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        ${activity.id ? `<a href="https://connect.garmin.com/modern/activity/${activity.id}" target="_blank" class="activity-link">Voir sur Garmin Connect</a>` : ''}
+        ${isRaceEligibleActivity(activity) ? `<button type="button" class="activity-link" id="btn-send-to-races" style="cursor:pointer">🏅 Envoyer vers Courses</button>` : ''}
+      </div>
     </div>`;
+
+  const sendBtn = el('btn-send-to-races');
+  if (sendBtn) sendBtn.onclick = () => sendActivityToRaces(activity);
 
   // Reinitialise la carte GPS (elements statiques, reutilises a chaque activite)
   const routeLoading = el('route-loading');

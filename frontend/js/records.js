@@ -450,9 +450,10 @@ function setRaceTypeToggle(type) {
   document.getElementById('race-type-trail').classList.toggle('active', type === 'trail');
 }
 
-function openRaceModal(existingRace = null) {
+function openRaceModal(existingRace = null, prefill = null) {
   if (document.getElementById('race-edit-modal')) return;
   const isEdit = !!existingRace;
+  const initialData = existingRace || prefill;
   const backdrop = document.createElement('div');
   backdrop.className = 'stats-modal-backdrop';
   backdrop.id = 'race-edit-modal';
@@ -511,14 +512,14 @@ function openRaceModal(existingRace = null) {
   `;
   document.body.appendChild(backdrop);
 
-  if (isEdit) {
-    el('race-form-name').value = existingRace.name || '';
-    el('race-form-date').value = (existingRace.date || '').slice(0, 10);
-    el('race-form-distance').value = existingRace.distanceKm ?? '';
-    el('race-form-duration').value = secondsToDurationInput(existingRace.durationSec);
-    el('race-form-elevation').value = existingRace.elevationGain ?? '';
-    el('race-form-vo2max').value = existingRace.vo2max ?? '';
-    setRaceTypeToggle(existingRace.type);
+  if (initialData) {
+    el('race-form-name').value = initialData.name || '';
+    el('race-form-date').value = (initialData.date || '').slice(0, 10);
+    el('race-form-distance').value = initialData.distanceKm ?? '';
+    el('race-form-duration').value = secondsToDurationInput(initialData.durationSec);
+    el('race-form-elevation').value = initialData.elevationGain ?? '';
+    el('race-form-vo2max').value = initialData.vo2max ?? '';
+    setRaceTypeToggle(initialData.type || 'route');
   } else {
     setRaceTypeToggle('route');
   }
