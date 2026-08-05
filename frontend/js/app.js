@@ -446,16 +446,8 @@ function renderLastRun(runs) {
   const tbody = el('runs-tbody');
   if (!tbody) return;
 
-  const runOnly = (runs || []).filter(r => isRunType(r.activityType));
-  const last = runOnly[0];
-
-  if (!last) {
-    // Si pas de filtre course, prendre la dernière quand même
-    const fallback = (runs || [])[0];
-    if (!fallback) { tbody.innerHTML = `<tr><td colspan="9" class="table-loading">Aucune activité trouvée</td></tr>`; return; }
-    renderRunRow(tbody, fallback);
-    return;
-  }
+  const last = (runs || [])[0];
+  if (!last) { tbody.innerHTML = `<tr><td colspan="9" class="table-loading">Aucune activité trouvée</td></tr>`; return; }
   renderRunRow(tbody, last);
 }
 

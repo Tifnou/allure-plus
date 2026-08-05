@@ -46,7 +46,7 @@ const { v4: uuidv4 } = require('uuid');
 const { GarminConnect } = require('garmin-connect');
 const {
   computeStats,
-  getLastRunActivities,
+  getRecentActivities,
   getPersonalRecords,
   buildGarminFunctions
 } = require('./garmin_client');
@@ -649,7 +649,7 @@ app.get('/api/dashboard', requireSession, async (req, res) => {
     const gc = req.session.gc;
     const activities = await getActivities(200);
     const stats    = computeStats(activities);
-    const lastRuns = getLastRunActivities(activities, 50);
+    const lastRuns = getRecentActivities(activities, 50);
     const records  = getPersonalRecords(activities);
 
     // VO2max : source de reference = historique quotidien officiel Garmin

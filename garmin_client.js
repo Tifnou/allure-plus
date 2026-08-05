@@ -388,12 +388,10 @@ function computeStats(activities) {
   };
 }
 
-function getLastRunActivities(activities, limit = 10) {
+// Dernieres activites, tous types confondus (course, velo, cardio, etc.) -
+// utilisee pour le widget "Derniere activite" de la Synthese.
+function getRecentActivities(activities, limit = 10) {
   return activities
-    .filter(a =>
-      a.activityType?.typeKey?.toLowerCase().includes('running') ||
-      a.activityType?.typeKey?.toLowerCase().includes('trail')
-    )
     .slice(0, limit)
     .map(a => ({
       id: a.activityId,
@@ -696,7 +694,7 @@ module.exports = {
   getBodyBatteryData,
   getTrainingStatusData,
   computeStats,
-  getLastRunActivities,
+  getRecentActivities,
   getPersonalRecords,
   getGarminClient,
   buildGarminFunctions
