@@ -70,17 +70,37 @@ function renderHealthHistoryBody(bodyEl, chartId, cfg, result) {
   const existing = Chart.getChart(canvas);
   if (existing) existing.destroy();
   const color = cfg.color || '#2563EB';
+  const opts = chartOptions();
+  let datasets;
+  // Cas particulier (Body Battery) : 2 courbes (matin/soir) + zone remplie
+  // entre les deux pour visualiser la fourchette de la journee.
+  if (result.series2) {
+    opts.plugins.legend.display = true;
+    opts.plugins.legend.position = 'top';
+    opts.plugins.legend.labels = { color: '#ADADAD', boxWidth: 10, font: { size: 11, family: 'Inter' } };
+    datasets = [
+      {
+        label: result.series2Label || 'Matin', data: result.series2.map(p => p.value),
+        borderColor: result.series2Color || '#FBBF24', backgroundColor: 'transparent',
+        borderWidth: 2, pointRadius: series.length > 40 ? 0 : 2, tension: 0.35, fill: false,
+      },
+      {
+        label: result.seriesLabel || 'Soir', data: series.map(p => p.value),
+        borderColor: color, backgroundColor: color + '20',
+        borderWidth: 2, pointRadius: series.length > 40 ? 0 : 2, tension: 0.35, fill: '-1',
+      },
+    ];
+  } else {
+    datasets = [{
+      data: series.map(p => p.value),
+      borderColor: color, backgroundColor: color + '18',
+      borderWidth: 2, pointRadius: series.length > 40 ? 0 : 3, tension: 0.35, fill: true,
+    }];
+  }
   new Chart(canvas.getContext('2d'), {
     type: 'line',
-    data: {
-      labels: series.map(p => p.label),
-      datasets: [{
-        data: series.map(p => p.value),
-        borderColor: color, backgroundColor: color + '18',
-        borderWidth: 2, pointRadius: series.length > 40 ? 0 : 3, tension: 0.35, fill: true,
-      }],
-    },
-    options: chartOptions(),
+    data: { labels: series.map(p => p.label), datasets },
+    options: opts,
   });
 }
 
@@ -285,15 +305,22 @@ async function loadBodyBatteryMetric(days) {
   const { data } = await fetch(`/api/body-battery?days=${days}`).then(r => r.json()).catch(() => ({ data: [] }));
   const arr = Array.isArray(data) ? data : (data ? [data] : []);
   const series = arr.map(d => ({ label: formatDateShort(d.date, days > 60), value: d.current }));
+  const series2 = arr.map(d => ({ label: formatDateShort(d.date, days > 60), value: d.morning }));
   const latest = arr.length ? arr[arr.length - 1] : null;
   let comment = null;
   if (latest) {
     const v = latest.current;
-    if (v >= 75) comment = { state: 'Réserves élevées', tier: 'good', text: `Votre Body Battery est à ${v}%, un excellent niveau de réserve d'énergie. C'est le bon moment pour une séance exigeante (fractionné, seuil) si votre plan le prévoit.` };
-    else if (v >= 40) comment = { state: 'Réserves moyennes', tier: 'neutral', text: `Avec ${v}% de Body Battery, vos réserves sont correctes sans être optimales. Une séance d'endurance modérée passera bien — gardez les séances intenses pour un jour où votre réserve sera plus haute.` };
-    else comment = { state: 'Réserves basses', tier: 'attention', text: `Votre Body Battery est basse (${v}%) : votre corps n'a pas encore récupéré du stress ou de l'entraînement récent. Privilégiez le repos ou une sortie très légère, et soignez votre sommeil cette nuit pour recharger.` };
+    const m = latest.morning;
+    const rangeTxt = (m != null) ? ` Vous êtes parti·e ce matin avec ${m}% et vous en êtes maintenant à ${v}% — ${v >= m ? 'votre réserve a rechargé' : 'la journée a consommé votre réserve'}.` : '';
+    if (v >= 75) comment = { state: 'Réserves élevées', tier: 'good', text: `Votre Body Battery est à ${v}%, un excellent niveau de réserve d'énergie.${rangeTxt} C'est le bon moment pour une séance exigeante (fractionné, seuil) si votre plan le prévoit.` };
+    else if (v >= 40) comment = { state: 'Réserves moyennes', tier: 'neutral', text: `Avec ${v}% de Body Battery, vos réserves sont correctes sans être optimales.${rangeTxt} Une séance d'endurance modérée passera bien — gardez les séances intenses pour un jour où votre réserve sera plus haute.` };
+    else comment = { state: 'Réserves basses', tier: 'attention', text: `Votre Body Battery est basse (${v}%) : votre corps n'a pas encore récupéré du stress ou de l'entraînement récent.${rangeTxt} Privilégiez le repos ou une sortie très légère, et soignez votre sommeil cette nuit pour recharger.` };
   }
-  return { series, comment, current: latest ? { value: String(latest.current), unit: '%', dateLabel: 'au ' + formatDate(latest.date) } : null };
+  return {
+    series, series2, seriesLabel: 'Soir / actuel', series2Label: 'Matin (réveil)', series2Color: '#FBBF24',
+    comment,
+    current: latest ? { value: String(latest.current), unit: '%', dateLabel: (latest.morning != null ? `matin ${latest.morning}% · ` : '') + 'au ' + formatDate(latest.date) } : null,
+  };
 }
 
 async function loadSleepMetric(days) {

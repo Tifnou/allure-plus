@@ -634,6 +634,15 @@ function buildGarminFunctions(gc) {
     });
   }
 
+  // "Matin" = pic de la matinee (apres la recharge du sommeil), pas la
+  // toute premiere valeur de la journee (minuit) qui prolonge souvent la
+  // fin de journee precedente et peut donc etre basse.
+  function morningBodyBatteryPeak(arr) {
+    const morningPts = arr.filter(pt => new Date(pt[0]).getHours() < 12);
+    const pool = morningPts.length ? morningPts : arr;
+    return Math.max(...pool.map(pt => pt[2]));
+  }
+
   async function getBodyBatteryData() {
     return cached('body_battery', async () => {
       const fmt = (d) => {
@@ -650,7 +659,7 @@ function buildGarminFunctions(gc) {
           const diff = arr[i][2] - arr[i - 1][2];
           if (diff > 0) charged += diff; else drained += diff;
         }
-        return { date: today, current: arr[arr.length - 1][2], charged, drained };
+        return { date: today, morning: morningBodyBatteryPeak(arr), current: arr[arr.length - 1][2], charged, drained };
       } catch (e) {
         console.log('Body Battery indisponible:', e.message);
         return null;
@@ -682,7 +691,7 @@ function buildGarminFunctions(gc) {
             const diff = arr[i][2] - arr[i - 1][2];
             if (diff > 0) charged += diff; else drained += diff;
           }
-          return { date: dateStr, current: arr[arr.length - 1][2], charged, drained };
+          return { date: dateStr, morning: morningBodyBatteryPeak(arr), current: arr[arr.length - 1][2], charged, drained };
         } catch (e) { return null; }
       }));
       return settled
