@@ -793,7 +793,7 @@ app.get('/api/races', requireSession, (req, res) => {
 
 app.post('/api/races', requireSession, (req, res) => {
   try {
-    const { name, type, date, distanceKm, durationSec, elevationGain, vo2max } = req.body || {};
+    const { name, type, date, distanceKm, durationSec, elevationGain, vo2max, dnf } = req.body || {};
     if (!name || !['route', 'trail'].includes(type) || !date || !distanceKm || !durationSec) {
       return res.status(400).json({ error: 'Champs obligatoires manquants (name, type, date, distanceKm, durationSec)' });
     }
@@ -807,6 +807,7 @@ app.post('/api/races', requireSession, (req, res) => {
       durationSec: Number(durationSec),
       elevationGain: elevationGain != null && elevationGain !== '' ? Number(elevationGain) : null,
       vo2max: vo2max != null && vo2max !== '' ? Number(vo2max) : null,
+      dnf: !!dnf,
     };
     races.push(race);
     writeJsonSafe(RACES_FILE, races);
@@ -819,7 +820,7 @@ app.put('/api/races/:id', requireSession, (req, res) => {
     const races = readJsonSafe(RACES_FILE, []);
     const idx = races.findIndex(r => r.id === req.params.id);
     if (idx === -1) return res.status(404).json({ error: 'Course introuvable' });
-    const { name, type, date, distanceKm, durationSec, elevationGain, vo2max } = req.body || {};
+    const { name, type, date, distanceKm, durationSec, elevationGain, vo2max, dnf } = req.body || {};
     if (!name || !['route', 'trail'].includes(type) || !date || !distanceKm || !durationSec) {
       return res.status(400).json({ error: 'Champs obligatoires manquants' });
     }
@@ -831,6 +832,7 @@ app.put('/api/races/:id', requireSession, (req, res) => {
       durationSec: Number(durationSec),
       elevationGain: elevationGain != null && elevationGain !== '' ? Number(elevationGain) : null,
       vo2max: vo2max != null && vo2max !== '' ? Number(vo2max) : null,
+      dnf: !!dnf,
     };
     writeJsonSafe(RACES_FILE, races);
     res.json({ success: true, race: races[idx] });

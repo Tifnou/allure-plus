@@ -583,11 +583,15 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
 .race-action-btn{border:none;background:none;color:var(--text-muted);cursor:pointer;font-size:13px;padding:2px 4px;}
 .race-action-btn:hover{color:var(--accent);}
 .race-group-start td{border-top:2px solid var(--border);}
+.race-group-alt{background:var(--bg-hover);}
 .race-row--best{background:var(--accent-light);}
 .race-row--best td:first-child{border-left:3px solid var(--accent);padding-left:7px;}
 .race-trophy{cursor:help;margin-left:2px;}
 .race-cert-link{text-decoration:none;}
 .race-cert-empty{color:var(--text-muted);}
+.race-dnf-badge{display:inline-block;font-size:10px;font-weight:700;color:var(--red);background:var(--red-bg);border:1px solid var(--red);border-radius:20px;padding:1px 8px;margin-left:6px;letter-spacing:0.03em;vertical-align:middle;}
+.races-row--dnf .races-name-cell{color:var(--text-muted);}
+.races-row--dnf td{opacity:0.7;}
 
 /* Formulaires modales Records/Courses (reutilise .stats-modal / .form-input / .btn-wizard-*) */
 .race-form-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px 16px;}

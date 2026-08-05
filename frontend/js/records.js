@@ -333,11 +333,13 @@ function groupAndSortRaces(races) {
   });
   const groupKeys = [...groups.keys()].sort((a, b) => a.localeCompare(b, 'fr'));
   const ordered = [];
-  groupKeys.forEach(k => {
-    const list = groups.get(k).slice().sort((a, b) => new Date(a.date) - new Date(b.date));
+  groupKeys.forEach((k, gi) => {
+    // Année la plus récente en premier au sein d'un même nom de course
+    const list = groups.get(k).slice().sort((a, b) => new Date(b.date) - new Date(a.date));
+    // Une course abandonnée ne compte jamais comme meilleure performance
     let bestId = null, bestDur = Infinity;
-    list.forEach(r => { if (r.durationSec < bestDur) { bestDur = r.durationSec; bestId = r.id; } });
-    list.forEach((r, i) => ordered.push({ ...r, _isBest: r.id === bestId, _isGroupStart: i === 0 }));
+    list.forEach(r => { if (!r.dnf && r.durationSec < bestDur) { bestDur = r.durationSec; bestId = r.id; } });
+    list.forEach((r, i) => ordered.push({ ...r, _isBest: r.id === bestId, _isGroupStart: i === 0, _groupAlt: gi % 2 === 1 }));
   });
   return ordered;
 }
@@ -369,19 +371,21 @@ function renderRacesTable() {
 
 function renderRaceRow(r) {
   const paceSecPerKm = r.distanceKm > 0 ? r.durationSec / r.distanceKm : null;
-  const badges = computeRaceBadges(r);
+  // Une course abandonnée ne peut pas servir d'estimation de record (temps non representatif)
+  const badges = r.dnf ? [] : computeRaceBadges(r);
   const trophyHtml = badges.length
     ? `<span class="race-trophy" title="${escapeHtml(badges.map(b =>
         `🏆 Estimation : votre allure pendant cette course aurait battu votre record du ${b.label} (${b.currentSec ? formatTime(b.currentSec) : '—'} → ~${formatTime(Math.round(b.estimatedSec))} estimé)`
       ).join(' | '))}">🏆</span>`
     : '';
+  const dnfHtml = r.dnf ? `<span class="race-dnf-badge" title="Course non terminée">Abandon</span>` : '';
   const certHtml = r.certificateFile
     ? `<a href="/uploads/${encodeURIComponent(r.certificateFile)}" target="_blank" rel="noopener" class="race-cert-link" title="Voir le diplôme">📄</a>`
     : `<span class="race-cert-empty">—</span>`;
 
   return `
-    <tr class="races-row${r._isBest ? ' race-row--best' : ''}${r._isGroupStart ? ' race-group-start' : ''}">
-      <td class="races-name-cell">${escapeHtml(r.name)} ${trophyHtml}</td>
+    <tr class="races-row${r._isBest ? ' race-row--best' : ''}${r._isGroupStart ? ' race-group-start' : ''}${r._groupAlt ? ' race-group-alt' : ''}${r.dnf ? ' races-row--dnf' : ''}">
+      <td class="races-name-cell">${escapeHtml(r.name)} ${dnfHtml}${trophyHtml}</td>
       <td>${r.type === 'trail' ? '⛰️ Trail' : '🏃 Route'}</td>
       <td>${formatDateShort(r.date, true)}</td>
       <td>${r.distanceKm.toFixed(2)} km</td>
@@ -474,6 +478,10 @@ function openRaceModal(existingRace = null, prefill = null) {
           <button type="button" class="type-toggle-btn" id="race-type-trail">⛰️ Trail</button>
         </div>
       </div>
+      <label class="form-row" style="flex-direction:row;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" id="race-form-dnf" style="width:16px;height:16px;margin:0" />
+        <span class="form-label" style="margin:0">Abandon (course non terminée)</span>
+      </label>
       <div class="race-form-grid">
         <div class="form-row">
           <span class="form-label">Date</span>
@@ -519,6 +527,7 @@ function openRaceModal(existingRace = null, prefill = null) {
     el('race-form-duration').value = secondsToDurationInput(initialData.durationSec);
     el('race-form-elevation').value = initialData.elevationGain ?? '';
     el('race-form-vo2max').value = initialData.vo2max ?? '';
+    el('race-form-dnf').checked = !!initialData.dnf;
     setRaceTypeToggle(initialData.type || 'route');
   } else {
     setRaceTypeToggle('route');
@@ -565,10 +574,12 @@ function openRaceModal(existingRace = null, prefill = null) {
       showToast('Merci de remplir au moins Nom, Date, Distance et Chrono', 'error');
       return;
     }
+    const dnf = el('race-form-dnf').checked;
     const payload = {
       name, type, date, distanceKm, durationSec,
       elevationGain: elevationRaw ? parseFloat(elevationRaw) : null,
       vo2max: vo2maxRaw ? parseFloat(vo2maxRaw) : null,
+      dnf,
     };
     try {
       const res = await fetch(isEdit ? `/api/races/${existingRace.id}` : '/api/races', {
@@ -593,7 +604,8 @@ function openRaceModal(existingRace = null, prefill = null) {
       close();
 
       // Suggestion (jamais automatique) si la distance correspond exactement a un record et le bat
-      const match = checkExactRecordMatch(savedRace);
+      // — jamais pour une course abandonnee, le chrono n'est pas representatif
+      const match = savedRace.dnf ? null : checkExactRecordMatch(savedRace);
       if (match) {
         showRecordSuggestionBanner(match.key, match.label, {
           name: savedRace.name, date: savedRace.date, duration: savedRace.durationSec, distance: Math.round(savedRace.distanceKm * 1000),
