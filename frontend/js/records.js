@@ -323,25 +323,36 @@ function computeRaceBadges(race) {
   return badges;
 }
 
-// ─── Tableau des courses ─────────────────────────────────────────────
-function groupAndSortRaces(races) {
+// ─── Tableau des courses (un cadre repliable par nom de course) ───────
+const RACE_COLLAPSED_KEY = 'races_collapsed_groups';
+let _collapsedRaceGroups = new Set();
+try { _collapsedRaceGroups = new Set(JSON.parse(localStorage.getItem(RACE_COLLAPSED_KEY) || '[]')); }
+catch (e) { _collapsedRaceGroups = new Set(); }
+
+function saveCollapsedRaceGroups() {
+  try { localStorage.setItem(RACE_COLLAPSED_KEY, JSON.stringify([..._collapsedRaceGroups])); }
+  catch (e) { /* silencieux */ }
+}
+
+function groupRaces(races) {
   const groups = new Map();
   races.forEach(r => {
     const norm = (r.name || '').trim().toLowerCase();
-    if (!groups.has(norm)) groups.set(norm, []);
-    groups.get(norm).push(r);
+    if (!groups.has(norm)) groups.set(norm, { key: norm, displayName: r.name, list: [] });
+    groups.get(norm).list.push(r);
   });
   const groupKeys = [...groups.keys()].sort((a, b) => a.localeCompare(b, 'fr'));
-  const ordered = [];
-  groupKeys.forEach((k, gi) => {
+  return groupKeys.map(k => {
+    const g = groups.get(k);
     // Année la plus récente en premier au sein d'un même nom de course
-    const list = groups.get(k).slice().sort((a, b) => new Date(b.date) - new Date(a.date));
+    g.list.sort((a, b) => new Date(b.date) - new Date(a.date));
     // Une course abandonnée ne compte jamais comme meilleure performance
     let bestId = null, bestDur = Infinity;
-    list.forEach(r => { if (!r.dnf && r.durationSec < bestDur) { bestDur = r.durationSec; bestId = r.id; } });
-    list.forEach((r, i) => ordered.push({ ...r, _isBest: r.id === bestId, _isGroupStart: i === 0, _groupAlt: gi % 2 === 1 }));
+    g.list.forEach(r => { if (!r.dnf && r.durationSec < bestDur) { bestDur = r.durationSec; bestId = r.id; } });
+    g.list.forEach(r => { r._isBest = r.id === bestId; });
+    g.bestDur = bestId ? bestDur : null;
+    return g;
   });
-  return ordered;
 }
 
 function renderRacesTable() {
@@ -351,22 +362,48 @@ function renderRacesTable() {
     wrap.innerHTML = '<div class="table-loading">Aucune course enregistrée pour le moment — ajoutez votre première course avec le bouton ci-dessus.</div>';
     return;
   }
-  const rows = groupAndSortRaces(_racesData);
-  wrap.innerHTML = `
-    <div class="races-table-scroll">
-      <table class="races-table">
-        <thead>
-          <tr>
-            <th>Nom</th><th>Type</th><th>Date</th><th>Distance</th><th>Chrono</th>
-            <th>Allure</th><th>Vitesse</th><th>D+</th><th>VO₂max</th><th></th><th></th>
-          </tr>
-        </thead>
-        <tbody>
-          ${rows.map(renderRaceRow).join('')}
-        </tbody>
-      </table>
-    </div>
-  `;
+  const groups = groupRaces(_racesData);
+  wrap.innerHTML = groups.map(renderRaceGroupCard).join('');
+
+  wrap.querySelectorAll('.race-group-header').forEach(header => {
+    header.addEventListener('click', () => toggleRaceGroup(header.dataset.group));
+  });
+}
+
+function toggleRaceGroup(key) {
+  if (_collapsedRaceGroups.has(key)) _collapsedRaceGroups.delete(key);
+  else _collapsedRaceGroups.add(key);
+  saveCollapsedRaceGroups();
+  renderRacesTable();
+}
+
+function renderRaceGroupCard(g) {
+  const collapsed = _collapsedRaceGroups.has(g.key);
+  const editionsLabel = g.list.length + (g.list.length > 1 ? ' éditions' : ' édition');
+  const bestLabel = g.bestDur != null ? `🏆 ${formatTime(g.bestDur)}` : '';
+  const groupAttr = escapeHtml(g.key).replace(/"/g, '&quot;');
+  return `
+    <div class="race-group-card">
+      <div class="race-group-header" data-group="${groupAttr}">
+        <span class="race-group-chevron${collapsed ? '' : ' race-group-chevron--open'}">&#x25BC;</span>
+        <span class="race-group-name">${escapeHtml(g.displayName)}</span>
+        <span class="race-group-count">${editionsLabel}</span>
+        <span class="race-group-best">${bestLabel}</span>
+      </div>
+      <div class="race-group-body" style="display:${collapsed ? 'none' : ''}">
+        <div class="races-table-scroll">
+          <table class="races-table">
+            <thead>
+              <tr>
+                <th>Type</th><th>Date</th><th>Distance</th><th>Chrono</th>
+                <th>Allure</th><th>Vitesse</th><th>D+</th><th>VO₂max</th><th></th><th></th>
+              </tr>
+            </thead>
+            <tbody>${g.list.map(renderRaceRow).join('')}</tbody>
+          </table>
+        </div>
+      </div>
+    </div>`;
 }
 
 function renderRaceRow(r) {
@@ -384,12 +421,11 @@ function renderRaceRow(r) {
     : `<span class="race-cert-empty">—</span>`;
 
   return `
-    <tr class="races-row${r._isBest ? ' race-row--best' : ''}${r._isGroupStart ? ' race-group-start' : ''}${r._groupAlt ? ' race-group-alt' : ''}${r.dnf ? ' races-row--dnf' : ''}">
-      <td class="races-name-cell">${escapeHtml(r.name)} ${dnfHtml}${trophyHtml}</td>
-      <td>${r.type === 'trail' ? '⛰️ Trail' : '🏃 Route'}</td>
+    <tr class="races-row${r._isBest ? ' race-row--best' : ''}${r.dnf ? ' races-row--dnf' : ''}">
+      <td>${r.type === 'trail' ? '⛰️ Trail' : '🏃 Route'}${dnfHtml}</td>
       <td>${formatDateShort(r.date, true)}</td>
       <td>${r.distanceKm.toFixed(2)} km</td>
-      <td class="races-mono">${formatTime(r.durationSec)}</td>
+      <td class="races-mono">${formatTime(r.durationSec)} ${trophyHtml}</td>
       <td class="races-mono">${formatPace(paceSecPerKm)}</td>
       <td class="races-mono">${formatSpeed(paceSecPerKm)}</td>
       <td>${r.elevationGain != null ? r.elevationGain + ' m' : '—'}</td>
