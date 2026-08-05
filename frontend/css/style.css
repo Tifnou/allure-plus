@@ -602,6 +602,36 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
 .race-group-best{margin-left:auto;font-family:var(--font-body);font-size:12px;font-weight:600;color:var(--accent-text);}
 .race-group-body{border-top:1px solid var(--border);background:var(--card-bg);}
 
+/* ═══════════════════════════════════════════════
+   PAGE SANTÉ/PERFORMANCE
+═══════════════════════════════════════════════ */
+.health-metric-block{margin-bottom:22px;}
+.health-metric-row{display:flex;gap:14px;align-items:stretch;}
+.health-current-card{
+  width:180px;flex-shrink:0;background:var(--card-bg);border:1px solid var(--border);border-radius:var(--radius-lg);
+  padding:20px 16px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:3px;box-shadow:var(--shadow-sm);
+}
+.health-current-icon{color:var(--accent);margin-bottom:6px;}
+.health-current-icon svg{width:26px;height:26px;}
+.health-current-value{font-family:var(--font);font-size:28px;font-weight:700;color:var(--text-primary);line-height:1.1;}
+.health-current-unit{font-size:13px;font-weight:500;color:var(--text-muted);margin-left:3px;}
+.health-current-label{font-family:var(--font-body);font-size:12.5px;font-weight:600;color:var(--text-secondary);margin-top:4px;}
+.health-current-date{font-family:var(--font-body);font-size:10.5px;color:var(--text-muted);}
+.health-history-card{flex:1;min-width:0;background:var(--card-bg);border:1px solid var(--border);border-radius:var(--radius-lg);padding:16px 18px;box-shadow:var(--shadow-sm);}
+.health-history-header{display:flex;justify-content:flex-end;margin-bottom:10px;}
+.health-period-btns{display:flex;gap:6px;}
+.health-history-body--chart{height:180px;position:relative;}
+.health-history-body--table{max-height:260px;overflow-y:auto;}
+.health-empty{display:flex;align-items:center;justify-content:center;height:100%;min-height:80px;color:var(--text-muted);font-family:var(--font-body);font-size:12.5px;text-align:center;padding:0 20px;}
+.health-comment{margin-top:10px;padding:12px 16px;border-radius:var(--radius-md);border:1px solid var(--border);border-left:3px solid var(--text-muted);background:var(--card-bg);}
+.health-comment--good{border-left-color:var(--green);}
+.health-comment--neutral{border-left-color:var(--accent);}
+.health-comment--attention{border-left-color:var(--orange);}
+.health-comment--empty{color:var(--text-muted);font-size:12px;font-style:italic;padding:10px 16px;}
+.health-comment-state{font-family:var(--font-body);font-weight:700;font-size:13px;color:var(--text-primary);margin-bottom:4px;}
+.health-comment-text{font-family:var(--font-body);font-size:12.5px;line-height:1.55;color:var(--text-secondary);}
+@media(max-width:720px){.health-metric-row{flex-direction:column;}.health-current-card{width:auto;}}
+
 /* Formulaires modales Records/Courses (reutilise .stats-modal / .form-input / .btn-wizard-*) */
 .race-form-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px 16px;}
 .race-form-computed{display:flex;gap:20px;font-size:13px;color:var(--text-secondary);margin:14px 0;}

@@ -12,7 +12,7 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <link rel="stylesheet" href="css/style.css?v=1785916355148" />
+  <link rel="stylesheet" href="css/style.css?v=1785916355149" />
   <link rel="stylesheet" href="css/plans.css?v=1785834176454" />
 </head>
 <body>
@@ -612,41 +612,17 @@
       </div>
     </div>
 
-    <!-- "?"? PAGE : SANT? "?"? -->
+    <!-- ── PAGE : SANTÉ/PERFORMANCE ── -->
     <div class="page" id="page-health">
       <div class="page-header">
-        <h1 class="page-title">Santé</h1>
-        <div class="page-subtitle">Indicateurs de forme</div>
+        <h1 class="page-title">Santé/Performance</h1>
+        <div class="page-subtitle">Vos indicateurs de forme et de performance</div>
       </div>
-      <div class="dashboard-grid">
-        <section class="card card--wide">
-          <div class="card-header">
-            <h2 class="card-title"><span class="card-title-icon">&#x1F4C8;</span> &#xC9;volution VO&#x2082;max</h2>
-            <span class="card-badge">Toutes les sorties</span>
-          </div>
-          <div class="chart-container" style="height:240px">
-            <canvas id="vo2max-chart-health"></canvas>
-          </div>
-        </section>
-        <section class="card card--two">
-          <div class="card-header">
-            <h2 class="card-title"><span class="card-title-icon">&#x2764;&#xFE0F;</span> Fréquence cardiaque au repos</h2>
-            <span class="card-badge">30 jours</span>
-          </div>
-          <div class="chart-container" style="height:220px">
-            <canvas id="hr-chart-health"></canvas>
-          </div>
-        </section>
-        <section class="card">
-          <div class="card-header">
-            <h2 class="card-title"><span class="card-title-icon">&#x1F634;</span> Sommeil</h2>
-            <span class="card-badge">14 jours</span>
-          </div>
-          <div class="chart-container" style="height:220px">
-            <canvas id="sleep-chart-health"></canvas>
-          </div>
-        </section>
+      <div class="filter-pills" id="health-category-tabs" style="margin-bottom:20px">
+        <button type="button" class="filter-pill active" data-cat="sante">Santé</button>
+        <button type="button" class="filter-pill" data-cat="performance">Performance</button>
       </div>
+      <div id="health-content"></div>
     </div>
 
     <!-- "?"? PAGE : RECORDS "?"? -->
@@ -1096,10 +1072,11 @@
 
   </div><!-- /app-content -->
 
-  <script src="js/app.js?v=1785916734147"></script>
+  <script src="js/app.js?v=1785916734148"></script>
   <script src="js/campus.js?v=1785858455056"></script>
   <script src="js/stats.js?v=1785829724242"></script>
   <script src="js/records.js?v=1785856541084"></script>
+  <script src="js/health.js?v=1"></script>
   <script src="js/plans.js?v=1785854785389"></script>
   <!-- ... MODAL LOGS ........................... -->
   <div id="logs-modal" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.55);backdrop-filter:blur(4px);" onclick="if(event.target===this)closeLogsModal()">

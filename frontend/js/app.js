@@ -1391,33 +1391,8 @@ function renderVO2MaxChart(series) {
 }
 
 
-// ─── Page Santé ────────────────────────────────
-let healthChartsRendered = false;
-function renderHealthPage() {
-  if (healthChartsRendered) return;
-  healthChartsRendered = true;
-
-  // VO2max sur santé (même données que dashboard)
-  const vo2canvas = el('vo2max-chart-health');
-  if (vo2canvas && _vo2maxSeries.length > 0) {
-    const byMonth = {};
-    _vo2maxSeries.forEach(p => { const m = p.date?.slice(0,7); if (m) byMonth[m] = p.value; });
-    const labels = Object.keys(byMonth).sort();
-    new Chart(vo2canvas.getContext('2d'), {
-      type: 'line',
-      data: { labels, datasets: [{ label:'VO₂max', data: labels.map(m => byMonth[m]),
-        borderColor:'#7C3AED', backgroundColor:'rgba(124,58,237,0.07)',
-        borderWidth:2, pointRadius:4, tension:0.4, fill:true }]},
-      options: chartOptions()
-    });
-  }
-
-  // FC repos sur santé
-  loadHeartRateInto('hr-chart-health');
-
-  // Sommeil sur santé
-  loadSleepInto('sleep-chart-health');
-}
+// La page Santé/Performance elle-même est rendue par renderHealthPage()
+// dans health.js (chargé après ce fichier), qui remplace cette fonction.
 
 let _vo2maxSeries = [];
 

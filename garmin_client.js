@@ -507,17 +507,22 @@ function buildGarminFunctions(gc) {
   }
   async function getHeartRateData(days = 7) {
     return cached(`hr_${days}`, async () => {
-      const results = [];
       const today = new Date();
-      for (let i = 0; i < days; i++) {
+      const dates = Array.from({ length: days }, (_, i) => {
         const d = new Date(today);
         d.setDate(d.getDate() - i);
-        try {
-          const hr = await gc.getHeartRate(d);
-          if (hr) results.push({ date: d.toISOString().split('T')[0], data: hr });
-        } catch (e) {}
-      }
-      return results;
+        return d;
+      });
+      // Fetch parallele (comme getSleepData) - indispensable pour les
+      // periodes longues (6 mois = ~180 requetes sequentielles sinon)
+      const settled = await Promise.allSettled(dates.map(async d => {
+        const hr = await gc.getHeartRate(d);
+        return hr ? { date: d.toISOString().split('T')[0], data: hr } : null;
+      }));
+      return settled
+        .filter(r => r.status === 'fulfilled' && r.value)
+        .map(r => r.value)
+        .sort((a, b) => a.date.localeCompare(b.date));
     });
   }
   async function getVO2MaxData() {
@@ -653,6 +658,40 @@ function buildGarminFunctions(gc) {
     });
   }
 
+  // Body Battery sur plusieurs jours - meme endpoint que getBodyBatteryData
+  // mais interroge en parallele sur "days" jours (comme getSleepData).
+  async function getBodyBatteryRange(days) {
+    return cached(`body_battery_range_${days}`, async () => {
+      const fmt = (d) => {
+        const pad = (n) => String(n).padStart(2, '0');
+        return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+      };
+      const today = new Date();
+      const dates = Array.from({ length: days }, (_, i) => {
+        const d = new Date(today);
+        d.setDate(d.getDate() - i);
+        return fmt(d);
+      });
+      const settled = await Promise.allSettled(dates.map(async dateStr => {
+        try {
+          const res = await gc.get(`https://connectapi.garmin.com/wellness-service/wellness/dailyStress/${dateStr}`);
+          const arr = res && Array.isArray(res.bodyBatteryValuesArray) ? res.bodyBatteryValuesArray : [];
+          if (arr.length === 0) return null;
+          let charged = 0, drained = 0;
+          for (let i = 1; i < arr.length; i++) {
+            const diff = arr[i][2] - arr[i - 1][2];
+            if (diff > 0) charged += diff; else drained += diff;
+          }
+          return { date: dateStr, current: arr[arr.length - 1][2], charged, drained };
+        } catch (e) { return null; }
+      }));
+      return settled
+        .filter(r => r.status === 'fulfilled' && r.value)
+        .map(r => r.value)
+        .sort((a, b) => a.date.localeCompare(b.date));
+    });
+  }
+
   async function getTrainingStatusData() {
     return cached('training_status', async () => {
       const fmt = (d) => {
@@ -680,7 +719,7 @@ function buildGarminFunctions(gc) {
 
   function clearCache() { Object.keys(cache).forEach(k => delete cache[k]); }
 
-  return { getActivities, getActivitiesForYear, getUserProfile, getHeartRateData, getVO2MaxData, getVO2MaxHistory, getSleepData, getStepsData, getBodyBatteryData, getTrainingStatusData, clearCache };
+  return { getActivities, getActivitiesForYear, getUserProfile, getHeartRateData, getVO2MaxData, getVO2MaxHistory, getSleepData, getStepsData, getBodyBatteryData, getBodyBatteryRange, getTrainingStatusData, clearCache };
 }
 
 module.exports = {

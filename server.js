@@ -106,6 +106,7 @@ try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch (e) {}
 const RECORDS_OVERRIDES_FILE = path.join(DATA_DIR, 'records_overrides.json');
 const RACES_FILE             = path.join(DATA_DIR, 'races.json');
 const WEIGHT_HISTORY_FILE    = path.join(DATA_DIR, 'weight_history.json');
+const HEALTH_SNAPSHOTS_FILE  = path.join(DATA_DIR, 'health_snapshots.json');
 
 function readJsonSafe(filePath, fallback) {
   try {
@@ -898,6 +899,35 @@ function todayParisISO() {
   return `${y}-${m}-${d}`;
 }
 
+// ─── Instantanes santé/performance (métriques sans historique Garmin natif) ─
+// Certaines métriques Garmin (statut d'entraînement, seuil lactique, scores
+// de montée/endurance, préparation à l'entraînement...) n'exposent qu'un
+// instantané "actuel", pas d'historique interrogeable par plage de dates.
+// On construit donc notre propre historique en capturant un instantané par
+// jour (au plus 1x/jour) à chaque fois que la valeur courante est consultée.
+function captureHealthSnapshot(metric, dateStr, value) {
+  if (value == null) return;
+  const store = readJsonSafe(HEALTH_SNAPSHOTS_FILE, {});
+  const arr = store[metric] || (store[metric] = []);
+  if (arr.some(e => e.date === dateStr)) return;
+  arr.push({ date: dateStr, value });
+  arr.sort((a, b) => new Date(a.date) - new Date(b.date));
+  writeJsonSafe(HEALTH_SNAPSHOTS_FILE, store);
+}
+
+function getHealthSnapshots(metric, days) {
+  const store = readJsonSafe(HEALTH_SNAPSHOTS_FILE, {});
+  const arr = store[metric] || [];
+  if (!days) return arr;
+  const cutoff = Date.now() - days * 24 * 3600 * 1000;
+  return arr.filter(e => new Date(e.date).getTime() >= cutoff);
+}
+
+app.get('/api/health-history/:metric', requireSession, (req, res) => {
+  const days = parseInt(req.query.days) || null;
+  res.json(getHealthSnapshots(req.params.metric, days));
+});
+
 app.get('/api/weight-history', requireSession, (req, res) => {
   const history = readJsonSafe(WEIGHT_HISTORY_FILE, []);
   history.sort((a, b) => new Date(a.date) - new Date(b.date));
@@ -993,6 +1023,8 @@ app.get('/api/fitness', requireSession, async (req, res) => {
       };
     }
 
+    if (ltPaceSec || ltHR) captureHealthSnapshot('lactateThreshold', todayParisISO(), { ltPaceSec, ltHR });
+
     res.json({ vo2max, vma, ltPaceSec, ltHR, zones });
   } catch (err) { handleError(res, err); }
 });
@@ -1025,18 +1057,24 @@ app.get('/api/steps', requireSession, async (req, res) => {
   } catch (err) { handleError(res, err); }
 });
 
-// Body Battery
+// Body Battery — sans "days" : instantane du jour (comportement historique,
+// utilise par le widget Synthese). Avec "days" : serie quotidienne.
 app.get('/api/body-battery', requireSession, async (req, res) => {
   try {
-    const data = await req.session.fns.getBodyBatteryData();
+    const days = parseInt(req.query.days) || 1;
+    const data = days > 1
+      ? await req.session.fns.getBodyBatteryRange(days)
+      : await req.session.fns.getBodyBatteryData();
     res.json({ data });
   } catch (err) { handleError(res, err); }
 });
 
-// Statut d'entrainement
+// Statut d'entrainement — chaque consultation capture aussi un instantane
+// du jour (pas d'historique natif expose par Garmin pour cette metrique).
 app.get('/api/training-status', requireSession, async (req, res) => {
   try {
     const data = await req.session.fns.getTrainingStatusData();
+    if (data) captureHealthSnapshot('trainingStatus', todayParisISO(), { trainingStatus: data.trainingStatus, phrase: data.phrase });
     res.json({ data });
   } catch (err) { handleError(res, err); }
 });

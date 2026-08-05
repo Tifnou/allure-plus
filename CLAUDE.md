@@ -13,8 +13,9 @@ App perso de suivi sportif (Node.js/Express + JS vanilla), intégrée à Garmin 
 - `frontend/js/plans.js` — catalogue de plans (wizard de recherche), chargement d'un plan.
 - `frontend/js/stats.js` — page Statistiques (lignes par année, comparaison).
 - `frontend/js/records.js` — page "Records et courses" (records éditables + tableau de courses).
+- `frontend/js/health.js` — page "Santé/Performance" (2 catégories, cartes valeur+historique+commentaire personnalisé par indicateur).
 - `frontend/css/style.css` — styles globaux ; `frontend/css/plans.css` — styles spécifiques à la page Plans.
-- Scripts chargés dans cet ordre dans `index.html` : `app.js`, `campus.js`, `stats.js`, `records.js`, `plans.js` — un `const`/`function` défini dans un script est utilisable par les scripts suivants (scope global partagé).
+- Scripts chargés dans cet ordre dans `index.html` : `app.js`, `campus.js`, `stats.js`, `records.js`, `health.js`, `plans.js` — un `const`/`function` défini dans un script est utilisable par les scripts suivants (scope global partagé).
 
 ### Données persistantes protégées (jamais commitées, jamais écrasées par l'installeur)
 - `data/records_overrides.json` — corrections manuelles des 5 records personnels.
