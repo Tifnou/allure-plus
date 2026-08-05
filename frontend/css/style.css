@@ -2366,6 +2366,11 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
 .activity-search-input {
   width: 220px;
   cursor: text;
+  /* Le fond de .activity-filter-select reste un blanc quasi opaque quel que
+     soit le theme, mais :hover bascule la couleur du texte sur
+     var(--text-primary) (blanc en mode sombre) -> texte invisible au survol.
+     Le texte saisi doit rester lisible en permanence, d'ou le noir force. */
+  color: #000 !important;
 }
 .activity-search-input::placeholder { color: var(--text-muted); }
 
