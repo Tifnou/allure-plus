@@ -4,6 +4,25 @@
 let _avgRestingHR = 0;  // FC repos moyenne (calculée depuis les données HR)
 
 // ═══════════════════════════════════════════════════════
+// Fermeture d'une modale au clic sur le fond (backdrop)
+// ═══════════════════════════════════════════════════════
+// Ne ferme que si le clic a A LA FOIS demarre (mousedown) ET fini (click)
+// sur le fond lui-meme. Sans ce garde-fou, selectionner du texte dans un
+// champ de la modale (mousedown sur le champ) puis relacher la souris en
+// dehors du cadre (sur le fond) declenche quand meme un evenement "click"
+// sur le fond - car le navigateur cible le plus proche ancetre commun des
+// cibles mousedown/mouseup, qui est le fond lui-meme - fermant la modale
+// a tort en pleine saisie.
+function attachBackdropClose(backdrop, onClose) {
+  let downOnBackdrop = false;
+  backdrop.addEventListener('mousedown', e => { downOnBackdrop = (e.target === backdrop); });
+  backdrop.addEventListener('click', e => {
+    if (downOnBackdrop && e.target === backdrop) onClose(e);
+    downOnBackdrop = false;
+  });
+}
+
+// ═══════════════════════════════════════════════════════
 // Modale de confirmation personnalisee
 // ═══════════════════════════════════════════════════════
 function showConfirmModal({ title = '', message = '', confirmLabel = 'Confirmer', cancelLabel = 'Annuler', danger = false, icon = '' } = {}) {
@@ -24,7 +43,7 @@ function showConfirmModal({ title = '', message = '', confirmLabel = 'Confirmer'
     const close = (val) => { bd.remove(); resolve(val); };
     bd.querySelector('#cm-ok').onclick     = () => close(true);
     bd.querySelector('#cm-cancel').onclick = () => close(false);
-    bd.addEventListener('click', e => { if (e.target === bd) close(false); });
+    attachBackdropClose(bd, () => close(false));
   });
 }
 
@@ -2787,7 +2806,7 @@ async function openBgManagerModal() {
     </div>
   `;
   document.body.appendChild(bd);
-  bd.addEventListener('click', closeBgManagerModal);
+  attachBackdropClose(bd, closeBgManagerModal);
   document.getElementById('bgmgr-modal-close').addEventListener('click', closeBgManagerModal);
   document.getElementById('bgmgr-add-btn').addEventListener('click', () => document.getElementById('bgmgr-file-input').click());
   document.getElementById('bgmgr-file-input').addEventListener('change', async (e) => {

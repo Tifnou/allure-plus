@@ -167,7 +167,7 @@ function openRecordEditModal(key, prefill = null) {
   el('record-form-duration').value = current.duration ? secondsToDurationInput(current.duration) : '';
 
   const close = () => backdrop.remove();
-  backdrop.addEventListener('click', close);
+  attachBackdropClose(backdrop, close);
   document.getElementById('record-modal-close-btn').onclick = close;
   document.getElementById('record-modal-cancel').onclick = close;
   document.getElementById('record-modal-save').onclick = async () => {
@@ -595,7 +595,7 @@ function openRaceModal(existingRace = null, prefill = null) {
   });
 
   const close = () => backdrop.remove();
-  backdrop.addEventListener('click', close);
+  attachBackdropClose(backdrop, close);
   document.getElementById('race-modal-close-btn').onclick = close;
   document.getElementById('race-modal-cancel').onclick = close;
   document.getElementById('race-modal-save').onclick = async () => {

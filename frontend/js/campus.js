@@ -1548,7 +1548,7 @@ async function cancelPlan() {
     document.body.appendChild(modal);
     modal.querySelector('#cp-confirm').onclick = () => { modal.remove(); resolve(true); };
     modal.querySelector('#cp-keep').onclick    = () => { modal.remove(); resolve(false); };
-    modal.onclick = e => { if (e.target === modal) { modal.remove(); resolve(false); } };
+    attachBackdropClose(modal, () => { modal.remove(); resolve(false); });
   });
   if (!ok) return;
 
@@ -1879,7 +1879,7 @@ function showRaceModal({ prefillName, prefillDate, nbWeeks, raceWeekIdx = null, 
       modal.remove();
       resolve({ name, date });
     });
-    modal.addEventListener('click', e => { if (e.target === modal) { modal.remove(); resolve(null); } });
+    attachBackdropClose(modal, () => { modal.remove(); resolve(null); });
   });
 }
 // "?"? Login form + import plan "?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?
@@ -2900,7 +2900,7 @@ function showPacesModal() {
   const close = () => { modal.remove(); document.removeEventListener('keydown', escHandler); };
   function escHandler(e) { if (e.key === 'Escape') close(); }
   modal.querySelector('#paces-modal-close').addEventListener('click', close);
-  modal.addEventListener('click', e => { if (e.target === modal) close(); });
+  attachBackdropClose(modal, close);
   document.addEventListener('keydown', escHandler);
 }
 

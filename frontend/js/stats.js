@@ -525,7 +525,7 @@ function openStatsCompareModal() {
     </div>
   `;
   document.body.appendChild(backdrop);
-  backdrop.addEventListener('click', closeStatsCompareModal);
+  attachBackdropClose(backdrop, closeStatsCompareModal);
   document.getElementById('stats-modal-close-btn').addEventListener('click', closeStatsCompareModal);
   renderStatsCompareModalContent();
 }
