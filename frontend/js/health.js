@@ -452,8 +452,8 @@ const READINESS_FACTOR_LABELS = {
 
 async function loadTrainingReadinessMetric(days) {
   const cur = await fetch('/api/training-readiness').then(r => r.json()).then(r => r.data).catch(() => null);
-  const hist = await fetch(`/api/health-history/trainingReadiness?days=${days}`).then(r => r.json()).catch(() => []);
-  const series = hist.filter(e => e.value.score != null).map(e => ({ label: formatDateShort(e.date, days > 60), value: e.value.score }));
+  const hist = await fetch(`/api/training-readiness-history?days=${days}`).then(r => r.json()).then(r => r.data).catch(() => []);
+  const series = (hist || []).filter(e => e.score != null).map(e => ({ label: formatDateShort(e.date, days > 60), value: e.score }));
   let comment = null;
   if (cur) {
     const info = READINESS_LEVEL_INFO[cur.level] || { label: cur.level || 'Préparation', tier: 'neutral' };

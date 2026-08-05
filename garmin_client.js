@@ -761,6 +761,39 @@ function buildGarminFunctions(gc) {
     });
   }
 
+  // Historique de la preparation a l'entrainement : contrairement au statut
+  // d'entrainement/seuil lactique, Garmin expose ici un vrai historique par
+  // plage de dates (verifie : jusqu'a 180 jours). Plusieurs lectures par
+  // jour sont possibles (recalculs) - on garde la plus recente de chaque jour.
+  async function getTrainingReadinessHistory(days) {
+    return cached(`training_readiness_history_${days}`, async () => {
+      const fmt = (d) => {
+        const pad = (n) => String(n).padStart(2, '0');
+        return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+      };
+      const today = new Date();
+      const past = new Date(today.getTime() - days * 24 * 60 * 60 * 1000);
+      try {
+        const res = await gc.get(`https://connectapi.garmin.com/metrics-service/metrics/trainingreadiness/${fmt(past)}/${fmt(today)}`);
+        const arr = Array.isArray(res) ? res : [];
+        const byDate = {};
+        arr.forEach(e => {
+          if (!e.calendarDate) return;
+          const ts = new Date(e.timestamp || e.timestampLocal || 0).getTime();
+          if (!byDate[e.calendarDate] || ts > byDate[e.calendarDate]._ts) {
+            byDate[e.calendarDate] = { date: e.calendarDate, score: e.score, level: e.level, _ts: ts };
+          }
+        });
+        return Object.values(byDate)
+          .map(({ _ts, ...rest }) => rest)
+          .sort((a, b) => a.date.localeCompare(b.date));
+      } catch (e) {
+        console.log('Historique preparation entrainement indisponible:', e.message);
+        return [];
+      }
+    });
+  }
+
   // Calories (resume quotidien Garmin - actives + metabolisme de base),
   // sur plusieurs jours en parallele (comme getSleepData).
   async function getCaloriesRange(days) {
@@ -796,7 +829,7 @@ function buildGarminFunctions(gc) {
 
   function clearCache() { Object.keys(cache).forEach(k => delete cache[k]); }
 
-  return { getActivities, getActivitiesForYear, getUserProfile, getHeartRateData, getVO2MaxData, getVO2MaxHistory, getSleepData, getStepsData, getBodyBatteryData, getBodyBatteryRange, getTrainingStatusData, getTrainingReadinessData, getCaloriesRange, clearCache };
+  return { getActivities, getActivitiesForYear, getUserProfile, getHeartRateData, getVO2MaxData, getVO2MaxHistory, getSleepData, getStepsData, getBodyBatteryData, getBodyBatteryRange, getTrainingStatusData, getTrainingReadinessData, getTrainingReadinessHistory, getCaloriesRange, clearCache };
 }
 
 module.exports = {

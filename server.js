@@ -1079,12 +1079,20 @@ app.get('/api/body-battery', requireSession, async (req, res) => {
   } catch (err) { handleError(res, err); }
 });
 
-// Preparation a l'entrainement — meme principe que le statut d'entrainement :
-// capture un instantane du jour a chaque consultation.
+// Preparation a l'entrainement — contrairement au statut d'entrainement,
+// Garmin expose ici un vrai historique par plage de dates (verifie) : pas
+// besoin d'instantane local.
 app.get('/api/training-readiness', requireSession, async (req, res) => {
   try {
     const data = await req.session.fns.getTrainingReadinessData();
-    if (data) captureHealthSnapshot('trainingReadiness', todayParisISO(), { level: data.level, score: data.score });
+    res.json({ data });
+  } catch (err) { handleError(res, err); }
+});
+
+app.get('/api/training-readiness-history', requireSession, async (req, res) => {
+  try {
+    const days = parseInt(req.query.days) || 30;
+    const data = await req.session.fns.getTrainingReadinessHistory(days);
     res.json({ data });
   } catch (err) { handleError(res, err); }
 });
