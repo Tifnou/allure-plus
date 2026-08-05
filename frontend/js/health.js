@@ -116,9 +116,11 @@ function buildMetricBlockHTML(cfg) {
   <div class="health-metric-block">
     <div class="health-metric-row">
       <div class="health-current-card">
-        <div class="health-current-icon">${cfg.icon}</div>
-        <div class="health-current-value" id="health-value-${cfg.key}">…</div>
         <div class="health-current-label">${cfg.label}</div>
+        <div class="health-current-main">
+          <div class="health-current-icon">${cfg.icon}</div>
+          <div class="health-current-value" id="health-value-${cfg.key}">…</div>
+        </div>
         <div class="health-current-date" id="health-date-${cfg.key}"></div>
       </div>
       <div class="health-history-card">
@@ -153,6 +155,7 @@ async function initMetricBlock(cfg) {
       commentEl.innerHTML = healthCommentBox(result.comment);
       if (result.current) {
         valueEl.innerHTML = `${result.current.value}<span class="health-current-unit">${result.current.unit || ''}</span>`;
+        valueEl.style.color = result.current.color || '';
         dateEl.textContent = result.current.dateLabel || '';
       } else {
         valueEl.textContent = '—';
@@ -202,39 +205,39 @@ function buildSleepComment(latest) {
 // ─── Commentaires : statut d'entraînement ─────────────────────────────
 const TRAINING_STATUS_INFO = {
   PEAKING: {
-    label: 'Pic de forme', tier: 'good',
+    label: 'Pic de forme', tier: 'good', color: '#7C3AED',
     text: "Vous êtes au sommet de votre forme actuelle : l'équilibre entre charge d'entraînement et récupération est optimal. C'est le moment idéal pour viser une performance ou une course objectif — cet état ne dure généralement que quelques semaines, profitez-en plutôt que d'ajouter du volume.",
   },
   PRODUCTIVE: {
-    label: 'Productif', tier: 'good',
+    label: 'Productif', tier: 'good', color: '#16A34A',
     text: "Votre charge d'entraînement porte ses fruits : votre forme progresse pendant que vous récupérez correctement. Continuez sur cette lancée sans changer brutalement de rythme — c'est l'état le plus favorable pour progresser durablement.",
   },
   MAINTAINING: {
-    label: 'Maintien', tier: 'neutral',
+    label: 'Maintien', tier: 'neutral', color: '#2563EB',
     text: "Votre forme actuelle est stable, sans progression ni régression notable ces dernières semaines. Pour progresser à nouveau, augmentez légèrement le volume ou l'intensité d'une séance par semaine — sinon c'est un état tout à fait sain en phase de stabilisation.",
   },
   RECOVERY: {
-    label: 'Récupération', tier: 'neutral',
+    label: 'Récupération', tier: 'neutral', color: '#0891B2',
     text: "Votre charge d'entraînement est actuellement basse : votre corps récupère. Une bonne récupération prépare la prochaine phase de progression — profitez-en pour bien dormir et bien manger, et reprenez progressivement dès que vous vous sentez prêt.",
   },
   UNPRODUCTIVE: {
-    label: 'Improductif', tier: 'attention',
+    label: 'Improductif', tier: 'attention', color: '#D97706',
     text: "Vous vous entraînez, mais votre forme ne progresse pas — souvent le signe d'une récupération insuffisante ou d'un stress accumulé. Réduisez temporairement l'intensité et priorisez le sommeil : forcer davantage dans cet état est contre-productif.",
   },
   DETRAINING: {
-    label: 'Désentraînement', tier: 'attention',
+    label: 'Désentraînement', tier: 'attention', color: '#6B7280',
     text: "Votre charge d'entraînement est trop faible depuis plusieurs jours et votre condition physique commence à décliner. Reprenez progressivement — 2 à 3 sorties par semaine suffisent pour stopper la baisse et relancer une dynamique positive.",
   },
   STRAINED: {
-    label: 'Sous tension', tier: 'attention',
+    label: 'Sous tension', tier: 'attention', color: '#EA580C',
     text: "Votre charge d'entraînement récente dépasse votre capacité de récupération actuelle, signe de fatigue accumulée. Accordez-vous quelques jours plus légers, en portant une attention particulière au sommeil, au stress et à l'alimentation avant de reprendre une charge normale.",
   },
   OVERREACHING: {
-    label: 'Surcharge fonctionnelle', tier: 'attention',
+    label: 'Surcharge fonctionnelle', tier: 'attention', color: '#DC2626',
     text: "Vous vous entraînez dur et votre charge dépasse temporairement ce que votre corps encaisse bien — utile ponctuellement dans un bloc de préparation, mais risqué si ça dure. Si c'était volontaire, planifiez une semaine allégée juste après ; sinon réduisez la charge dès maintenant pour éviter la blessure ou le surentraînement.",
   },
   NO_STATUS: {
-    label: 'Pas assez de données', tier: 'neutral',
+    label: 'Pas assez de données', tier: 'neutral', color: '#9CA3AF',
     text: "Garmin n'a pas encore assez d'historique récent (VO2max, charge d'entraînement) pour calculer votre statut. Enregistrez quelques activités de course avec cardiofréquencemètre dans les prochains jours pour débloquer cet indicateur.",
   },
 };
@@ -367,18 +370,28 @@ async function loadVo2maxMetric(days) {
   return { series, comment, current: latest ? { value: String(latest.value), unit: 'ml/kg/min', dateLabel: 'au ' + formatDate(latest.date) } : null };
 }
 
+function statusDot(color) {
+  return `<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${color || '#9CA3AF'};margin-right:7px;vertical-align:middle"></span>`;
+}
+
 async function loadTrainingStatusMetric(days) {
   const cur = await fetch('/api/training-status').then(r => r.json()).then(r => r.data).catch(() => null);
   const hist = await fetch(`/api/health-history/trainingStatus?days=${days}`).then(r => r.json()).catch(() => []);
   const info = cur ? trainingStatusInfo(cur.phrase) : null;
   const rows = hist.slice().reverse().map(e => {
     const i = trainingStatusInfo(e.value.phrase);
-    return [formatDate(e.date), i ? i.label : (e.value.phrase || '—')];
+    return [formatDate(e.date), statusDot(i?.color) + (i ? i.label : (e.value.phrase || '—'))];
   });
-  const comment = info ? { state: info.label, tier: info.tier, text: info.text } : null;
+  // Garmin n'expose pas d'historique de statut par API (verifie) : on
+  // construit le notre au fil des visites. On le signale tant qu'il n'y a
+  // que quelques points, pour ne pas laisser croire a un historique figé.
+  const buildingNotice = hist.length < 5
+    ? "Garmin ne donne pas accès à l'historique de cet indicateur par ce biais : Allure+ construit sa propre courbe au fil de vos visites — revenez régulièrement pour la voir se compléter."
+    : null;
+  const comment = info ? { state: info.label, tier: info.tier, text: info.text + (buildingNotice ? ' ' + buildingNotice : '') } : null;
   return {
     headers: ['Date', 'Statut'], rows, comment,
-    current: cur ? { value: info ? info.label : (cur.phrase || '—'), unit: '', dateLabel: 'au ' + formatDate(cur.calendarDate) } : null,
+    current: cur ? { value: info ? info.label : (cur.phrase || '—'), unit: '', color: info?.color, dateLabel: 'au ' + formatDate(cur.calendarDate) } : null,
   };
 }
 
@@ -389,9 +402,12 @@ async function loadLactateMetric(days) {
   let comment = null;
   if (cur.ltHR || cur.ltPaceSec) {
     const paceStr = cur.ltPaceSec ? formatPace(cur.ltPaceSec) : null;
+    const buildingNotice = series.length < 5
+      ? " Garmin ne donne pas accès à l'historique de cet indicateur par ce biais : Allure+ construit sa propre courbe au fil de vos visites — revenez régulièrement pour la voir se compléter."
+      : '';
     comment = {
       state: 'Seuil lactique', tier: 'neutral',
-      text: `Votre seuil lactique est estimé à ${cur.ltHR ? cur.ltHR + ' bpm' : ''}${paceStr ? ' (environ ' + paceStr + ')' : ''}. C'est l'intensité au-delà de laquelle l'acide lactique s'accumule plus vite qu'il n'est éliminé — courir juste en dessous de ce seuil est ce que vous pouvez tenir le plus longtemps à haute intensité (utile pour cerner votre allure semi/10km). Des séances régulières « au seuil » (20 à 30 min à cette intensité) permettent de le repousser progressivement.${!cur.ltPaceSec ? " Cette valeur n'est estimée qu'à partir de la fréquence cardiaque : elle sera plus précise une fois calibrée par votre montre lors d'un test ou d'une course récente." : ''}`,
+      text: `Votre seuil lactique est estimé à ${cur.ltHR ? cur.ltHR + ' bpm' : ''}${paceStr ? ' (environ ' + paceStr + ')' : ''}. C'est l'intensité au-delà de laquelle l'acide lactique s'accumule plus vite qu'il n'est éliminé — courir juste en dessous de ce seuil est ce que vous pouvez tenir le plus longtemps à haute intensité (utile pour cerner votre allure semi/10km). Des séances régulières « au seuil » (20 à 30 min à cette intensité) permettent de le repousser progressivement.${!cur.ltPaceSec ? " Cette valeur n'est estimée qu'à partir de la fréquence cardiaque : elle sera plus précise une fois calibrée par votre montre lors d'un test ou d'une course récente." : ''}${buildingNotice}`,
     };
   }
   return {
