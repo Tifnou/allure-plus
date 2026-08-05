@@ -108,6 +108,7 @@ function activityTypeClass(type) {
 // ─── Données globales ──────────────────────────
 let _allActivities = [];  // stocké pour le filtre et le détail
 let _fullyLoadedYears = new Set(); // années dont on a chargé l'ensemble complet depuis Garmin
+let _activitiesYearDefaulted = false; // évite d'écraser "Toutes les années" (valeur vide) en revenant sur la page
 
 
 // ═══════════════════════════════════════════════
@@ -130,11 +131,17 @@ function navigateTo(pageId) {
     if (!actYear || actYear.options.length <= 1) {
       populateYearSelector();
     }
-    // Définir l'année courante par défaut seulement si rien n'est sélectionné
-    if (actYear && !actYear.value) {
+    // Définir l'année courante par défaut seulement lors de la toute première
+    // visite — sinon un retour depuis le détail d'une activité écraserait le
+    // choix "Toutes les années" (valeur vide, donc faussement "non défini")
+    if (actYear && !actYear.value && !_activitiesYearDefaulted) {
       actYear.value = String(curYear);
     }
-    renderAllActivities(_allActivities, 'all');
+    _activitiesYearDefaulted = true;
+    // Conserver le filtre sport actif plutôt que de le réinitialiser sur "Tout"
+    const activePill = document.querySelector('.filter-pill.active');
+    const currentSportFilter = activePill ? (activePill.dataset.filter || 'all') : 'all';
+    renderAllActivities(_allActivities, currentSportFilter);
   }
   if (pageId === 'records')    { if (typeof initRecordsPage === 'function') initRecordsPage(); }
   if (pageId === 'health')     renderHealthPage();
@@ -557,6 +564,30 @@ function renderAllActivities(activities, filter = 'all', yearOverride = null) {
     return sportMatch && yearMatch && monthMatch && nameMatch;
   });
 
+  // Tri chronologique descendant explicite — _allActivities est alimenté par
+  // lots (chargement initial + chargements par année à la demande) qui ne
+  // sont pas forcément concaténés dans le bon ordre global.
+  filtered.sort((a, b) => new Date(b.date || b.startTimeLocal || b.startTimeGMT || 0) - new Date(a.date || a.startTimeLocal || a.startTimeGMT || 0));
+
+  // Avertir si une recherche texte porte sur "Toutes les années" alors que
+  // certaines années n'ont pas encore été chargées depuis Garmin (chargement
+  // à la demande par année) — la recherche ne peut alors être que partielle.
+  const searchWarnEl = el('activities-search-warning');
+  if (searchWarnEl) {
+    const searchTerm = (el('filter-search')?.value || '').trim();
+    const currentYear = new Date().getFullYear();
+    const missingYears = [];
+    if (searchTerm && !yearFilter) {
+      for (let y = 2010; y < currentYear; y++) {
+        if (!_fullyLoadedYears.has(y)) missingYears.push(y);
+      }
+    }
+    searchWarnEl.innerHTML = missingYears.length > 0 ? `
+      <div class="weight-loss-advice" style="margin:0 0 16px 0">
+        <div style="font-family:var(--font-body);font-size:12px;color:var(--text-secondary);white-space:normal">⚠️ Recherche partielle : les années <strong style="color:var(--text-primary)">${missingYears[0]}–${missingYears[missingYears.length - 1]}</strong> n'ont pas encore été chargées. Sélectionnez-les une à une dans le filtre année pour une recherche complète.</div>
+      </div>` : '';
+  }
+
   if (filtered.length === 0) {
     tbody.innerHTML = `<tr><td colspan="10" class="table-loading">Aucune activite trouvee pour ce filtre</td></tr>`;
     // Mise à jour synthèse à 0
@@ -582,7 +613,7 @@ function renderAllActivities(activities, filter = 'all', yearOverride = null) {
     const icon = getSportIcon(type);
     return `
       <tr class="activity-row" data-activity-id="${a.id || ''}">
-        <td>${formatDateShort(a.date, !yearFilter)}</td>
+        <td>${formatDateShort(a.date, true)}</td>
         <td><span class="activity-type-cell ${activityTypeClass(type)}">${icon}<span class="run-type-text">${activityTypeLabel(type)}</span></span></td>
         <td style="color:var(--text-primary);max-width:180px;overflow:hidden;text-overflow:ellipsis">${a.name || '\u2014'}</td>
         <td class="dist-value">${a.distanceKm ? a.distanceKm.toFixed(2)+' km' : '\u2014'}</td>
