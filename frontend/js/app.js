@@ -1753,6 +1753,52 @@ function saveProfileData(data) {
   localStorage.setItem(PROFILE_KEY, JSON.stringify(data));
 }
 
+// ─── Historique du poids (serveur, pour suivi dans le temps + page Santé) ─
+let _weightHistory = [];
+const WEIGHT_REMINDER_SHOWN_KEY = 'weight_reminder_shown_date';
+
+async function loadWeightHistory() {
+  try {
+    const res = await fetch(`${API}/api/weight-history`);
+    if (res.ok) _weightHistory = await res.json();
+  } catch (e) { console.error('loadWeightHistory:', e); }
+}
+
+function renderWeightReminder() {
+  const lastDateEl = el('profile-weight-lastdate');
+  const reminderEl = el('profile-weight-reminder');
+  if (!_weightHistory.length) {
+    if (lastDateEl) lastDateEl.textContent = '';
+    if (reminderEl) reminderEl.innerHTML = '';
+    return;
+  }
+  const last = _weightHistory[_weightHistory.length - 1];
+  const daysSince = Math.floor((Date.now() - new Date(last.date).getTime()) / 86400000);
+  if (lastDateEl) lastDateEl.textContent = `(dernière saisie : ${formatDate(last.date)})`;
+  if (reminderEl) {
+    reminderEl.innerHTML = daysSince >= 7 ? `
+      <div class="weight-loss-advice" style="margin-top:10px">
+        <div class="weight-loss-title">⚖️ Pensez à vous peser</div>
+        <div class="weight-loss-items">
+          <div class="weight-loss-item">Dernière saisie il y a <span>${daysSince} jours</span> (${formatDate(last.date)}) — mettez à jour votre poids pour suivre son évolution</div>
+        </div>
+      </div>` : '';
+  }
+}
+
+// Toast au démarrage de l'appli si la dernière pesée date de 7 jours ou plus
+// (une seule fois par jour, pas à chaque rechargement de page)
+function checkWeightReminderToast() {
+  if (!_weightHistory.length) return;
+  const last = _weightHistory[_weightHistory.length - 1];
+  const daysSince = Math.floor((Date.now() - new Date(last.date).getTime()) / 86400000);
+  if (daysSince < 7) return;
+  const today = new Date().toISOString().slice(0, 10);
+  if (localStorage.getItem(WEIGHT_REMINDER_SHOWN_KEY) === today) return;
+  localStorage.setItem(WEIGHT_REMINDER_SHOWN_KEY, today);
+  showToast(`⚖️ Avez-vous pensé à vous peser ? Dernière saisie le ${formatDate(last.date)}.`, 'info', 8000);
+}
+
 // \u2500\u2500\u2500 Calculs \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
 
 // VMA depuis VO2max (formule ACSM, plus pr\u00e9cise que /3.5)
@@ -1934,6 +1980,7 @@ function renderProfile() {
   if (el('input-hrmax'))  el('input-hrmax').value  = hrmaxMeasured || '';
   el('sex-m').classList.toggle('active', sex === 'M');
   el('sex-f').classList.toggle('active', sex === 'F');
+  renderWeightReminder();
 
   // VO2max depuis données Garmin
   // Affichage : valeur arrondie (comme Garmin) — Classification (couleur/categorie/curseur) :
@@ -2217,7 +2264,7 @@ function initProfileForm() {
   // Sauvegarde
   const form = el('profile-form');
   if (form) {
-    form.addEventListener('submit', e => {
+    form.addEventListener('submit', async e => {
       e.preventDefault();
       const data = {
         sex:    _sex,
@@ -2227,6 +2274,16 @@ function initProfileForm() {
         hrmax:  parseInt(el('input-hrmax')?.value)  || null,
       };
       saveProfileData(data);
+      if (data.weight) {
+        try {
+          const res = await fetch(`${API}/api/weight-history`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ weight: data.weight }),
+          });
+          if (res.ok) _weightHistory = (await res.json()).history;
+        } catch (err) { console.error('weight-history save:', err); }
+      }
       renderProfile();
       applyGenderedEmojis();
       // Mini feedback visuel
@@ -2911,6 +2968,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   try { initThemeToggle(); } catch(e) { console.error('initThemeToggle failed:', e); }
   initBgSlideshow(); // async, pas de throw critique
   try { initProfileForm(); } catch(e) { console.error('initProfileForm failed:', e); }
+  try { await loadWeightHistory(); checkWeightReminderToast(); } catch(e) { console.error('loadWeightHistory failed:', e); }
   try { initAvatarUpload(); loadAvatar(); } catch(e) { console.error('initAvatarUpload failed:', e); }
   try { initBgManagerButton(); } catch(e) { console.error('initBgManagerButton failed:', e); }
   applyGenderedEmojis();

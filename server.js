@@ -105,6 +105,7 @@ const DATA_DIR = path.join(__dirname, 'data');
 try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch (e) {}
 const RECORDS_OVERRIDES_FILE = path.join(DATA_DIR, 'records_overrides.json');
 const RACES_FILE             = path.join(DATA_DIR, 'races.json');
+const WEIGHT_HISTORY_FILE    = path.join(DATA_DIR, 'weight_history.json');
 
 function readJsonSafe(filePath, fallback) {
   try {
@@ -883,22 +884,67 @@ app.delete('/api/races/:id/certificate', requireSession, (req, res) => {
   } catch (err) { handleError(res, err); }
 });
 
+// ─── Historique du poids (saisie profil) ──────────────────────────────
+// Un seul releve par jour (date au format YYYY-MM-DD, fuseau Europe/Paris) :
+// une nouvelle saisie le meme jour ecrase la precedente plutot que d'empiler.
+function todayParisISO() {
+  const parts = new Intl.DateTimeFormat('fr-CA', { timeZone: 'Europe/Paris', year: 'numeric', month: '2-digit', day: '2-digit' })
+    .formatToParts(new Date());
+  const y = parts.find(p => p.type === 'year').value;
+  const m = parts.find(p => p.type === 'month').value;
+  const d = parts.find(p => p.type === 'day').value;
+  return `${y}-${m}-${d}`;
+}
+
+app.get('/api/weight-history', requireSession, (req, res) => {
+  const history = readJsonSafe(WEIGHT_HISTORY_FILE, []);
+  history.sort((a, b) => new Date(a.date) - new Date(b.date));
+  res.json(history);
+});
+
+app.post('/api/weight-history', requireSession, (req, res) => {
+  try {
+    const { weight, date } = req.body || {};
+    const w = Number(weight);
+    if (!w || w <= 0) return res.status(400).json({ error: 'Poids invalide' });
+    const entryDate = date || todayParisISO();
+    const history = readJsonSafe(WEIGHT_HISTORY_FILE, []);
+    const idx = history.findIndex(e => e.date === entryDate);
+    const entry = { date: entryDate, weight: w };
+    if (idx !== -1) history[idx] = entry; else history.push(entry);
+    history.sort((a, b) => new Date(a.date) - new Date(b.date));
+    writeJsonSafe(WEIGHT_HISTORY_FILE, history);
+    res.json({ success: true, entry, history });
+  } catch (err) { handleError(res, err); }
+});
+
+app.delete('/api/weight-history/:date', requireSession, (req, res) => {
+  try {
+    const history = readJsonSafe(WEIGHT_HISTORY_FILE, []);
+    const filtered = history.filter(e => e.date !== req.params.date);
+    writeJsonSafe(WEIGHT_HISTORY_FILE, filtered);
+    res.json({ success: true });
+  } catch (err) { handleError(res, err); }
+});
+
 // ─── Export / import des records + courses (changement de PC, reinstall) ──
 app.get('/api/records-export', requireSession, (req, res) => {
   const records_overrides = readJsonSafe(RECORDS_OVERRIDES_FILE, {});
   const races = readJsonSafe(RACES_FILE, []);
+  const weight_history = readJsonSafe(WEIGHT_HISTORY_FILE, []);
   res.setHeader('Content-Disposition', 'attachment; filename=allure-plus-records.json');
-  res.json({ records_overrides, races, exportedAt: new Date().toISOString() });
+  res.json({ records_overrides, races, weight_history, exportedAt: new Date().toISOString() });
 });
 
 app.post('/api/records-import', requireSession, (req, res) => {
   try {
-    const { records_overrides, races } = req.body || {};
+    const { records_overrides, races, weight_history } = req.body || {};
     if (typeof records_overrides !== 'object' || records_overrides === null || !Array.isArray(races)) {
       return res.status(400).json({ error: 'Structure invalide (records_overrides ou races manquant)' });
     }
     writeJsonSafe(RECORDS_OVERRIDES_FILE, records_overrides);
     writeJsonSafe(RACES_FILE, races);
+    if (Array.isArray(weight_history)) writeJsonSafe(WEIGHT_HISTORY_FILE, weight_history);
     res.json({ success: true, racesCount: races.length });
   } catch (err) { handleError(res, err); }
 });

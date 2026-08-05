@@ -205,12 +205,13 @@
                 </div>
               </div>
               <div class="form-row">
-                <label class="form-label" for="input-weight">Poids actuel</label>
+                <label class="form-label" for="input-weight">Poids actuel <span id="profile-weight-lastdate" style="font-weight:400;color:var(--text-muted);font-size:11px"></span></label>
                 <div class="form-input-wrap">
                   <input type="number" id="input-weight" class="form-input" min="30" max="200" step="0.1" placeholder="ex: 75.5">
                   <span class="form-unit">kg</span>
                 </div>
               </div>
+              <div id="profile-weight-reminder"></div>
               <div class="form-row">
                 <label class="form-label" for="input-hrmax">FC max réelle</label>
                 <div class="form-input-wrap">
@@ -1093,7 +1094,7 @@
 
   </div><!-- /app-content -->
 
-  <script src="js/app.js?v=1785916734141"></script>
+  <script src="js/app.js?v=1785916734142"></script>
   <script src="js/campus.js?v=1785858455055"></script>
   <script src="js/stats.js?v=1785829724241"></script>
   <script src="js/records.js?v=1785856541080"></script>
