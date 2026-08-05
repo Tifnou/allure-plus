@@ -582,7 +582,7 @@ function renderAllActivities(activities, filter = 'all', yearOverride = null) {
     const icon = getSportIcon(type);
     return `
       <tr class="activity-row" data-activity-id="${a.id || ''}">
-        <td>${formatDateShort(a.date)}</td>
+        <td>${formatDateShort(a.date, !yearFilter)}</td>
         <td><span class="activity-type-cell ${activityTypeClass(type)}">${icon}<span class="run-type-text">${activityTypeLabel(type)}</span></span></td>
         <td style="color:var(--text-primary);max-width:180px;overflow:hidden;text-overflow:ellipsis">${a.name || '\u2014'}</td>
         <td class="dist-value">${a.distanceKm ? a.distanceKm.toFixed(2)+' km' : '\u2014'}</td>
