@@ -10,7 +10,10 @@ const HEALTH_ICONS = {
   moon:    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>',
   vo2:     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9.6 4.6A2 2 0 1 1 11 8H2m10.6 11.4A2 2 0 1 0 14 16H2m15.7-8.3A2.5 2.5 0 1 1 19.5 12H2"/></svg>',
   trend:   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>',
-  flame:   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>',
+  zap:     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>',
+  flame:   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.07-2.14-.22-4.05 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.15.43-2.29 1-3a2.5 2.5 0 0 0 2.5 2.5z"/></svg>',
+  gauge:   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20a8 8 0 1 1 8-8"/><path d="M12 12l3.5-3.5"/><circle cx="12" cy="12" r="1"/></svg>',
+  layers:  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>',
 };
 
 // ─── Constantes ────────────────────────────────────────────────────────
@@ -394,15 +397,123 @@ async function loadLactateMetric(days) {
   };
 }
 
+// ─── Commentaires : préparation à l'entraînement ──────────────────────
+const READINESS_LEVEL_INFO = {
+  VERY_HIGH: { label: 'Préparation très élevée', tier: 'good' },
+  HIGH:      { label: 'Préparation élevée', tier: 'good' },
+  MODERATE:  { label: 'Préparation moyenne', tier: 'neutral' },
+  LOW:       { label: 'Préparation basse', tier: 'attention' },
+  VERY_LOW:  { label: 'Préparation très basse', tier: 'attention' },
+};
+const READINESS_FACTOR_LABELS = {
+  sleepScoreFactorFeedback: 'votre sommeil de la nuit dernière',
+  recoveryTimeFactorFeedback: 'votre temps de récupération',
+  acwrFactorFeedback: "votre charge d'entraînement récente",
+  hrvFactorFeedback: 'votre variabilité de fréquence cardiaque',
+  stressHistoryFactorFeedback: 'votre niveau de stress récent',
+  sleepHistoryFactorFeedback: 'votre historique de sommeil',
+};
+
+async function loadTrainingReadinessMetric(days) {
+  const cur = await fetch('/api/training-readiness').then(r => r.json()).then(r => r.data).catch(() => null);
+  const hist = await fetch(`/api/health-history/trainingReadiness?days=${days}`).then(r => r.json()).catch(() => []);
+  const series = hist.filter(e => e.value.score != null).map(e => ({ label: formatDateShort(e.date, days > 60), value: e.value.score }));
+  let comment = null;
+  if (cur) {
+    const info = READINESS_LEVEL_INFO[cur.level] || { label: cur.level || 'Préparation', tier: 'neutral' };
+    // Classe chaque facteur (POOR/LOW < MODERATE/FAIR < GOOD/HIGH) pour
+    // toujours pouvoir designer le(s) facteur(s) le(s) plus limitant(s),
+    // meme quand aucun n'est franchement "mauvais" a lui seul.
+    const FACTOR_RANK = { POOR: 0, LOW: 0, MODERATE: 1, FAIR: 1, GOOD: 2, HIGH: 2 };
+    const factorEntries = Object.entries(cur.factors || {}).filter(([, v]) => v);
+    let factorTxt = '';
+    if (factorEntries.length) {
+      const rankOf = ([, v]) => FACTOR_RANK[v] ?? 1;
+      const worstRank = Math.min(...factorEntries.map(rankOf));
+      if (worstRank >= 2) {
+        factorTxt = ' Tous les facteurs qui composent ce score sont favorables.';
+      } else {
+        const worstLabels = factorEntries.filter(e => rankOf(e) === worstRank).map(([k]) => READINESS_FACTOR_LABELS[k]).filter(Boolean);
+        factorTxt = ` Le facteur le plus limitant aujourd'hui : ${worstLabels.join(', ')}.`;
+      }
+    }
+    const adviceTxt = info.tier === 'good'
+      ? " C'est un bon jour pour une séance exigeante si votre plan en prévoit une."
+      : ' Privilégiez une séance légère ou un jour de repos, et reprenez normalement dès que ce score remonte.';
+    comment = { state: info.label, tier: info.tier, text: `Votre préparation à l'entraînement est évaluée à ${cur.score}/100 (${info.label.toLowerCase()}).${factorTxt}${adviceTxt}` };
+  }
+  return { series, comment, current: cur ? { value: String(cur.score), unit: '/100', dateLabel: 'au ' + formatDate(cur.calendarDate) } : null };
+}
+
+async function loadCaloriesMetric(days) {
+  const { data } = await fetch(`/api/calories?days=${days}`).then(r => r.json()).catch(() => ({ data: [] }));
+  const arr = data || [];
+  const series = arr.map(d => ({ label: formatDateShort(d.date, days > 60), value: d.activeKilocalories }));
+  const latest = arr.length ? arr[arr.length - 1] : null;
+  let comment = null;
+  if (latest) {
+    const active = latest.activeKilocalories;
+    if (active >= 600) comment = { state: 'Journée très active', tier: 'good', text: `Vous avez brûlé ${active} kcal par l'activité aujourd'hui, en plus de vos ${latest.bmrKilocalories} kcal de métabolisme de base (${latest.totalKilocalories} kcal au total). Pensez à compenser cette dépense par une alimentation suffisante, en particulier en glucides, pour bien récupérer.` };
+    else if (active >= 200) comment = { state: 'Journée modérément active', tier: 'neutral', text: `Vous avez brûlé ${active} kcal par l'activité aujourd'hui (${latest.totalKilocalories} kcal au total avec le métabolisme de base). Une alimentation équilibrée classique suffit à compenser une journée comme celle-ci.` };
+    else comment = { state: 'Journée peu active', tier: 'neutral', text: `Seulement ${active} kcal brûlées par l'activité aujourd'hui (${latest.totalKilocalories} kcal au total, l'essentiel venant de votre métabolisme de base). Rien d'alarmant ponctuellement — c'est la régularité sur la semaine qui compte.` };
+  }
+  return { series, comment, current: latest ? { value: String(latest.activeKilocalories), unit: 'kcal', dateLabel: 'actives, au ' + formatDate(latest.date) } : null };
+}
+
+// ─── Commentaires : training effect (aérobie / anaérobie) ─────────────
+function trainingEffectScale(v) {
+  if (v == null) return null;
+  if (v < 1) return { label: 'Aucun effet', tier: 'neutral' };
+  if (v < 2) return { label: 'Effet mineur', tier: 'neutral' };
+  if (v < 3) return { label: 'Maintien', tier: 'neutral' };
+  if (v < 4) return { label: 'Amélioration', tier: 'good' };
+  if (v < 5) return { label: 'Forte amélioration', tier: 'good' };
+  return { label: 'Surcharge', tier: 'attention' };
+}
+
+async function loadTrainingEffectMetric(days) {
+  const cutoff = Date.now() - days * 86400000;
+  const runs = (_allActivities || [])
+    .filter(a => {
+      const t = (a.activityType || '').toLowerCase();
+      return (t.includes('run') || t.includes('trail')) && a.aerobicTrainingEffect != null && new Date(a.date).getTime() >= cutoff;
+    })
+    .sort((a, b) => new Date(a.date) - new Date(b.date));
+  const rows = runs.slice().reverse().slice(0, 30).map(a => [
+    formatDate(a.date), escapeHtml(a.name || ''),
+    a.aerobicTrainingEffect != null ? a.aerobicTrainingEffect.toFixed(1) : '—',
+    a.anaerobicTrainingEffect != null ? a.anaerobicTrainingEffect.toFixed(1) : '—',
+  ]);
+  const latest = runs.length ? runs[runs.length - 1] : null;
+  let comment = null;
+  if (latest) {
+    const aer = trainingEffectScale(latest.aerobicTrainingEffect);
+    const anaer = trainingEffectScale(latest.anaerobicTrainingEffect);
+    const dominant = latest.aerobicTrainingEffect >= latest.anaerobicTrainingEffect ? 'aérobie (endurance)' : 'anaérobie (intensité/vitesse)';
+    comment = {
+      state: `Aérobie : ${aer ? aer.label : '—'} · Anaérobie : ${anaer ? anaer.label : '—'}`,
+      tier: (aer && aer.tier === 'attention') || (anaer && anaer.tier === 'attention') ? 'attention' : ((aer && aer.tier === 'good') ? 'good' : 'neutral'),
+      text: `Votre dernière sortie (${latest.aerobicTrainingEffect.toFixed(1)} en effet aérobie, ${latest.anaerobicTrainingEffect.toFixed(1)} en effet anaérobie) a surtout sollicité votre filière ${dominant}. L'effet aérobie mesure le bénéfice sur votre endurance de fond, l'effet anaérobie celui sur votre capacité à tenir un effort intense. Pour progresser sur les deux, alternez des sorties à dominante aérobie (Z2 longues) et des séances plus courtes et intenses (fractionné, côtes) qui développent l'anaérobie.`,
+    };
+  }
+  return {
+    headers: ['Date', 'Activité', 'Aérobie', 'Anaérobie'], rows, comment,
+    current: latest ? { value: latest.aerobicTrainingEffect.toFixed(1), unit: '/5', dateLabel: 'aérobie, ' + formatDate(latest.date) } : null,
+  };
+}
+
 // ─── Registre des métriques ────────────────────────────────────────────
 const HEALTH_METRICS = [
-  { key: 'weight',            category: 'sante',       label: 'Poids',                   icon: HEALTH_ICONS.weight,  mode: 'chart', color: '#2563EB', load: loadWeightMetric },
-  { key: 'restingHR',         category: 'sante',       label: 'FC repos',                icon: HEALTH_ICONS.heart,   mode: 'chart', color: '#DC2626', load: loadRestingHRMetric },
-  { key: 'bodyBattery',       category: 'sante',       label: 'Body Battery',            icon: HEALTH_ICONS.battery, mode: 'chart', color: '#16A34A', load: loadBodyBatteryMetric },
-  { key: 'sleepScore',        category: 'sante',       label: 'Score de sommeil',        icon: HEALTH_ICONS.moon,    mode: 'chart', color: '#7C3AED', load: loadSleepMetric },
-  { key: 'vo2max',            category: 'performance', label: 'VO₂max',                  icon: HEALTH_ICONS.vo2,     mode: 'chart', color: '#7C3AED', load: loadVo2maxMetric },
-  { key: 'trainingStatus',    category: 'performance', label: "Statut d'entraînement",   icon: HEALTH_ICONS.trend,   mode: 'table',                   load: loadTrainingStatusMetric },
-  { key: 'lactateThreshold',  category: 'performance', label: 'Seuil lactique',          icon: HEALTH_ICONS.flame,   mode: 'chart', color: '#D97706', load: loadLactateMetric },
+  { key: 'weight',             category: 'sante',       label: 'Poids',                   icon: HEALTH_ICONS.weight,  mode: 'chart', color: '#2563EB', load: loadWeightMetric },
+  { key: 'restingHR',          category: 'sante',       label: 'FC repos',                icon: HEALTH_ICONS.heart,   mode: 'chart', color: '#DC2626', load: loadRestingHRMetric },
+  { key: 'bodyBattery',        category: 'sante',       label: 'Body Battery',            icon: HEALTH_ICONS.battery, mode: 'chart', color: '#16A34A', load: loadBodyBatteryMetric },
+  { key: 'sleepScore',         category: 'sante',       label: 'Score de sommeil',        icon: HEALTH_ICONS.moon,    mode: 'chart', color: '#7C3AED', load: loadSleepMetric },
+  { key: 'calories',           category: 'sante',       label: 'Calories brûlées',        icon: HEALTH_ICONS.flame,   mode: 'chart', color: '#EA580C', load: loadCaloriesMetric },
+  { key: 'vo2max',             category: 'performance', label: 'VO₂max',                  icon: HEALTH_ICONS.vo2,     mode: 'chart', color: '#7C3AED', load: loadVo2maxMetric },
+  { key: 'trainingStatus',     category: 'performance', label: "Statut d'entraînement",   icon: HEALTH_ICONS.trend,   mode: 'table',                   load: loadTrainingStatusMetric },
+  { key: 'trainingReadiness',  category: 'performance', label: "Préparation à l'entraînement", icon: HEALTH_ICONS.gauge, mode: 'chart', color: '#0EA5E9', load: loadTrainingReadinessMetric },
+  { key: 'trainingEffect',     category: 'performance', label: 'Training Effect',         icon: HEALTH_ICONS.layers,  mode: 'table',                   load: loadTrainingEffectMetric },
+  { key: 'lactateThreshold',   category: 'performance', label: 'Seuil lactique',          icon: HEALTH_ICONS.zap,     mode: 'chart', color: '#D97706', load: loadLactateMetric },
 ];
 
 // ─── Page ───────────────────────────────────────────────────────────────

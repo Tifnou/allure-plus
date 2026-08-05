@@ -726,9 +726,77 @@ function buildGarminFunctions(gc) {
     });
   }
 
+  // Preparation a l'entrainement (Training Readiness) : non expose par la
+  // lib garmin-connect. Endpoint prive utilise par le widget Garmin Connect.
+  async function getTrainingReadinessData() {
+    return cached('training_readiness', async () => {
+      const fmt = (d) => {
+        const pad = (n) => String(n).padStart(2, '0');
+        return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+      };
+      const today = fmt(new Date());
+      try {
+        const res = await gc.get(`https://connectapi.garmin.com/metrics-service/metrics/trainingreadiness/${today}`);
+        const entry = Array.isArray(res) ? res[0] : res;
+        if (!entry) return null;
+        return {
+          calendarDate: entry.calendarDate,
+          level: entry.level,
+          score: entry.score,
+          feedbackShort: entry.feedbackShort,
+          feedbackLong: entry.feedbackLong,
+          factors: {
+            sleepScoreFactorFeedback: entry.sleepScoreFactorFeedback,
+            recoveryTimeFactorFeedback: entry.recoveryTimeFactorFeedback,
+            acwrFactorFeedback: entry.acwrFactorFeedback,
+            hrvFactorFeedback: entry.hrvFactorFeedback,
+            stressHistoryFactorFeedback: entry.stressHistoryFactorFeedback,
+            sleepHistoryFactorFeedback: entry.sleepHistoryFactorFeedback,
+          },
+        };
+      } catch (e) {
+        console.log('Preparation entrainement indisponible:', e.message);
+        return null;
+      }
+    });
+  }
+
+  // Calories (resume quotidien Garmin - actives + metabolisme de base),
+  // sur plusieurs jours en parallele (comme getSleepData).
+  async function getCaloriesRange(days) {
+    return cached(`calories_range_${days}`, async () => {
+      const fmt = (d) => {
+        const pad = (n) => String(n).padStart(2, '0');
+        return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+      };
+      const today = new Date();
+      const dates = Array.from({ length: days }, (_, i) => {
+        const d = new Date(today);
+        d.setDate(d.getDate() - i);
+        return fmt(d);
+      });
+      const settled = await Promise.allSettled(dates.map(async dateStr => {
+        try {
+          const res = await gc.get(`https://connectapi.garmin.com/usersummary-service/usersummary/daily?calendarDate=${dateStr}`);
+          if (!res || res.totalKilocalories == null) return null;
+          return {
+            date: dateStr,
+            totalKilocalories: res.totalKilocalories,
+            activeKilocalories: res.activeKilocalories,
+            bmrKilocalories: res.bmrKilocalories,
+          };
+        } catch (e) { return null; }
+      }));
+      return settled
+        .filter(r => r.status === 'fulfilled' && r.value)
+        .map(r => r.value)
+        .sort((a, b) => a.date.localeCompare(b.date));
+    });
+  }
+
   function clearCache() { Object.keys(cache).forEach(k => delete cache[k]); }
 
-  return { getActivities, getActivitiesForYear, getUserProfile, getHeartRateData, getVO2MaxData, getVO2MaxHistory, getSleepData, getStepsData, getBodyBatteryData, getBodyBatteryRange, getTrainingStatusData, clearCache };
+  return { getActivities, getActivitiesForYear, getUserProfile, getHeartRateData, getVO2MaxData, getVO2MaxHistory, getSleepData, getStepsData, getBodyBatteryData, getBodyBatteryRange, getTrainingStatusData, getTrainingReadinessData, getCaloriesRange, clearCache };
 }
 
 module.exports = {

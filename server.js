@@ -683,7 +683,12 @@ app.get('/api/dashboard', requireSession, async (req, res) => {
       elevationGain:   a.elevationGain,
       calories:        a.calories,
       activityType:    a.activityType?.typeKey,
-      vO2MaxValue:     a.vO2MaxValue
+      vO2MaxValue:     a.vO2MaxValue,
+      aerobicTrainingEffect:      a.aerobicTrainingEffect,
+      anaerobicTrainingEffect:    a.anaerobicTrainingEffect,
+      trainingEffectLabel:        a.trainingEffectLabel,
+      aerobicTrainingEffectMessage:   a.aerobicTrainingEffectMessage,
+      anaerobicTrainingEffectMessage: a.anaerobicTrainingEffectMessage,
     }));
     res.json({ stats, lastRuns, allActivities, records, lastUpdated: new Date().toISOString() });
   } catch (err) { handleError(res, err); }
@@ -711,7 +716,12 @@ app.get('/api/activities/year/:year', requireSession, async (req, res) => {
       elevationGain:   a.elevationGain,
       calories:        a.calories,
       activityType:    a.activityType?.typeKey,
-      vO2MaxValue:     a.vO2MaxValue
+      vO2MaxValue:     a.vO2MaxValue,
+      aerobicTrainingEffect:      a.aerobicTrainingEffect,
+      anaerobicTrainingEffect:    a.anaerobicTrainingEffect,
+      trainingEffectLabel:        a.trainingEffectLabel,
+      aerobicTrainingEffectMessage:   a.aerobicTrainingEffectMessage,
+      anaerobicTrainingEffectMessage: a.anaerobicTrainingEffectMessage,
     }));
     res.json({ year, activities: mapped, count: mapped.length });
   } catch (err) { handleError(res, err); }
@@ -1065,6 +1075,25 @@ app.get('/api/body-battery', requireSession, async (req, res) => {
     const data = days > 1
       ? await req.session.fns.getBodyBatteryRange(days)
       : await req.session.fns.getBodyBatteryData();
+    res.json({ data });
+  } catch (err) { handleError(res, err); }
+});
+
+// Preparation a l'entrainement — meme principe que le statut d'entrainement :
+// capture un instantane du jour a chaque consultation.
+app.get('/api/training-readiness', requireSession, async (req, res) => {
+  try {
+    const data = await req.session.fns.getTrainingReadinessData();
+    if (data) captureHealthSnapshot('trainingReadiness', todayParisISO(), { level: data.level, score: data.score });
+    res.json({ data });
+  } catch (err) { handleError(res, err); }
+});
+
+// Calories (resume quotidien Garmin)
+app.get('/api/calories', requireSession, async (req, res) => {
+  try {
+    const days = parseInt(req.query.days) || 7;
+    const data = await req.session.fns.getCaloriesRange(days);
     res.json({ data });
   } catch (err) { handleError(res, err); }
 });
