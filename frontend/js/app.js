@@ -570,21 +570,38 @@ function renderAllActivities(activities, filter = 'all', yearOverride = null) {
   filtered.sort((a, b) => new Date(b.date || b.startTimeLocal || b.startTimeGMT || 0) - new Date(a.date || a.startTimeLocal || a.startTimeGMT || 0));
 
   // Avertir si une recherche texte porte sur "Toutes les années" alors que
-  // certaines années n'ont pas encore été chargées depuis Garmin (chargement
-  // à la demande par année) — la recherche ne peut alors être que partielle.
+  // certaines années n'ont aucune activité chargée en mémoire (chargement à
+  // la demande par année) — la recherche ne peut alors être que partielle.
+  // Seules les années totalement absentes de _allActivities sont signalées :
+  // une année qui a déjà des activités visibles (via le lot initial) ne doit
+  // pas être annoncée comme "non chargée".
   const searchWarnEl = el('activities-search-warning');
   if (searchWarnEl) {
     const searchTerm = (el('filter-search')?.value || '').trim();
     const currentYear = new Date().getFullYear();
     const missingYears = [];
     if (searchTerm && !yearFilter) {
-      for (let y = 2010; y < currentYear; y++) {
-        if (!_fullyLoadedYears.has(y)) missingYears.push(y);
+      const yearsWithData = new Set();
+      _allActivities.forEach(a => {
+        const d = new Date(a.date || a.startTimeLocal || a.startTimeGMT || '');
+        if (!isNaN(d)) yearsWithData.add(d.getFullYear());
+      });
+      let earliest = yearsWithData.size ? Math.min(...yearsWithData) : currentYear;
+      earliest = Math.min(earliest, 2010);
+      for (let y = earliest; y < currentYear; y++) {
+        if (!yearsWithData.has(y)) missingYears.push(y);
       }
     }
+    // Regrouper les années consécutives en plages (ex: 2010-2018, 2020)
+    const ranges = [];
+    missingYears.forEach(y => {
+      const last = ranges[ranges.length - 1];
+      if (last && y === last[1] + 1) last[1] = y; else ranges.push([y, y]);
+    });
+    const rangesLabel = ranges.map(([a, b]) => a === b ? String(a) : `${a}–${b}`).join(', ');
     searchWarnEl.innerHTML = missingYears.length > 0 ? `
       <div class="weight-loss-advice" style="margin:0 0 16px 0">
-        <div style="font-family:var(--font-body);font-size:12px;color:var(--text-secondary);white-space:normal">⚠️ Recherche partielle : les années <strong style="color:var(--text-primary)">${missingYears[0]}–${missingYears[missingYears.length - 1]}</strong> n'ont pas encore été chargées. Sélectionnez-les une à une dans le filtre année pour une recherche complète.</div>
+        <div style="font-family:var(--font-body);font-size:12px;color:var(--text-secondary);white-space:normal">⚠️ Recherche partielle : les années <strong style="color:var(--text-primary)">${rangesLabel}</strong> n'ont aucune activité chargée. Sélectionnez-les une à une dans le filtre année pour une recherche complète.</div>
       </div>` : '';
   }
 
