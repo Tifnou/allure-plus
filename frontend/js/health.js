@@ -15,6 +15,8 @@ const HEALTH_ICONS = {
   gauge:   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20a8 8 0 1 1 8-8"/><path d="M12 12l3.5-3.5"/><circle cx="12" cy="12" r="1"/></svg>',
   layers:  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>',
   calendar: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>',
+  droplet: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.7l5.66 5.66a8 8 0 1 1-11.31 0z"/></svg>',
+  leaf:    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10Z"/><path d="M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12"/></svg>',
 };
 
 // ─── Constantes ────────────────────────────────────────────────────────
@@ -569,6 +571,104 @@ async function loadPhysicalAgeMetric(days) {
   return { series, comment, current: currentAge != null ? { value: String(currentAge), unit: 'ans', dateLabel: 'estimation Allure+' } : null };
 }
 
+// ─── Conseils du jour (hydratation / nutrition dynamiques) ────────────
+// Base sur le meme calcul que le Profil (poids -> besoin hydrique/proteine),
+// mais ajuste selon l'etat du jour (Body Battery, sommeil, activite) plutot
+// que de rester fige comme la version Profil.
+function buildDailyAdvice({ weight, bodyBattery, sleepScore, activeCalories }) {
+  let hydroState, hydroTier, hydroText;
+  if (!weight) {
+    hydroState = 'Renseignez votre poids';
+    hydroTier = 'neutral';
+    hydroText = "Ajoutez votre poids dans le Profil pour obtenir une estimation d'hydratation personnalisée.";
+  } else {
+    const base = Math.round(weight * 33 / 100) * 100;
+    let bonus = 0;
+    const reasons = [];
+    if (activeCalories != null && activeCalories >= 400) { bonus += 700; reasons.push('votre activité soutenue aujourd\'hui'); }
+    else if (activeCalories != null && activeCalories >= 150) { bonus += 400; reasons.push('votre activité du jour'); }
+    if (bodyBattery != null && bodyBattery < 40) { bonus += 300; reasons.push('vos réserves d\'énergie basses'); }
+    if (sleepScore != null && sleepScore < 60) { bonus += 200; reasons.push('un sommeil dégradé cette nuit'); }
+    const total = base + bonus;
+    hydroState = (total / 1000).toFixed(1) + ' L recommandés aujourd\'hui';
+    hydroTier = bonus > 0 ? 'attention' : 'good';
+    hydroText = bonus > 0
+      ? `Visez environ ${(total / 1000).toFixed(1)} L aujourd'hui (base ${(base / 1000).toFixed(1)} L + un supplément lié à ${reasons.join(' et ')}). Répartissez sur la journée plutôt que de tout boire d'un coup, et surveillez la couleur de vos urines (jaune paille = bien hydraté).`
+      : `Votre besoin de base est d'environ ${(base / 1000).toFixed(1)} L aujourd'hui. Rien de particulier ne justifie d'augmenter cet apport pour le moment — restez régulier tout au long de la journée.`;
+  }
+
+  let nutriState, nutriTier, nutriText;
+  const lowEnergy = (bodyBattery != null && bodyBattery < 40) || (sleepScore != null && sleepScore < 60);
+  const highActivity = activeCalories != null && activeCalories >= 400;
+  if (highActivity) {
+    nutriState = 'Reconstituez vos réserves';
+    nutriTier = 'neutral';
+    nutriText = `Avec ${activeCalories} kcal brûlées par l'activité aujourd'hui, privilégiez des glucides complexes (riz, pâtes complètes, patate douce) et des protéines dans les 30 à 45 minutes suivant l'effort pour bien récupérer, sans négliger les légumes pour les fibres et micronutriments.`;
+  } else if (lowEnergy) {
+    const parts = [];
+    if (sleepScore != null && sleepScore < 60) parts.push('sommeil dégradé');
+    if (bodyBattery != null && bodyBattery < 40) parts.push('réserves basses');
+    nutriState = 'Priorisez la récupération';
+    nutriTier = 'attention';
+    nutriText = `Vos indicateurs du jour (${parts.join(' et ')}) suggèrent un corps qui a besoin de récupérer. Misez sur des aliments anti-inflammatoires (fruits rouges, oméga-3, curcuma) et évitez l'alcool et les sucres rapides aujourd'hui — ils ralentissent la récupération.`;
+  } else {
+    nutriState = 'Alimentation standard';
+    nutriTier = 'good';
+    nutriText = `Rien de particulier à ajuster aujourd'hui : une alimentation équilibrée classique (protéines à chaque repas, glucides complexes, fruits et légumes) suffit à soutenir votre entraînement.`;
+  }
+
+  return { hydroState, hydroTier, hydroText, nutriState, nutriTier, nutriText };
+}
+
+async function renderDailyAdviceCard(container) {
+  const cardEl = document.createElement('div');
+  cardEl.className = 'health-advice-card';
+  cardEl.innerHTML = '<div class="table-loading">Chargement…</div>';
+  container.appendChild(cardEl);
+
+  try {
+    const [bbRes, sleepRes, calRes, weightHistory] = await Promise.all([
+      fetch('/api/body-battery').then(r => r.json()).catch(() => ({ data: null })),
+      fetch('/api/sleep?days=1').then(r => r.json()).catch(() => ({ data: [] })),
+      fetch('/api/calories?days=1').then(r => r.json()).catch(() => ({ data: [] })),
+      fetch('/api/weight-history').then(r => r.json()).catch(() => []),
+    ]);
+    const bodyBattery = bbRes?.data?.current ?? null;
+    const nights = sleepRes?.data || [];
+    const sleepScore = nights.length ? nights[nights.length - 1].sleepScore : null;
+    const calDays = calRes?.data || [];
+    const activeCalories = calDays.length ? calDays[calDays.length - 1].activeKilocalories : null;
+    const weight = weightHistory.length ? weightHistory[weightHistory.length - 1].weight : (loadProfileData().weight || null);
+
+    const advice = buildDailyAdvice({ weight, bodyBattery, sleepScore, activeCalories });
+
+    cardEl.innerHTML = `
+      <div class="health-advice-header">
+        <div class="health-advice-title">Conseils du jour</div>
+        <div class="health-advice-sub">Basés sur vos réserves, votre sommeil et votre activité du moment</div>
+      </div>
+      <div class="health-advice-grid">
+        <div class="health-advice-block">
+          <div class="health-advice-block-icon">${HEALTH_ICONS.droplet}</div>
+          <div>
+            <div class="health-comment-state">${escapeHtml(advice.hydroState)}</div>
+            <div class="health-comment-text">${advice.hydroText}</div>
+          </div>
+        </div>
+        <div class="health-advice-block">
+          <div class="health-advice-block-icon">${HEALTH_ICONS.leaf}</div>
+          <div>
+            <div class="health-comment-state">${escapeHtml(advice.nutriState)}</div>
+            <div class="health-comment-text">${advice.nutriText}</div>
+          </div>
+        </div>
+      </div>`;
+  } catch (e) {
+    console.error('daily advice card:', e);
+    cardEl.innerHTML = '<div class="health-empty">Conseils indisponibles pour le moment.</div>';
+  }
+}
+
 // ─── Registre des métriques ────────────────────────────────────────────
 const HEALTH_METRICS = [
   { key: 'weight',             category: 'sante',       label: 'Poids',                   icon: HEALTH_ICONS.weight,  mode: 'chart', color: '#2563EB', load: loadWeightMetric },
@@ -621,4 +721,5 @@ async function renderHealthCategory() {
   // plusieurs metriques a la fois (chacune peut deja faire plusieurs
   // requetes internes pour les longues periodes).
   for (const m of metrics) { await initMetricBlock(m); }
+  if (_healthActiveCategory === 'sante') { renderDailyAdviceCard(section); }
 }
