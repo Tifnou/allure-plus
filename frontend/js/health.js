@@ -14,6 +14,7 @@ const HEALTH_ICONS = {
   flame:   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.07-2.14-.22-4.05 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.15.43-2.29 1-3a2.5 2.5 0 0 0 2.5 2.5z"/></svg>',
   gauge:   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20a8 8 0 1 1 8-8"/><path d="M12 12l3.5-3.5"/><circle cx="12" cy="12" r="1"/></svg>',
   layers:  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>',
+  calendar: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>',
 };
 
 // ─── Constantes ────────────────────────────────────────────────────────
@@ -502,12 +503,79 @@ async function loadTrainingEffectMetric(days) {
   };
 }
 
+// ─── Âge physique (estimation Allure+ — pas de donnée Garmin equivalente
+// exploitable, voir CLAUDE.md). Garmin decrit sa propre metrique comme basee
+// sur l'intensite d'activite, la FC repos et l'IMC/masse grasse : on a deja
+// toutes ces briques via le VO2max (bien correle a la forme cardio), la FC
+// repos et le profil (taille/poids), donc on construit notre propre
+// estimation plutot que de laisser la metrique vide.
+function estimatePhysicalAge(vo2, sex, chronoAge, restingHR, bmi) {
+  if (!vo2 || !chronoAge || typeof vo2maxCategoryIndex !== 'function') return null;
+  const cat = vo2maxCategoryIndex(vo2, sex, chronoAge); // 0=Faible .. 4=Superieur, 2=Bon (reference neutre)
+  let age = chronoAge - (cat - 2) * 4;
+  if (restingHR) {
+    if (restingHR < 50) age -= 2;
+    else if (restingHR < 55) age -= 1;
+    else if (restingHR > 75) age += 2;
+    else if (restingHR > 65) age += 1;
+  }
+  if (bmi) {
+    if (bmi > 25) age += Math.min((bmi - 25) * 0.3, 3);
+    else if (bmi < 18.5) age += 1;
+  }
+  return Math.max(18, Math.min(Math.round(age), chronoAge + 15));
+}
+
+async function loadPhysicalAgeMetric(days) {
+  const prof = loadProfileData();
+  const sex = prof.sex || 'M';
+  const chronoAge = prof.birthDate ? Math.floor((Date.now() - new Date(prof.birthDate).getTime()) / (365.25 * 86400000)) : (prof.age || null);
+  const bmi = (typeof calcBMI === 'function' && prof.height && prof.weight) ? calcBMI(prof.weight, prof.height) : null;
+
+  if (!chronoAge) {
+    return { series: [], comment: { state: 'Profil incomplet', tier: 'neutral', text: "Renseignez votre date de naissance, votre taille et votre poids dans le Profil pour estimer votre âge physique." }, current: null };
+  }
+
+  const cutoff = Date.now() - days * 86400000;
+  const vo2Pts = (_vo2maxSeries || []).filter(p => p.date && new Date(p.date).getTime() >= cutoff);
+  const { data: hrData } = await fetch(`/api/heartrate?days=${days}`).then(r => r.json()).catch(() => ({ data: [] }));
+  const hrPoints = (hrData || []).filter(d => d.data?.restingHeartRate > 0).map(d => ({ date: d.data.calendarDate || d.date, value: d.data.restingHeartRate }));
+
+  function nearestHR(dateStr) {
+    if (!hrPoints.length) return null;
+    const t = new Date(dateStr).getTime();
+    let best = null, bestDiff = Infinity;
+    hrPoints.forEach(p => { const diff = Math.abs(new Date(p.date).getTime() - t); if (diff < bestDiff) { bestDiff = diff; best = p.value; } });
+    return bestDiff <= 5 * 86400000 ? best : null;
+  }
+
+  const series = vo2Pts.map(p => {
+    const ageAtPoint = estimatePhysicalAge(p.value, sex, chronoAge, nearestHR(p.date), bmi);
+    return ageAtPoint != null ? { label: formatDateShort(p.date, days > 60), value: ageAtPoint } : null;
+  }).filter(Boolean);
+
+  const latestVo2 = vo2Pts.length ? vo2Pts[vo2Pts.length - 1] : ((_vo2maxSeries || []).length ? _vo2maxSeries[_vo2maxSeries.length - 1] : null);
+  const currentAge = latestVo2 ? estimatePhysicalAge(latestVo2.value, sex, chronoAge, nearestHR(latestVo2.date), bmi) : null;
+
+  let comment = null;
+  if (currentAge != null) {
+    const diff = chronoAge - currentAge;
+    const disclaimer = ' (estimation Allure+ à partir de votre VO2max, FC repos et IMC — même principe que Garmin, sans être identique à son chiffre).';
+    if (diff >= 2) comment = { state: `${diff} ans de moins que votre âge réel`, tier: 'good', text: `Votre âge physique estimé est de ${currentAge} ans, pour un âge réel de ${chronoAge} ans — votre forme cardiovasculaire vous place en avance sur votre âge.${disclaimer} Continuez à entretenir cet écart avec de la régularité en endurance fondamentale.` };
+    else if (diff <= -2) comment = { state: `${Math.abs(diff)} ans de plus que votre âge réel`, tier: 'attention', text: `Votre âge physique estimé est de ${currentAge} ans, au-dessus de votre âge réel (${chronoAge} ans).${disclaimer} Le levier le plus efficace pour le faire baisser est votre VO2max : plus de sorties d'endurance fondamentale et quelques séances de fractionné par semaine peuvent le faire progresser sensiblement en quelques mois.` };
+    else comment = { state: 'Proche de votre âge réel', tier: 'neutral', text: `Votre âge physique estimé (${currentAge} ans) est proche de votre âge réel (${chronoAge} ans).${disclaimer} Une progression de votre VO2max ou une baisse de votre FC repos sont les leviers les plus efficaces pour le faire baisser.` };
+  }
+
+  return { series, comment, current: currentAge != null ? { value: String(currentAge), unit: 'ans', dateLabel: 'estimation Allure+' } : null };
+}
+
 // ─── Registre des métriques ────────────────────────────────────────────
 const HEALTH_METRICS = [
   { key: 'weight',             category: 'sante',       label: 'Poids',                   icon: HEALTH_ICONS.weight,  mode: 'chart', color: '#2563EB', load: loadWeightMetric },
   { key: 'restingHR',          category: 'sante',       label: 'FC repos',                icon: HEALTH_ICONS.heart,   mode: 'chart', color: '#DC2626', load: loadRestingHRMetric },
   { key: 'bodyBattery',        category: 'sante',       label: 'Body Battery',            icon: HEALTH_ICONS.battery, mode: 'chart', color: '#16A34A', load: loadBodyBatteryMetric },
   { key: 'sleepScore',         category: 'sante',       label: 'Score de sommeil',        icon: HEALTH_ICONS.moon,    mode: 'chart', color: '#7C3AED', load: loadSleepMetric },
+  { key: 'physicalAge',        category: 'sante',       label: 'Âge physique',            icon: HEALTH_ICONS.calendar, mode: 'chart', color: '#0891B2', load: loadPhysicalAgeMetric },
   { key: 'calories',           category: 'sante',       label: 'Calories brûlées',        icon: HEALTH_ICONS.flame,   mode: 'chart', color: '#EA580C', load: loadCaloriesMetric },
   { key: 'vo2max',             category: 'performance', label: 'VO₂max',                  icon: HEALTH_ICONS.vo2,     mode: 'chart', color: '#7C3AED', load: loadVo2maxMetric },
   { key: 'trainingStatus',     category: 'performance', label: "Statut d'entraînement",   icon: HEALTH_ICONS.trend,   mode: 'table',                   load: loadTrainingStatusMetric },
