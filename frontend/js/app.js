@@ -143,12 +143,39 @@ let _activitiesYearDefaulted = false; // évite d'écraser "Toutes les années" 
 function syncFixedHeaderPadding(pageEl) {
   if (!pageEl) return;
   const header = pageEl.querySelector(':scope > .health-sticky-header') || pageEl.querySelector(':scope > .page-header');
-  if (!header) { pageEl.style.paddingTop = ''; return; }
-  const apply = () => { pageEl.style.paddingTop = (header.getBoundingClientRect().height + 46) + 'px'; };
+  const mask = el('page-top-mask');
+  if (!header) {
+    pageEl.style.paddingTop = '';
+    if (mask) mask.style.display = 'none';
+    return;
+  }
+  const apply = () => {
+    // Le centrage CSS pur (left/right/max-width/margin:auto) sur un
+    // element position:fixed s'est avere peu fiable (largeur obtenue ne
+    // correspondait pas au calcul attendu) : on aligne plutot l'en-tete
+    // directement sur le rectangle reel de .page (colonne de contenu deja
+    // centree de façon fiable par le navigateur, .page n'etant pas fixed).
+    const pageRect = pageEl.getBoundingClientRect();
+    const pageStyle = getComputedStyle(pageEl);
+    const padLeft = parseFloat(pageStyle.paddingLeft) || 0;
+    const padRight = parseFloat(pageStyle.paddingRight) || 0;
+    header.style.setProperty('left', (pageRect.left + padLeft) + 'px', 'important');
+    header.style.setProperty('width', (pageRect.width - padLeft - padRight) + 'px', 'important');
+    header.style.setProperty('right', 'auto', 'important');
+    header.style.setProperty('margin-left', '0', 'important');
+    header.style.setProperty('margin-right', '0', 'important');
+
+    const bottom = header.getBoundingClientRect().bottom;
+    const neededPadding = (header.getBoundingClientRect().height + 46) + 'px';
+    if (pageEl.style.paddingTop !== neededPadding) pageEl.style.paddingTop = neededPadding;
+    if (mask) { mask.style.height = (bottom + 8) + 'px'; mask.style.display = 'block'; }
+  };
   apply();
   if (pageEl._ppsHeaderRO) pageEl._ppsHeaderRO.disconnect();
   pageEl._ppsHeaderRO = new ResizeObserver(apply);
   pageEl._ppsHeaderRO.observe(header);
+  pageEl._ppsHeaderRO.observe(pageEl);
+  window.addEventListener('resize', apply);
 }
 
 function navigateTo(pageId) {
@@ -1490,20 +1517,32 @@ async function loadSleepInto(canvasId) {
 // ─── Bien-être (Synthèse) : FC, Body Battery, Pas, Sommeil, Statut ─────
 const SLEEP_QUALIFIER_FR = { POOR: 'Mauvais', FAIR: 'Passable', GOOD: 'Bon', EXCELLENT: 'Excellent' };
 
-// Couleurs approchées de celles utilisées par Garmin Connect pour chaque
-// statut d'entrainement (non documentées officiellement, calées au plus
-// pres de la capture d'ecran fournie pour STRAINED).
+// Statut d'entrainement : Garmin renvoie DEUX signaux independants pour un
+// meme releve - "trainingStatus" (code numerique, categorie de fond a plus
+// long terme) et "trainingStatusFeedbackPhrase" (categorie affichee en
+// titre par Garmin, peut differer du code numerique : constate en reel,
+// trainingStatus=3/Maintien avec phrase=OVERREACHING_1 en meme temps).
+// Garmin affiche la PHRASE comme statut principal (confirme par capture :
+// "Effort trop soutenu" en rouge alors que le code correspondait a
+// "Maintien"), donc on indexe desormais uniquement par le prefixe de la
+// phrase (avant le "_N" final) - jamais par le code numerique, qui n'est
+// pas fiable pour l'affichage. Couleurs non documentees officiellement,
+// calees au plus pres des captures fournies pour STRAINED et OVERREACHING.
 const TRAINING_STATUS_MAP = {
-  0: { label: 'Aucun statut',    color: '#9CA3AF' },
-  1: { label: 'Décrochage',      color: '#60A5FA' },
-  2: { label: 'Récupération',    color: '#3B82F6' },
-  3: { label: 'Maintien',        color: '#22C55E' },
-  4: { label: 'Productif',       color: '#16A34A' },
-  5: { label: 'Pic de forme',    color: '#06B6D4' },
-  6: { label: 'Surcharge',       color: '#F59E0B' },
-  7: { label: 'Improductif',     color: '#EF4444' },
-  8: { label: 'Sous tension',    color: '#DB2777' },
+  NO_STATUS:    { label: 'Aucun statut',        color: '#9CA3AF', tier: 'neutral' },
+  DETRAINING:   { label: 'Désentraînement',      color: '#60A5FA', tier: 'attention' },
+  RECOVERY:     { label: 'Récupération',         color: '#3B82F6', tier: 'neutral' },
+  MAINTAINING:  { label: 'Maintien',             color: '#22C55E', tier: 'neutral' },
+  PRODUCTIVE:   { label: 'Productif',            color: '#16A34A', tier: 'good' },
+  PEAKING:      { label: 'Pic de forme',         color: '#06B6D4', tier: 'good' },
+  OVERREACHING: { label: 'Effort trop soutenu',  color: '#DC2626', tier: 'attention' },
+  UNPRODUCTIVE: { label: 'Improductif',          color: '#EF4444', tier: 'attention' },
+  STRAINED:     { label: 'Sous tension',         color: '#DB2777', tier: 'attention' },
 };
+function trainingStatusCategory(phrase) {
+  const base = String(phrase || '').replace(/_\d+$/, '');
+  return TRAINING_STATUS_MAP[base] || null;
+}
 
 async function loadWellnessRow() {
   const set = (id, val) => { const e = el(id); if (e) e.textContent = val; };
@@ -1546,7 +1585,7 @@ async function loadWellnessRow() {
     }
 
     if (tsJson.data) {
-      const info = TRAINING_STATUS_MAP[tsJson.data.trainingStatus] || { label: tsJson.data.phrase || '—', color: '#9CA3AF' };
+      const info = trainingStatusCategory(tsJson.data.phrase) || { label: tsJson.data.phrase || '—', color: '#9CA3AF' };
       set('wellness-ts-value', info.label);
       const valEl = el('wellness-ts-value');
       if (valEl) valEl.style.color = info.color;

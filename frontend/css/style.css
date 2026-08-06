@@ -371,7 +371,7 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
   position: fixed;
   top: 16px;
   left: var(--sidebar-w);
-  right: 36px;
+  right: 0;
   max-width: 1028px;
   margin: 0 auto;
   z-index: 50;
@@ -382,7 +382,7 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
   position: fixed;
   top: 16px;
   left: var(--sidebar-w);
-  right: 36px;
+  right: 0;
   max-width: 1028px;
   margin: 0 auto;
   z-index: 50;
@@ -397,6 +397,7 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
 .health-sticky-header .page-header{
   position: static; background: none !important; border: none; box-shadow: none;
   padding: 0; margin-bottom: 10px; max-width: none; left: auto; right: auto; top: auto;
+  backdrop-filter: none !important; -webkit-backdrop-filter: none !important;
 }
 [data-theme="dark"] .page-header {
   background: rgba(14,17,30,0.78);
@@ -412,6 +413,27 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
    priorite au dernier declare) pour bien annuler le fond en mode sombre */
 [data-theme="dark"] .health-sticky-header .page-header{
   background: none !important;
+  backdrop-filter: none !important; -webkit-backdrop-filter: none !important;
+}
+
+/* Masque plein-largeur derriere l'en-tete fixe : meme traitement verre
+   depoli que l'en-tete lui-meme, pour que le contenu qui defile s'estompe
+   avant d'atteindre le cadre plutot que de rester visible derriere lui.
+   Hauteur/visibilite pilotees en JS (syncFixedHeaderPadding). */
+.page-top-mask{
+  position: fixed;
+  top: 0;
+  left: var(--sidebar-w);
+  right: 0;
+  z-index: 49;
+  background: rgba(255,255,255,0.55);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  pointer-events: none;
+  display: none;
+}
+[data-theme="dark"] .page-top-mask{
+  background: rgba(14,17,30,0.55);
 }
 .page-title{
   font-size:20px;font-weight:600;
@@ -1049,7 +1071,7 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
 .btn-logout-icon:hover{background:rgba(239,68,68,0.08);color:#dc2626;}
 
 /* Animations */
-@keyframes fadeIn{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:translateY(0);}}
+@keyframes fadeIn{from{opacity:0;}to{opacity:1;}}
 
 /* Responsive */
 @media(max-width:1100px){.hero-stats{grid-template-columns:repeat(2,1fr);}.dashboard-grid{grid-template-columns:repeat(2,1fr);}.card--wide{grid-column:span 2;}}
@@ -3822,7 +3844,7 @@ body { background: var(--bg) !important; }
   position: fixed !important;
   top: 16px !important;
   left: var(--sidebar-w) !important;
-  right: 36px !important;
+  right: 0 !important;
   max-width: 1028px !important;
   margin: 0 auto !important;
   z-index: 50 !important;
@@ -3912,7 +3934,7 @@ body { background: var(--bg) !important; }
   position: fixed !important;
   top: 16px !important;
   left: var(--sidebar-w) !important;
-  right: 36px !important;
+  right: 0 !important;
   max-width: 1028px !important;
   margin: 0 auto !important;
   z-index: 100 !important;

@@ -1028,12 +1028,21 @@ app.post('/api/pps', requireSession, upload.single('pdf'), async (req, res) => {
       const chosen = plausible.length ? closestToExpire(plausible) : (allDates.length ? closestToExpire(allDates) : null);
       if (chosen) expiryDate = `${chosen[3]}-${chosen[2]}-${chosen[1]}`;
 
-      // Nom : token en majuscule suivant le label "NOM", en excluant les
-      // autres labels de la carte (le texte extrait peut les intercaler).
-      const nomMatch = text.match(/\bNOM\b[\s:]*[\r\n]*\s*([A-ZÀ-ÖØ-Ý][A-Za-zÀ-ÖØ-öø-ÿ'\-]{1,30})/);
-      if (nomMatch) {
-        const blocklist = ['PRENOM', 'PRÉNOM', 'SEXE', 'PPS', 'NE', 'NÉ', 'EXPIRE', 'NUMERO', 'NUMÉRO', 'ATHLE', 'ATHLÉ', 'PASS', 'PREVENTION', 'PRÉVENTION', 'SANTE', 'SANTÉ'];
-        if (!blocklist.includes(nomMatch[1].toUpperCase())) lastName = nomMatch[1];
+      // Nom : sur un exemplaire reel, l'extraction PDF regroupe tous les
+      // libelles ("PRENOM NOM", "EXPIRE LE"...) d'un cote et toutes les
+      // valeurs de l'autre, dans un ordre qui ne suit ni l'un ni l'autre
+      // agencement visuel - impossible de rattacher une valeur a son
+      // libelle par simple proximite textuelle. On isole donc les tokens
+      // capitalises qui ne sont ni un libelle connu ni la valeur du sexe :
+      // il en reste exactement 2 (nom, prenom). Sur le gabarit observe, le
+      // nom precede la date de validite dans le texte brut et le prenom la
+      // suit - on utilise cette position relative pour les departager.
+      const KNOWN_LABELS = new Set(['NUMERO', 'NUMÉRO', 'PPS', 'PRENOM', 'PRÉNOM', 'NOM', 'NE', 'NÉ', 'SEXE', 'EXPIRE', 'LE', 'ATHLE', 'ATHLÉ', 'PASS', 'PREVENTION', 'PRÉVENTION', 'SANTE', 'SANTÉ', 'MASCULIN', 'FEMININ', 'FÉMININ']);
+      const nameMatches = [...text.matchAll(/\b([A-ZÀ-Ý][A-Za-zÀ-ÖØ-öø-ÿ'\-]{1,30})\b/g)]
+        .filter(m => !KNOWN_LABELS.has(m[1].toUpperCase()));
+      if (nameMatches.length) {
+        const before = chosen ? nameMatches.filter(m => m.index < chosen.index) : [];
+        lastName = (before.length ? before[before.length - 1] : nameMatches[0])[1];
       }
 
       await parser.destroy();

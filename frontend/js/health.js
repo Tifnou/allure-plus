@@ -203,50 +203,28 @@ function buildSleepComment(latest) {
 }
 
 // ─── Commentaires : statut d'entraînement ─────────────────────────────
-// Couleurs : voir trainingStatusColor() plus bas, qui reutilise
-// TRAINING_STATUS_MAP (app.js) plutot qu'une palette dupliquee ici.
-const TRAINING_STATUS_INFO = {
-  PEAKING: {
-    label: 'Pic de forme', tier: 'good',
-    text: "Vous êtes au sommet de votre forme actuelle : l'équilibre entre charge d'entraînement et récupération est optimal. C'est le moment idéal pour viser une performance ou une course objectif — cet état ne dure généralement que quelques semaines, profitez-en plutôt que d'ajouter du volume.",
-  },
-  PRODUCTIVE: {
-    label: 'Productif', tier: 'good',
-    text: "Votre charge d'entraînement porte ses fruits : votre forme progresse pendant que vous récupérez correctement. Continuez sur cette lancée sans changer brutalement de rythme — c'est l'état le plus favorable pour progresser durablement.",
-  },
-  MAINTAINING: {
-    label: 'Maintien', tier: 'neutral',
-    text: "Votre forme actuelle est stable, sans progression ni régression notable ces dernières semaines. Pour progresser à nouveau, augmentez légèrement le volume ou l'intensité d'une séance par semaine — sinon c'est un état tout à fait sain en phase de stabilisation.",
-  },
-  RECOVERY: {
-    label: 'Récupération', tier: 'neutral',
-    text: "Votre charge d'entraînement est actuellement basse : votre corps récupère. Une bonne récupération prépare la prochaine phase de progression — profitez-en pour bien dormir et bien manger, et reprenez progressivement dès que vous vous sentez prêt.",
-  },
-  UNPRODUCTIVE: {
-    label: 'Improductif', tier: 'attention',
-    text: "Vous vous entraînez, mais votre forme ne progresse pas — souvent le signe d'une récupération insuffisante ou d'un stress accumulé. Réduisez temporairement l'intensité et priorisez le sommeil : forcer davantage dans cet état est contre-productif.",
-  },
-  DETRAINING: {
-    label: 'Désentraînement', tier: 'attention',
-    text: "Votre charge d'entraînement est trop faible depuis plusieurs jours et votre condition physique commence à décliner. Reprenez progressivement — 2 à 3 sorties par semaine suffisent pour stopper la baisse et relancer une dynamique positive.",
-  },
-  STRAINED: {
-    label: 'Sous tension', tier: 'attention',
-    text: "Votre charge d'entraînement récente dépasse votre capacité de récupération actuelle, signe de fatigue accumulée. Accordez-vous quelques jours plus légers, en portant une attention particulière au sommeil, au stress et à l'alimentation avant de reprendre une charge normale.",
-  },
-  OVERREACHING: {
-    label: 'Surcharge fonctionnelle', tier: 'attention',
-    text: "Vous vous entraînez dur et votre charge dépasse temporairement ce que votre corps encaisse bien — utile ponctuellement dans un bloc de préparation, mais risqué si ça dure. Si c'était volontaire, planifiez une semaine allégée juste après ; sinon réduisez la charge dès maintenant pour éviter la blessure ou le surentraînement.",
-  },
-  NO_STATUS: {
-    label: 'Pas assez de données', tier: 'neutral',
-    text: "Garmin n'a pas encore assez d'historique récent (VO2max, charge d'entraînement) pour calculer votre statut. Enregistrez quelques activités de course avec cardiofréquencemètre dans les prochains jours pour débloquer cet indicateur.",
-  },
+// Label/couleur/tier viennent de TRAINING_STATUS_MAP (app.js, indexee par
+// le prefixe de trainingStatusFeedbackPhrase - PAS le code numerique
+// trainingStatus, les deux peuvent diverger sur un meme releve Garmin,
+// voir le commentaire de TRAINING_STATUS_MAP). Seul le texte de conseil,
+// plus long, reste local a cette page.
+const TRAINING_STATUS_TEXT = {
+  PEAKING: "Vous êtes au sommet de votre forme actuelle : l'équilibre entre charge d'entraînement et récupération est optimal. C'est le moment idéal pour viser une performance ou une course objectif — cet état ne dure généralement que quelques semaines, profitez-en plutôt que d'ajouter du volume.",
+  PRODUCTIVE: "Votre charge d'entraînement porte ses fruits : votre forme progresse pendant que vous récupérez correctement. Continuez sur cette lancée sans changer brutalement de rythme — c'est l'état le plus favorable pour progresser durablement.",
+  MAINTAINING: "Votre forme actuelle est stable, sans progression ni régression notable ces dernières semaines. Pour progresser à nouveau, augmentez légèrement le volume ou l'intensité d'une séance par semaine — sinon c'est un état tout à fait sain en phase de stabilisation.",
+  RECOVERY: "Votre charge d'entraînement est actuellement basse : votre corps récupère. Une bonne récupération prépare la prochaine phase de progression — profitez-en pour bien dormir et bien manger, et reprenez progressivement dès que vous vous sentez prêt.",
+  UNPRODUCTIVE: "Vous vous entraînez, mais votre forme ne progresse pas — souvent le signe d'une récupération insuffisante ou d'un stress accumulé. Réduisez temporairement l'intensité et priorisez le sommeil : forcer davantage dans cet état est contre-productif.",
+  DETRAINING: "Votre charge d'entraînement est trop faible depuis plusieurs jours et votre condition physique commence à décliner. Reprenez progressivement — 2 à 3 sorties par semaine suffisent pour stopper la baisse et relancer une dynamique positive.",
+  STRAINED: "Votre charge d'entraînement récente dépasse votre capacité de récupération actuelle, signe de fatigue accumulée. Accordez-vous quelques jours plus légers, en portant une attention particulière au sommeil, au stress et à l'alimentation avant de reprendre une charge normale.",
+  OVERREACHING: "Vous poussez plus fort que ce que votre corps récupère en ce moment. Ponctuellement (bloc de préparation volontaire), c'est utile — mais si ça dure, le risque de blessure ou de surentraînement augmente. Accordez-vous quelques jours plus légers et surveillez votre sommeil et votre récupération de près.",
+  NO_STATUS: "Garmin n'a pas encore assez d'historique récent (VO2max, charge d'entraînement) pour calculer votre statut. Enregistrez quelques activités de course avec cardiofréquencemètre dans les prochains jours pour débloquer cet indicateur.",
 };
 
 function trainingStatusInfo(phrase) {
+  const cat = (typeof trainingStatusCategory === 'function') ? trainingStatusCategory(phrase) : null;
+  if (!cat) return null;
   const base = String(phrase || '').replace(/_\d+$/, '');
-  return TRAINING_STATUS_INFO[base] || null;
+  return { label: cat.label, tier: cat.tier, color: cat.color, text: TRAINING_STATUS_TEXT[base] || '' };
 }
 
 // ─── Chargement par métrique ───────────────────────────────────────────
@@ -383,21 +361,13 @@ function statusDot(color) {
   return `<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${color || '#9CA3AF'};margin-right:7px;vertical-align:middle"></span>`;
 }
 
-// Couleur : reutilise TRAINING_STATUS_MAP (app.js, indexee par le code
-// numerique trainingStatus), deja calee sur la Synthese - pas de palette
-// distincte a maintenir en double.
-function trainingStatusColor(code) {
-  return (typeof TRAINING_STATUS_MAP !== 'undefined' && TRAINING_STATUS_MAP[code]) ? TRAINING_STATUS_MAP[code].color : '#9CA3AF';
-}
-
 async function loadTrainingStatusMetric(days) {
   const cur = await fetch('/api/training-status').then(r => r.json()).then(r => r.data).catch(() => null);
   const hist = await fetch(`/api/health-history/trainingStatus?days=${days}`).then(r => r.json()).catch(() => []);
   const info = cur ? trainingStatusInfo(cur.phrase) : null;
   const rows = hist.slice().reverse().map(e => {
     const i = trainingStatusInfo(e.value.phrase);
-    const color = trainingStatusColor(e.value.trainingStatus);
-    return [formatDate(e.date), statusDot(color) + (i ? i.label : (e.value.phrase || '—'))];
+    return [formatDate(e.date), statusDot(i?.color) + (i ? i.label : (e.value.phrase || '—'))];
   });
   // Garmin n'expose pas d'historique de statut par API (verifie) : on
   // construit le notre au fil des visites. On le signale tant qu'il n'y a
@@ -408,7 +378,7 @@ async function loadTrainingStatusMetric(days) {
   const comment = info ? { state: info.label, tier: info.tier, text: info.text + (buildingNotice ? ' ' + buildingNotice : '') } : null;
   return {
     headers: ['Date', 'Statut'], rows, comment,
-    current: cur ? { value: info ? info.label : (cur.phrase || '—'), unit: '', color: trainingStatusColor(cur.trainingStatus), dateLabel: 'au ' + formatDate(cur.calendarDate) } : null,
+    current: cur ? { value: info ? info.label : (cur.phrase || '—'), unit: '', color: info?.color, dateLabel: 'au ' + formatDate(cur.calendarDate) } : null,
   };
 }
 
