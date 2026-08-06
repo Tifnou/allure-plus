@@ -354,10 +354,7 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
 .page{display:none;padding:32px 36px 60px;max-width:1100px;margin:0 auto;}
 .page.active{display:block;}
 
-/* Page header — position:fixed (pas sticky) : ne bouge jamais du tout,
-   meme pendant le court trajet initial avant "accroche" que sticky
-   provoque. La compensation d'espace (padding-top de .page) est geree
-   en JS (syncFixedHeaderPadding) car la hauteur varie selon la page. */
+/* Page header — flux normal, defile avec le reste de la page. */
 .page-header{
   display:flex;align-items:center;justify-content:space-between;
   gap:16px;
@@ -368,24 +365,10 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
   border-radius: 14px;
   padding: 10px 20px;
   box-shadow: 0 2px 12px rgba(0,0,0,0.07);
-  position: fixed;
-  top: 16px;
-  left: var(--sidebar-w);
-  right: 0;
-  max-width: 1028px;
-  margin: 0 auto;
-  z-index: 50;
+  margin-bottom: 20px;
 }
-/* Santé/Performance : en-tête + onglets Santé/Performance figes ensemble,
-   comme un seul bloc (meme principe que .act-header-sticky/Activités) */
+/* Santé/Performance : en-tête + onglets Santé/Performance dans un seul bloc */
 .health-sticky-header{
-  position: fixed;
-  top: 16px;
-  left: var(--sidebar-w);
-  right: 0;
-  max-width: 1028px;
-  margin: 0 auto;
-  z-index: 50;
   background: rgba(255,255,255,0.72);
   backdrop-filter: blur(18px);
   -webkit-backdrop-filter: blur(18px);
@@ -393,10 +376,11 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
   border-radius: 14px;
   padding: 10px 20px 14px;
   box-shadow: 0 2px 12px rgba(0,0,0,0.07);
+  margin-bottom: 20px;
 }
 .health-sticky-header .page-header{
-  position: static; background: none !important; border: none; box-shadow: none;
-  padding: 0; margin-bottom: 10px; max-width: none; left: auto; right: auto; top: auto;
+  background: none !important; border: none; box-shadow: none;
+  padding: 0; margin-bottom: 10px;
   backdrop-filter: none !important; -webkit-backdrop-filter: none !important;
 }
 [data-theme="dark"] .page-header {
@@ -416,23 +400,6 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
   backdrop-filter: none !important; -webkit-backdrop-filter: none !important;
 }
 
-/* Masque plein-largeur derriere l'en-tete fixe : meme traitement verre
-   depoli que l'en-tete lui-meme, pour que le contenu qui defile s'estompe
-   avant d'atteindre le cadre plutot que de rester visible derriere lui.
-   Hauteur/visibilite pilotees en JS (syncFixedHeaderPadding). */
-.page-top-mask{
-  position: fixed;
-  top: 0;
-  left: var(--sidebar-w);
-  right: 0;
-  z-index: 49;
-  background: linear-gradient(to bottom, rgba(247,246,243,0.97) 0%, rgba(247,246,243,0.97) 55%, rgba(247,246,243,0) 100%);
-  pointer-events: none;
-  display: none;
-}
-[data-theme="dark"] .page-top-mask{
-  background: linear-gradient(to bottom, rgba(11,13,20,0.97) 0%, rgba(11,13,20,0.97) 55%, rgba(11,13,20,0) 100%);
-}
 .page-title{
   font-size:20px;font-weight:600;
   color:var(--text-primary);
@@ -3925,17 +3892,11 @@ body { background: var(--bg) !important; }
    ═══════════════════════════════════════════════════════════════════ */
 
 /* 1. Annuler les anciens overrides qui cassaient le sticky */
-#page-activities .page-header { position: unset !important; }
+#page-activities .page-header { position: unset !important; margin-bottom: 20px !important; }
 
-/* 2. Fixed haute spécificité (pas sticky : aucun mouvement au scroll) */
+/* En-tête en flux normal : defile avec le reste de la page. */
 #page-activities .act-header-sticky {
-  position: fixed !important;
-  top: 16px !important;
-  left: var(--sidebar-w) !important;
-  right: 0 !important;
-  max-width: 1028px !important;
-  margin: 0 auto !important;
-  z-index: 100 !important;
+  position: static !important;
   display: flex !important;
   align-items: flex-start !important;
   gap: 20px !important;
@@ -4068,25 +4029,16 @@ body { background: var(--bg) !important; }
   overflow: visible !important;
 }
 #page-activities.active {
-  display: flex !important;
-  flex-direction: column !important;
-  height: calc(100vh - 64px) !important;   /* 64px = padding top de .page */
-  padding-bottom: 0 !important;
-  box-sizing: border-box !important;
-  overflow: hidden !important;
+  display: block !important;
+  height: auto !important;
+  overflow: visible !important;
 }
 #page-activities.active .card.card--fullwidth {
-  flex: 1 !important;
-  min-height: 0 !important;
-  overflow: hidden !important;
-  display: flex !important;
-  flex-direction: column !important;
-  margin-bottom: 0 !important;
+  overflow: visible !important;
 }
 #page-activities.active .table-wrapper {
-  flex: 1 !important;
-  overflow-y: auto !important;
   overflow-x: auto !important;
+  overflow-y: visible !important;
 }
 #page-activities.active .runs-table thead th {
   position: sticky !important;
@@ -4101,11 +4053,6 @@ body { background: var(--bg) !important; }
    2. Header sans backdrop-filter coûteux → plus de re-render au hover
    3. will-change sur les lignes hover → isolé du header
    ══════════════════════════════════════════════════════════════════ */
-
-/* Scrollbar toujours visible = espace toujours réservé, pas de shift */
-#page-activities.active .table-wrapper {
-  overflow-y: scroll !important;
-}
 
 /* Supprimer le backdrop-filter sur le header activités uniquement */
 #page-activities .act-header-sticky {

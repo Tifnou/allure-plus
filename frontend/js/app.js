@@ -134,55 +134,12 @@ let _activitiesYearDefaulted = false; // évite d'écraser "Toutes les années" 
 // NAVIGATION
 // ═══════════════════════════════════════════════
 
-// L'en-tete de page est en position:fixed (jamais de mouvement au scroll,
-// meme le court trajet initial que "sticky" provoquerait) - il ne reserve
-// donc plus sa place dans le flux normal. On compense en ajustant le
-// padding-top de la page active a la hauteur reelle de son en-tete, mesuree
-// en continu (ResizeObserver) car cette hauteur varie selon le contenu
-// (ex: stats Activites qui se peuplent apres coup, retour a la ligne...).
-function syncFixedHeaderPadding(pageEl) {
-  if (!pageEl) return;
-  const header = pageEl.querySelector(':scope > .health-sticky-header') || pageEl.querySelector(':scope > .page-header');
-  const mask = el('page-top-mask');
-  if (!header) {
-    pageEl.style.paddingTop = '';
-    if (mask) mask.style.display = 'none';
-    return;
-  }
-  const apply = () => {
-    // Le centrage CSS pur (left/right/max-width/margin:auto) sur un
-    // element position:fixed s'est avere peu fiable (largeur obtenue ne
-    // correspondait pas au calcul attendu) : on aligne plutot l'en-tete
-    // directement sur le rectangle reel de .page (colonne de contenu deja
-    // centree de façon fiable par le navigateur, .page n'etant pas fixed).
-    const pageRect = pageEl.getBoundingClientRect();
-    const pageStyle = getComputedStyle(pageEl);
-    const padLeft = parseFloat(pageStyle.paddingLeft) || 0;
-    const padRight = parseFloat(pageStyle.paddingRight) || 0;
-    header.style.setProperty('left', (pageRect.left + padLeft) + 'px', 'important');
-    header.style.setProperty('width', (pageRect.width - padLeft - padRight) + 'px', 'important');
-    header.style.setProperty('right', 'auto', 'important');
-    header.style.setProperty('margin-left', '0', 'important');
-    header.style.setProperty('margin-right', '0', 'important');
-
-    const bottom = header.getBoundingClientRect().bottom;
-    const neededPadding = (header.getBoundingClientRect().height + 46) + 'px';
-    if (pageEl.style.paddingTop !== neededPadding) pageEl.style.paddingTop = neededPadding;
-    if (mask) { mask.style.height = (bottom + 8) + 'px'; mask.style.display = 'block'; }
-  };
-  apply();
-  if (pageEl._ppsHeaderRO) pageEl._ppsHeaderRO.disconnect();
-  pageEl._ppsHeaderRO = new ResizeObserver(apply);
-  pageEl._ppsHeaderRO.observe(header);
-  pageEl._ppsHeaderRO.observe(pageEl);
-  window.addEventListener('resize', apply);
-}
 
 function navigateTo(pageId) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   const page = el(`page-${pageId}`);
-  if (page) { page.classList.add('active'); syncFixedHeaderPadding(page); }
+  if (page) { page.classList.add('active'); }
 
   const navItem = el(`nav-${pageId}`);
   if (navItem) navItem.classList.add('active');
@@ -3287,7 +3244,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   try { await loadWeightHistory(); checkWeightReminderToast(); } catch(e) { console.error('loadWeightHistory failed:', e); }
   try { initAvatarUpload(); loadAvatar(); } catch(e) { console.error('initAvatarUpload failed:', e); }
   try { initPpsButtons(); loadPpsList(); } catch(e) { console.error('initPpsButtons failed:', e); }
-  try { syncFixedHeaderPadding(document.querySelector('.page.active')); } catch(e) { console.error('syncFixedHeaderPadding failed:', e); }
   try { initBgManagerButton(); } catch(e) { console.error('initBgManagerButton failed:', e); }
   applyGenderedEmojis();
   // Précharger les plans en arrière-plan dès le démarrage (évite le délai à l'ouverture de la page)
