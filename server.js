@@ -991,27 +991,58 @@ app.post('/api/pps', requireSession, upload.single('pdf'), async (req, res) => {
       return res.status(400).json({ error: 'Deux PPS sont deja enregistres — supprimez-en un avant d\'en ajouter un nouveau' });
     }
 
-    let number = null, expiryDate = null;
+    let number = null, expiryDate = null, lastName = null;
     try {
       const { PDFParse } = require('pdf-parse');
       const parser = new PDFParse({ data: req.file.buffer });
       const parsed = await parser.getText();
       const text = parsed.text || '';
+
       // Numero PPS : "P" suivi d'alphanumerique incluant au moins un
       // chiffre (evite de matcher un mot comme "PREVENTION").
       const numMatch = text.match(/\bP(?=[A-Z0-9]*\d)[A-Z0-9]{8,12}\b/);
       if (numMatch) number = numMatch[0];
-      // Date de validite : cherchee pres du mot "EXPIRE" pour ne pas
-      // confondre avec la date de naissance, elle aussi au format JJ/MM/AAAA.
-      const dateMatch = text.match(/EXPIRE[^\d]{0,20}(\d{2})\/(\d{2})\/(\d{4})/i);
-      if (dateMatch) expiryDate = `${dateMatch[3]}-${dateMatch[2]}-${dateMatch[1]}`;
+
+      // Date de validite : l'extraction d'un PDF ne respecte pas forcement
+      // l'ordre visuel du document ("EXPIRE" et sa date peuvent se
+      // retrouver loin l'un de l'autre, ou une autre date - naissance -
+      // plus proche dans le texte brut). Strategie fiable : parmi toutes
+      // les dates JJ/MM/AAAA du document, ne garder que celles dont
+      // l'annee est plausible pour une validite (annee courante -1 a +3),
+      // une date de naissance etant toujours bien plus ancienne. En cas
+      // d'ambiguite (plusieurs dates plausibles), departager par proximite
+      // avec le mot "EXPIRE".
+      const currentYear = new Date().getFullYear();
+      const allDates = [...text.matchAll(/(\d{2})\/(\d{2})\/(\d{4})/g)];
+      const plausible = allDates.filter(m => {
+        const y = parseInt(m[3], 10);
+        return y >= currentYear - 1 && y <= currentYear + 3;
+      });
+      const idxExpire = text.search(/EXPIRE/i);
+      const closestToExpire = (candidates) => {
+        if (idxExpire === -1) return candidates[0];
+        let best = candidates[0], bestDist = Infinity;
+        candidates.forEach(m => { const d = Math.abs(m.index - idxExpire); if (d < bestDist) { bestDist = d; best = m; } });
+        return best;
+      };
+      const chosen = plausible.length ? closestToExpire(plausible) : (allDates.length ? closestToExpire(allDates) : null);
+      if (chosen) expiryDate = `${chosen[3]}-${chosen[2]}-${chosen[1]}`;
+
+      // Nom : token en majuscule suivant le label "NOM", en excluant les
+      // autres labels de la carte (le texte extrait peut les intercaler).
+      const nomMatch = text.match(/\bNOM\b[\s:]*[\r\n]*\s*([A-ZÀ-ÖØ-Ý][A-Za-zÀ-ÖØ-öø-ÿ'\-]{1,30})/);
+      if (nomMatch) {
+        const blocklist = ['PRENOM', 'PRÉNOM', 'SEXE', 'PPS', 'NE', 'NÉ', 'EXPIRE', 'NUMERO', 'NUMÉRO', 'ATHLE', 'ATHLÉ', 'PASS', 'PREVENTION', 'PRÉVENTION', 'SANTE', 'SANTÉ'];
+        if (!blocklist.includes(nomMatch[1].toUpperCase())) lastName = nomMatch[1];
+      }
+
       await parser.destroy();
     } catch (e) { console.log('Extraction PDF PPS impossible:', e.message); }
 
     const id = crypto.randomUUID();
     const filename = 'pps-' + id + '.pdf';
     fs.writeFileSync(path.join(UPLOADS_DIR, filename), req.file.buffer);
-    const entry = { id, number, expiryDate, filename, uploadedAt: new Date().toISOString() };
+    const entry = { id, number, expiryDate, lastName, filename, uploadedAt: new Date().toISOString() };
     list.push(entry);
     writeJsonSafe(PPS_FILE, list);
     res.json({ success: true, entry });
@@ -1023,9 +1054,10 @@ app.put('/api/pps/:id', requireSession, (req, res) => {
     const list = readJsonSafe(PPS_FILE, []);
     const idx = list.findIndex(e => e.id === req.params.id);
     if (idx === -1) return res.status(404).json({ error: 'PPS introuvable' });
-    const { number, expiryDate } = req.body || {};
+    const { number, expiryDate, lastName } = req.body || {};
     if (number != null) list[idx].number = String(number).slice(0, 40);
     if (expiryDate != null) list[idx].expiryDate = expiryDate;
+    if (lastName != null) list[idx].lastName = String(lastName).slice(0, 60);
     writeJsonSafe(PPS_FILE, list);
     res.json({ success: true, entry: list[idx] });
   } catch (err) { handleError(res, err); }
