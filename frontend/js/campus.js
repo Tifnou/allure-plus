@@ -98,18 +98,21 @@ function isNowInWeek(now, weekDate) {
 // S60 = allure tenable 60min = limite basse seuil anaérobie = 79-83% VMA
 // S30 = allure tenable 30min = limite haute seuil anaérobie = 86-88% VMA
 // Sweet Spot = 95% de la vitesse S60 (définition officielle Campus Coach)
+// fcZone : correspondance FC generalement observee (reperage qualitatif,
+// jamais une egalite stricte — %VMA et %FC reserve ne se recouvrent jamais
+// parfaitement point par point). Affichee en plage, jamais en valeur unique.
 const ALLURE_PLUS_ZONES = {
   // RECOVER : pas d'allure cible (allure libre selon forme du jour)
   RECOVER:    { pctLow: 0.55, pctHigh: 0.62, label: 'Récupération',             color: '#94a3b8', noTarget: true },
-  EF:         { pctLow: 0.62, pctHigh: 0.67, label: 'EF — Endurance fond.',    color: '#4ade80', trailCorr: 0.07 },
-  TEMPO:      { pctLow: 0.71, pctHigh: 0.75, label: 'Tempo',                    color: '#a3e635', trailCorr: 0.07 },
-  AS42:       { pctLow: 0.75, pctHigh: 0.78, label: 'AS42 — Allure Marathon',   color: '#818cf8', trailCorr: 0.07 },
-  SWEET_SPOT: { pctLow: 0.79, pctHigh: 0.82, label: 'Sweet Spot',               color: '#facc15', isSweetSpot: true, trailCorr: 0.07 },
-  AS21:       { pctLow: 0.82, pctHigh: 0.85, label: 'AS21 — Allure Semi',      color: '#fb923c', trailCorr: 0.07 },
-  S60:        { pctLow: 0.84, pctHigh: 0.87, label: 'S60 — Seuil 60min',       color: '#f97316', trailCorr: 0.07 },
-  AS10:       { pctLow: 0.88, pctHigh: 0.91, label: 'AS10 — Allure 10km',      color: '#c084fc', trailCorr: 0.08 },
-  S30:        { pctLow: 0.89, pctHigh: 0.92, label: 'S30 — Seuil 30min',       color: '#f87171', trailCorr: 0.07 },
-  VMA:        { pctLow: 0.95, pctHigh: 1.05, label: 'VMA',                      color: '#e879f9', trailCorr: 0.10 },
+  EF:         { pctLow: 0.62, pctHigh: 0.70, label: 'EF — Endurance fond.',    color: '#4ade80', trailCorr: 0.07, fcZone: 'Z1 haute à Z2' },
+  TEMPO:      { pctLow: 0.71, pctHigh: 0.75, label: 'Tempo',                    color: '#a3e635', trailCorr: 0.07, fcZone: 'Z2 haute à Z3 basse' },
+  AS42:       { pctLow: 0.76, pctHigh: 0.79, label: 'AS42 — Allure Marathon',   color: '#818cf8', trailCorr: 0.07, fcZone: 'Z3' },
+  SWEET_SPOT: { pctLow: 0.80, pctHigh: 0.83, label: 'Sweet Spot',               color: '#facc15', isSweetSpot: true, trailCorr: 0.07, fcZone: 'Z3 moyenne à haute' },
+  AS21:       { pctLow: 0.82, pctHigh: 0.85, label: 'AS21 — Allure Semi',      color: '#fb923c', trailCorr: 0.07, fcZone: 'Z3 haute à Z4 basse' },
+  S60:        { pctLow: 0.84, pctHigh: 0.87, label: 'S60 — Seuil 60min',       color: '#f97316', trailCorr: 0.07, fcZone: 'Z4 basse à moyenne' },
+  AS10:       { pctLow: 0.88, pctHigh: 0.91, label: 'AS10 — Allure 10km',      color: '#c084fc', trailCorr: 0.08, fcZone: 'Z4 moyenne à haute' },
+  S30:        { pctLow: 0.92, pctHigh: 0.94, label: 'S30 — Seuil 30min',       color: '#f87171', trailCorr: 0.07, fcZone: 'Z4 haute à Z5 basse' },
+  VMA:        { pctLow: 0.95, pctHigh: 1.05, label: 'VMA',                      color: '#e879f9', trailCorr: 0.10, fcZone: 'Z5' },
 };
 
 // Calcule min/max allure (sec/km) pour une zone et une VMA données
@@ -145,7 +148,7 @@ function isTrailSession(session) {
                       combined.includes('montée') || combined.includes('montee') ||
                       combined.includes('uphill');
   const isCompTrail = cat.includes('competition')
-                   && (campusState.goal?.type || '').toLowerCase().includes('trail');
+                   && (campusState.goal?.goalType || '').toLowerCase().includes('trail');
   return hasUphill || hasElev || hasCoteText || isCompTrail;
 }
 
@@ -344,6 +347,16 @@ function markSessionDone(weekId, trainingIndex) {
   const m = _getLocalDoneMap(); m[weekId + '_' + trainingIndex] = 'done';
   localStorage.setItem(LOCAL_DONE_KEY, JSON.stringify(m));
   renderSessionList(campusState.selectedWeekIdx);
+  // Proposer de lier une activite Garmin reelle juste apres validation, si la
+  // seance s'y prete (pas PPG/competition) et n'est pas deja liee.
+  if (typeof openSessionLinkPicker === 'function' && typeof _analysisIndex !== 'undefined') {
+    const week = (campusState.weeks || []).find(w => w._id === weekId);
+    const session = week?.sessions?.find(s => (s.trainingIndex ?? 0) === Number(trainingIndex));
+    const already = _analysisIndex.bySession[_analysisSessionKey(weekId, trainingIndex)];
+    if (session && !already && typeof isSessionAnalysable === 'function' && isSessionAnalysable(session)) {
+      openSessionLinkPicker(weekId, trainingIndex);
+    }
+  }
 }
 function markSessionSkip(weekId, trainingIndex) {
   const m = _getLocalDoneMap(); m[weekId + '_' + trainingIndex] = 'skip';
@@ -1103,6 +1116,11 @@ function renderSessionCard(session, idx, weekIdx, weekId, isCurrentWeek) {
         </div>
         <div class="session-card-right">
           <div class="session-difficulty">${diffDots}</div>
+          ${(() => {
+            if (!weekId || typeof _analysisIndex === 'undefined') return '';
+            const rec = _analysisIndex.bySession[(weekId + '_' + (session.trainingIndex ?? 0))];
+            return rec ? `<span class="session-analysis-score-badge" title="Séance analysée">📊 ${rec.score}%</span>` : '';
+          })()}
           <span class="session-status-badge ${statusInfo.cls}">${statusInfo.label}</span>
           <span class="session-expand-chevron">${isOpen ? '-' : '-'}</span>
         </div>
@@ -1399,6 +1417,7 @@ function renderSessionDetail(session, weekId, isCurrentWeek) {
       ${zonesHTML}
       <div class="session-detail-actions">
         ${exportBtn}
+        ${typeof renderSessionAnalysisButton === 'function' ? renderSessionAnalysisButton(session, weekId) : ''}
         ${(() => {
           if (!campusState.usingImportedPlan || !weekId) return '';
           const ti = session.trainingIndex ?? 0;
@@ -2835,18 +2854,12 @@ function renderGoalSummary(summary) {
 function buildPacesTableHTML() {
   const isTrail = (campusState.goal?.goalType || '').toLowerCase().includes('trail');
 
-  const CAMPUS_ZONES = [
-    // Ordre : du plus lent au plus rapide — valeurs tirées du tableau de référence Allure+
-    { label: 'EF — Endurance fond.',   sub: '62-67% VMA',    emoji: 'EF',  low: 0.62, high: 0.67, trailF: 1.07, color: '#4ade80' },
-    { label: 'Tempo',                   sub: '71-75% VMA',    emoji: 'T',   low: 0.71, high: 0.75, trailF: 1.07, color: '#a3e635' },
-    { label: 'AS42 — Allure Marathon', sub: '75-78% VMA',    emoji: 'M42', low: 0.75, high: 0.78, trailF: 1.07, color: '#818cf8' },
-    { label: 'Sweet Spot',              sub: '79-82% VMA',    emoji: 'SS',  low: 0.84 * 0.95, high: 0.87 * 0.95, trailF: 1.07, color: '#facc15' },
-    { label: 'AS21 — Allure Semi',     sub: '82-85% VMA',    emoji: 'M21', low: 0.82, high: 0.85, trailF: 1.07, color: '#fb923c' },
-    { label: 'S60 — Seuil 60min',      sub: '84-87% VMA  ★', emoji: 'S60', low: 0.84, high: 0.87, trailF: 1.07, color: '#f97316' },
-    { label: 'AS10 — Allure 10km',     sub: '88-91% VMA',    emoji: 'M10', low: 0.88, high: 0.91, trailF: 1.08, color: '#c084fc' },
-    { label: 'S30 — Seuil 30min',      sub: '89-92% VMA',    emoji: 'S30', low: 0.89, high: 0.92, trailF: 1.07, color: '#f87171' },
-    { label: 'VMA',                     sub: '95-105% VMA',   emoji: 'VMA', low: 0.95, high: 1.05, trailF: 1.10, color: '#e879f9' },
-  ];
+  // Zones affichees (du plus lent au plus rapide), construites depuis
+  // ALLURE_PLUS_ZONES via calcAllureRef/calcAllureRefTrail — la meme source
+  // de verite unique que le tableau Allures du Profil, pour que les deux
+  // affichent toujours des valeurs identiques (plus de table dupliquee ici).
+  const PACE_MODAL_ZONES = ['EF', 'TEMPO', 'AS42', 'SWEET_SPOT', 'AS21', 'S60', 'AS10', 'S30', 'VMA'];
+  const SHORT_CODE = { EF: 'EF', TEMPO: 'T', AS42: 'M42', SWEET_SPOT: 'SS', AS21: 'M21', S60: 'S60', AS10: 'M10', S30: 'S30', VMA: 'VMA' };
 
   const profile = JSON.parse(localStorage.getItem('suivi_sport_profile') || '{}');
   const sex = profile.sex || 'M';
@@ -2858,19 +2871,19 @@ function buildPacesTableHTML() {
     ? `<div class="paces-col-header"><span class="paces-col-zone"></span><span class="paces-col-road">${personEmoji('running')} Route /km</span><span class="paces-col-trail">&#x1F3D4; Trail /km</span></div>`
     : `<div class="paces-col-header"><span class="paces-col-zone"></span><span class="paces-col-road">Allure /km</span></div>`;
 
-  const rows = CAMPUS_ZONES.map(z => {
+  const rows = PACE_MODAL_ZONES.map(key => {
+    const ref = ALLURE_PLUS_ZONES[key];
+    const sub = Math.round(ref.pctLow * 100) + '-' + Math.round(ref.pctHigh * 100) + '% VMA' + (key === 'S60' ? '  ★' : '');
     let roadStr = '?', trailHtml = '';
     if (vmaKmh) {
-      const pFast = Math.round(3600 / (vmaKmh * z.high));
-      const pSlow = Math.round(3600 / (vmaKmh * z.low));
-      roadStr = fmtPace(pFast) + '<small class="pace-sep">&rarr;</small>' + fmtPace(pSlow);
+      const road = calcAllureRef(key, vmaKmh);
+      roadStr = fmtPace(road.paceMin) + '<small class="pace-sep">&rarr;</small>' + fmtPace(road.paceMax);
       if (isTrail) {
-        const tFast = Math.round(pFast * z.trailF);
-        const tSlow = Math.round(pSlow * z.trailF);
-        trailHtml = '<span class="pace-trail-val">' + fmtPace(tFast) + '<small class="pace-sep">&rarr;</small>' + fmtPace(tSlow) + '</span><small class="pace-trail-pct">+' + Math.round((z.trailF-1)*100) + '%</small>';
+        const trail = calcAllureRefTrail(key, vmaKmh);
+        trailHtml = '<span class="pace-trail-val">' + fmtPace(trail.paceMin) + '<small class="pace-sep">&rarr;</small>' + fmtPace(trail.paceMax) + '</span><small class="pace-trail-pct">+' + Math.round((trail.trailCorr || 0) * 100) + '%</small>';
       }
     }
-    return '<div class="pace-row" style="border-left:3px solid ' + z.color + '40"><div class="pace-row-zone"><span class="pace-zone-label" style="color:' + z.color + '">' + z.emoji + '</span><div><div class="pace-row-label">' + z.label + '</div><div class="pace-row-sub">' + z.sub + '</div></div></div><div class="pace-row-values' + (isTrail ? ' pace-row-values--trail' : '') + '"><span class="pace-road-val">' + roadStr + '<small class="pace-unit">/km</small></span>' + (isTrail ? trailHtml : '') + '</div></div>';
+    return '<div class="pace-row" style="border-left:3px solid ' + ref.color + '40"><div class="pace-row-zone"><span class="pace-zone-label" style="color:' + ref.color + '">' + (SHORT_CODE[key] || key) + '</span><div><div class="pace-row-label">' + ref.label + '</div><div class="pace-row-sub">' + sub + '</div></div></div><div class="pace-row-values' + (isTrail ? ' pace-row-values--trail' : '') + '"><span class="pace-road-val">' + roadStr + '<small class="pace-unit">/km</small></span>' + (isTrail ? trailHtml : '') + '</div></div>';
   }).join('');
 
   const typeLabel = isTrail

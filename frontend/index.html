@@ -12,8 +12,8 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <link rel="stylesheet" href="css/style.css?v=1786004705088" />
-  <link rel="stylesheet" href="css/plans.css?v=1785834176454" />
+  <link rel="stylesheet" href="css/style.css?v=1786201855335" />
+  <link rel="stylesheet" href="css/plans.css?v=1786014624239" />
 </head>
 <body>
 <!-- ✨ SPLASH SCREEN ✨ -->
@@ -210,6 +210,12 @@
                 </div>
               </div>
               <div id="profile-weight-reminder"></div>
+              <div class="form-row" id="pref2-row" style="display:none">
+                <label class="form-label" for="input-pref2">Tampon</label>
+                <label class="form-checkbox-inline">
+                  <input type="checkbox" id="input-pref2" /> Pref 2
+                </label>
+              </div>
               <div class="form-row">
                 <label class="form-label" for="input-hrmax">FC max réelle</label>
                 <div class="form-input-wrap">
@@ -1072,11 +1078,12 @@
 
   </div><!-- /app-content -->
 
-  <script src="js/app.js?v=1786004705088"></script>
-  <script src="js/campus.js?v=1785858455056"></script>
+  <script src="js/app.js?v=1786200768035"></script>
+  <script src="js/campus.js?v=1786199203890"></script>
+  <script src="js/session-analysis.js?v=1786202770953"></script>
   <script src="js/stats.js?v=1785829724242"></script>
-  <script src="js/records.js?v=1785856541084"></script>
-  <script src="js/health.js?v=9"></script>
+  <script src="js/records.js?v=1786024863614"></script>
+  <script src="js/health.js?v=1786028890149"></script>
   <script src="js/plans.js?v=1785854785389"></script>
   <!-- ... MODAL LOGS ........................... -->
   <div id="logs-modal" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.55);backdrop-filter:blur(4px);" onclick="if(event.target===this)closeLogsModal()">
@@ -1133,6 +1140,9 @@
   <button type="button" class="pps-btn pps-btn--empty" id="pps-btn" title="PPS">PPS</button>
   <input type="file" accept="application/pdf" id="pps-file-input" style="display:none" />
   <div class="pps-panel" id="pps-panel" style="display:none"></div>
+
+  <!-- Tampon "Pref 2", sous l'avatar — visible seulement si active dans Profil > Mes informations -->
+  <img src="/images/pref2-tampon.png" alt="Pref 2" class="pref2-tampon" id="pref2-tampon" style="display:none" />
 
 </body>
 </html>

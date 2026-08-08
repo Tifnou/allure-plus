@@ -1,5 +1,5 @@
 #define MyAppName "Allure+"
-#define MyAppVersion "1.6.0"
+#define MyAppVersion "1.10.0"
 #define MyAppPublisher "Allure+"
 
 [Setup]
@@ -39,29 +39,51 @@ Name: "{group}\Desinstaller Allure+"; Filename: "{uninstallexe}"
 Filename: "{app}\install.bat"; WorkingDir: "{app}"; Flags: waituntilterminated; Description: "Installer Node.js et les dependances d'Allure+"
 
 [Code]
+var
+  // ShouldSeedImages est appelee une fois PAR FICHIER par Inno Setup (le
+  // Check: d'une entree [Files] a wildcard est reevalue a chaque fichier,
+  // pas une seule fois pour tout le groupe). Sans cache, des que le premier
+  // fichier (Sport1.jpg) est copie, {app}\Images n'est plus vide et le
+  // Check renvoie False pour tous les suivants -> un seul fichier installe
+  // au lieu des dix (bug constate en prod). On decide donc une seule fois,
+  // avant toute copie, et on reutilise ce resultat pour tous les fichiers.
+  ShouldSeedImagesChecked: Boolean;
+  ShouldSeedImagesResult: Boolean;
+
 function ShouldSeedImages(): Boolean;
 var
   ImagesDir: String;
   FindRec: TFindRec;
   HasContent: Boolean;
 begin
+  if ShouldSeedImagesChecked then
+  begin
+    Result := ShouldSeedImagesResult;
+    Exit;
+  end;
+
   ImagesDir := ExpandConstant('{app}\Images');
   if not DirExists(ImagesDir) then
   begin
     Result := True;
-    Exit;
-  end;
-  HasContent := False;
-  if FindFirst(ImagesDir + '\*', FindRec) then
+  end
+  else
   begin
-    try
-      repeat
-        if (FindRec.Name <> '.') and (FindRec.Name <> '..') and (FindRec.Name <> 'thumbs') then
-          HasContent := True;
-      until (not FindNext(FindRec)) or HasContent;
-    finally
-      FindClose(FindRec);
+    HasContent := False;
+    if FindFirst(ImagesDir + '\*', FindRec) then
+    begin
+      try
+        repeat
+          if (FindRec.Name <> '.') and (FindRec.Name <> '..') and (FindRec.Name <> 'thumbs') then
+            HasContent := True;
+        until (not FindNext(FindRec)) or HasContent;
+      finally
+        FindClose(FindRec);
+      end;
     end;
+    Result := not HasContent;
   end;
-  Result := not HasContent;
+
+  ShouldSeedImagesResult := Result;
+  ShouldSeedImagesChecked := True;
 end;

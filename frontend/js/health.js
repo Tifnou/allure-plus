@@ -66,6 +66,30 @@ function renderHealthHistoryBody(bodyEl, chartId, cfg, result) {
       </div>`;
     return;
   }
+  if (cfg.mode === 'timeline') {
+    const cells = result.timeline || [];
+    if (cells.length === 0) {
+      bodyEl.innerHTML = '<div class="health-empty">Aucune donnée sur cette période.</div>';
+      return;
+    }
+    // Une puce par jour (largeur egale, comme le widget "Statut" de Garmin
+    // Connect) ; espacement des graduations adapte a la periode affichee.
+    const tickEvery = cells.length <= 7 ? 1 : (cells.length <= 28 ? 7 : 28);
+    const track = cells.map(c => {
+      const title = c.label ? escapeHtml(`${formatDate(c.date)} — ${c.label}`) : '';
+      const style = c.color ? `background:${c.color}` : '';
+      return `<div class="health-timeline-day" style="${style}"${title ? ` title="${title}"` : ''}></div>`;
+    }).join('');
+    const labels = cells.map((c, i) => (i % tickEvery !== 0) ? '' : (
+      `<div class="health-timeline-tick" style="left:${(i / cells.length) * 100}%">${escapeHtml(formatDateShort(c.date))}</div>`
+    )).join('');
+    bodyEl.innerHTML = `
+      <div class="health-timeline">
+        <div class="health-timeline-track">${track}</div>
+        <div class="health-timeline-labels">${labels}</div>
+      </div>`;
+    return;
+  }
   const series = result.series || [];
   if (series.length === 0) {
     bodyEl.innerHTML = '<div class="health-empty">Aucune donnée sur cette période.</div>';
@@ -357,18 +381,36 @@ async function loadVo2maxMetric(days) {
   };
 }
 
-function statusDot(color) {
-  return `<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${color || '#9CA3AF'};margin-right:7px;vertical-align:middle"></span>`;
+// Construit une bande jour par jour (comme le widget "Statut" de Garmin
+// Connect) plutot qu'un tableau : un jour sans releve reste vide (aucune
+// visite Allure+ ce jour-la, on ne l'invente pas).
+function parisISODate(date) {
+  const parts = new Intl.DateTimeFormat('fr-CA', { timeZone: 'Europe/Paris', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(date);
+  const y = parts.find(p => p.type === 'year').value;
+  const m = parts.find(p => p.type === 'month').value;
+  const d = parts.find(p => p.type === 'day').value;
+  return `${y}-${m}-${d}`;
+}
+
+function buildTrainingStatusTimeline(hist, days) {
+  const byDate = {};
+  hist.forEach(e => { byDate[e.date] = e; });
+  const now = Date.now();
+  const cells = [];
+  for (let i = days - 1; i >= 0; i--) {
+    const dateStr = parisISODate(new Date(now - i * 86400000));
+    const entry = byDate[dateStr];
+    const info = entry ? trainingStatusInfo(entry.value.phrase) : null;
+    cells.push({ date: dateStr, color: info?.color || null, label: info?.label || null });
+  }
+  return cells;
 }
 
 async function loadTrainingStatusMetric(days) {
   const cur = await fetch('/api/training-status').then(r => r.json()).then(r => r.data).catch(() => null);
   const hist = await fetch(`/api/health-history/trainingStatus?days=${days}`).then(r => r.json()).catch(() => []);
   const info = cur ? trainingStatusInfo(cur.phrase) : null;
-  const rows = hist.slice().reverse().map(e => {
-    const i = trainingStatusInfo(e.value.phrase);
-    return [formatDate(e.date), statusDot(i?.color) + (i ? i.label : (e.value.phrase || '—'))];
-  });
+  const timeline = buildTrainingStatusTimeline(hist, days);
   // Garmin n'expose pas d'historique de statut par API (verifie) : on
   // construit le notre au fil des visites. On le signale tant qu'il n'y a
   // que quelques points, pour ne pas laisser croire a un historique figé.
@@ -377,7 +419,7 @@ async function loadTrainingStatusMetric(days) {
     : null;
   const comment = info ? { state: info.label, tier: info.tier, text: info.text + (buildingNotice ? ' ' + buildingNotice : '') } : null;
   return {
-    headers: ['Date', 'Statut'], rows, comment,
+    timeline, comment,
     current: cur ? { value: info ? info.label : (cur.phrase || '—'), unit: '', color: info?.color, dateLabel: 'au ' + formatDate(cur.calendarDate) } : null,
   };
 }
@@ -509,26 +551,34 @@ async function loadTrainingEffectMetric(days) {
 }
 
 // ─── Âge physique (estimation Allure+ — pas de donnée Garmin equivalente
-// exploitable, voir CLAUDE.md). Garmin decrit sa propre metrique comme basee
-// sur l'intensite d'activite, la FC repos et l'IMC/masse grasse : on a deja
-// toutes ces briques via le VO2max (bien correle a la forme cardio), la FC
-// repos et le profil (taille/poids), donc on construit notre propre
-// estimation plutot que de laisser la metrique vide.
-function estimatePhysicalAge(vo2, sex, chronoAge, restingHR, bmi) {
-  if (!vo2 || !chronoAge || typeof vo2maxCategoryIndex !== 'function') return null;
-  const cat = vo2maxCategoryIndex(vo2, sex, chronoAge); // 0=Faible .. 4=Superieur, 2=Bon (reference neutre)
-  let age = chronoAge - (cat - 2) * 4;
-  if (restingHR) {
-    if (restingHR < 50) age -= 2;
-    else if (restingHR < 55) age -= 1;
-    else if (restingHR > 75) age += 2;
-    else if (restingHR > 65) age += 1;
-  }
-  if (bmi) {
-    if (bmi > 25) age += Math.min((bmi - 25) * 0.3, 3);
-    else if (bmi < 18.5) age += 1;
-  }
-  return Math.max(18, Math.min(Math.round(age), chronoAge + 15));
+// exploitable, voir CLAUDE.md). Formule continue (pas de palier) : on compare
+// le VO2max a une reference lineaire par age/sexe, puis on ajuste par petites
+// corrections additives (FC repos, IMC, volume d'entrainement). Calibree sur
+// un cas reel (ecart Allure+/Garmin trop important avec l'ancienne version a
+// paliers de 4 ans/categorie, qui amplifiait les profils tres fit).
+function estimatePhysicalAge(vo2, sex, chronoAge, restingHR, bmi, weeklyKm) {
+  if (!vo2 || !chronoAge) return null;
+  const vo2ref = sex === 'F' ? (43 - 0.20 * chronoAge) : (50 - 0.25 * chronoAge);
+  let age = chronoAge - 0.4 * (vo2 - vo2ref);
+  if (restingHR != null && restingHR < 50) age -= 0.5;
+  if (bmi != null && bmi > 25) age += 0.5;
+  if (weeklyKm != null && weeklyKm > 30) age -= 0.5;
+  age = Math.round(age * 2) / 2; // arrondi a 0.5
+  return Math.max(18, Math.min(age, chronoAge + 15));
+}
+
+// Volume hebdomadaire moyen (course seulement) sur les 4 semaines precedant
+// une date donnee — moyenne plutot que la seule derniere semaine, pour que
+// la correction "> 30 km/semaine" ne bascule pas d'un jour a l'autre selon
+// qu'une sortie tombe juste avant ou apres la fenetre.
+function trailingWeeklyKm(activities, atDate, weeks = 4) {
+  const t = new Date(atDate).getTime();
+  const windowMs = weeks * 7 * 86400000;
+  const sum = (activities || []).filter(a => {
+    const at = new Date(a.date).getTime();
+    return at <= t && at > t - windowMs && (a.activityType || '').toLowerCase().includes('run');
+  }).reduce((s, a) => s + (a.distanceKm || 0), 0);
+  return sum / weeks;
 }
 
 async function loadPhysicalAgeMetric(days) {
@@ -555,17 +605,19 @@ async function loadPhysicalAgeMetric(days) {
   }
 
   const series = vo2Pts.map(p => {
-    const ageAtPoint = estimatePhysicalAge(p.value, sex, chronoAge, nearestHR(p.date), bmi);
+    const weeklyKm = trailingWeeklyKm(_allActivities, p.date);
+    const ageAtPoint = estimatePhysicalAge(p.value, sex, chronoAge, nearestHR(p.date), bmi, weeklyKm);
     return ageAtPoint != null ? { label: formatDateShort(p.date, days > 60), value: ageAtPoint } : null;
   }).filter(Boolean);
 
   const latestVo2 = vo2Pts.length ? vo2Pts[vo2Pts.length - 1] : ((_vo2maxSeries || []).length ? _vo2maxSeries[_vo2maxSeries.length - 1] : null);
-  const currentAge = latestVo2 ? estimatePhysicalAge(latestVo2.value, sex, chronoAge, nearestHR(latestVo2.date), bmi) : null;
+  const currentWeeklyKm = latestVo2 ? trailingWeeklyKm(_allActivities, latestVo2.date) : null;
+  const currentAge = latestVo2 ? estimatePhysicalAge(latestVo2.value, sex, chronoAge, nearestHR(latestVo2.date), bmi, currentWeeklyKm) : null;
 
   let comment = null;
   if (currentAge != null) {
-    const diff = chronoAge - currentAge;
-    const disclaimer = ' (estimation Allure+ à partir de votre VO2max, FC repos et IMC — même principe que Garmin, sans être identique à son chiffre).';
+    const diff = Math.round((chronoAge - currentAge) * 2) / 2;
+    const disclaimer = ' (estimation Allure+ à partir de votre VO2max, FC repos, IMC et volume d\'entraînement — même principe que Garmin, sans être identique à son chiffre).';
     if (diff >= 2) comment = { state: `${diff} ans de moins que votre âge réel`, tier: 'good', text: `Votre âge physique estimé est de ${currentAge} ans, pour un âge réel de ${chronoAge} ans — votre forme cardiovasculaire vous place en avance sur votre âge.${disclaimer} Continuez à entretenir cet écart avec de la régularité en endurance fondamentale.` };
     else if (diff <= -2) comment = { state: `${Math.abs(diff)} ans de plus que votre âge réel`, tier: 'attention', text: `Votre âge physique estimé est de ${currentAge} ans, au-dessus de votre âge réel (${chronoAge} ans).${disclaimer} Le levier le plus efficace pour le faire baisser est votre VO2max : plus de sorties d'endurance fondamentale et quelques séances de fractionné par semaine peuvent le faire progresser sensiblement en quelques mois.` };
     else comment = { state: 'Proche de votre âge réel', tier: 'neutral', text: `Votre âge physique estimé (${currentAge} ans) est proche de votre âge réel (${chronoAge} ans).${disclaimer} Une progression de votre VO2max ou une baisse de votre FC repos sont les leviers les plus efficaces pour le faire baisser.` };
@@ -681,7 +733,7 @@ const HEALTH_METRICS = [
   { key: 'physicalAge',        category: 'sante',       label: 'Âge physique',            icon: HEALTH_ICONS.calendar, mode: 'chart', color: '#0891B2', load: loadPhysicalAgeMetric },
   { key: 'calories',           category: 'sante',       label: 'Calories brûlées',        icon: HEALTH_ICONS.flame,   mode: 'chart', color: '#EA580C', load: loadCaloriesMetric },
   { key: 'vo2max',             category: 'performance', label: 'VO₂max',                  icon: HEALTH_ICONS.vo2,     mode: 'chart', color: '#7C3AED', load: loadVo2maxMetric },
-  { key: 'trainingStatus',     category: 'performance', label: "Statut d'entraînement",   icon: HEALTH_ICONS.trend,   mode: 'table',                   load: loadTrainingStatusMetric },
+  { key: 'trainingStatus',     category: 'performance', label: "Statut d'entraînement",   icon: HEALTH_ICONS.trend,   mode: 'timeline',                load: loadTrainingStatusMetric },
   { key: 'trainingReadiness',  category: 'performance', label: "Préparation à l'entraînement", icon: HEALTH_ICONS.gauge, mode: 'chart', color: '#0EA5E9', load: loadTrainingReadinessMetric },
   { key: 'trainingEffect',     category: 'performance', label: 'Training Effect',         icon: HEALTH_ICONS.layers,  mode: 'table',                   load: loadTrainingEffectMetric },
   { key: 'lactateThreshold',   category: 'performance', label: 'Seuil lactique',          icon: HEALTH_ICONS.zap,     mode: 'chart', color: '#D97706', load: loadLactateMetric },

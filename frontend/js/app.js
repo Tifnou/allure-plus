@@ -273,6 +273,9 @@ async function checkStatus() {
     // Afficher menu Admin si compte administrateur
     showAdminNav(data.user);
 
+    // Tampon "Pref 2" (case a cocher reservee a un compte, dans Mes informations)
+    loadPref2State();
+
     // Badge profil incomplet
     const profile = JSON.parse(localStorage.getItem('suivi_sport_profile') || '{}');
     const profileBadge = el('nav-profile-badge');
@@ -484,7 +487,7 @@ function renderRunRow(tbody, act) {
   tbody.innerHTML = `
     <tr data-activity-id="${act.id || ''}" class="activity-row" style="cursor:pointer" title="Voir le détail de l'activité">
       <td>${formatDateShort(act.date, true)}</td>
-      <td><span class="run-type-text ${activityTypeClass(type)}">${activityTypeLabel(type)}</span></td>
+      <td><span class="run-type-text ${activityTypeClass(type)}">${activityTypeLabel(type)}</span>${typeof activityAnalysisBadge === 'function' ? activityAnalysisBadge(act.id) : ''}</td>
       <td style="color:var(--text-primary)">${act.name || '—'}</td>
       <td class="dist-value">${act.distanceKm?.toFixed(2) || '—'} km</td>
       <td style="color:var(--text-secondary)">${formatDuration(act.durationSec)}</td>
@@ -651,7 +654,7 @@ function renderAllActivities(activities, filter = 'all', yearOverride = null) {
     return `
       <tr class="activity-row" data-activity-id="${a.id || ''}">
         <td>${formatDateShort(a.date, true)}</td>
-        <td><span class="activity-type-cell ${activityTypeClass(type)}">${icon}<span class="run-type-text">${activityTypeLabel(type)}</span></span></td>
+        <td><span class="activity-type-cell ${activityTypeClass(type)}">${icon}<span class="run-type-text">${activityTypeLabel(type)}</span>${typeof activityAnalysisBadge === 'function' ? activityAnalysisBadge(a.id) : ''}</span></td>
         <td style="color:var(--text-primary);max-width:180px;overflow:hidden;text-overflow:ellipsis">${a.name || '\u2014'}</td>
         <td class="dist-value">${a.distanceKm ? a.distanceKm.toFixed(2)+' km' : '\u2014'}</td>
         <td style="color:var(--text-secondary)">${formatDuration(a.durationSec)}</td>
@@ -673,6 +676,39 @@ function renderAllActivities(activities, filter = 'all', yearOverride = null) {
   });
 }
 
+// Ouvre le detail d'une activite (page Activites) depuis son id Garmin —
+// utilise par le lien "course -> activite" de la page Records et courses.
+// _allActivities n'est peuple qu'avec l'annee courante au demarrage (voir
+// loadDashboard) + les annees deja parcourues dans le filtre Activites
+// (_fullyLoadedYears) : si on arrive directement sur Records et courses et
+// que la course date d'une annee jamais visitee, l'activite liee n'y est
+// pas encore — on la charge alors a la demande (meme route que le filtre
+// annee) avant de reessayer, plutot que d'echouer silencieusement.
+async function openActivityFromId(id, year) {
+  let act = (_allActivities || []).find(a => String(a.id) === String(id));
+  if (!act && year && !_fullyLoadedYears.has(year)) {
+    showToast('Chargement de l\'activité…', 'loading', 0);
+    try {
+      const resp = await fetch('/api/activities/year/' + year);
+      if (resp.ok) {
+        const data = await resp.json();
+        if (data.activities && data.activities.length) {
+          _allActivities = _allActivities.filter(a => {
+            const d = new Date(a.date || a.startTimeLocal || a.startTimeGMT || '');
+            return isNaN(d) || d.getFullYear() !== year;
+          }).concat(data.activities);
+        }
+        _fullyLoadedYears.add(year);
+        act = _allActivities.find(a => String(a.id) === String(id));
+      }
+    } catch (e) { /* silencieux, le toast d'erreur ci-dessous couvre le cas */ }
+    const lt = document.getElementById('app-toast-loading');
+    if (lt) { lt.style.opacity = '0'; setTimeout(() => lt.remove(), 300); }
+  }
+  if (act) { showActivityDetail(act, 'records'); }
+  else if (typeof showToast === 'function') { showToast('Activité introuvable (elle a peut-être été supprimée de Garmin)', 'error'); }
+}
+
 // ─── Envoi d'une activite vers "Mes courses" (page Records) ───────────
 function isRaceEligibleActivity(activity) {
   const t = (activity.activityType || '').toLowerCase();
@@ -689,17 +725,22 @@ function sendActivityToRaces(activity) {
     durationSec: activity.durationSec || null,
     elevationGain: activity.elevationGain ? Math.round(activity.elevationGain) : null,
     vo2max: activity.vO2MaxValue || null,
+    activityId: activity.id || null,
   };
   navigateTo('records');
   if (typeof openRaceModal === 'function') openRaceModal(null, prefill);
 }
 
 // ─── Detail d une activite ─────────────────────────────────────────
-function showActivityDetail(activity) {
+// backTo : page vers laquelle revient le bouton "Retour" — 'activities' par
+// defaut (liste des activites), 'records' quand on arrive via le lien 🏃
+// d'une course (Records et courses, cf. openActivityFromId) pour repartir
+// d'ou l'on vient plutot que d'atterrir systematiquement sur Activites.
+function showActivityDetail(activity, backTo = 'activities') {
   if (!activity) return;
 
   navigateTo('activity-detail');
-  el('nav-activities').classList.add('active');
+  el('nav-' + backTo)?.classList.add('active');
 
   const type  = activity.activityType || '';
   const dist  = activity.distanceKm ? activity.distanceKm.toFixed(2) + ' km' : '\u2014';
@@ -734,11 +775,13 @@ function showActivityDetail(activity) {
       <div style="display:flex;gap:10px;flex-wrap:wrap">
         ${activity.id ? `<a href="https://connect.garmin.com/modern/activity/${activity.id}" target="_blank" class="activity-link">Voir sur Garmin Connect</a>` : ''}
         ${isRaceEligibleActivity(activity) ? `<button type="button" class="activity-link" id="btn-send-to-races" style="cursor:pointer">🏅 Envoyer vers Courses</button>` : ''}
+        ${typeof renderActivityAnalysisButtons === 'function' ? renderActivityAnalysisButtons(activity) : ''}
       </div>
     </div>`;
 
   const sendBtn = el('btn-send-to-races');
   if (sendBtn) sendBtn.onclick = () => sendActivityToRaces(activity);
+  if (typeof wireActivityAnalysisButtons === 'function') wireActivityAnalysisButtons(activity);
 
   // Reinitialise la carte GPS (elements statiques, reutilises a chaque activite)
   const routeLoading = el('route-loading');
@@ -761,8 +804,10 @@ function showActivityDetail(activity) {
   const toggleBtn = el('route-view-toggle');
   if (toggleBtn) { toggleBtn.style.display = ''; toggleBtn.onclick = toggleRouteView; }
 
-  // Bouton retour
-  el('btn-back-activities').onclick = () => navigateTo('activities');
+  // Bouton retour — contextuel (voir backTo ci-dessus)
+  const backBtn = el('btn-back-activities');
+  backBtn.onclick = () => navigateTo(backTo);
+  backBtn.lastChild.textContent = backTo === 'records' ? ' Retour aux courses' : ' Retour aux activités';
 
   if (activity.id) loadAndDrawRoute(activity.id, dist, dur);
   loadActivityAnalysis(activity);
@@ -1007,6 +1052,115 @@ function drawRouteTrace(canvas, rawPoints) {
 
 
 
+// ─── Détection Circuits vs Intervalles ────────────────────
+// Garmin Circuits = laps déclenchés par distance (tous ~1km)
+// Garmin Intervalles = laps manuels avec distances variées
+// Extrait de loadActivityAnalysis (etait une closure interne) pour etre
+// reutilisable par le moteur de comparaison seance prevue/realisee (session-analysis.js)
+function isKmCircuits(laps) {
+  if (laps.length < 3) return false;
+  // Exclure le dernier lap (souvent très court = fin de parcours)
+  const mainLaps = laps.slice(0, -1);
+  const dists = mainLaps.map(l => l.distance || 0).filter(d => d > 50);
+  if (dists.length < 2) return false;
+  const sorted = [...dists].sort((a,b) => a-b);
+  const median = sorted[Math.floor(sorted.length / 2)];
+  if (median < 400 || median > 3000) return false;
+  // Circuits: AU MOINS 75% des laps dans ±35% de la médiane
+  // (tolère les laps partiels : km de montagne, demi-km de fin etc.)
+  const inRange = dists.filter(d => Math.abs(d - median) / median < 0.35).length;
+  return inRange / dists.length >= 0.75;
+}
+
+// ─── Classification intelligente des laps (pour Intervalles) ────────────────────
+function classifyLaps(laps) {
+  if (!laps || laps.length === 0) return [];
+
+  // Pré-calcul vitesse médiane pour fallback
+  const allSpeeds = laps.map(l => l.averageSpeed || 0).filter(s => s > 0);
+  const sorted = [...allSpeeds].sort((a,b) => a-b);
+  const median = sorted[Math.floor(sorted.length / 2)] || 1;
+  const n = laps.length;
+
+  return laps.map((lap, idx) => {
+    // Garmin retourne intensityType tantot en chaine simple ('ACTIVE', 'RECOVERY'...)
+    // tantot en objet ({ typeKey: 'active' }) selon l'endpoint (laps/splits/details) -
+    // on gere les deux formes, avec fallback sur le champ legacy 'intensity'
+    const intensRaw = (typeof lap.intensityType === 'string' ? lap.intensityType : lap.intensityType?.typeKey) || lap.intensity || '';
+    const intens = intensRaw.toLowerCase();
+    const trigRaw = (typeof lap.lapTriggerType === 'string' ? lap.lapTriggerType : lap.lapTriggerType?.typeKey) || lap.lapTrigger || '';
+    const trig   = trigRaw.toLowerCase();
+
+    // 1. Champs Garmin explicites — le plus fiable, doit passer en PRIORITÉ
+    if (intens === 'active')                                      return 'effort';
+    if (intens === 'rest' || intens === 'recovery')               return 'rest';
+    if (intens === 'cooldown')                                    return 'rest';   // cooldown = récup
+    if (intens === 'warmup')                                      return 'warmup';
+
+    // 2. Lap trigger hints
+    if (trig.includes('recovery') || trig.includes('rest'))       return 'rest';
+    if (trig.includes('warm'))                                    return 'warmup';
+
+    // 3. Position : premier → échauffement seulement
+    //    IMPORTANT : ne pas classifier le dernier en 'warmup' (c'est la récupération finale)
+    if (n >= 4) {
+      if (idx === 0)     return 'warmup';
+      if (idx === n - 1) return 'rest';  // dernière étape = retour au calme, pas échauffement
+    }
+
+    // 4. Fallback vitesse : au-dessus de 90% de la vitesse MAX = effort
+    //    (utiliser max plutôt que médiane pour mieux séparer effort/récup)
+    const maxSpd = Math.max(...laps.map(l => l.averageSpeed || 0));
+    const spd = lap.averageSpeed || 0;
+    return spd >= maxSpd * 0.90 ? 'effort' : 'rest';
+  });
+}
+
+function describeDuration(sec) {
+  if (sec < 60) return `${Math.round(sec)}s`;
+  const min = sec / 60;
+  return `${Number.isInteger(min) ? min : min.toFixed(1)}min`;
+}
+
+// ─── Regroupement des efforts par duree similaire ────────────────────
+// Une seance peut enchainer plusieurs types de repetition a des allures
+// volontairement differentes (ex: 30s + 2min + 6min) : les traiter comme
+// un seul bloc fausse regularite/derive/split. On les separe par duree
+// (tolerance 20%, plancher 8s) et on classe chaque groupe dans sa zone.
+function groupEffortsByDuration(effortEntries, vma, isTrail) {
+  const groups = [];
+  effortEntries.forEach(({ lap, idx }) => {
+    const dur = lap.elapsedDuration || lap.movingDuration || lap.duration || 0;
+    let group = groups.find(g => Math.abs(dur - g.anchorDuration) <= Math.max(g.anchorDuration * 0.20, 8));
+    if (!group) {
+      group = { anchorDuration: dur, memberIdx: [], paces: [], hrValues: [] };
+      groups.push(group);
+    }
+    group.memberIdx.push(idx);
+    if (lap.averageSpeed > 0) group.paces.push(1000 / lap.averageSpeed);
+    if (lap.averageHR) group.hrValues.push(Math.round(lap.averageHR));
+  });
+  groups.forEach(g => {
+    g.repCount = g.memberIdx.length;
+    g.avgPaceSecKm = g.paces.length ? g.paces.reduce((a, b) => a + b, 0) / g.paces.length : null;
+    if (g.paces.length >= 2) {
+      g.regularityMaxEcart = Math.round(Math.max(...g.paces) - Math.min(...g.paces));
+      g.regularityLabel = g.regularityMaxEcart <= 5 ? 'excellente régularité'
+        : g.regularityMaxEcart <= 12 ? 'bonne régularité'
+        : g.regularityMaxEcart <= 25 ? 'quelques variations'
+        : 'répétitions irrégulières';
+      g.splitDiffSec = Math.round(g.paces[g.paces.length - 1] - g.paces[0]);
+    } else {
+      g.regularityMaxEcart = null; g.regularityLabel = null; g.splitDiffSec = null;
+    }
+    g.hrDriftBpm = g.hrValues.length >= 2 ? (g.hrValues[g.hrValues.length - 1] - g.hrValues[0]) : null;
+    g.zoneKey = (vma && g.avgPaceSecKm) ? matchZoneFromPaceTrailAware(g.avgPaceSecKm, vma, isTrail) : null;
+    g.zoneLabel = (g.zoneKey && typeof ALLURE_PLUS_ZONES !== 'undefined') ? ALLURE_PLUS_ZONES[g.zoneKey]?.label : null;
+    g.zoneColor = (g.zoneKey && typeof ALLURE_PLUS_ZONES !== 'undefined') ? ALLURE_PLUS_ZONES[g.zoneKey]?.color : null;
+  });
+  return groups;
+}
+
 async function loadActivityAnalysis(activity) {
 
   const panel = el('activity-analysis-panel');
@@ -1031,112 +1185,6 @@ async function loadActivityAnalysis(activity) {
     if (act.distanceKm) insights.push(`Distance : <strong>${act.distanceKm.toFixed(2)} km</strong>`);
     if (act.calories)   insights.push(`Calories : <strong>${Math.round(act.calories)} kcal</strong>`);
     return insights;
-  }
-
-  // ─── Détection Circuits vs Intervalles ────────────────────
-  // Garmin Circuits = laps déclenchés par distance (tous ~1km)
-  // Garmin Intervalles = laps manuels avec distances variées
-  function isKmCircuits(laps) {
-    if (laps.length < 3) return false;
-    // Exclure le dernier lap (souvent très court = fin de parcours)
-    const mainLaps = laps.slice(0, -1);
-    const dists = mainLaps.map(l => l.distance || 0).filter(d => d > 50);
-    if (dists.length < 2) return false;
-    const sorted = [...dists].sort((a,b) => a-b);
-    const median = sorted[Math.floor(sorted.length / 2)];
-    if (median < 400 || median > 3000) return false;
-    // Circuits: AU MOINS 75% des laps dans ±35% de la médiane
-    // (tolère les laps partiels : km de montagne, demi-km de fin etc.)
-    const inRange = dists.filter(d => Math.abs(d - median) / median < 0.35).length;
-    return inRange / dists.length >= 0.75;
-  }
-
-  // ─── Classification intelligente des laps (pour Intervalles) ────────────────────
-  function classifyLaps(laps) {
-    if (!laps || laps.length === 0) return [];
-
-    // Pré-calcul vitesse médiane pour fallback
-    const allSpeeds = laps.map(l => l.averageSpeed || 0).filter(s => s > 0);
-    const sorted = [...allSpeeds].sort((a,b) => a-b);
-    const median = sorted[Math.floor(sorted.length / 2)] || 1;
-    const n = laps.length;
-
-    return laps.map((lap, idx) => {
-      // Garmin retourne intensityType tantot en chaine simple ('ACTIVE', 'RECOVERY'...)
-      // tantot en objet ({ typeKey: 'active' }) selon l'endpoint (laps/splits/details) -
-      // on gere les deux formes, avec fallback sur le champ legacy 'intensity'
-      const intensRaw = (typeof lap.intensityType === 'string' ? lap.intensityType : lap.intensityType?.typeKey) || lap.intensity || '';
-      const intens = intensRaw.toLowerCase();
-      const trigRaw = (typeof lap.lapTriggerType === 'string' ? lap.lapTriggerType : lap.lapTriggerType?.typeKey) || lap.lapTrigger || '';
-      const trig   = trigRaw.toLowerCase();
-
-      // 1. Champs Garmin explicites — le plus fiable, doit passer en PRIORITÉ
-      if (intens === 'active')                                      return 'effort';
-      if (intens === 'rest' || intens === 'recovery')               return 'rest';
-      if (intens === 'cooldown')                                    return 'rest';   // cooldown = récup
-      if (intens === 'warmup')                                      return 'warmup';
-
-      // 2. Lap trigger hints
-      if (trig.includes('recovery') || trig.includes('rest'))       return 'rest';
-      if (trig.includes('warm'))                                    return 'warmup';
-
-      // 3. Position : premier → échauffement seulement
-      //    IMPORTANT : ne pas classifier le dernier en 'warmup' (c'est la récupération finale)
-      if (n >= 4) {
-        if (idx === 0)     return 'warmup';
-        if (idx === n - 1) return 'rest';  // dernière étape = retour au calme, pas échauffement
-      }
-
-      // 4. Fallback vitesse : au-dessus de 90% de la vitesse MAX = effort
-      //    (utiliser max plutôt que médiane pour mieux séparer effort/récup)
-      const maxSpd = Math.max(...laps.map(l => l.averageSpeed || 0));
-      const spd = lap.averageSpeed || 0;
-      return spd >= maxSpd * 0.90 ? 'effort' : 'rest';
-    });
-  }
-
-  // ─── Regroupement des efforts par duree similaire ────────────────────
-  // Une seance peut enchainer plusieurs types de repetition a des allures
-  // volontairement differentes (ex: 30s + 2min + 6min) : les traiter comme
-  // un seul bloc fausse regularite/derive/split. On les separe par duree
-  // (tolerance 20%, plancher 8s) et on classe chaque groupe dans sa zone.
-  function describeDuration(sec) {
-    if (sec < 60) return `${Math.round(sec)}s`;
-    const min = sec / 60;
-    return `${Number.isInteger(min) ? min : min.toFixed(1)}min`;
-  }
-  function groupEffortsByDuration(effortEntries) {
-    const groups = [];
-    effortEntries.forEach(({ lap, idx }) => {
-      const dur = lap.elapsedDuration || lap.movingDuration || lap.duration || 0;
-      let group = groups.find(g => Math.abs(dur - g.anchorDuration) <= Math.max(g.anchorDuration * 0.20, 8));
-      if (!group) {
-        group = { anchorDuration: dur, memberIdx: [], paces: [], hrValues: [] };
-        groups.push(group);
-      }
-      group.memberIdx.push(idx);
-      if (lap.averageSpeed > 0) group.paces.push(1000 / lap.averageSpeed);
-      if (lap.averageHR) group.hrValues.push(Math.round(lap.averageHR));
-    });
-    groups.forEach(g => {
-      g.repCount = g.memberIdx.length;
-      g.avgPaceSecKm = g.paces.length ? g.paces.reduce((a, b) => a + b, 0) / g.paces.length : null;
-      if (g.paces.length >= 2) {
-        g.regularityMaxEcart = Math.round(Math.max(...g.paces) - Math.min(...g.paces));
-        g.regularityLabel = g.regularityMaxEcart <= 5 ? 'excellente régularité'
-          : g.regularityMaxEcart <= 12 ? 'bonne régularité'
-          : g.regularityMaxEcart <= 25 ? 'quelques variations'
-          : 'répétitions irrégulières';
-        g.splitDiffSec = Math.round(g.paces[g.paces.length - 1] - g.paces[0]);
-      } else {
-        g.regularityMaxEcart = null; g.regularityLabel = null; g.splitDiffSec = null;
-      }
-      g.hrDriftBpm = g.hrValues.length >= 2 ? (g.hrValues[g.hrValues.length - 1] - g.hrValues[0]) : null;
-      g.zoneKey = (vma && g.avgPaceSecKm) ? matchZoneFromPaceTrailAware(g.avgPaceSecKm, vma, isTrail) : null;
-      g.zoneLabel = (g.zoneKey && typeof ALLURE_PLUS_ZONES !== 'undefined') ? ALLURE_PLUS_ZONES[g.zoneKey]?.label : null;
-      g.zoneColor = (g.zoneKey && typeof ALLURE_PLUS_ZONES !== 'undefined') ? ALLURE_PLUS_ZONES[g.zoneKey]?.color : null;
-    });
-    return groups;
   }
 
   try {
@@ -1240,7 +1288,7 @@ async function loadActivityAnalysis(activity) {
         }, []);
         const restLaps   = validLaps.filter((_, i) => types[i] === 'rest');
         const warmupLaps = validLaps.filter((_, i) => types[i] === 'warmup');
-        const groups = groupEffortsByDuration(effortEntries);
+        const groups = groupEffortsByDuration(effortEntries, vma, isTrail);
         const zoneByIdx = {};
         groups.forEach(g => g.memberIdx.forEach(i => { zoneByIdx[i] = { label: g.zoneKey, color: g.zoneColor }; }));
 
@@ -1917,13 +1965,20 @@ function calcHRMax(age, hrmaxMeasured) {
 
 // Zones Karvonen : FC réserve = FCmax − FC repos
 // FCzone = FCmin + %*(FCmax − FCmin) ... puis + FC repos
+// Noms volontairement physiologiques (pas de mot d'allure/distance course :
+// "Tempo", "Marathon", "Semi", "10km") — une zone FC et une zone d'allure
+// (ALLURE_PLUS_ZONES, campus.js) ne se recouvrent jamais exactement (derive
+// cardiaque, fatigue...), leur donner le même nom laisse croire à une
+// correspondance stricte qui n'existe pas. allureZone : correspondance
+// qualitative fournie par l'utilisateur (pas calculee) — affichee en plage,
+// jamais en valeur unique, meme logique que fcZone sur ALLURE_PLUS_ZONES.
 function calcHRZones(hrMax, hrRest) {
   const zones = [
-    { name:'Z1 — Récupération',       pLow:0.50, pHigh:0.60, color:'#60a5fa', desc:'Effort très léger, récup actif' },
-    { name:'Z2 — Endurance fond.',   pLow:0.60, pHigh:0.70, color:'#4ade80', desc:'Allure lente, base aérobie' },
-    { name:'Z3 — Tempo / Marathon',  pLow:0.70, pHigh:0.80, color:'#facc15', desc:'Allure marathon, conforté' },
-    { name:'Z4 — Seuil lactique',    pLow:0.80, pHigh:0.90, color:'#fb923c', desc:'Semi, 10km, intense' },
-    { name:'Z5 — VO₂max / Fracs',  pLow:0.90, pHigh:1.00, color:'#f87171', desc:'Intervalles courts, max' },
+    { name:'Z1 — Récupération',       pLow:0.50, pHigh:0.60, color:'#60a5fa', desc:'Effort très léger, récupération active', allureZone:'Récupération' },
+    { name:'Z2 — Endurance aérobie',  pLow:0.60, pHigh:0.70, color:'#4ade80', desc:'Effort facile, base aérobie', allureZone:'EF à Tempo' },
+    { name:'Z3 — Endurance soutenue', pLow:0.70, pHigh:0.80, color:'#facc15', desc:'Effort modéré, encore confortable', allureZone:'Tempo à AS21' },
+    { name:'Z4 — Seuil',              pLow:0.80, pHigh:0.90, color:'#fb923c', desc:'Effort soutenu à difficile', allureZone:'AS21 à S30' },
+    { name:'Z5 — VO₂max',             pLow:0.90, pHigh:1.00, color:'#f87171', desc:'Effort maximal, haute intensité', allureZone:'S30 à VMA' },
   ];
   const useKarvonen = hrRest && hrRest > 0;
   const reserve = useKarvonen ? (hrMax - hrRest) : hrMax;
@@ -2094,6 +2149,11 @@ function renderProfile() {
   const indEl = el('profile-indicators');
   if (indEl && (vma || hrMax || vo2)) {
     const vmaAllure = vma ? formatPace(3600 / vma) : null;
+    // Allure EF : lue depuis ALLURE_PLUS_ZONES.EF (campus.js, source de
+    // verite unique) plutot qu'un pourcentage fixe — evite de reafficher
+    // une valeur figee qui se decale a chaque ajustement des zones d'allure.
+    const efZone = (typeof ALLURE_PLUS_ZONES !== 'undefined') ? ALLURE_PLUS_ZONES.EF : null;
+    const efPct = efZone ? efZone.pctHigh : null; // borne haute de l'EF (allure la plus soutenue de la zone)
     indEl.innerHTML = `
       ${vma ? `
       <div class="profile-ind-card">
@@ -2122,14 +2182,14 @@ function renderProfile() {
         <div class="profile-ind-label">FC repos (moy. Garmin)</div>
         <div class="profile-ind-sub">30 derniers jours</div>
       </div>` : ''}
-      ${vma && hrMax ? `
+      ${vma && efZone ? `
       <div class="profile-ind-card">
         <div style="display:flex;align-items:baseline;gap:4px">
-          <div class="profile-ind-value">${Math.round(vma * 0.75 * 10) / 10}</div>
+          <div class="profile-ind-value">${Math.round(vma * efPct * 10) / 10}</div>
           <div class="profile-ind-unit">km/h</div>
         </div>
-        <div class="profile-ind-label">Allure EF (Z2)</div>
-        <div class="profile-ind-sub">75% VMA · ${formatPace(3600 / (vma * 0.75))} min/km — endurance fond.</div>
+        <div class="profile-ind-label">Allure EF</div>
+        <div class="profile-ind-sub">${Math.round(efZone.pctLow * 100)}–${Math.round(efZone.pctHigh * 100)}% VMA · ${formatPace(3600 / (vma * efPct))} min/km — endurance fond.</div>
       </div>` : ''}
     `.trim() || '<div class="profile-indicator-empty">Renseignez votre âge pour voir les calculs</div>';
   } else if (indEl) {
@@ -2209,30 +2269,16 @@ function renderProfile() {
     const useKarv = !!_avgRestingHR;
     setVal('profile-zones-method', useKarv ? 'Méthode Karvonen (FC repos Garmin)' : 'Méthode % FC max (Tanaka)');
     const zones = calcHRZones(hrMax, useKarv ? Math.round(_avgRestingHR) : null);
-    // Pourcentages VMA par zone (Campus Coach definitions)
-    const VMA_ZONES = [
-      { low: 0.55, high: 0.65 },  // Z1 Récup
-      { low: 0.65, high: 0.75 },  // Z2 Endurance fond.
-      { low: 0.75, high: 0.83 },  // Z3 S60 / Tempo (79-83%)
-      { low: 0.83, high: 0.93 },  // Z4 S30 / Seuil (83-93%)
-      { low: 0.93, high: 1.05 },  // Z5 VMA
-    ];
     zonesEl.innerHTML = `<div class="hr-zones-list">
-      ${zones.map((z, i) => {
-        const vmaZ = vma ? VMA_ZONES[i] : null;
-        const sLow  = vmaZ ? Math.round(vma * vmaZ.low  * 10) / 10 : null;
-        const sHigh = vmaZ ? Math.round(vma * vmaZ.high * 10) / 10 : null;
-        const pFast = sHigh ? formatPace(3600 / sHigh) : null;
-        const pSlow = sLow  ? formatPace(3600 / sLow)  : null;
-        const speedHTML = sLow ? `
-          <div class="hr-zone-speed">${sLow}–${sHigh} <span style="font-size:10px;color:var(--text-muted)">km/h</span></div>
-          <div class="hr-zone-pace">${pFast}–${pSlow} <span style="font-size:10px;color:var(--text-muted)">/km</span></div>` : '';
+      ${zones.map(z => {
+        const allureLabel = z.allureZone;
+        const allureHTML = allureLabel ? `<div class="hr-zone-allure">Allure ≈ <b>${allureLabel}</b></div>` : '<div class="hr-zone-allure"></div>';
         return `
         <div class="hr-zone-row">
           <div class="hr-zone-dot" style="background:${z.color}"></div>
           <div class="hr-zone-name">${z.name}</div>
           <div class="hr-zone-range">${z.low} – ${z.high} bpm</div>
-          ${speedHTML}
+          ${allureHTML}
           <div class="hr-zone-bar-wrap">
             <div class="hr-zone-bar" style="background:${z.color};width:${Math.round(z.pHigh*100)}%"></div>
           </div>
@@ -2249,52 +2295,31 @@ function renderProfile() {
   if (racePacesEl && vma) {
     setVal('profile-paces-method', 'VMA ' + vma.toFixed(2) + ' km/h');
 
-    // Table de reference Allure+ — Route + Trail (doit rester identique à
-    // ALLURE_PLUS_ZONES dans campus.js, la vraie source de vérité)
-    const APZ = {
-      RECOVER:    { pL:0.55, pH:0.62, icon:'&#128994;', label:'Récupération',        color:'#94a3b8', note:'55–62% VMA', noTarget:true },
-      EF:         { pL:0.62, pH:0.67, icon:'&#128995;', label:'EF — Endurance fond.', color:'#4ade80', note:'62–67% VMA', trailCorr:0.07 },
-      TEMPO:      { pL:0.71, pH:0.75, icon:'&#128992;', label:'Tempo',                color:'#a3e635', note:'71–75% VMA', trailCorr:0.07 },
-      AS42:       { pL:0.75, pH:0.78, icon:'&#127942;', label:'AS42 — Allure Marathon', color:'#818cf8', note:'75–78% VMA', trailCorr:0.07 },
-      SWEET_SPOT: { pL:null, pH:null, icon:'&#11088;',  label:'Sweet Spot',           color:'#facc15', note:'95% vitesse S60',  isSweetSpot:true, trailCorr:0.07 },
-      AS21:       { pL:0.82, pH:0.85, icon:'&#127942;', label:'AS21 — Allure Semi',   color:'#fb923c', note:'82–85% VMA', trailCorr:0.07 },
-      S60:        { pL:0.84, pH:0.87, icon:'&#9200;',   label:'S60 — Seuil 60min',    color:'#f97316', note:'84–87% VMA', trailCorr:0.07 },
-      AS10:       { pL:0.88, pH:0.91, icon:'&#127937;', label:'AS10 — Allure 10km',   color:'#c084fc', note:'88–91% VMA', trailCorr:0.08 },
-      S30:        { pL:0.89, pH:0.92, icon:'&#9889;',   label:'S30 — Seuil 30min',    color:'#f87171', note:'89–92% VMA', trailCorr:0.07 },
-      VMA:        { pL:0.95, pH:1.05, icon:'&#9889;',   label:'VMA',                  color:'#e879f9', note:'95–105% VMA', trailCorr:0.10 },
-    };
-
-    // Formatteur d'allure sec → min'ss"
-    const fmtSec = (s) => Math.floor(s/60) + "'" + String(s%60).padStart(2,'0') + '"';
-    const fmtPct = (pct) => fmtSec(Math.round(3600 / (vma * pct)));
-
-    // Ligne du tableau — CSS Grid (alignement parfait header+données)
-    const paceRow = (def) => {
-      let pL = def.pL, pH = def.pH;
-      if (def.isSweetSpot) { pL = APZ.S60.pL * 0.95; pH = APZ.S60.pH * 0.95; }
-
-      let routeCell, trailCell;
-      if (def.noTarget) {
-        routeCell = '<em class="rpt-free">allure libre</em>';
-        trailCell = '<em class="rpt-free">allure libre</em>';
+    // Ligne du tableau — CSS Grid (alignement parfait header+données) —
+    // ref lu directement dans ALLURE_PLUS_ZONES (campus.js, source de
+    // verite unique) via calcAllureRef/calcAllureRefTrail, memes fonctions
+    // que la modale "Allures de course" (Objectifs) : les deux tableaux
+    // affichent donc toujours des valeurs identiques par construction.
+    const paceRow = (key) => {
+      const ref = ALLURE_PLUS_ZONES[key];
+      const note = ref.isSweetSpot ? '95% vitesse S60' : (Math.round(ref.pctLow * 100) + '–' + Math.round(ref.pctHigh * 100) + '% VMA');
+      const road = calcAllureRef(key, vma);
+      const routeCell = fmtPace(road.paceMin) + '<span class="rpt-dash"> – </span>' + fmtPace(road.paceMax);
+      let trailCell;
+      if (ref.trailCorr) {
+        const trail = calcAllureRefTrail(key, vma);
+        trailCell = fmtPace(trail.paceMin) + '<span class="rpt-dash"> – </span>' + fmtPace(trail.paceMax)
+          + ' <span class="rpt-badge">+' + Math.round((trail.trailCorr || 0) * 100) + '%</span>';
       } else {
-        routeCell = fmtPct(pH) + '<span class="rpt-dash"> – </span>' + fmtPct(pL);
-        if (def.trailCorr) {
-          const corr = def.trailCorr;
-          const tMin = Math.round(3600 / (vma * pH) * (1 + corr));
-          const tMax = Math.round(3600 / (vma * pL) * (1 + corr));
-          trailCell = fmtSec(tMin) + '<span class="rpt-dash"> – </span>' + fmtSec(tMax)
-            + ' <span class="rpt-badge">+' + Math.round(corr*100) + '%</span>';
-        } else {
-          trailCell = '<span class="rpt-na">–</span>';
-        }
+        trailCell = '<span class="rpt-na">–</span>';
       }
 
-      return '<div class="rpt-row" style="border-left:3px solid ' + def.color + '">'
+      return '<div class="rpt-row" style="border-left:3px solid ' + ref.color + '">'
         + '<div class="rpt-cell rpt-zone">'
-          + '<div class="rpt-zone-name">' + def.label + '</div>'
-          + '<div class="rpt-zone-pct">' + def.note + '</div>'
+          + '<div class="rpt-zone-name">' + ref.label + '</div>'
+          + '<div class="rpt-zone-pct">' + note + '</div>'
         + '</div>'
+        + '<div class="rpt-cell rpt-fczone">' + (ref.fcZone || '<span class="rpt-na">–</span>') + '</div>'
         + '<div class="rpt-cell rpt-route">' + routeCell + '</div>'
         + '<div class="rpt-cell rpt-trail">' + trailCell + '</div>'
         + '</div>';
@@ -2304,20 +2329,21 @@ function renderProfile() {
       '<div class="rpt-table">'
       + '<div class="rpt-head">'
         + '<div class="rpt-cell rpt-zone">Zone</div>'
+        + '<div class="rpt-cell rpt-fczone">Zone FC associée</div>'
         + '<div class="rpt-cell rpt-route">' + personEmoji('running') + ' Route <span class="rpt-unit-hd">/km</span></div>'
         + '<div class="rpt-cell rpt-trail">🏔 Trail <span class="rpt-unit-hd">/km</span></div>'
       + '</div>'
-      + paceRow(APZ.EF)
-      + paceRow(APZ.TEMPO)
-      + paceRow(APZ.AS42)
-      + paceRow(APZ.SWEET_SPOT)
-      + paceRow(APZ.AS21)
+      + paceRow('EF')
+      + paceRow('TEMPO')
+      + paceRow('AS42')
+      + paceRow('SWEET_SPOT')
+      + paceRow('AS21')
       + '<div class="rpt-sep"></div>'
-      + paceRow(APZ.S60)
-      + paceRow(APZ.AS10)
-      + paceRow(APZ.S30)
+      + paceRow('S60')
+      + paceRow('AS10')
+      + paceRow('S30')
       + '<div class="rpt-sep"></div>'
-      + paceRow(APZ.VMA)
+      + paceRow('VMA')
       + '</div>';
   } else if (racePacesEl) {
     racePacesEl.innerHTML = '<div class="profile-indicator-empty">Synchronisez Garmin pour calculer vos allures</div>';
@@ -3058,6 +3084,42 @@ function showAdminNav(userEmail) {
   }
 }
 
+// ══════════════════════════════════════════════════════
+// TAMPON "PREF 2"
+// ══════════════════════════════════════════════════════
+async function loadPref2State() {
+  try {
+    const res = await fetch(`${API}/api/pref2`);
+    if (!res.ok) return;
+    const data = await res.json();
+
+    const row = el('pref2-row');
+    if (row) row.style.display = data.canEdit ? 'flex' : 'none';
+
+    const tampon = el('pref2-tampon');
+    if (tampon) tampon.style.display = data.enabled ? 'block' : 'none';
+
+    const checkbox = el('input-pref2');
+    if (checkbox) {
+      checkbox.checked = !!data.enabled;
+      if (!checkbox.dataset.pref2Bound) {
+        checkbox.dataset.pref2Bound = '1';
+        checkbox.addEventListener('change', async () => {
+          try {
+            const r = await fetch(`${API}/api/pref2`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ enabled: checkbox.checked })
+            });
+            const d = await r.json();
+            if (tampon) tampon.style.display = d.enabled ? 'block' : 'none';
+          } catch (e) {}
+        });
+      }
+    }
+  } catch (e) {}
+}
+
 // Implémentation réelle dans campus.js (a besoin de campusState.goal/weeks,
 // le plan tel qu'affiché à l'écran - voir la fonction là-bas pour le detail)
 
@@ -3352,6 +3414,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Status + chargement initial
   await checkStatus();
   await Promise.all([loadDashboard(), loadHeartRate(), loadSleep(), loadWellnessRow()]);
+  if (typeof loadAnalysisIndex === 'function') loadAnalysisIndex();
 
   // Initialiser le sélecteur d'années complet (2010 → année courante)
   populateYearSelector();

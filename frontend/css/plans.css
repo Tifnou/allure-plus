@@ -14,17 +14,22 @@
   background: transparent;
 }
 
-/* ── Bandeau d'info : catalogue + plan actif ── */
+/* ── Bandeau d'info : catalogue + plan actif, cote a cote (meme hauteur,
+   largeur proportionnelle) plutot qu'empiles — occupe toute la largeur de
+   page (comme le header) au lieu d'un bandeau etroit fixe a 600px. ── */
 .plans-info-banner {
-  max-width: 600px;
+  display: flex;
+  align-items: stretch;
+  gap: 16px;
   margin-bottom: 20px;
 }
 .plans-info-card {
+  flex: 2;
+  min-width: 0;
   background: var(--bg-white);
   border: 1px solid var(--border);
   border-radius: 14px;
   padding: 16px 20px;
-  margin-bottom: 10px;
   box-shadow: var(--shadow-sm);
 }
 .plans-info-card-title {
@@ -45,6 +50,8 @@
   white-space: nowrap;
 }
 .plans-active-warning {
+  flex: 1;
+  min-width: 0;
   display: flex; align-items: flex-start; gap: 12px;
   background: #fffbeb; color: #92400e;
   border: 1px solid rgba(245,158,11,0.35);
@@ -55,13 +62,13 @@
 .plans-active-warning-icon { font-size: 1.25rem; flex-shrink: 0; margin-top: 1px; }
 .plans-active-warning-title { display: block; margin-bottom: 3px; font-weight: 700; }
 
-/* ── Carte centrale du wizard ── */
+/* ── Carte centrale du wizard — meme largeur que le header de la page
+   (plus de max-width fixe a 600px) ── */
 .plans-card {
   background: var(--bg-white);
   border: 1px solid var(--border);
   border-radius: 16px;
   padding: 28px 32px;
-  max-width: 600px;
   margin-bottom: 24px;
   box-shadow: var(--shadow-sm);
 }
@@ -77,8 +84,10 @@
 .wizard-dot.done { background:#10b981; }
 .wizard-step-label { font-size:13px; color:var(--text-muted); margin-left:4px; }
 
-/* ── Question ── */
-.wizard-step-content { max-width: 560px; }
+/* ── Question — meme largeur que le header (plus de cap a 560px : .plans-card
+   est injecte a l'interieur de ce conteneur, donc c'est lui qui bornait
+   la largeur reelle de la carte, malgre le max-width:none sur .plans-card) ── */
+.wizard-step-content { max-width: none; }
 .wizard-question { margin-bottom:24px; }
 .wizard-q-title {
   font-size:20px; font-weight:700;

@@ -1,6 +1,6 @@
 {
   "name": "suivi-sport",
-  "version": "1.6.1",
+  "version": "1.10.0",
   "description": "",
   "main": "index.js",
   "scripts": {
@@ -18,8 +18,10 @@
     "exceljs": "^4.4.0",
     "express": "^5.2.1",
     "garmin-connect": "^1.6.2",
+    "jsqr": "^1.4.0",
     "multer": "^2.2.0",
     "pdf-parse": "^2.4.5",
+    "pdfjs-dist": "^2.16.105",
     "sharp": "^0.35.3",
     "uuid": "^14.0.1"
   }

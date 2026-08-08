@@ -150,7 +150,11 @@
 
 /* ─── Reset ─── */
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
-html{scroll-behavior:smooth;}
+/* scrollbar-gutter reserve l'espace de la scrollbar en permanence : sans
+   ca, les pages dont le contenu tient dans la fenetre (pas de scrollbar)
+   sont ~4px plus larges que les autres, ce qui decale legerement le
+   page-header (largeur + coin haut-gauche) d'une page a l'autre. */
+html{scroll-behavior:smooth;scrollbar-gutter:stable;}
 body{
   font-family:var(--font);
   background:var(--bg);
@@ -612,8 +616,10 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
 .race-row--best{background:var(--accent-light);}
 .race-row--best td:first-child{border-left:3px solid var(--accent);padding-left:7px;}
 .race-trophy{cursor:help;margin-left:2px;}
-.race-cert-link{text-decoration:none;}
+.race-cert-link{text-decoration:none;background:none;border:none;padding:0;font-size:inherit;cursor:pointer;}
 .race-cert-empty{color:var(--text-muted);}
+.race-link-suggest{background:none;border:none;cursor:pointer;padding:0;opacity:0.55;filter:grayscale(1);transition:opacity var(--transition),filter var(--transition);}
+.race-link-suggest:hover{opacity:1;filter:none;}
 .race-dnf-badge{display:inline-block;font-size:10px;font-weight:700;color:var(--red);background:var(--red-bg);border:1px solid var(--red);border-radius:20px;padding:1px 8px;margin-left:6px;letter-spacing:0.03em;vertical-align:middle;}
 .races-row--dnf{color:var(--text-muted);}
 .races-row--dnf td{opacity:0.7;}
@@ -644,6 +650,11 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
 .health-current-icon{color:var(--accent);display:flex;}
 .health-current-icon svg{width:16px;height:16px;}
 .health-current-value{font-family:var(--font);font-size:21px;font-weight:700;color:var(--text-primary);line-height:1.1;}
+/* Statut d'entrainement : phrase (pas un nombre court comme les autres
+   cartes) — taille reduite + coupure propre (hyphens) au cas ou un mot
+   long sans espace ("Desentrainement") ne tienne pas sur une ligne dans
+   les 150px de la carte, plutot qu'une coupure brute ou un debordement. */
+#health-value-trainingStatus{font-size:15px;line-height:1.3;overflow-wrap:break-word;hyphens:auto;}
 .health-current-unit{font-size:11.5px;font-weight:500;color:var(--text-muted);margin-left:2px;}
 .health-current-date{font-family:var(--font-body);font-size:9.5px;color:var(--text-muted);}
 .health-history-card{flex:1;min-width:0;background:var(--card-bg);border:1px solid var(--border);border-radius:var(--radius-lg);padding:10px 16px;box-shadow:var(--shadow-sm);}
@@ -652,6 +663,14 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
 .health-period-btn{padding:3px 10px;font-size:11px;}
 .health-history-body--chart{height:100px;position:relative;}
 .health-history-body--table{max-height:180px;overflow-y:auto;}
+.health-history-body--timeline{height:100px;display:flex;flex-direction:column;justify-content:center;}
+.health-timeline{width:100%;}
+.health-timeline-track{display:flex;width:100%;height:28px;border-radius:6px;overflow:hidden;background:var(--bg-light);border:1px solid var(--border-light);}
+.health-timeline-day{flex:1 1 0;min-width:1px;transition:filter var(--transition);}
+.health-timeline-day[title]{cursor:default;}
+.health-timeline-day[title]:hover{filter:brightness(1.18);}
+.health-timeline-labels{position:relative;height:16px;margin-top:6px;}
+.health-timeline-tick{position:absolute;top:0;font-family:var(--font-body);font-size:10px;color:var(--text-muted);white-space:nowrap;}
 .health-empty{display:flex;align-items:center;justify-content:center;height:100%;min-height:80px;color:var(--text-muted);font-family:var(--font-body);font-size:12.5px;text-align:center;padding:0 20px;}
 .health-comment{margin-top:6px;padding:9px 14px;border-radius:var(--radius-md);border:1px solid var(--border);border-left:3px solid var(--text-muted);background:var(--card-bg);}
 .health-comment--good{border-left-color:var(--green);}
@@ -692,8 +711,11 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
 /* ═══════════════════════════════════════════════
    PAGE PROFIL
 ═══════════════════════════════════════════════ */
-/* Densité resserrée, propre à cette page (n'affecte aucune autre page) */
-#page-profile{padding:24px 28px 48px;}
+/* Densité resserrée, propre à cette page (n'affecte aucune autre page).
+   Top/gauche/droite alignés sur .page (32px/36px) pour que le coin
+   haut-gauche et la largeur du page-header restent identiques partout —
+   seul le bas reste resserré (48px au lieu de 60px), sans effet sur l'en-tête. */
+#page-profile{padding:32px 36px 48px;}
 #page-profile .page-header{margin-bottom:16px;padding:8px 18px;}
 #page-profile .card{padding:14px 16px;}
 #page-profile .card-header{margin-bottom:10px;}
@@ -899,16 +921,22 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
 .weight-loss-item{font-family:var(--font-body);font-size:12px;color:var(--text-secondary);white-space:nowrap;}
 .weight-loss-item span{font-weight:600;color:var(--text-primary);}
 
-/* Zones FC */
+/* Zones FC — grille a colonnes fixes (au lieu de flex+min-width) : la
+   largeur de chaque colonne ne depend plus de la longueur du texte d'une
+   ligne donnee, donc bpm/allure/barre restent alignes verticalement quel
+   que soit le nom de zone (Recuperation vs Endurance soutenue). */
 .hr-zones-list{display:flex;flex-direction:column;gap:6px;padding-top:2px;font-variant-numeric:tabular-nums;}
-.hr-zone-row{display:flex;align-items:center;gap:10px;flex-wrap:nowrap;padding:2px 0;}
-.hr-zone-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0;}
-.hr-zone-name{font-family:var(--font-body);font-size:12px;font-weight:600;color:var(--text-primary);min-width:140px;}
-.hr-zone-range{font-family:var(--font-mono,var(--font));font-size:12px;color:var(--text-secondary);min-width:95px;white-space:nowrap;}
-.hr-zone-speed{font-family:var(--font-mono,var(--font));font-size:12px;color:var(--text-primary);min-width:100px;white-space:nowrap;font-weight:500;}
-.hr-zone-pace{font-family:var(--font-mono,var(--font));font-size:12px;color:var(--text-secondary);min-width:110px;white-space:nowrap;}
+.hr-zone-row{display:grid;grid-template-columns:14px 180px 100px 195px 140px 1fr;align-items:center;gap:10px;padding:2px 0;}
+.hr-zone-dot{width:9px;height:9px;border-radius:50%;}
+.hr-zone-name{font-family:var(--font-body);font-size:12px;font-weight:600;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.hr-zone-range{font-family:var(--font-mono,var(--font));font-size:12px;color:var(--text-secondary);white-space:nowrap;}
+.hr-zone-allure{font-family:var(--font-body);font-size:11.5px;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.hr-zone-allure b{color:var(--text-primary);font-weight:600;}
 .hr-zone-desc{font-family:var(--font-body);font-size:11px;color:var(--text-muted);}
-.hr-zone-bar-wrap{flex:1;height:5px;background:var(--border);border-radius:3px;overflow:hidden;min-width:40px;}
+/* Barre en "escalier" : largeur cumulee depuis la gauche (0 -> pHigh), donc
+   chaque ligne est plus longue que la precedente — lu de haut en bas, les
+   bords droits dessinent des marches qui montent. */
+.hr-zone-bar-wrap{height:5px;background:var(--border);border-radius:3px;overflow:hidden;}
 .hr-zone-bar{height:100%;border-radius:3px;transition:width 0.5s ease;}
 
 /* Conseils personnalises */
@@ -1934,6 +1962,87 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
   border-color: #e53935;
 }
 
+/* ── Analyse seance prevue vs realisee ── */
+.btn-link-analysis, .btn-view-analysis {
+  padding: 7px 14px;
+  font-size: 12px;
+  font-family: var(--font-body);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all var(--transition);
+  font-weight: 600;
+}
+.btn-link-analysis {
+  background: transparent;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+}
+.btn-link-analysis:hover { background: rgba(99,102,241,.08); }
+.btn-view-analysis {
+  background: var(--accent);
+  color: #fff;
+  border: 1px solid var(--accent);
+}
+.btn-view-analysis:hover { background: var(--accent-text); }
+.session-analysis-score-badge {
+  font-family: var(--font-body);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent);
+  background: rgba(99,102,241,.1);
+  border: 1px solid rgba(99,102,241,.3);
+  border-radius: 20px;
+  padding: 2px 8px;
+  white-space: nowrap;
+}
+.activity-analysis-badge { font-size: 12px; cursor: pointer; }
+
+.analysis-modal-header { margin-bottom: 14px; }
+.analysis-modal-title { font-family: var(--font); font-weight: 700; font-size: 16px; color: var(--text-primary); }
+.analysis-modal-score { font-family: var(--font-body); font-size: 13.5px; color: var(--text-secondary); margin-top: 4px; }
+.analysis-summary-block { border: 1px solid var(--border-light); border-radius: 10px; overflow: hidden; margin-bottom: 14px; }
+.analysis-summary-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 8px 12px; border-bottom: 1px solid var(--border-light);
+  font-family: var(--font-body); font-size: 12.5px;
+}
+.analysis-summary-row:last-child { border-bottom: none; }
+.analysis-summary-row--muted { opacity: .55; }
+.analysis-summary-label { color: var(--text-secondary); font-weight: 600; flex-shrink: 0; min-width: 90px; }
+.analysis-summary-values { color: var(--text-primary); text-align: right; flex: 1; }
+.analysis-summary-planned { color: var(--text-muted); }
+.analysis-summary-actual { font-weight: 700; }
+.analysis-summary-icon { flex-shrink: 0; }
+.analysis-section-title { font-family: var(--font-body); font-weight: 700; font-size: 12.5px; color: var(--text-primary); margin: 14px 0 6px; }
+.analysis-timeline-bar { display: flex; height: 26px; border-radius: 6px; overflow: hidden; }
+.analysis-timeline-seg { min-width: 2px; cursor: default; transition: opacity var(--transition); }
+.analysis-timeline-seg:hover { opacity: .8; }
+.analysis-timeline-legend { display: flex; gap: 14px; margin-top: 6px; font-family: var(--font-body); font-size: 11px; color: var(--text-secondary); }
+.analysis-timeline-legend-item { display: inline-flex; align-items: center; gap: 4px; }
+.analysis-timeline-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; }
+.analysis-reps-table { width: 100%; border-collapse: collapse; font-family: var(--font-body); font-size: 12px; }
+.analysis-reps-table th { text-align: left; color: var(--text-muted); font-weight: 600; padding: 4px 8px; border-bottom: 1px solid var(--border-light); }
+.analysis-reps-table td { padding: 5px 8px; border-bottom: 1px solid var(--border-light); color: var(--text-primary); }
+.analysis-list { margin: 0; padding: 0; list-style: none; font-family: var(--font-body); font-size: 12.5px; }
+.analysis-list li { padding: 3px 0; }
+.analysis-list--positive li { color: #2e7d32; }
+.analysis-list--improve li { color: #bf360c; }
+.analysis-coherence-note, .analysis-commentary, .analysis-similar-note {
+  font-family: var(--font-body); font-size: 12.5px; color: var(--text-secondary);
+  margin-top: 12px; padding: 10px 12px; background: var(--bg); border-radius: 8px; line-height: 1.6;
+}
+.analysis-commentary { color: var(--text-primary); font-style: italic; }
+.btn-analysis-unlink, .btn-analysis-close-modal, .btn-analysis-recalc {
+  flex: 1; padding: 9px; border-radius: 9px; font-size: 13px; font-weight: 600;
+  cursor: pointer; font-family: var(--font-body);
+}
+.btn-analysis-unlink { border: 1px solid #e53935; background: transparent; color: #e53935; }
+.btn-analysis-unlink:hover { background: rgba(229,57,53,.08); }
+.btn-analysis-close-modal { border: 1px solid var(--border); background: transparent; color: var(--text-secondary); }
+.btn-analysis-close-modal:hover { border-color: var(--text-muted); color: var(--text-primary); }
+.btn-analysis-recalc { border: 1px solid var(--accent); background: transparent; color: var(--accent); }
+.btn-analysis-recalc:hover { background: rgba(99,102,241,.08); }
+
 /* ── Barre d'actions plan ── */
 .plan-actions-bar {
   display: flex;
@@ -2685,13 +2794,25 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
 /* ─── PPS (Pass Prevention Sante) — sous l'avatar, fixe, bouton unique
    translucide (jusqu'a 2 PPS geres depuis un seul panneau) ─── */
 .pps-btn{
-  position:fixed;top:106px;right:18px;z-index:998;
+  position:fixed;top:106px;right:60px;transform:translateX(50%);z-index:998;
   border:none;cursor:pointer;border-radius:20px;padding:4px 12px;font-family:var(--font-body);
   font-size:10.5px;font-weight:700;letter-spacing:0.03em;color:#fff;
   backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);
   box-shadow:0 2px 8px rgba(0,0,0,0.18);transition:transform var(--transition),opacity var(--transition);
 }
-.pps-btn:hover{transform:translateY(-1px);}
+.pps-btn:hover{transform:translateX(50%) translateY(-1px);}
+
+/* ─── Tampon "Pref 2" — sous l'avatar, meme taille que la photo de profil ─── */
+.pref2-tampon{
+  position:fixed;top:150px;right:18px;width:84px;height:84px;z-index:997;
+  pointer-events:none;filter:drop-shadow(0 2px 6px rgba(0,0,0,0.18));
+}
+
+.form-checkbox-inline{
+  display:flex;align-items:center;gap:6px;font-family:var(--font-body);font-size:13px;
+  color:var(--text-primary);cursor:pointer;
+}
+.form-checkbox-inline input{cursor:pointer;}
 .pps-btn--empty{background:rgba(148,163,184,0.45);}
 .pps-btn--unknown{background:rgba(148,163,184,0.65);}
 .pps-btn--green{background:rgba(22,163,74,0.65);}
@@ -3262,7 +3383,7 @@ td .activity-type-cell {
 .rpt-head,
 .rpt-row {
   display: grid;
-  grid-template-columns: 1fr 128px 140px;
+  grid-template-columns: 1fr 150px 128px 140px;
   align-items: center;
   border-left: 3px solid transparent;
 }
@@ -3285,6 +3406,7 @@ td .activity-type-cell {
 .rpt-zone { padding-left: 6px; }
 .rpt-zone-name { font-size: 12px; font-weight: 500; color: var(--text-primary); line-height: 1.25; }
 .rpt-zone-pct { font-size: 9.5px; color: var(--text-muted); font-weight: 400; margin-top: 0; }
+.rpt-fczone { font-size: 11px; color: var(--text-secondary); font-weight: 500; white-space: nowrap; }
 .rpt-route, .rpt-trail {
   font-family: var(--font-mono, 'SF Mono', 'Fira Code', 'Consolas', monospace);
   font-size: 12px; font-weight: 500; text-align: right; color: var(--text-primary);
@@ -3461,6 +3583,7 @@ body.plans-active {
 .paces-col-header {
   display: flex; align-items: center;
   padding: 5px 12px 5px 16px;
+  margin-top: 10px;
   margin-bottom: 2px;
   font-size: 0.68rem; font-weight: 800;
   text-transform: uppercase; letter-spacing: 0.06em;
@@ -4049,22 +4172,12 @@ body { background: var(--bg) !important; }
 
 
 /* ═══ ACTIVITÉS — correction scintillement header ═══════════════════
-   1. Scrollbar toujours réservée (overflow-y: scroll) → pas de décalage
-   2. Header sans backdrop-filter coûteux → plus de re-render au hover
-   3. will-change sur les lignes hover → isolé du header
-   ══════════════════════════════════════════════════════════════════ */
-
-/* Supprimer le backdrop-filter sur le header activités uniquement */
-#page-activities .act-header-sticky {
-  backdrop-filter: none !important;
-  -webkit-backdrop-filter: none !important;
-  background: var(--card-bg) !important;
-  border: 1px solid var(--border) !important;
-  overflow: hidden !important;
-}
-[data-theme="dark"] #page-activities .act-header-sticky {
-  background: var(--card-bg) !important;
-}
+   Le fond/flou opaque ci-dessous datait du header fixe (l'overlap avec le
+   tableau qui defilait dessous forcait un recalcul du backdrop-filter a
+   chaque frame de scroll -> scintillement). Le header est repasse en flux
+   normal (position:static, cf. plus haut) : il ne recouvre plus rien, donc
+   plus besoin de sacrifier le fond translucide commun a tous les headers.
+   Seul le will-change sur les lignes reste utile (isole leur propre repaint). */
 
 /* Isoler les hover des lignes du tableau pour éviter tout repaint du header */
 #page-activities .runs-table tbody tr {

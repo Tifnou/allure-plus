@@ -108,6 +108,11 @@ const RACES_FILE             = path.join(DATA_DIR, 'races.json');
 const WEIGHT_HISTORY_FILE    = path.join(DATA_DIR, 'weight_history.json');
 const HEALTH_SNAPSHOTS_FILE  = path.join(DATA_DIR, 'health_snapshots.json');
 const PPS_FILE                = path.join(DATA_DIR, 'pps.json');
+const PREFS_FILE              = path.join(DATA_DIR, 'prefs.json');
+const SESSION_ANALYSES_FILE   = path.join(DATA_DIR, 'session_analyses.json');
+
+// Tampon "Pref 2" — case a cocher reservee a ce compte, dans Profil > Mes informations
+const PREF2_EMAIL = 'floflopavard@gmail.com';
 
 function readJsonSafe(filePath, fallback) {
   try {
@@ -142,6 +147,30 @@ app.delete('/api/avatar', requireSession, (req, res) => {
     if (f) fs.unlinkSync(path.join(UPLOADS_DIR, f));
     res.json({ ok: true });
   } catch (err) { handleError(res, err); }
+});
+
+// Tampon "Pref 2" sous l'avatar : reglable uniquement par PREF2_EMAIL, mais
+// l'etat (enabled) est stocke par compte et lu tel quel pour n'importe quelle
+// session (permet par ex. de l'activer temporairement sur un autre compte
+// pour verification, sans exposer la case a cocher a ce compte).
+app.get('/api/pref2', requireSession, (req, res) => {
+  const email = (req.session.email || '').toLowerCase();
+  const prefs = readJsonSafe(PREFS_FILE, {});
+  res.json({
+    canEdit: email === PREF2_EMAIL.toLowerCase(),
+    enabled: !!prefs[email]?.pref2
+  });
+});
+
+app.post('/api/pref2', requireSession, (req, res) => {
+  const email = (req.session.email || '').toLowerCase();
+  if (email !== PREF2_EMAIL.toLowerCase()) {
+    return res.status(403).json({ error: 'Reserve a ce compte' });
+  }
+  const prefs = readJsonSafe(PREFS_FILE, {});
+  prefs[email] = { pref2: !!req.body?.enabled };
+  writeJsonSafe(PREFS_FILE, prefs);
+  res.json({ success: true, enabled: prefs[email].pref2 });
 });
 
 // Ajout / suppression des images du diaporama de fond
@@ -805,7 +834,7 @@ app.get('/api/races', requireSession, (req, res) => {
 
 app.post('/api/races', requireSession, (req, res) => {
   try {
-    const { name, type, date, distanceKm, durationSec, elevationGain, vo2max, dnf } = req.body || {};
+    const { name, type, date, distanceKm, durationSec, elevationGain, vo2max, dnf, activityId } = req.body || {};
     if (!name || !['route', 'trail'].includes(type) || !date || !distanceKm || !durationSec) {
       return res.status(400).json({ error: 'Champs obligatoires manquants (name, type, date, distanceKm, durationSec)' });
     }
@@ -820,6 +849,11 @@ app.post('/api/races', requireSession, (req, res) => {
       elevationGain: elevationGain != null && elevationGain !== '' ? Number(elevationGain) : null,
       vo2max: vo2max != null && vo2max !== '' ? Number(vo2max) : null,
       dnf: !!dnf,
+      // Lien vers l'activite Garmin d'origine : fourni automatiquement depuis
+      // "Envoyer vers Courses" (Activites), ou ajoute a posteriori par
+      // l'utilisateur (suggestion date+distance, jamais un lien automatique
+      // silencieux — voir linkRaceToActivity/findLikelyActivityMatch, records.js)
+      activityId: activityId ? String(activityId) : null,
     };
     races.push(race);
     writeJsonSafe(RACES_FILE, races);
@@ -832,7 +866,7 @@ app.put('/api/races/:id', requireSession, (req, res) => {
     const races = readJsonSafe(RACES_FILE, []);
     const idx = races.findIndex(r => r.id === req.params.id);
     if (idx === -1) return res.status(404).json({ error: 'Course introuvable' });
-    const { name, type, date, distanceKm, durationSec, elevationGain, vo2max, dnf } = req.body || {};
+    const { name, type, date, distanceKm, durationSec, elevationGain, vo2max, dnf, activityId } = req.body || {};
     if (!name || !['route', 'trail'].includes(type) || !date || !distanceKm || !durationSec) {
       return res.status(400).json({ error: 'Champs obligatoires manquants' });
     }
@@ -845,6 +879,7 @@ app.put('/api/races/:id', requireSession, (req, res) => {
       elevationGain: elevationGain != null && elevationGain !== '' ? Number(elevationGain) : null,
       vo2max: vo2max != null && vo2max !== '' ? Number(vo2max) : null,
       dnf: !!dnf,
+      activityId: activityId ? String(activityId) : (races[idx].activityId || null),
     };
     writeJsonSafe(RACES_FILE, races);
     res.json({ success: true, race: races[idx] });
@@ -894,6 +929,87 @@ app.delete('/api/races/:id/certificate', requireSession, (req, res) => {
     }
     delete races[idx].certificateFile;
     writeJsonSafe(RACES_FILE, races);
+    res.json({ success: true });
+  } catch (err) { handleError(res, err); }
+});
+
+// ─── Analyses seance prevue vs realisee (liaison Entrainement <-> Activites) ──
+// Le calcul (zones, VMA, classification des laps...) vit entierement cote
+// client (campus.js/app.js/session-analysis.js) - le serveur ne fait que
+// stocker le resultat, pour ne pas dupliquer ALLURE_PLUS_ZONES et consorts.
+// Une activite ne peut etre liee qu'a une seule seance, et reciproquement
+// (contrainte imposee ici, jamais seulement cote client).
+app.get('/api/session-analyses', requireSession, (req, res) => {
+  const analyses = readJsonSafe(SESSION_ANALYSES_FILE, []);
+  res.json(analyses);
+});
+
+app.get('/api/session-analyses/by-activity/:activityId', requireSession, (req, res) => {
+  const analyses = readJsonSafe(SESSION_ANALYSES_FILE, []);
+  const found = analyses.find(a => String(a.activityId) === String(req.params.activityId));
+  if (!found) return res.status(404).json({ error: 'Aucune analyse pour cette activite' });
+  res.json(found);
+});
+
+app.get('/api/session-analyses/by-session', requireSession, (req, res) => {
+  const { weekId, trainingIndex } = req.query;
+  if (!weekId || trainingIndex === undefined) {
+    return res.status(400).json({ error: 'weekId et trainingIndex requis' });
+  }
+  const analyses = readJsonSafe(SESSION_ANALYSES_FILE, []);
+  const found = analyses.find(a =>
+    a.planKey?.weekId === weekId && String(a.planKey?.trainingIndex) === String(trainingIndex));
+  if (!found) return res.status(404).json({ error: 'Aucune analyse pour cette seance' });
+  res.json(found);
+});
+
+app.post('/api/session-analyses', requireSession, (req, res) => {
+  try {
+    const body = req.body || {};
+    const { planKey, activityId } = body;
+    if (!planKey?.weekId || planKey?.trainingIndex === undefined || !activityId) {
+      return res.status(400).json({ error: 'planKey (weekId, trainingIndex) et activityId requis' });
+    }
+    const analyses = readJsonSafe(SESSION_ANALYSES_FILE, []);
+    if (analyses.some(a => String(a.activityId) === String(activityId))) {
+      return res.status(409).json({ error: 'Cette activite est deja liee a une autre seance' });
+    }
+    if (analyses.some(a => a.planKey?.weekId === planKey.weekId && String(a.planKey?.trainingIndex) === String(planKey.trainingIndex))) {
+      return res.status(409).json({ error: 'Cette seance est deja liee a une autre activite' });
+    }
+    const now = new Date().toISOString();
+    const record = { ...body, id: crypto.randomUUID(), createdAt: now, updatedAt: now };
+    analyses.push(record);
+    writeJsonSafe(SESSION_ANALYSES_FILE, analyses);
+    res.json({ success: true, analysis: record });
+  } catch (err) { handleError(res, err); }
+});
+
+app.put('/api/session-analyses/:id', requireSession, (req, res) => {
+  try {
+    const analyses = readJsonSafe(SESSION_ANALYSES_FILE, []);
+    const idx = analyses.findIndex(a => a.id === req.params.id);
+    if (idx === -1) return res.status(404).json({ error: 'Analyse introuvable' });
+    const body = req.body || {};
+    const { planKey, activityId } = body;
+    if (planKey?.weekId && activityId) {
+      const conflictActivity = analyses.some(a => a.id !== req.params.id && String(a.activityId) === String(activityId));
+      const conflictSession = analyses.some(a => a.id !== req.params.id &&
+        a.planKey?.weekId === planKey.weekId && String(a.planKey?.trainingIndex) === String(planKey.trainingIndex));
+      if (conflictActivity) return res.status(409).json({ error: 'Cette activite est deja liee a une autre seance' });
+      if (conflictSession) return res.status(409).json({ error: 'Cette seance est deja liee a une autre activite' });
+    }
+    analyses[idx] = { ...analyses[idx], ...body, id: analyses[idx].id, createdAt: analyses[idx].createdAt, updatedAt: new Date().toISOString() };
+    writeJsonSafe(SESSION_ANALYSES_FILE, analyses);
+    res.json({ success: true, analysis: analyses[idx] });
+  } catch (err) { handleError(res, err); }
+});
+
+app.delete('/api/session-analyses/:id', requireSession, (req, res) => {
+  try {
+    const analyses = readJsonSafe(SESSION_ANALYSES_FILE, []);
+    const filtered = analyses.filter(a => a.id !== req.params.id);
+    writeJsonSafe(SESSION_ANALYSES_FILE, filtered);
     res.json({ success: true });
   } catch (err) { handleError(res, err); }
 });
@@ -970,6 +1086,96 @@ app.delete('/api/weight-history/:date', requireSession, (req, res) => {
   } catch (err) { handleError(res, err); }
 });
 
+// ─── PPS : extraction via QR code ───────────────────────────────────────
+// Le PDF officiel athle.fr embarque un QR pointant vers
+// https://pps.athle.fr/passes/<token>/verify?data=<base64url zlib deflate>.
+// Une fois inflate, ce parametre est un JSON structure (nom, prenom, numero,
+// date d'expiration) : bien plus fiable que l'heuristique texte ci-dessous
+// (qui doit deviner la position des valeurs dans un texte PDF non ordonne).
+// On extrait les images XObject de chaque page via pdfjs-dist (sans rendu
+// canvas - juste getOperatorList + page.objs) et on tente un decodage jsQR
+// sur chacune ; fallback silencieux sur l'heuristique texte si absent/echec
+// (autre gabarit de PPS, QR illisible, etc.).
+function pdfImageToRgba(img) {
+  if (!img || !img.width || !img.height || !img.data) return null;
+  const { width, height, data, kind } = img;
+  const n = width * height;
+  if (data.length === n * 4) return data; // deja RGBA (kind 3)
+  if (data.length === n * 3) { // RGB (kind 2)
+    const rgba = new Uint8ClampedArray(n * 4);
+    for (let p = 0; p < n; p++) {
+      rgba[p * 4] = data[p * 3]; rgba[p * 4 + 1] = data[p * 3 + 1]; rgba[p * 4 + 2] = data[p * 3 + 2]; rgba[p * 4 + 3] = 255;
+    }
+    return rgba;
+  }
+  const bytesPerRow = Math.ceil(width / 8);
+  if (data.length === bytesPerRow * height) { // 1bpp grayscale (kind 1)
+    const rgba = new Uint8ClampedArray(n * 4);
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const byte = data[y * bytesPerRow + (x >> 3)];
+        const v = ((byte >> (7 - (x & 7))) & 1) ? 255 : 0;
+        const p = (y * width + x) * 4;
+        rgba[p] = v; rgba[p + 1] = v; rgba[p + 2] = v; rgba[p + 3] = 255;
+      }
+    }
+    return rgba;
+  }
+  return null;
+}
+
+function parsePpsQrUrl(text) {
+  try {
+    const u = new URL(text);
+    if (!/(^|\.)pps\.athle\.fr$/i.test(u.hostname)) return null;
+    const dataParam = u.searchParams.get('data');
+    if (!dataParam) return null;
+    const zlib = require('zlib');
+    const buf = Buffer.from(dataParam.replace(/-/g, '+').replace(/_/g, '/'), 'base64');
+    const json = JSON.parse(zlib.inflateSync(buf).toString('utf8'));
+    const toIso = (d) => { const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(d || ''); return m ? `${m[3]}-${m[2]}-${m[1]}` : null; };
+    if (!json.pps_identifier && !json.last_name) return null;
+    return {
+      number: json.pps_identifier || null,
+      expiryDate: toIso(json.expiry_date),
+      lastName: json.last_name || null,
+    };
+  } catch (e) { return null; }
+}
+
+async function extractPpsFromQr(buffer) {
+  try {
+    const pdfjsLib = require('pdfjs-dist/legacy/build/pdf.js');
+    const jsQR = require('jsqr');
+    const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(buffer) }).promise;
+    const OPS = pdfjsLib.OPS;
+    for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+      const page = await pdf.getPage(pageNum);
+      const opList = await page.getOperatorList();
+      const imgNames = [];
+      opList.fnArray.forEach((fn, i) => {
+        if (fn === OPS.paintImageXObject || fn === OPS.paintJpegXObject) imgNames.push(opList.argsArray[i][0]);
+      });
+      for (const name of imgNames) {
+        const img = await new Promise((resolve) => page.objs.get(name, resolve));
+        const rgba = pdfImageToRgba(img);
+        if (!rgba) continue;
+        let code = jsQR(rgba, img.width, img.height);
+        if (!code) {
+          const inverted = new Uint8ClampedArray(rgba);
+          for (let i = 0; i < inverted.length; i += 4) { const v = 255 - inverted[i]; inverted[i] = v; inverted[i + 1] = v; inverted[i + 2] = v; }
+          code = jsQR(inverted, img.width, img.height);
+        }
+        if (code && code.data) {
+          const parsed = parsePpsQrUrl(code.data);
+          if (parsed) return parsed;
+        }
+      }
+    }
+  } catch (e) { console.log('Extraction QR PPS impossible:', e.message); }
+  return null;
+}
+
 // ─── PPS (Pass Prevention Sante) ───────────────────────────────────────
 // Jusqu'a 2 PPS (nom de naissance / nom marital : une inscription a une
 // course a pu etre faite avec l'un ou l'autre). PDF stocke dans uploads/,
@@ -992,6 +1198,10 @@ app.post('/api/pps', requireSession, upload.single('pdf'), async (req, res) => {
     }
 
     let number = null, expiryDate = null, lastName = null;
+    const qrData = await extractPpsFromQr(req.file.buffer);
+    if (qrData) {
+      ({ number, expiryDate, lastName } = qrData);
+    } else
     try {
       const { PDFParse } = require('pdf-parse');
       const parser = new PDFParse({ data: req.file.buffer });

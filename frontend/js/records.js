@@ -396,7 +396,7 @@ function renderRaceGroupCard(g) {
             <thead>
               <tr>
                 <th>Type</th><th>Date</th><th>Distance</th><th>Chrono</th>
-                <th>Allure</th><th>Vitesse</th><th>D+</th><th>VO₂max</th><th></th><th></th>
+                <th>Allure</th><th>Vitesse</th><th>D+</th><th>VO₂max</th><th></th><th></th><th></th>
               </tr>
             </thead>
             <tbody>${g.list.map(renderRaceRow).join('')}</tbody>
@@ -420,6 +420,28 @@ function renderRaceRow(r) {
     ? `<a href="/uploads/${encodeURIComponent(r.certificateFile)}" target="_blank" rel="noopener" class="race-cert-link" title="Voir le diplôme">📄</a>`
     : `<span class="race-cert-empty">—</span>`;
 
+  let activityHtml;
+  if (r.activityId) {
+    // Ouvre le detail de l'activite dans Allure+ (page Activites), pas Garmin
+    // Connect — cf. openActivityFromId (app.js). L'annee de la course est
+    // transmise pour que la fonction puisse charger cette annee a la demande
+    // si l'activite n'est pas deja dans le cache local (_allActivities).
+    const raceYear = new Date(r.date).getFullYear();
+    activityHtml = `<button type="button" class="race-cert-link" onclick="openActivityFromId('${r.activityId}', ${raceYear})" title="Voir l'activité dans Allure+">🏃</button>`;
+  } else {
+    const suggestion = findLikelyActivityMatch(r);
+    const raceYear = new Date(r.date).getFullYear();
+    if (suggestion) {
+      activityHtml = `<button type="button" class="race-cert-link race-link-suggest" onclick="linkRaceToActivity('${r.id}','${suggestion.id}')" title="Lier à l'activité Garmin du ${formatDateShort(suggestion.date, true)} (${suggestion.distanceKm.toFixed(2)} km) ?">🔗</button>`;
+    } else if (!_fullyLoadedYears.has(raceYear)) {
+      // Annee pas encore chargee dans _allActivities : proposer de la
+      // chercher directement, sans avoir a passer par Activites.
+      activityHtml = `<button type="button" class="race-cert-link race-link-suggest" onclick="searchActivityForRace('${r.id}')" title="Chercher l'activité Garmin correspondante (${raceYear})">🔍</button>`;
+    } else {
+      activityHtml = `<span class="race-cert-empty">—</span>`;
+    }
+  }
+
   return `
     <tr class="races-row${r._isBest ? ' race-row--best' : ''}${r.dnf ? ' races-row--dnf' : ''}">
       <td>${r.type === 'trail' ? '⛰️ Trail' : '🏃 Route'}${dnfHtml}</td>
@@ -431,6 +453,7 @@ function renderRaceRow(r) {
       <td>${r.elevationGain != null ? r.elevationGain + ' m' : '—'}</td>
       <td>${r.vo2max != null ? r.vo2max : '—'}</td>
       <td>${certHtml}</td>
+      <td>${activityHtml}</td>
       <td class="races-actions">
         <button class="race-action-btn" onclick="editRace('${r.id}')" title="Modifier">✎</button>
         <button class="race-action-btn" onclick="deleteRace('${r.id}')" title="Supprimer">🗑</button>
@@ -459,6 +482,93 @@ async function deleteRace(id) {
     renderRacesTable();
     showToast('Course supprimée', 'success');
   } catch (e) { showToast('Erreur : ' + e.message, 'error'); }
+}
+
+// ─── Lien vers l'activité Garmin d'origine ────────────────────────────
+// Pour une course saisie manuellement (pas de activityId), on propose une
+// correspondance par date (meme jour ± 1, pour absorber un decalage de
+// fuseau horaire) et distance approchante (±15%, min 300 m) plutot que de
+// lier automatiquement — jamais de lien silencieux, l'utilisateur confirme
+// via linkRaceToActivity (bouton "🔗" dans le tableau).
+function findLikelyActivityMatch(race) {
+  if (!race.distanceKm || !race.date || typeof isRaceEligibleActivity !== 'function') return null;
+  const raceTime = new Date(race.date).getTime();
+  const ONE_DAY = 24 * 3600 * 1000;
+  const tolerance = Math.max(0.3, race.distanceKm * 0.15);
+  let best = null, bestScore = Infinity;
+  (_allActivities || []).forEach(a => {
+    if (!isRaceEligibleActivity(a)) return;
+    const dateDiff = Math.abs(new Date(a.date).getTime() - raceTime);
+    if (dateDiff > ONE_DAY) return;
+    const distDiff = Math.abs(a.distanceKm - race.distanceKm);
+    if (distDiff > tolerance) return;
+    const score = dateDiff / ONE_DAY + distDiff / race.distanceKm;
+    if (score < bestScore) { bestScore = score; best = a; }
+  });
+  return best;
+}
+
+async function linkRaceToActivity(raceId, activityId) {
+  const race = _racesData.find(r => r.id === raceId);
+  const activity = (_allActivities || []).find(a => String(a.id) === String(activityId));
+  if (!race || !activity) return;
+  const ok = await showConfirmModal({
+    title: 'Lier cette course ?',
+    message: `« ${escapeHtml(race.name)} » sera liée à l'activité Garmin « ${escapeHtml(activity.name || '')} » du ${formatDate(activity.date)} (${activity.distanceKm.toFixed(2)} km).`,
+    confirmLabel: 'Lier',
+    icon: '🔗',
+  });
+  if (!ok) return;
+  try {
+    const res = await fetch(`/api/races/${raceId}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...race, activityId: activity.id }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Erreur');
+    _racesData = await fetch('/api/races').then(r => r.json());
+    renderRacesTable();
+    showToast('Course liée à l\'activité Garmin', 'success');
+  } catch (e) { showToast('Erreur : ' + e.message, 'error'); }
+}
+
+// findLikelyActivityMatch ne cherche que dans _allActivities, qui n'est
+// peuplé au démarrage qu'avec les ~200 activités les plus récentes
+// (loadDashboard, app.js) — une course plus ancienne n'a donc aucune chance
+// d'y trouver de correspondance tant que son année n'a pas été chargée
+// explicitement (jusqu'ici, uniquement possible via le filtre année de la
+// page Activités, ce qui obligeait a jongler entre les deux pages). Ce
+// bouton "🔍" déclenche ce chargement directement depuis Records et
+// courses, comme le fait déjà openActivityFromId (app.js) pour un lien
+// déjà confirmé.
+async function searchActivityForRace(raceId) {
+  const race = _racesData.find(r => r.id === raceId);
+  if (!race) return;
+  const year = new Date(race.date).getFullYear();
+  showToast(`Recherche dans les activités ${year}…`, 'loading', 0);
+  try {
+    const resp = await fetch('/api/activities/year/' + year);
+    if (resp.ok) {
+      const data = await resp.json();
+      if (data.activities && data.activities.length) {
+        _allActivities = _allActivities.filter(a => {
+          const d = new Date(a.date || a.startTimeLocal || a.startTimeGMT || '');
+          return isNaN(d) || d.getFullYear() !== year;
+        }).concat(data.activities);
+      }
+      _fullyLoadedYears.add(year);
+    } else {
+      showToast('Erreur serveur lors du chargement de ' + year, 'error');
+    }
+  } catch (e) {
+    showToast('Erreur réseau : ' + e.message, 'error');
+  }
+  const lt = document.getElementById('app-toast-loading');
+  if (lt) { lt.style.opacity = '0'; setTimeout(() => lt.remove(), 300); }
+  renderRacesTable();
+  if (!findLikelyActivityMatch(race)) {
+    showToast(`Aucune activité correspondante trouvée pour ${year}`, 'info');
+  }
 }
 
 // ─── Ajout / édition d'une course ────────────────────────────────────
@@ -616,6 +726,10 @@ function openRaceModal(existingRace = null, prefill = null) {
       elevationGain: elevationRaw ? parseFloat(elevationRaw) : null,
       vo2max: vo2maxRaw ? parseFloat(vo2maxRaw) : null,
       dnf,
+      // Present si la course vient de "Envoyer vers Courses" (Activites) ou
+      // si elle a deja ete liee via linkRaceToActivity — jamais modifiable
+      // depuis ce formulaire, donc simplement propage tel quel.
+      activityId: initialData?.activityId || null,
     };
     try {
       const res = await fetch(isEdit ? `/api/races/${existingRace.id}` : '/api/races', {
