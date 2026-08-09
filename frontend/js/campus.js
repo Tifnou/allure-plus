@@ -147,8 +147,13 @@ function isTrailSession(session) {
   const hasCoteText = combined.includes('cote') || combined.includes('côte') ||
                       combined.includes('montée') || combined.includes('montee') ||
                       combined.includes('uphill');
-  const isCompTrail = cat.includes('competition')
-                   && (campusState.goal?.goalType || '').toLowerCase().includes('trail');
+  // "competition" seul (TRAINING_CATEGORIES) est une categorie AMBIGUE
+  // partagee route/trail (course de preparation sur route au sein d'un plan
+  // trail, par ex.) — seul le prefixe explicite 'trail_' (trail_competition)
+  // garantit que CETTE seance precise se court sur terrain trail ; se fier a
+  // l'objectif global du plan (goalType) faisait passer en allures trail
+  // (plus lentes) des courses de prepa sur route sans D+ ni cote.
+  const isCompTrail = cat.includes('trail_competition');
   return hasUphill || hasElev || hasCoteText || isCompTrail;
 }
 

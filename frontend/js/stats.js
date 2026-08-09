@@ -32,7 +32,7 @@ const EARTH_CIRCUMFERENCE_KM = 40075;
 const EVEREST_HEIGHT_M = 8849;
 const STATS_YEARS_PAGE_SIZE = 10;
 
-let _statsSportFilter = 'all';
+let _statsSportFilter = ['all'];
 let _statsExpandedYear = null;
 let _statsCompareYears = new Set();
 let _statsModalDistance = '10km';
@@ -47,15 +47,20 @@ let statsModalComparisonChart = null;
 let statsModalProgressionChart = null;
 
 // ─── Filtre par type d'activité (même logique que renderAllActivities) ──
+// filter : 'all', une seule cle, ou un tableau de cles cumulees (pastilles
+// multi-selection, cf wireSportFilterPills dans app.js)
 function statsSportMatch(activityType, filter) {
-  if (filter === 'all') return true;
+  const filters = Array.isArray(filter) ? filter : [filter];
+  if (filters.includes('all')) return true;
   const t = (activityType || '').toLowerCase();
-  if (filter === 'running') return t === 'running' || t === 'treadmill_running' || (t.includes('run') && !t.includes('trail'));
-  if (filter === 'trail')   return t.includes('trail');
-  if (filter === 'cycling') return t === 'cycling' || t.includes('cycl') || t.includes('bike');
-  if (filter === 'cardio')  return t.includes('cardio') || t.includes('fitness') || t.includes('indoor') || t.includes('strength') || t.includes('hiit') || t.includes('muscul');
-  if (filter === 'walking') return t.includes('walk') || t === 'walking';
-  return true;
+  return filters.some(f => {
+    if (f === 'running') return t === 'running' || t === 'treadmill_running' || (t.includes('run') && !t.includes('trail'));
+    if (f === 'trail')   return t.includes('trail');
+    if (f === 'cycling') return t === 'cycling' || t.includes('cycl') || t.includes('bike');
+    if (f === 'cardio')  return t.includes('cardio') || t.includes('fitness') || t.includes('indoor') || t.includes('strength') || t.includes('hiit') || t.includes('muscul');
+    if (f === 'walking') return t.includes('walk') || t === 'walking';
+    return true;
+  });
 }
 
 function isRunOrTrail(a) {
@@ -219,13 +224,9 @@ let _statsPageInitialized = false;
 async function renderStatsPage() {
   if (!_statsPageInitialized) {
     _statsPageInitialized = true;
-    document.querySelectorAll('#stats-filters .filter-pill').forEach(pill => {
-      pill.addEventListener('click', async () => {
-        document.querySelectorAll('#stats-filters .filter-pill').forEach(p => p.classList.remove('active'));
-        pill.classList.add('active');
-        _statsSportFilter = pill.dataset.filter;
-        await renderStatsYearsList();
-      });
+    wireSportFilterPills(document.getElementById('stats-filters'), async (filters) => {
+      _statsSportFilter = filters;
+      await renderStatsYearsList();
     });
     const compareBtn = el('stats-compare-btn');
     if (compareBtn) compareBtn.addEventListener('click', () => openStatsCompareModal());
@@ -248,13 +249,32 @@ function getStatsYearRange() {
 }
 
 // ─── Liste des lignes par année ──────────────────────────────────────────
+// Charge TOUTES les annees affichees (pas seulement celles deja en cache
+// local) puis affiche — desormais rapide meme apres un nettoyage du
+// navigateur grace au cache SERVEUR des annees passees (server.js,
+// data/activities_cache.json) : plus besoin de cliquer "Cliquez pour
+// charger" annee par annee (vecu reel, cf CLAUDE.md). Rendu en deux temps :
+// un premier affichage immediat avec ce qui est deja en memoire (jamais de
+// page vide le temps du chargement), puis un second une fois les annees
+// manquantes chargees en arriere-plan.
 async function renderStatsYearsList() {
-  const container = el('stats-years-list');
-  if (!container) return;
   const allYears = getStatsYearRange();
   const hasOlder = allYears.length > STATS_YEARS_PAGE_SIZE;
   const years = _statsShowOlderYears ? allYears : allYears.slice(0, STATS_YEARS_PAGE_SIZE);
   preloadCachedYears(years);
+
+  await renderStatsYearsRows(years, hasOlder, allYears);
+
+  const missing = years.filter(y => !_fullyLoadedYears.has(y));
+  if (missing.length) {
+    await Promise.all(missing.map(y => ensureYearLoaded(y).catch(() => {})));
+    await renderStatsYearsRows(years, hasOlder, allYears);
+  }
+}
+
+async function renderStatsYearsRows(years, hasOlder, allYears) {
+  const container = el('stats-years-list');
+  if (!container) return;
 
   const headerHtml = `
     <div class="stats-years-header">
@@ -279,7 +299,7 @@ async function renderStatsYearsList() {
         <div class="stats-year-cell">${Math.round(s.totals.calories).toLocaleString('fr-FR')}</div>
       `;
     } else {
-      cells = `<div class="stats-year-cell stats-year-cell--loading" style="grid-column:span 5">Cliquez pour charger…</div>`;
+      cells = `<div class="stats-year-cell stats-year-cell--loading" style="grid-column:span 5">Chargement…</div>`;
     }
     return `
       <div class="stats-year-row ${expanded ? 'stats-year-row--expanded' : ''}" data-year="${y}">
@@ -392,7 +412,7 @@ async function renderStatsRowDetail(year) {
   const detail = document.querySelector(`.stats-year-row-detail[data-year="${year}"]`);
   if (!detail) return;
   const stats = computeYearStats(getActivitiesForYearLocal(year, _statsSportFilter), year);
-  const showSportTile = _statsSportFilter === 'all';
+  const showSportTile = _statsSportFilter.includes('all');
 
   detail.innerHTML = `
     <div class="stats-tile-grid">

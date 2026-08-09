@@ -53,6 +53,67 @@ function showConfirmModal({ title = '', message = '', confirmLabel = 'Confirmer'
 ═══════════════════════════════════════════════ */
 const API = '';
 
+// ─── Sauvegarde durable (serveur) de donnees auparavant en localStorage
+// seul ─────────────────────────────────────────────────────────────────
+// Vecu reel : un nettoyage de l'historique de navigation a fait perdre le
+// profil (sexe/date de naissance/taille/poids) ET les objectifs personnels
+// d'une utilisatrice, sans aucun autre endroit ou les retrouver — a la
+// difference des activites Garmin (re-telechargeables depuis Garmin,
+// jamais perdues). localStorage.setItem est patche ci-dessous : toute
+// ecriture sur une des cles "durables" est mireoiree vers /api/user-data
+// (server.js, fichier data/user_data.json — protege comme les autres
+// fichiers de data/, jamais ecrase par l'installeur) EN PLUS du
+// localStorage habituel. Aucun des dizaines d'appels localStorage.setItem
+// existants (campus.js, plans.js, records.js...) n'a besoin d'etre
+// modifie : ils continuent de lire/ecrire localStorage tel quel, la
+// synchronisation est transparente. syncUserDataFromServer() ne fait que
+// COMBLER les cles manquantes au demarrage (jamais ecraser une valeur deja
+// presente en local) — protege contre un revert vers une copie serveur
+// perimee si un push precedent avait echoue (coupure reseau ponctuelle).
+const DURABLE_LS_KEYS = ['suivi_sport_profile', 'suivi_personal_goals', 'suivi_imported_plan', 'suivi_local_done', 'prefer_imported_plan'];
+const DURABLE_LS_PREFIXES = ['suivi_objectif_dist_', 'suivi_objectif_dplus_', 'suivi_objectif_validated_'];
+function isDurableLsKey(key) {
+  return DURABLE_LS_KEYS.includes(key) || DURABLE_LS_PREFIXES.some(p => key.startsWith(p));
+}
+(function patchLocalStorageForServerSync() {
+  const nativeSetItem = localStorage.setItem.bind(localStorage);
+  localStorage.setItem = function(key, value) {
+    nativeSetItem(key, value);
+    if (isDurableLsKey(key)) {
+      fetch(`${API}/api/user-data`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ [key]: value }),
+      }).catch(e => console.error('sync user-data (' + key + '):', e));
+    }
+  };
+})();
+async function syncUserDataFromServer() {
+  try {
+    const res = await fetch(`${API}/api/user-data`);
+    if (!res.ok) return;
+    const serverData = await res.json();
+    // Serveur -> local : comble les cles manquantes en local (recuperation
+    // apres un nettoyage du navigateur).
+    Object.entries(serverData).forEach(([key, value]) => {
+      if (isDurableLsKey(key) && localStorage.getItem(key) == null) localStorage.setItem(key, value);
+    });
+    // Local -> serveur : sauvegarde tout de suite les cles deja presentes en
+    // local mais absentes du serveur (typiquement la toute premiere
+    // synchro apres l'ajout de ce mecanisme) — sans attendre une prochaine
+    // ecriture qui pourrait ne jamais survenir avant un nettoyage.
+    const toPush = {};
+    Object.keys(localStorage).forEach(key => {
+      if (isDurableLsKey(key) && !(key in serverData)) toPush[key] = localStorage.getItem(key);
+    });
+    if (Object.keys(toPush).length) {
+      fetch(`${API}/api/user-data`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(toPush),
+      }).catch(e => console.error('sync user-data (backfill):', e));
+    }
+  } catch (e) { console.error('syncUserDataFromServer:', e); }
+}
+
 // ─── Helpers ───────────────────────────────────
 function el(id) { return document.getElementById(id); }
 function setVal(id, val) { const e = el(id); if (e) e.textContent = val; }
@@ -158,10 +219,8 @@ function navigateTo(pageId) {
       actYear.value = String(curYear);
     }
     _activitiesYearDefaulted = true;
-    // Conserver le filtre sport actif plutôt que de le réinitialiser sur "Tout"
-    const activePill = document.querySelector('.filter-pill.active');
-    const currentSportFilter = activePill ? (activePill.dataset.filter || 'all') : 'all';
-    renderAllActivities(_allActivities, currentSportFilter);
+    // Conserver le(s) filtre(s) sport actif(s) plutôt que de les réinitialiser sur "Tout"
+    renderAllActivities(_allActivities, getActiveSportFilters(el('activity-filters')));
   }
   if (pageId === 'records')    { if (typeof initRecordsPage === 'function') initRecordsPage(); }
   if (pageId === 'health')     renderHealthPage();
@@ -547,6 +606,36 @@ function updateActivitySummary(count, distM, secs, filter) {
   `;
 }
 
+// ─── Filtres sport multi-selection (pastilles "Tout / Course / Trail / ...") ──
+// Partagé entre la page Activités (#activity-filters, ici) et Statistiques
+// (#stats-filters, stats.js) : "Tout" est exclusif (efface les autres), les
+// pastilles sport se cumulent (clic = coche/décoche), et si la dernière
+// pastille sport active est décochée on retombe automatiquement sur "Tout"
+// plutôt que de laisser un filtre vide (qui ne matcherait plus rien).
+function getActiveSportFilters(container) {
+  if (!container) return ['all'];
+  const active = [...container.querySelectorAll('.filter-pill.active')].map(p => p.dataset.filter);
+  return active.length ? active : ['all'];
+}
+function wireSportFilterPills(container, onChange) {
+  if (!container) return;
+  const pills = [...container.querySelectorAll('.filter-pill')];
+  pills.forEach(pill => {
+    pill.addEventListener('click', () => {
+      if (pill.dataset.filter === 'all') {
+        pills.forEach(p => p.classList.remove('active'));
+        pill.classList.add('active');
+      } else {
+        pill.classList.toggle('active');
+        const allPill = pills.find(p => p.dataset.filter === 'all');
+        const anySportActive = pills.some(p => p.dataset.filter !== 'all' && p.classList.contains('active'));
+        if (allPill) allPill.classList.toggle('active', !anySportActive);
+      }
+      onChange(getActiveSportFilters(container));
+    });
+  });
+}
+
 function renderAllActivities(activities, filter = 'all', yearOverride = null) {
 
   const tbody = el('all-activities-tbody');
@@ -564,19 +653,17 @@ function renderAllActivities(activities, filter = 'all', yearOverride = null) {
 
   const filtered = (activities || []).filter(a => {
     const t = (a.activityType || '').toLowerCase();
-    // Sport type filter
-    let sportMatch = true;
-
-    if (filter !== 'all') {
-      if (filter === 'running') {
-        sportMatch = (t === 'running' || t === 'treadmill_running' ||
-          (t.includes('run') && !t.includes('trail')));
-      } else if (filter === 'trail')   { sportMatch = t.includes('trail'); }
-      else if (filter === 'cycling')   { sportMatch = t === 'cycling' || t.includes('cycl') || t.includes('bike'); }
-      else if (filter === 'cardio')    { sportMatch = t.includes('cardio') || t.includes('fitness') || t.includes('indoor') || t.includes('strength') || t.includes('hiit') || t.includes('muscul'); }
-      else if (filter === 'walking')   { sportMatch = t.includes('walk') || t === 'walking'; }
-      else { sportMatch = true; }
-    }
+    // Sport type filter — filter est 'all', une seule cle, ou un tableau de
+    // cles cumulees (multi-selection des pastilles, cf wireSportFilterPills)
+    const filters = Array.isArray(filter) ? filter : [filter];
+    let sportMatch = filters.includes('all') || filters.some(f => {
+      if (f === 'running') return (t === 'running' || t === 'treadmill_running' || (t.includes('run') && !t.includes('trail')));
+      if (f === 'trail')   return t.includes('trail');
+      if (f === 'cycling') return t === 'cycling' || t.includes('cycl') || t.includes('bike');
+      if (f === 'cardio')  return t.includes('cardio') || t.includes('fitness') || t.includes('indoor') || t.includes('strength') || t.includes('hiit') || t.includes('muscul');
+      if (f === 'walking') return t.includes('walk') || t === 'walking';
+      return true;
+    });
     // Year/month filter
     const date = new Date(a.startTimeLocal || a.startTimeGMT || a.beginTimestamp || a.date);
     const yearMatch  = !yearFilter  || date.getFullYear() === yearFilter;
@@ -1246,7 +1333,10 @@ async function loadActivityAnalysis(activity) {
           // Terrain vallonne : Garmin fournit une allure ajustee au denivele (avgGradeAdjustedSpeed)
           // par intervalle - on l'utilise pour juger la regularite si le terrain le justifie,
           // plutot que l'allure brute qui varie naturellement avec les montees/descentes.
-          const totalElevGain = repLaps.reduce((s,l) => s + (l.elevationGain || 0), 0);
+          // D+ affiche ici = activity.elevationGain (meme total que la carte d'activite) et
+          // non une somme des elevationGain par lap, qui diverge legerement (arrondis/seuils
+          // par lap) et affichait un chiffre different de celui de la carte au-dessus.
+          const totalElevGain = activity.elevationGain || repLaps.reduce((s,l) => s + (l.elevationGain || 0), 0);
           const elevPerKm = totalElevGain / repLaps.length;
           const hasGAP = repLaps.every(l => l.avgGradeAdjustedSpeed > 0);
           const terrainVallonne = hasGAP && (isTrail || elevPerKm > 10);
@@ -3259,6 +3349,11 @@ window.addEventListener('unhandledrejection', (e) => {
 });
 
 document.addEventListener('DOMContentLoaded', async () => {
+  // Recharge depuis le serveur les cles localStorage "durables" manquantes
+  // (profil, objectifs...) AVANT tout le reste de l'init — cf commentaire
+  // pres de DURABLE_LS_KEYS plus haut dans ce fichier.
+  try { await syncUserDataFromServer(); } catch (e) { console.error('syncUserDataFromServer (boot):', e); }
+
   // ── Splash screen ────────────────────────────────────────────
   const splash = document.getElementById('splash-screen');
   const splashVideo = document.getElementById('splash-video');
@@ -3331,19 +3426,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   const seeAll = el('see-all-runs');
   if (seeAll) seeAll.addEventListener('click', () => navigateTo('activities'));
 
-  // Filtres page activités (sport type)
-  document.querySelectorAll('.filter-pill').forEach(pill => {
-    pill.addEventListener('click', () => {
-      document.querySelectorAll('.filter-pill').forEach(p => p.classList.remove('active'));
-      pill.classList.add('active');
-      renderAllActivities(_allActivities, pill.dataset.filter);
-    });
+  // Filtres page activités (sport type, multi-selection)
+  wireSportFilterPills(el('activity-filters'), (filters) => {
+    renderAllActivities(_allActivities, filters);
   });
 
   // TASK 4 — Year/month selectors re-render with current sport filter
   function getCurrentSportFilter() {
-    const activePill = document.querySelector('.filter-pill.active');
-    return activePill ? (activePill.dataset.filter || 'all') : 'all';
+    return getActiveSportFilters(el('activity-filters'));
   }
 
   const filterYear  = el('filter-year');

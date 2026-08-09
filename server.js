@@ -109,6 +109,8 @@ const WEIGHT_HISTORY_FILE    = path.join(DATA_DIR, 'weight_history.json');
 const HEALTH_SNAPSHOTS_FILE  = path.join(DATA_DIR, 'health_snapshots.json');
 const PPS_FILE                = path.join(DATA_DIR, 'pps.json');
 const PREFS_FILE              = path.join(DATA_DIR, 'prefs.json');
+const USER_DATA_FILE          = path.join(DATA_DIR, 'user_data.json');
+const ACTIVITIES_CACHE_FILE   = path.join(DATA_DIR, 'activities_cache.json');
 const SESSION_ANALYSES_FILE   = path.join(DATA_DIR, 'session_analyses.json');
 
 // Tampon "Pref 2" — case a cocher reservee a ce compte, dans Profil > Mes informations
@@ -171,6 +173,34 @@ app.post('/api/pref2', requireSession, (req, res) => {
   prefs[email] = { pref2: !!req.body?.enabled };
   writeJsonSafe(PREFS_FILE, prefs);
   res.json({ success: true, enabled: prefs[email].pref2 });
+});
+
+// Sauvegarde serveur de donnees auparavant stockees UNIQUEMENT en
+// localStorage (profil, objectifs personnels, plan importe, seances
+// pointees comme faites...) — vecu reel : un nettoyage de l'historique de
+// navigation faisait tout perdre, sans aucune autre source (contrairement
+// aux activites Garmin, re-telechargeables). Le client continue de lire/
+// ecrire ces cles dans localStorage (acces synchrone, des dizaines d'appels
+// existants comptent dessus) mais les mireoire desormais vers le serveur a
+// chaque ecriture et les recharge depuis le serveur au demarrage — comme
+// les autres fichiers de data/, jamais ecrase par l'installeur (cf
+// allure-plus.iss). Cle/valeur libres (n'importe quelle cle localStorage
+// "durable" cote client, cf DURABLE_LS_KEYS dans app.js), stocke par compte
+// comme PREFS_FILE au cas ou plusieurs comptes utilisent le meme serveur.
+app.get('/api/user-data', requireSession, (req, res) => {
+  const email = (req.session.email || '').toLowerCase();
+  const store = readJsonSafe(USER_DATA_FILE, {});
+  res.json(store[email] || {});
+});
+
+app.post('/api/user-data', requireSession, (req, res) => {
+  const email = (req.session.email || '').toLowerCase();
+  const updates = req.body || {};
+  if (typeof updates !== 'object' || Array.isArray(updates)) return res.status(400).json({ error: 'Corps invalide' });
+  const store = readJsonSafe(USER_DATA_FILE, {});
+  store[email] = { ...(store[email] || {}), ...updates };
+  writeJsonSafe(USER_DATA_FILE, store);
+  res.json({ success: true });
 });
 
 // Ajout / suppression des images du diaporama de fond
@@ -728,8 +758,21 @@ app.get('/api/dashboard', requireSession, async (req, res) => {
 app.get('/api/activities/year/:year', requireSession, async (req, res) => {
   try {
     const year = parseInt(req.params.year, 10);
-    if (!year || year < 2000 || year > new Date().getFullYear()) {
+    const currentYear = new Date().getFullYear();
+    if (!year || year < 2000 || year > currentYear) {
       return res.status(400).json({ error: 'Annee invalide' });
+    }
+    // Cache serveur pour les annees PASSEES ET CLOSES uniquement (elles ne
+    // changeront plus jamais) — jamais l'annee en cours, qui continue de se
+    // recharger en direct depuis Garmin a chaque appel (nouvelles activites
+    // en continu). Meme frontiere que l'ancien cache localStorage cote
+    // client (stats.js), deplacee ici pour que ca survive a un nettoyage du
+    // navigateur ET marche des le premier chargement sur n'importe quel
+    // navigateur, sans dependre du localStorage du tout.
+    const isPastYear = year < currentYear;
+    if (isPastYear) {
+      const cached = readJsonSafe(ACTIVITIES_CACHE_FILE, {})[year];
+      if (cached) return res.json({ year, activities: cached, count: cached.length, cached: true });
     }
     const { getActivitiesForYear } = req.session.fns;
     if (!getActivitiesForYear) return res.status(501).json({ error: 'Non supporte' });
@@ -753,6 +796,11 @@ app.get('/api/activities/year/:year', requireSession, async (req, res) => {
       aerobicTrainingEffectMessage:   a.aerobicTrainingEffectMessage,
       anaerobicTrainingEffectMessage: a.anaerobicTrainingEffectMessage,
     }));
+    if (isPastYear) {
+      const cache = readJsonSafe(ACTIVITIES_CACHE_FILE, {});
+      cache[year] = mapped;
+      writeJsonSafe(ACTIVITIES_CACHE_FILE, cache);
+    }
     res.json({ year, activities: mapped, count: mapped.length });
   } catch (err) { handleError(res, err); }
 });

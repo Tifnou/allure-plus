@@ -2014,12 +2014,13 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
 .analysis-summary-actual { font-weight: 700; }
 .analysis-summary-icon { flex-shrink: 0; }
 .analysis-section-title { font-family: var(--font-body); font-weight: 700; font-size: 12.5px; color: var(--text-primary); margin: 14px 0 6px; }
-.analysis-timeline-bar { display: flex; height: 26px; border-radius: 6px; overflow: hidden; }
-.analysis-timeline-seg { min-width: 2px; cursor: default; transition: opacity var(--transition); }
+.analysis-timeline-bar { display: flex; align-items: flex-end; height: 60px; gap: 2px; border-bottom: 2px solid var(--border-light); }
+.analysis-timeline-seg { min-width: 3px; cursor: default; transition: opacity var(--transition); border-radius: 3px 3px 0 0; }
 .analysis-timeline-seg:hover { opacity: .8; }
 .analysis-timeline-legend { display: flex; gap: 14px; margin-top: 6px; font-family: var(--font-body); font-size: 11px; color: var(--text-secondary); }
 .analysis-timeline-legend-item { display: inline-flex; align-items: center; gap: 4px; }
 .analysis-timeline-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; }
+.analysis-elevation-chart-wrapper { position: relative; height: 130px; margin-bottom: 4px; }
 .analysis-reps-table { width: 100%; border-collapse: collapse; font-family: var(--font-body); font-size: 12px; }
 .analysis-reps-table th { text-align: left; color: var(--text-muted); font-weight: 600; padding: 4px 8px; border-bottom: 1px solid var(--border-light); }
 .analysis-reps-table td { padding: 5px 8px; border-bottom: 1px solid var(--border-light); color: var(--text-primary); }

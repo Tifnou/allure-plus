@@ -382,8 +382,12 @@ async function loadVo2maxMetric(days) {
 }
 
 // Construit une bande jour par jour (comme le widget "Statut" de Garmin
-// Connect) plutot qu'un tableau : un jour sans releve reste vide (aucune
-// visite Allure+ ce jour-la, on ne l'invente pas).
+// Connect). Le statut d'entrainement ne change pas de lui-meme entre deux
+// visites (ce n'est pas une mesure quotidienne comme la FC) : un jour sans
+// releve Allure+ ce jour-la a donc toujours eu le dernier statut connu,
+// jamais "aucun statut" — on reporte la derniere valeur connue plutot que
+// de laisser une case vide (les jours AVANT le tout premier releve restent
+// vides faute de base pour les remplir).
 function parisISODate(date) {
   const parts = new Intl.DateTimeFormat('fr-CA', { timeZone: 'Europe/Paris', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(date);
   const y = parts.find(p => p.type === 'year').value;
@@ -397,11 +401,12 @@ function buildTrainingStatusTimeline(hist, days) {
   hist.forEach(e => { byDate[e.date] = e; });
   const now = Date.now();
   const cells = [];
+  let lastInfo = null;
   for (let i = days - 1; i >= 0; i--) {
     const dateStr = parisISODate(new Date(now - i * 86400000));
     const entry = byDate[dateStr];
-    const info = entry ? trainingStatusInfo(entry.value.phrase) : null;
-    cells.push({ date: dateStr, color: info?.color || null, label: info?.label || null });
+    if (entry) lastInfo = trainingStatusInfo(entry.value.phrase);
+    cells.push({ date: dateStr, color: lastInfo?.color || null, label: lastInfo?.label || null });
   }
   return cells;
 }

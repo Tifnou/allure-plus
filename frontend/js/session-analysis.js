@@ -363,10 +363,17 @@ async function buildSessionAnalysis(session, week, activity) {
   // segment par lap, largeur proportionnelle a sa duree — meme principe que
   // la vue "phases" de Garmin Connect. Construit independamment du chemin
   // repetitions/continu emprunte plus haut, tant que des laps existent.
+  // La classification par lap (types) ne reflete une VRAIE structure que si
+  // le plan prevoit lui-meme un echauffement/retour au calme/repetitions —
+  // sur une seance continue (ex: sortie longue) sans variation d'allure
+  // prevue, classifyLaps colore quand meme le 1er/dernier lap par simple
+  // position (regle de classifyLaps) : sans ce garde-fou, la barre affiche a
+  // tort 3 couleurs alors que rien de different n'etait prevu.
+  const hasPlannedStructure = plannedWarmupSec > 0 || plannedCooldownSec > 0 || hasStructuredReps;
   const timeline = laps.map((lap, idx) => {
     const durationSec = lap.elapsedDuration || lap.movingDuration || lap.duration || 0;
     const paceSecKm = lap.averageSpeed > 0 ? Math.round(1000 / lap.averageSpeed) : null;
-    return { type: types[idx] || 'effort', durationSec, paceSecKm, hr: lap.averageHR ? Math.round(lap.averageHR) : null };
+    return { type: hasPlannedStructure ? (types[idx] || 'effort') : 'effort', durationSec, paceSecKm, hr: lap.averageHR ? Math.round(lap.averageHR) : null };
   }).filter(seg => seg.durationSec > 0);
 
   const groups = useRepsPath ? groupEffortsByDuration(effortEntries, vma, isTrail) : [];
@@ -417,8 +424,19 @@ async function buildSessionAnalysis(session, week, activity) {
   // classifyLaps, qui ne representeraient alors que quelques sprints
   // ponctuels et fausseraient totalement l'allure globale affichee.
   const actualPaceSecKm = (repsAreMainFocus && mainGroup) ? mainGroup.avgPaceSecKm : (activity.avgPaceSecPerKm || null);
-  const deviationSecKm = (mainPaceRange && actualPaceSecKm) ? Math.round(actualPaceSecKm - (mainPaceRange.paceMin + mainPaceRange.paceMax) / 2) : null;
-  const deviationPct   = (mainPaceRange && actualPaceSecKm) ? Math.round((deviationSecKm / ((mainPaceRange.paceMin + mainPaceRange.paceMax) / 2)) * 100) : null;
+  // Ecart par rapport a la borne la plus proche de la plage cible, jamais par
+  // rapport a son milieu : une allure DANS la plage n'est pas un ecart (0),
+  // et une allure hors plage n'est en retard/avance que de ce qui depasse la
+  // borne franchie (ex: plage 6'44-7'37/km, allure reelle 7'54/km -> ecart de
+  // 17s/km sous la borne lente 7'37, pas ~35s/km sous le milieu de plage).
+  let deviationSecKm = null;
+  if (mainPaceRange && actualPaceSecKm) {
+    if (actualPaceSecKm > mainPaceRange.paceMax) deviationSecKm = Math.round(actualPaceSecKm - mainPaceRange.paceMax);
+    else if (actualPaceSecKm < mainPaceRange.paceMin) deviationSecKm = Math.round(actualPaceSecKm - mainPaceRange.paceMin);
+    else deviationSecKm = 0;
+  }
+  const deviationPct = (mainPaceRange && actualPaceSecKm && deviationSecKm != null)
+    ? Math.round((deviationSecKm / ((mainPaceRange.paceMin + mainPaceRange.paceMax) / 2)) * 100) : null;
   // Laps pertinents pour le temps-en-zone : meme logique — le groupe de
   // repetitions seulement si elles sont l'objectif principal, sinon TOUS les
   // laps de l'activite (une seance continue n'a pas de sous-ensemble
@@ -1006,19 +1024,45 @@ const TIMELINE_LABELS = { warmup: 'Échauffement', effort: 'Effort', rest: 'Réc
 function _escapeAttr(str) {
   return String(str).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
+// Hauteur du segment = intensite (allure reelle), meme principe visuel que
+// le graphique "Instructions" de Campus (blocs hauts = allures rapides,
+// blocs bas = recuperation) — mais applique ici aux laps REELS plutot qu'aux
+// blocs planifies : sur une seance sans structure prevue, la couleur reste
+// uniforme (cf hasPlannedStructure plus haut) mais la hauteur montre quand
+// meme les vraies variations d'allure (fatigue, cotes...).
+const TIMELINE_MIN_HEIGHT_PCT = 15, TIMELINE_MAX_HEIGHT_PCT = 100;
+// Interpolation sur la VITESSE (1/allure), pas sur l'allure brute : en
+// sec/km, l'ecart entre un footing d'echauffement (5'46) et un sprint
+// (3'51) est petit devant l'ecart entre une recup active et un arret quasi
+// total (souvent >20'/km) — une interpolation lineaire en sec/km ecrase donc
+// tout le monde pres du haut de l'echelle des qu'un seul lap tres lent
+// (feu rouge, pause) apparait. En vitesse, cette meme lenteur extreme reste
+// proche de 0 et n'ecrase pas le reste de la plage : echauffement et recup
+// ressortent alors nettement plus bas que l'effort, comme sur le graphique
+// "Instructions" de Campus.
+function timelineHeightPct(seg, minSpeed, maxSpeed) {
+  if (!seg.paceSecKm || minSpeed == null || maxSpeed == null || minSpeed === maxSpeed) return 55;
+  const speed = 1 / seg.paceSecKm;
+  const t = Math.max(0, Math.min(1, (speed - minSpeed) / (maxSpeed - minSpeed)));
+  return Math.round(TIMELINE_MIN_HEIGHT_PCT + t * (TIMELINE_MAX_HEIGHT_PCT - TIMELINE_MIN_HEIGHT_PCT));
+}
 function buildTimelineHtml(timeline) {
   if (!timeline || !timeline.length) return '';
   const total = timeline.reduce((s, seg) => s + seg.durationSec, 0);
   if (!total) return '';
+  const speeds = timeline.map(s => s.paceSecKm ? 1 / s.paceSecKm : null).filter(Boolean);
+  const minSpeed = speeds.length ? Math.min(...speeds) : null, maxSpeed = speeds.length ? Math.max(...speeds) : null;
   const bar = timeline.map(seg => {
     const pct = (seg.durationSec / total) * 100;
+    const h = timelineHeightPct(seg, minSpeed, maxSpeed);
     const title = `${TIMELINE_LABELS[seg.type] || seg.type} — ${describeDuration(seg.durationSec)}`
       + (seg.paceSecKm ? ` · ${fmtPace(seg.paceSecKm)}/km` : '')
       + (seg.hr ? ` · ${seg.hr} bpm` : '');
-    return `<div class="analysis-timeline-seg" style="flex:${pct} 0 auto;background:${TIMELINE_COLORS[seg.type] || TIMELINE_COLORS.effort}" title="${_escapeAttr(title)}"></div>`;
+    return `<div class="analysis-timeline-seg" style="flex:${pct} 0 auto;height:${h}%;background:${TIMELINE_COLORS[seg.type] || TIMELINE_COLORS.effort}" title="${_escapeAttr(title)}"></div>`;
   }).join('');
-  const legend = Object.keys(TIMELINE_LABELS)
-    .filter(k => timeline.some(s => s.type === k))
+  const distinctTypes = new Set(timeline.map(s => s.type));
+  const legend = distinctTypes.size <= 1 ? '' : Object.keys(TIMELINE_LABELS)
+    .filter(k => distinctTypes.has(k))
     .map(k => `<span class="analysis-timeline-legend-item"><span class="analysis-timeline-dot" style="background:${TIMELINE_COLORS[k]}"></span>${TIMELINE_LABELS[k]}</span>`)
     .join('');
   return `
@@ -1093,6 +1137,13 @@ function buildAnalysisModalHtml(record) {
   const similar = findSimilarPastAnalyses(record.pairingKey, record.sessionTypeKey, record.id);
   const similarHtml = buildSimilarSessionNote(record, similar);
   const timelineHtml = buildTimelineHtml(record.timeline);
+  // Profil de la course : uniquement pour les seances trail avec un D+ annonce
+  // au plan — inutile (et bruite) pour une seance route ou sans D+ prevu.
+  const elevationProfileHtml = (isTrail && record.trail?.plannedDPlusM) ? `
+    <div class="analysis-section-title">Profil de la course</div>
+    <div class="analysis-elevation-chart-wrapper">
+      <canvas id="analysis-elevation-chart"></canvas>
+    </div>` : '';
 
   return `
     <div class="analysis-modal-header">
@@ -1100,6 +1151,7 @@ function buildAnalysisModalHtml(record) {
       <div class="analysis-modal-score">${record.verdict.emoji} <strong>${record.score}%</strong> — ${record.verdict.label}</div>
     </div>
     <div class="analysis-summary-block">${summaryRowsHtml}${trailRowHtml}</div>
+    ${elevationProfileHtml}
     ${timelineHtml}
     ${repsTableHtml}
     ${positivesHtml}
@@ -1132,6 +1184,43 @@ function openAnalysisModal(record) {
   modal.querySelector('#session-analysis-recalc').addEventListener('click', () => recalculateAnalysis(record));
   attachBackdropClose(modal, close);
   document.addEventListener('keydown', escHandler);
+  if (record.sessionTypeKey === 'TRAIL' && record.trail?.plannedDPlusM) loadAnalysisElevationChart(record.activityId);
+}
+
+// Profil altimetrique de la course, dans la modale d'analyse (seances trail
+// avec D+ annonce uniquement — cf. gabarit dans buildAnalysisModalHtml).
+// Meme source/lissage que renderElevationProfile (app.js, carte d'activite),
+// dupliquee ici car cette modale n'a pas de canevas "route" partage.
+let _analysisElevationChart = null;
+async function loadAnalysisElevationChart(activityId) {
+  const canvas = document.getElementById('analysis-elevation-chart');
+  if (!canvas) return;
+  if (_analysisElevationChart) { _analysisElevationChart.destroy(); _analysisElevationChart = null; }
+  try {
+    const res = await fetch(`/api/activity/${activityId}/gps`);
+    const { elevation } = await res.json();
+    if (!canvas.isConnected || !elevation || elevation.length < 2) return;
+    const labels = elevation.map(p => p.distKm.toFixed(2));
+    const rawAlt = elevation.map(p => p.alt);
+    const WINDOW = 5;
+    const half = Math.floor(WINDOW / 2);
+    const data = rawAlt.map((_, i) => {
+      const start = Math.max(0, i - half), end = Math.min(rawAlt.length, i + half + 1);
+      const slice = rawAlt.slice(start, end);
+      return slice.reduce((a, b) => a + b, 0) / slice.length;
+    });
+    const base = chartOptions();
+    _analysisElevationChart = new Chart(canvas.getContext('2d'), {
+      type: 'line',
+      data: { labels, datasets: [{ data, borderColor: '#60a5fa', backgroundColor: 'rgba(96,165,250,0.18)', fill: true, pointRadius: 0, borderWidth: 2, cubicInterpolationMode: 'monotone' }] },
+      options: {
+        ...base,
+        plugins: { ...base.plugins, tooltip: { ...base.plugins.tooltip, displayColors: false,
+          callbacks: { title: (items) => `${items[0].label} km`, label: (item) => `${Math.round(item.raw)} m` } } },
+        scales: { ...base.scales, x: { ...base.scales.x, ticks: { ...base.scales.x.ticks, maxTicksLimit: 6 } } },
+      }
+    });
+  } catch (e) { console.error('loadAnalysisElevationChart:', e); }
 }
 
 // Recalcule une analyse existante avec le moteur actuel (utile apres une
