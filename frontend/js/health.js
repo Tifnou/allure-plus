@@ -66,6 +66,32 @@ function renderHealthHistoryBody(bodyEl, chartId, cfg, result) {
       </div>`;
     return;
   }
+  if (cfg.mode === 'bars') {
+    const bars = result.bars || [];
+    if (bars.length === 0) {
+      bodyEl.innerHTML = '<div class="health-empty">Aucune donnée disponible.</div>';
+      return;
+    }
+    bodyEl.innerHTML = `<div class="health-bars">${bars.map(b => {
+      const scale = Math.max(b.value, b.max, 1) * 1.15;
+      const fillPct = Math.min((b.value / scale) * 100, 100);
+      const targetLeft = (b.min / scale) * 100;
+      const targetWidth = ((b.max - b.min) / scale) * 100;
+      const inRange = b.value >= b.min && b.value <= b.max;
+      return `
+        <div class="health-bar-row">
+          <div class="health-bar-label">${escapeHtml(b.label)}</div>
+          <div class="health-bar-track">
+            <div class="health-bar-target" style="left:${targetLeft}%;width:${targetWidth}%"></div>
+            <div class="health-bar-fill${inRange ? ' health-bar-fill--ok' : ''}" style="width:${fillPct}%"></div>
+          </div>
+          <div class="health-bar-value">${Math.round(b.value)}</div>
+        </div>`;
+    }).join('')}
+    <div class="health-bars-legend"><span class="health-bars-legend-swatch"></span> Plage optimale</div>
+    </div>`;
+    return;
+  }
   if (cfg.mode === 'timeline') {
     const cells = result.timeline || [];
     if (cells.length === 0) {
@@ -102,9 +128,18 @@ function renderHealthHistoryBody(bodyEl, chartId, cfg, result) {
   const color = result.color || cfg.color || '#2563EB';
   const opts = chartOptions();
   let datasets;
-  // Cas particulier (Body Battery) : 2 courbes (matin/soir) + zone remplie
-  // entre les deux pour visualiser la fourchette de la journee.
-  if (result.series2) {
+  // Cas particulier (Charge d'entrainement) : bande min/max (charge
+  // chronique cible) en arriere-plan, courbe de charge aigue au premier
+  // plan - meme principe que series2 (Body Battery) mais avec 2 bornes
+  // fixes par jour plutot qu'une 2e courbe de mesure.
+  if (result.band) {
+    const bandFill = (result.bandColor || '#22c55e') + '30';
+    datasets = [
+      { data: result.band.map(b => b.min), borderColor: 'transparent', backgroundColor: 'transparent', pointRadius: 0, fill: false, order: 3 },
+      { data: result.band.map(b => b.max), borderColor: 'transparent', backgroundColor: bandFill, pointRadius: 0, fill: '-1', order: 2 },
+      { data: series.map(p => p.value), borderColor: color, backgroundColor: 'transparent', borderWidth: 2, pointRadius: series.length > 40 ? 0 : 3, tension: 0.35, fill: false, order: 1 },
+    ];
+  } else if (result.series2) {
     opts.plugins.legend.display = true;
     opts.plugins.legend.position = 'top';
     opts.plugins.legend.labels = { color: '#ADADAD', boxWidth: 10, font: { size: 11, family: 'Inter' } };
@@ -429,6 +464,75 @@ async function loadTrainingStatusMetric(days) {
   };
 }
 
+// ─── Commentaires : charge d'entraînement (acute/chronic) ─────────────
+async function loadTrainingLoadMetric(days) {
+  const cur = await fetch('/api/training-status').then(r => r.json()).then(r => r.data).catch(() => null);
+  const hist = await fetch(`/api/health-history/trainingLoad?days=${days}`).then(r => r.json()).catch(() => []);
+  const series = hist.map(e => ({ label: formatDateShort(e.date, days > 60), value: e.value.acute }));
+  const band = hist.map(e => ({ min: e.value.chronicMin, max: e.value.chronicMax }));
+  const buildingNotice = hist.length < 5
+    ? " Garmin ne donne pas accès à l'historique de cet indicateur par ce biais : Allure+ construit sa propre courbe au fil de vos visites — revenez régulièrement pour la voir se compléter."
+    : '';
+  let comment = null;
+  if (cur?.load) {
+    const { acute, chronicMin, chronicMax } = cur.load;
+    const inRange = acute >= chronicMin && acute <= chronicMax;
+    const tier = inRange ? 'good' : (acute > chronicMax ? 'attention' : 'neutral');
+    const state = inRange ? 'Charge équilibrée' : (acute > chronicMax ? 'Charge élevée' : 'Charge faible');
+    const text = inRange
+      ? `Votre charge d'entraînement récente (${Math.round(acute)}) est dans la plage optimale (${Math.round(chronicMin)}–${Math.round(chronicMax)}) par rapport à votre charge chronique (votre habitude d'entraînement sur les dernières semaines). Continuez sur ce rythme.`
+      : acute > chronicMax
+        ? `Votre charge récente (${Math.round(acute)}) dépasse la plage optimale (${Math.round(chronicMin)}–${Math.round(chronicMax)}) : le volume ou l'intensité a augmenté plus vite que ce que votre corps a l'habitude d'absorber, ce qui augmente le risque de blessure ou de surentraînement. Réduisez le volume ou l'intensité des prochaines séances pour repasser dans la plage.`
+        : `Votre charge récente (${Math.round(acute)}) est en dessous de la plage optimale (${Math.round(chronicMin)}–${Math.round(chronicMax)}) : vous vous entraînez moins que ce que votre forme actuelle permettrait d'absorber. Vous pouvez augmenter progressivement le volume ou l'intensité si vous visez un objectif.`;
+    comment = { state, tier, text: text + buildingNotice };
+  }
+  return {
+    series, band, bandColor: '#22c55e', comment,
+    current: cur?.load ? { value: String(Math.round(cur.load.acute)), unit: '', dateLabel: 'au ' + formatDate(cur.calendarDate) } : null,
+  };
+}
+
+// ─── Commentaires : intensité d'entraînement (aerobie/anaerobie) ──────
+const INTENSITY_ADVICE = {
+  aerobicLow: {
+    below: "augmentez le volume de vos sorties en endurance fondamentale (allure facile, conversation possible) — c'est la base du volume d'entraînement.",
+    above: "votre volume en endurance fondamentale est déjà généreux, pas besoin d'en rajouter.",
+  },
+  aerobicHigh: {
+    below: "ajoutez des séances au tempo ou au seuil (effort soutenu mais tenable 20 à 40 min) pour développer cette zone.",
+    above: "vous faites déjà beaucoup de travail au tempo/seuil, veillez à ne pas négliger la récupération.",
+  },
+  anaerobic: {
+    below: "intégrez un peu de fractionné court/rapide (VMA, côtes, sprints) pour stimuler cette filière.",
+    above: "le travail à haute intensité est déjà bien présent, surveillez la fatigue accumulée.",
+  },
+};
+async function loadTrainingIntensityMetric(_days) {
+  const cur = await fetch('/api/training-status').then(r => r.json()).then(r => r.data).catch(() => null);
+  const intensity = cur?.intensity || null;
+  if (!intensity) return { bars: [], comment: null, current: null };
+  const bars = [
+    { key: 'aerobicLow', label: 'Aérobie faible', value: intensity.aerobicLow, min: intensity.aerobicLowMin, max: intensity.aerobicLowMax },
+    { key: 'aerobicHigh', label: 'Aérobie élevée', value: intensity.aerobicHigh, min: intensity.aerobicHighMin, max: intensity.aerobicHighMax },
+    { key: 'anaerobic', label: 'Anaérobique', value: intensity.anaerobic, min: intensity.anaerobicMin, max: intensity.anaerobicMax },
+  ];
+  const advices = bars
+    .filter(b => b.value < b.min || b.value > b.max)
+    .map(b => INTENSITY_ADVICE[b.key][b.value < b.min ? 'below' : 'above']);
+  const allInRange = advices.length === 0;
+  const comment = {
+    state: allInRange ? 'Répartition équilibrée' : 'Répartition à ajuster',
+    tier: allInRange ? 'good' : 'neutral',
+    text: allInRange
+      ? "Votre répartition entre endurance fondamentale, tempo/seuil et haute intensité sur les 4 dernières semaines est dans les plages recommandées. Continuez ainsi."
+      : "Sur les 4 dernières semaines : " + advices.join(' '),
+  };
+  return {
+    bars, comment,
+    current: { value: allInRange ? 'Équilibrée' : 'À ajuster', unit: '', dateLabel: 'sur les 4 dernières semaines' },
+  };
+}
+
 async function loadLactateMetric(days) {
   const cur = await fetch('/api/fitness').then(r => r.json()).catch(() => ({}));
   const hist = await fetch(`/api/health-history/lactateThreshold?days=${days}`).then(r => r.json()).catch(() => []);
@@ -739,6 +843,8 @@ const HEALTH_METRICS = [
   { key: 'calories',           category: 'sante',       label: 'Calories brûlées',        icon: HEALTH_ICONS.flame,   mode: 'chart', color: '#EA580C', load: loadCaloriesMetric },
   { key: 'vo2max',             category: 'performance', label: 'VO₂max',                  icon: HEALTH_ICONS.vo2,     mode: 'chart', color: '#7C3AED', load: loadVo2maxMetric },
   { key: 'trainingStatus',     category: 'performance', label: "Statut d'entraînement",   icon: HEALTH_ICONS.trend,   mode: 'timeline',                load: loadTrainingStatusMetric },
+  { key: 'trainingLoad',       category: 'performance', label: "Charge d'entraînement",   icon: HEALTH_ICONS.gauge,  mode: 'chart', color: '#111827', load: loadTrainingLoadMetric },
+  { key: 'trainingIntensity',  category: 'performance', label: "Intensité d'entraînement", icon: HEALTH_ICONS.layers, mode: 'bars',                     load: loadTrainingIntensityMetric },
   { key: 'trainingReadiness',  category: 'performance', label: "Préparation à l'entraînement", icon: HEALTH_ICONS.gauge, mode: 'chart', color: '#0EA5E9', load: loadTrainingReadinessMetric },
   { key: 'trainingEffect',     category: 'performance', label: 'Training Effect',         icon: HEALTH_ICONS.layers,  mode: 'table',                   load: loadTrainingEffectMetric },
   { key: 'lactateThreshold',   category: 'performance', label: 'Seuil lactique',          icon: HEALTH_ICONS.zap,     mode: 'chart', color: '#D97706', load: loadLactateMetric },

@@ -1149,6 +1149,42 @@ function computeGearKm(gearId, activityGear) {
     .reduce((sum, a) => sum + (Number(a.distanceKm) || 0), 0);
 }
 
+// route/trail depuis activityType Garmin, meme logique que partout ailleurs
+// (isRaceEligibleActivity, sendActivityToRaces...) - null pour les sports
+// non concernes (velo, marche, cardio...), jamais assignes automatiquement.
+function activityGearType(activityType) {
+  const t = (activityType || '').toLowerCase();
+  if (t.includes('trail')) return 'trail';
+  if (t.includes('run')) return 'route';
+  return null;
+}
+
+// Rattrapage du kilometrage a la creation/modification d'une paire : depuis
+// "firstUseDate", assigne cette paire a toutes les activites du meme type
+// (route/trail) qui n'ont PAS deja une chaussure assignee - une activite
+// deja assignee (a cette paire ou a une autre) n'est jamais ecrasee, pour
+// ne pas detruire une correction manuelle existante. Avec 2 paires du meme
+// type sur la meme periode, l'utilisateur corrige ensuite au cas par cas
+// depuis le detail de chaque activite (choix assume, pas d'heuristique
+// pour deviner laquelle a ete reellement portee).
+async function backfillGearKm(gear, firstUseDate, session) {
+  if (!firstUseDate) return;
+  const since = new Date(firstUseDate).getTime();
+  if (!Number.isFinite(since)) return;
+  const activities = await session.fns.getActivities(300);
+  const mapped = getRecentActivities(activities, 300);
+  const activityGear = readJsonSafe(ACTIVITY_GEAR_FILE, {});
+  let changed = false;
+  for (const a of mapped) {
+    if (!a.id || !a.distanceKm || activityGear[a.id]) continue;
+    if (activityGearType(a.activityType) !== gear.type) continue;
+    if (new Date(a.date).getTime() < since) continue;
+    activityGear[a.id] = { gearId: gear.id, distanceKm: a.distanceKm, date: a.date };
+    changed = true;
+  }
+  if (changed) writeJsonSafe(ACTIVITY_GEAR_FILE, activityGear);
+}
+
 app.get('/api/gear', requireSession, (req, res) => {
   const gear = readJsonSafe(GEAR_FILE, []);
   const activityGear = readJsonSafe(ACTIVITY_GEAR_FILE, {});
@@ -1156,9 +1192,9 @@ app.get('/api/gear', requireSession, (req, res) => {
   res.json(withKm);
 });
 
-app.post('/api/gear', requireSession, (req, res) => {
+app.post('/api/gear', requireSession, async (req, res) => {
   try {
-    const { brand, name, type, maxKm, isDefault } = req.body || {};
+    const { brand, name, type, maxKm, isDefault, firstUseDate } = req.body || {};
     if (!name || !['route', 'trail'].includes(type)) {
       return res.status(400).json({ error: 'Champs obligatoires manquants (name, type)' });
     }
@@ -1170,25 +1206,28 @@ app.post('/api/gear', requireSession, (req, res) => {
       type,
       maxKm: maxKm != null && maxKm !== '' ? Number(maxKm) : null,
       isDefault: !!isDefault,
+      firstUseDate: firstUseDate || null,
       createdAt: new Date().toISOString(),
     };
     if (item.isDefault) gear.forEach(g => { if (g.type === type) g.isDefault = false; });
     gear.push(item);
     writeJsonSafe(GEAR_FILE, gear);
+    if (item.firstUseDate) await backfillGearKm(item, item.firstUseDate, req.session);
     res.json({ success: true, gear: item });
   } catch (err) { handleError(res, err); }
 });
 
-app.put('/api/gear/:id', requireSession, (req, res) => {
+app.put('/api/gear/:id', requireSession, async (req, res) => {
   try {
     const gear = readJsonSafe(GEAR_FILE, []);
     const idx = gear.findIndex(g => g.id === req.params.id);
     if (idx === -1) return res.status(404).json({ error: 'Paire introuvable' });
-    const { brand, name, type, maxKm, isDefault } = req.body || {};
+    const { brand, name, type, maxKm, isDefault, firstUseDate } = req.body || {};
     if (!name || !['route', 'trail'].includes(type)) {
       return res.status(400).json({ error: 'Champs obligatoires manquants (name, type)' });
     }
     if (isDefault) gear.forEach(g => { if (g.type === type && g.id !== req.params.id) g.isDefault = false; });
+    const previousFirstUseDate = gear[idx].firstUseDate || null;
     gear[idx] = {
       ...gear[idx],
       brand: brand ? String(brand).slice(0, 80) : '',
@@ -1196,8 +1235,14 @@ app.put('/api/gear/:id', requireSession, (req, res) => {
       type,
       maxKm: maxKm != null && maxKm !== '' ? Number(maxKm) : null,
       isDefault: !!isDefault,
+      firstUseDate: firstUseDate || null,
     };
     writeJsonSafe(GEAR_FILE, gear);
+    // Rattrapage relance seulement si la date a change (nouvelle ou modifiee) -
+    // sinon inutile de re-parcourir les activites a chaque simple renommage.
+    if (gear[idx].firstUseDate && gear[idx].firstUseDate !== previousFirstUseDate) {
+      await backfillGearKm(gear[idx], gear[idx].firstUseDate, req.session);
+    }
     res.json({ success: true, gear: gear[idx] });
   } catch (err) { handleError(res, err); }
 });
@@ -1752,7 +1797,10 @@ app.get('/api/calories', requireSession, async (req, res) => {
 app.get('/api/training-status', requireSession, async (req, res) => {
   try {
     const data = await req.session.fns.getTrainingStatusData();
-    if (data) captureHealthSnapshot('trainingStatus', todayParisISO(), { trainingStatus: data.trainingStatus, phrase: data.phrase });
+    if (data) {
+      captureHealthSnapshot('trainingStatus', todayParisISO(), { trainingStatus: data.trainingStatus, phrase: data.phrase });
+      if (data.load) captureHealthSnapshot('trainingLoad', todayParisISO(), data.load);
+    }
     res.json({ data });
   } catch (err) { handleError(res, err); }
 });

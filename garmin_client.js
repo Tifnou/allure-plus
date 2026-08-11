@@ -713,11 +713,42 @@ function buildGarminFunctions(gc) {
         const byDevice = res?.mostRecentTrainingStatus?.latestTrainingStatusData || {};
         const entry = Object.values(byDevice)[0];
         if (!entry) return null;
+        // Charge d'entrainement (acute/chronic, meme reponse) : Garmin ne
+        // fournit qu'un instantane "a date" (pas d'historique interrogeable
+        // par plage) - la courbe est reconstruite cote serveur via
+        // captureHealthSnapshot, comme trainingStatus.
+        const acuteDTO = entry.acuteTrainingLoadDTO || null;
+        const load = acuteDTO ? {
+          acute: acuteDTO.dailyTrainingLoadAcute,
+          chronicMin: acuteDTO.minTrainingLoadChronic,
+          chronicMax: acuteDTO.maxTrainingLoadChronic,
+          acwrPercent: acuteDTO.acwrPercent,
+          acwrStatus: acuteDTO.acwrStatus,
+        } : null;
+        // Intensite d'entrainement (aerobie faible/elevee, anaerobie) sur
+        // les ~4 dernieres semaines glissantes - instantane courant sans
+        // historique par date (pas de captureHealthSnapshot necessaire).
+        const balanceByDevice = res?.mostRecentTrainingLoadBalance?.metricsTrainingLoadBalanceDTOMap || {};
+        const balanceEntry = balanceByDevice[entry.deviceId] || Object.values(balanceByDevice)[0] || null;
+        const intensity = balanceEntry ? {
+          aerobicLow: balanceEntry.monthlyLoadAerobicLow,
+          aerobicLowMin: balanceEntry.monthlyLoadAerobicLowTargetMin,
+          aerobicLowMax: balanceEntry.monthlyLoadAerobicLowTargetMax,
+          aerobicHigh: balanceEntry.monthlyLoadAerobicHigh,
+          aerobicHighMin: balanceEntry.monthlyLoadAerobicHighTargetMin,
+          aerobicHighMax: balanceEntry.monthlyLoadAerobicHighTargetMax,
+          anaerobic: balanceEntry.monthlyLoadAnaerobic,
+          anaerobicMin: balanceEntry.monthlyLoadAnaerobicTargetMin,
+          anaerobicMax: balanceEntry.monthlyLoadAnaerobicTargetMax,
+          feedbackPhrase: balanceEntry.trainingBalanceFeedbackPhrase,
+        } : null;
         return {
           trainingStatus: entry.trainingStatus,
           phrase: entry.trainingStatusFeedbackPhrase,
           sinceDate: entry.sinceDate,
           calendarDate: entry.calendarDate,
+          load,
+          intensity,
         };
       } catch (e) {
         console.log('Statut entrainement indisponible:', e.message);

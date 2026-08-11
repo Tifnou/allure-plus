@@ -54,7 +54,7 @@ function renderGearRow(g) {
         <span class="gear-type-badge gear-type-badge--${g.type}">${g.type === 'trail' ? '🏔️ Trail' : personEmoji('running') + ' Route'}</span>
         <div class="gear-row-info">
           <div class="gear-row-name">${escapeHtml(g.name)}${g.isDefault ? ' <span class="card-badge card-badge--blue">Par défaut</span>' : ''}</div>
-          <div class="gear-row-brand">${escapeHtml(g.brand || '')}</div>
+          <div class="gear-row-brand">${escapeHtml(g.brand || '')}${g.firstUseDate ? ' &middot; depuis le ' + formatDate(g.firstUseDate) : ''}</div>
         </div>
       </div>
       <div class="gear-row-progress">${barHtml}</div>
@@ -102,6 +102,13 @@ function openGearModal(gearId = null) {
         </div>
       </div>
       <div class="form-row">
+        <span class="form-label">Date de première utilisation</span>
+        <div class="form-input-wrap">
+          <input type="date" class="form-input" id="gear-form-firstusedate" style="max-width:100%" />
+        </div>
+        <div class="gear-form-hint">Les km déjà parcourus depuis cette date seront calculés automatiquement à partir des activités ${personEmoji('running')}/&#127956;&#65039; correspondantes (celles pas déjà assignées à une autre paire).</div>
+      </div>
+      <div class="form-row">
         <span class="form-label">Km max avant remplacement</span>
         <div class="form-input-wrap">
           <input type="number" class="form-input" id="gear-form-maxkm" min="0" step="10" placeholder="optionnel" />
@@ -131,6 +138,7 @@ function openGearModal(gearId = null) {
     if (!isKnownBrand && current.brand) { brandOtherRow.style.display = ''; brandOtherInput.value = current.brand; }
   }
   el('gear-form-name').value = current?.name || '';
+  el('gear-form-firstusedate').value = current?.firstUseDate ? String(current.firstUseDate).slice(0, 10) : '';
   el('gear-form-maxkm').value = current?.maxKm ?? '';
   el('gear-form-default').checked = !!current?.isDefault;
 
@@ -152,17 +160,19 @@ function openGearModal(gearId = null) {
   el('gear-modal-save').onclick = async () => {
     const brand = brandSelect.value === 'Autre' ? brandOtherInput.value.trim() : brandSelect.value;
     const name = el('gear-form-name').value.trim();
+    const firstUseDate = el('gear-form-firstusedate').value || null;
     const maxKmRaw = el('gear-form-maxkm').value;
     const isDefault = el('gear-form-default').checked;
     if (!name) { showToast('Merci de donner un nom à la paire', 'error'); return; }
-    const payload = { brand, name, type: selType, maxKm: maxKmRaw !== '' ? Number(maxKmRaw) : null, isDefault };
+    const payload = { brand, name, type: selType, firstUseDate, maxKm: maxKmRaw !== '' ? Number(maxKmRaw) : null, isDefault };
     try {
       const url = current ? `${API}/api/gear/${current.id}` : `${API}/api/gear`;
       const method = current ? 'PUT' : 'POST';
+      const dateChanged = firstUseDate && firstUseDate !== (current?.firstUseDate ? String(current.firstUseDate).slice(0, 10) : null);
       const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       if (!res.ok) throw new Error((await res.json()).error || 'Erreur');
       await initGearSection();
-      showToast(current ? 'Paire mise à jour' : 'Paire ajoutée', 'success');
+      showToast(current ? 'Paire mise à jour' : (dateChanged ? 'Paire ajoutée — kilométrage calculé depuis les activités' : 'Paire ajoutée'), 'success');
       close();
     } catch (e) { showToast('Erreur : ' + e.message, 'error'); }
   };
