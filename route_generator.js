@@ -60,33 +60,98 @@ async function geocode(address) {
   return results.map(r => ({ label: r.display_name, lat: parseFloat(r.lat), lon: parseFloat(r.lon) }));
 }
 
-// Genere une boucle passant par `start`, convergeant vers targetDistanceM en
-// quelques iterations. Pas besoin d'Overpass : BRouter accroche deja les
-// points au reseau reel de chemins/routes.
+// Recherche en cascade via les API officielles françaises (geo.api.gouv.fr,
+// api-adresse.data.gouv.fr) plutot que Nominatim pour la saisie du depart :
+// code postal -> villes associees -> rues de cette ville en autocompletion.
+// La selection explicite a chaque etape (l'utilisateur clique une suggestion
+// reelle) tient lieu de confirmation - plus besoin de modale bloquante.
+async function getCommunesForPostcode(postcode) {
+  const url = `https://geo.api.gouv.fr/communes?codePostal=${encodeURIComponent(postcode)}&fields=nom,code,centre`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Recherche de commune échouée (HTTP ${res.status})`);
+  const data = await res.json();
+  return data
+    .filter(c => c.centre && c.centre.coordinates)
+    .map(c => ({ nom: c.nom, code: c.code, lat: c.centre.coordinates[1], lon: c.centre.coordinates[0] }));
+}
+
+async function searchStreet(query, citycode) {
+  const url = 'https://api-adresse.data.gouv.fr/search/?' + new URLSearchParams({ q: query, citycode, type: 'street', limit: '6' });
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Recherche de rue échouée (HTTP ${res.status})`);
+  const data = await res.json();
+  return (data.features || []).map(f => ({ label: `${f.properties.name}, ${f.properties.city}`, lat: f.geometry.coordinates[1], lon: f.geometry.coordinates[0] }));
+}
+
+// Point de depart par defaut quand aucune rue n'est saisie : la mairie de la
+// commune choisie, plus precise que le simple centroide administratif.
+async function getTownHall(citycode) {
+  const url = 'https://api-adresse.data.gouv.fr/search/?' + new URLSearchParams({ q: 'Mairie', citycode, limit: '1' });
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Recherche de mairie échouée (HTTP ${res.status})`);
+  const data = await res.json();
+  if (!data.features || data.features.length === 0) return null;
+  const f = data.features[0];
+  return { label: f.properties.label, lat: f.geometry.coordinates[1], lon: f.geometry.coordinates[0] };
+}
+
+function loopWaypointsForBearing(start, bearing, radius) {
+  // Boucle asymetrique (pas un simple aller-retour) : pousse vers `bearing`
+  // puis revient par un angle legerement different, pour suivre un vrai
+  // reseau de chemins plutot qu'une ligne droite.
+  return [
+    start,
+    destinationPoint(start.lat, start.lon, bearing - 35, radius * 0.55),
+    destinationPoint(start.lat, start.lon, bearing, radius),
+    destinationPoint(start.lat, start.lon, bearing + 35, radius * 0.55),
+    start,
+  ];
+}
+
+const SEARCH_DIRECTIONS = 8;
+
+// Genere une boucle passant par `start`, convergeant vers targetDistanceM.
+// Ne se contente pas d'un seul losange symetrique fixe : explore plusieurs
+// directions autour du depart (en parallele) et garde celle qui cumule le
+// plus de D+ naturel, avant d'affiner le rayon sur cette direction gagnante.
+// Sans ca, un jeu de relevements fixe peut tomber sur un secteur plat alors
+// qu'un vrai relief existe juste a cote (constate en test reel : plateau
+// plat au nord/est de Saclay, relief net vers le sud/sud-est).
+// Pas besoin d'Overpass : BRouter accroche deja les points au reseau reel.
 async function generateLoop(start, targetDistanceM, profile, opts = {}) {
-  const bearings = opts.bearings || [45, 135, 225, 315];
-  const maxIterations = opts.maxIterations || 4;
-  let radius = targetDistanceM / 4;
-  let best = null;
+  const maxRefineIterations = opts.maxRefineIterations || 2;
+  const radius = targetDistanceM / 4;
 
-  for (let iter = 0; iter < maxIterations; iter++) {
-    const waypoints = [start, ...bearings.map(b => destinationPoint(start.lat, start.lon, b, radius)), start];
-    let result;
+  const bearingsToTry = Array.from({ length: SEARCH_DIRECTIONS }, (_, k) => (360 / SEARCH_DIRECTIONS) * k);
+  const scanResults = await Promise.all(bearingsToTry.map(async (bearing) => {
     try {
-      result = await routeThroughPoints(waypoints, profile, { trackname: `loop_iter${iter}` });
+      const result = await routeThroughPoints(loopWaypointsForBearing(start, bearing, radius), profile, { trackname: `scan_${bearing}` });
+      return { bearing, result };
     } catch (err) {
-      radius *= 0.7; // points probablement non routables (zone sans chemin) - on resserre
-      continue;
+      return null; // direction non routable (hors reseau, zone isolee...)
     }
-    if (!best || Math.abs(result.distanceM - targetDistanceM) < Math.abs(best.distanceM - targetDistanceM)) {
-      best = result;
-    }
-    const ratio = targetDistanceM / result.distanceM;
-    if (Math.abs(ratio - 1) < 0.15) break;
-    radius *= ratio;
-  }
+  }));
 
-  if (!best) throw new Error('Impossible de generer une boucle exploitable autour de ce depart.');
+  const candidates = scanResults.filter(Boolean);
+  if (candidates.length === 0) {
+    throw new Error('Impossible de generer une boucle exploitable autour de ce depart.');
+  }
+  candidates.sort((a, b) => b.result.filteredAscendM - a.result.filteredAscendM);
+
+  let best = candidates[0].result;
+  let bestBearing = candidates[0].bearing;
+  let bestRadius = radius;
+
+  for (let iter = 0; iter < maxRefineIterations; iter++) {
+    const ratio = targetDistanceM / best.distanceM;
+    if (Math.abs(ratio - 1) < 0.15) break;
+    bestRadius *= ratio;
+    try {
+      best = await routeThroughPoints(loopWaypointsForBearing(start, bestBearing, bestRadius), profile, { trackname: `refine_${iter}` });
+    } catch (err) {
+      break; // le rayon affine n'est plus routable, on garde le meilleur resultat connu
+    }
+  }
   return best;
 }
 
@@ -144,10 +209,28 @@ function predictDurationMin(points, paceMinPerKm) {
 const TERRAIN_PROFILES = { trail: 'hiking-mountain', route: 'trekking' };
 const MAX_REPEATS = 15;
 const ASCENT_TOLERANCE_M = 30;
+// Un "segment le plus efficace" avec moins que ça de gain n'est que du bruit
+// GPS/altimetrique sur terrain plat, pas une vraie cote exploitable - le
+// signaler plutot que de repeter indefiniment un quasi-rien.
+const MIN_VIABLE_SEGMENT_GAIN_M = 8;
+// Les repetitions ne doivent jamais faire deraper la sortie loin au-dela de
+// ce qui a ete demande (bug reel constate : 1h05/300m D+ -> proposition a
+// 41 km, faute de plafond sur la duree/distance reelle pendant qu'on ajoute
+// des repetitions pour chercher le D+ a tout prix).
+const MAX_OVERSHOOT_RATIO = 1.3;
+
+// Nombre de points de depart alternatifs testes quand la recherche elargie
+// est activee, et rayon d'echantillonnage angulaire (4 points cardinaux
+// suffisent : chaque point relance deja sa propre recherche a 8 directions,
+// inutile de multiplier les angles en plus).
+const ALT_START_BEARINGS = [0, 90, 180, 270];
 
 // Orchestration : construit une ou deux options selon que la boucle
-// naturelle suffit ou non a atteindre le D+ vise.
-async function generateRouteOptions({ start, targetDistanceM, targetAscentM, terrain = 'trail', paceMinPerKm }) {
+// naturelle suffit ou non a atteindre le D+ vise. Si searchRadiusM est
+// fourni et que le depart exact ne suffit pas, teste aussi quelques points
+// de depart alternatifs dans ce rayon (l'utilisateur accepte alors de
+// rejoindre un point de depart different, ex. en voiture, avant de courir).
+async function generateRouteOptions({ start, targetDistanceM, targetAscentM, targetDurationMin, terrain = 'trail', paceMinPerKm, searchRadiusM }) {
   // Verifie l'infrastructure avant toute tentative de routage : sans ca, les
   // echecs de generateLoop (qui retente avec un rayon reduit, pensant a un
   // probleme de terrain) masqueraient un message clair du type "BRouter non
@@ -157,15 +240,45 @@ async function generateRouteOptions({ start, targetDistanceM, targetAscentM, ter
   }
 
   const profile = TERRAIN_PROFILES[terrain] || TERRAIN_PROFILES.trail;
-  const natural = await generateLoop(start, targetDistanceM, profile);
+  let effectiveStart = start;
+  let natural = await generateLoop(start, targetDistanceM, profile);
+  let naturalAscentM = calibrateAscent(natural.filteredAscendM);
+
+  const initialNeedsMoreAscent = terrain === 'trail' && targetAscentM
+    && naturalAscentM < targetAscentM - ASCENT_TOLERANCE_M;
+
+  let usedAlternateStart = false;
+  if (initialNeedsMoreAscent && searchRadiusM) {
+    // Recherche sequentielle (pas tout en parallele - chaque candidat lance
+    // deja 8 appels BRouter en interne, inutile de saturer le process local).
+    let best = null;
+    for (const bearing of ALT_START_BEARINGS) {
+      const altStart = destinationPoint(start.lat, start.lon, bearing, searchRadiusM);
+      try {
+        const loop = await generateLoop(altStart, targetDistanceM, profile, { maxRefineIterations: 0 });
+        const ascentM = calibrateAscent(loop.filteredAscendM);
+        if (!best || ascentM > best.ascentM) best = { altStart, loop, ascentM };
+      } catch (err) { /* point non routable, on ignore */ }
+    }
+    if (best && best.ascentM > naturalAscentM) {
+      effectiveStart = best.altStart;
+      natural = best.loop;
+      naturalAscentM = best.ascentM;
+      usedAlternateStart = true;
+    }
+  }
 
   const naturalOption = {
     type: 'boucle-naturelle',
     label: 'Boucle sans répétition',
     points: natural.points,
     distanceM: natural.distanceM,
-    ascentM: calibrateAscent(natural.filteredAscendM),
+    ascentM: naturalAscentM,
     predictedDurationMin: predictDurationMin(natural.points, paceMinPerKm),
+    commentary: usedAlternateStart
+      ? `Le D+ visé n'était pas atteignable depuis l'adresse demandée — ce départ est décalé d'environ ${(haversineDistance(start, effectiveStart) / 1000).toFixed(1)} km (à rejoindre avant de courir) pour trouver un secteur plus vallonné. Boucle construite en explorant ${SEARCH_DIRECTIONS} directions autour de ce nouveau départ.`
+      : `Boucle construite en explorant ${SEARCH_DIRECTIONS} directions autour du départ pour trouver le meilleur dénivelé naturel du secteur, sans répétition de côte.`,
+    alternateStart: usedAlternateStart ? { lat: effectiveStart.lat, lon: effectiveStart.lon, distanceFromRequestedM: haversineDistance(start, effectiveStart) } : null,
   };
 
   const options = [naturalOption];
@@ -176,15 +289,36 @@ async function generateRouteOptions({ start, targetDistanceM, targetAscentM, ter
 
   if (needsMoreAscent) {
     const segment = findSteepestSegment(natural.points);
-    if (!segment) {
+    if (!segment || segment.gainM < MIN_VIABLE_SEGMENT_GAIN_M) {
       warning = `Aucune côte exploitable trouvée pour compléter le D+ dans ce secteur — seule la boucle naturelle (${naturalOption.ascentM} m) est proposée.`;
     } else {
-      const targetFilteredM = targetAscentM / ASCENT_CALIBRATION_FACTOR;
-      const gapFilteredM = targetFilteredM - natural.filteredAscendM;
-      let n = Math.min(MAX_REPEATS, Math.max(1, Math.ceil(gapFilteredM / segment.gainM)));
+      // Budget a ne pas depasser en ajoutant des repetitions : la duree
+      // reelle visee si elle est connue, sinon la distance visee. Teste les
+      // repetitions une a une (pas de calcul en un coup qui peut deraper) et
+      // s'arrete des que le D+ vise est atteint OU que le budget est depasse.
+      const overshootBudgetMin = targetDurationMin ? targetDurationMin * MAX_OVERSHOOT_RATIO : null;
+      const overshootBudgetDistM = !targetDurationMin ? targetDistanceM * MAX_OVERSHOOT_RATIO : null;
 
-      const repeatedWaypoints = buildRepeatedWaypoints(natural.points, segment, n);
-      const repeated = await routeThroughPoints(repeatedWaypoints, profile, { trackname: 'boucle_repetitions' });
+      let repeated = null;
+      let repeatedDurationMin = 0;
+      let n = 0;
+      for (let candidateN = 1; candidateN <= MAX_REPEATS; candidateN++) {
+        let candidate;
+        try {
+          candidate = await routeThroughPoints(buildRepeatedWaypoints(natural.points, segment, candidateN), profile, { trackname: `repeat_${candidateN}` });
+        } catch (err) {
+          break; // plus de repetitions possibles (points non routables) - on garde le dernier resultat valide
+        }
+        const candidateDurationMin = predictDurationMin(candidate.points, paceMinPerKm);
+        const overBudget = overshootBudgetMin ? candidateDurationMin > overshootBudgetMin : candidate.distanceM > overshootBudgetDistM;
+
+        repeated = candidate;
+        repeatedDurationMin = candidateDurationMin;
+        n = candidateN;
+        if (overBudget) break; // on garde ce dernier essai (le meilleur compromis trouve dans le budget) et on s'arrete
+        if (calibrateAscent(candidate.filteredAscendM) >= targetAscentM - ASCENT_TOLERANCE_M) break; // objectif atteint
+      }
+
       const repeatedAscentM = calibrateAscent(repeated.filteredAscendM);
 
       options.push({
@@ -195,11 +329,17 @@ async function generateRouteOptions({ start, targetDistanceM, targetAscentM, ter
         ascentM: repeatedAscentM,
         repeats: n,
         repeatedSegment: { fromLat: segment.from.lat, fromLon: segment.from.lon, toLat: segment.to.lat, toLon: segment.to.lon, gainM: segment.gainM },
-        predictedDurationMin: predictDurationMin(repeated.points, paceMinPerKm),
+        predictedDurationMin: repeatedDurationMin,
+        commentary: `Le D+ visé (${targetAscentM} m) n'était pas atteignable par une boucle simple dans ce secteur (${naturalAscentM} m naturels) — le passage le plus efficace trouvé (${Math.round(segment.gainM)} m de dénivelé sur ${Math.round(segment.distM)} m) est répété ${n} fois pour s'en rapprocher.`,
+        alternateStart: naturalOption.alternateStart,
       });
 
       if (repeatedAscentM < targetAscentM - ASCENT_TOLERANCE_M) {
-        warning = `Le secteur ne permet pas d'atteindre ${targetAscentM} m de D+ même avec répétitions (max ${MAX_REPEATS}) — meilleure option trouvée : ${repeatedAscentM} m.`;
+        const budgetLabel = targetDurationMin ? `${Math.round(repeatedDurationMin)} min` : `${(repeated.distanceM / 1000).toFixed(1)} km`;
+        const radiusNote = searchRadiusM
+          ? (usedAlternateStart ? ` (recherche élargie à ${(searchRadiusM / 1000).toFixed(0)} km déjà essayée)` : ' (recherche élargie essayée, aucun point alentour ne fait mieux)')
+          : ' — essayez la recherche élargie pour explorer plus loin';
+        warning = `Le secteur ne permet pas d'atteindre ${targetAscentM} m de D+ sans dépasser largement ce qui a été demandé${radiusNote} — meilleure option trouvée : ${repeatedAscentM} m de D+ (${n} répétition${n > 1 ? 's' : ''}, ${budgetLabel}).`;
       }
     }
   }
@@ -223,6 +363,9 @@ function buildGpxXml(points, label = 'Allure+') {
 
 module.exports = {
   geocode,
+  getCommunesForPostcode,
+  searchStreet,
+  getTownHall,
   destinationPoint,
   haversineDistance,
   generateLoop,

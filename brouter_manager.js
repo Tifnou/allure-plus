@@ -89,16 +89,25 @@ async function ensureBrouterRunning() {
   }
 }
 
-function shutdownBrouter() {
+// callback optionnel appele une fois le process reellement termine (pas
+// juste kill() envoye) - necessaire pour eviter un crash libuv observe en
+// test quand process.exit() est appele immediatement apres kill() alors que
+// les pipes stdout/stderr du enfant sont encore en cours de fermeture.
+function shutdownBrouter(callback) {
   if (brouterProcess) {
-    try { brouterProcess.kill(); } catch (e) {}
+    const proc = brouterProcess;
     brouterProcess = null;
+    readyPromise = null;
+    proc.once('exit', () => { if (callback) callback(); });
+    try { proc.kill(); } catch (e) { if (callback) callback(); }
+  } else if (callback) {
+    callback();
   }
 }
 
-process.on('exit', shutdownBrouter);
-process.on('SIGINT', () => { shutdownBrouter(); process.exit(0); });
-process.on('SIGTERM', () => { shutdownBrouter(); process.exit(0); });
+process.on('exit', () => shutdownBrouter()); // handler 'exit' : uniquement synchrone, pas de callback attendu
+process.on('SIGINT', () => shutdownBrouter(() => process.exit(0)));
+process.on('SIGTERM', () => shutdownBrouter(() => process.exit(0)));
 
 module.exports = {
   ensureBrouterRunning,

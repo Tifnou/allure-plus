@@ -52,7 +52,7 @@ const {
 } = require('./garmin_client');
 const { getZoneRange, annotatePaceZones, ZONE_LABELS } = require('./zones');
 const { isBrouterConfigured } = require('./brouter_manager');
-const { geocode, generateRouteOptions, buildGpxXml } = require('./route_generator');
+const { geocode, getCommunesForPostcode, searchStreet, getTownHall, generateRouteOptions, buildGpxXml } = require('./route_generator');
 const { getPaceProfile, refreshPaceProfile } = require('./pace_profile');
 const { buildPlanWorkbook } = require('./xlsx_export');
 const {
@@ -536,20 +536,60 @@ app.get('/api/routes/geocode', requireSession, async (req, res) => {
   } catch (err) { handleError(res, err); }
 });
 
+// Recherche en cascade (code postal -> ville -> rue) via les API officielles
+// francaises, pour la saisie du depart sur la page Itineraires.
+app.get('/api/routes/communes', requireSession, async (req, res) => {
+  try {
+    const postcode = (req.query.postcode || '').trim();
+    if (!/^\d{5}$/.test(postcode)) return res.status(400).json({ error: 'Code postal invalide' });
+    const communes = await getCommunesForPostcode(postcode);
+    res.json({ communes });
+  } catch (err) { handleError(res, err); }
+});
+
+app.get('/api/routes/street-suggestions', requireSession, async (req, res) => {
+  try {
+    const q = (req.query.q || '').trim();
+    const citycode = (req.query.citycode || '').trim();
+    if (q.length < 2 || !citycode) return res.json({ suggestions: [] });
+    const suggestions = await searchStreet(q, citycode);
+    res.json({ suggestions });
+  } catch (err) { handleError(res, err); }
+});
+
+app.get('/api/routes/town-hall', requireSession, async (req, res) => {
+  try {
+    const citycode = (req.query.citycode || '').trim();
+    if (!citycode) return res.status(400).json({ error: 'Ville manquante' });
+    const townHall = await getTownHall(citycode);
+    if (!townHall) return res.status(404).json({ error: 'Mairie introuvable pour cette commune' });
+    res.json({ townHall });
+  } catch (err) { handleError(res, err); }
+});
+
 app.post('/api/routes/generate', requireSession, async (req, res) => {
   try {
-    const { start, targetDistanceM, targetAscentM, terrain } = req.body || {};
+    const { start, targetDistanceM, targetDurationMin, targetAscentM, terrain, searchRadiusKm } = req.body || {};
     if (!start || typeof start.lat !== 'number' || typeof start.lon !== 'number') {
       return res.status(400).json({ error: 'Point de départ invalide (adresse non confirmée ?)' });
     }
-    if (!targetDistanceM || targetDistanceM < 500) {
-      return res.status(400).json({ error: 'Distance cible invalide' });
+    if ((!targetDistanceM || targetDistanceM < 500) && (!targetDurationMin || targetDurationMin < 5)) {
+      return res.status(400).json({ error: 'Distance ou durée cible invalide' });
     }
     const paceProfile = getPaceProfile();
+    // Si seule la duree est fournie, estimation de depart pour la forme de la
+    // boucle (affinee ensuite par generateLoop) - au rythme "plat", optimiste
+    // par construction mais recalcule reellement une fois le tracé obtenu.
+    const distanceEstimateM = targetDistanceM
+      || (targetDurationMin * 1000) / paceProfile.paceMinPerKm.flat;
     const result = await generateRouteOptions({
-      start, targetDistanceM, targetAscentM: targetAscentM || null,
+      start,
+      targetDistanceM: distanceEstimateM,
+      targetDurationMin: targetDurationMin || null,
+      targetAscentM: targetAscentM || null,
       terrain: terrain === 'route' ? 'route' : 'trail',
       paceMinPerKm: paceProfile.paceMinPerKm,
+      searchRadiusM: (searchRadiusKm && searchRadiusKm > 0) ? searchRadiusKm * 1000 : null,
     });
     res.json({ ...result, paceProfileIsGeneric: paceProfile.isGeneric });
   } catch (err) { handleError(res, err); }
