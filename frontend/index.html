@@ -14,6 +14,7 @@
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <link rel="stylesheet" href="css/style.css?v=1786278970998" />
   <link rel="stylesheet" href="css/plans.css?v=1786014624239" />
+  <link rel="stylesheet" href="css/routes.css?v=1786450733004" />
 </head>
 <body>
 <!-- ✨ SPLASH SCREEN ✨ -->
@@ -113,6 +114,12 @@
           <polyline points="10 9 9 9 8 9"/>
         </svg>
         Plans d’entraînement
+      </a>
+      <a class="nav-item" data-page="routes" id="nav-routes">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M9 20l-5.447-2.724A1 1 0 0 1 3 16.382V5.618a1 1 0 0 1 1.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0 0 21 18.382V7.618a1 1 0 0 0-.553-.894L15 4m0 13V4m0 0L9 7"/>
+        </svg>
+        Itinéraires
       </a>
       <a class="nav-item nav-item--admin" data-page="admin" id="nav-admin">
         <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -1014,6 +1021,34 @@
       </div>
     </div>
 
+    <!-- PAGE : ITINÉRAIRES -->
+    <div class="page" id="page-routes">
+      <div class="page-header">
+        <div>
+          <h1 class="page-title">Itinéraires</h1>
+          <div class="page-subtitle">Générez un parcours à partir de vos critères</div>
+        </div>
+      </div>
+
+      <!-- WIZARD -->
+      <div id="routes-wizard">
+        <div id="routes-step-content" class="wizard-step-content"></div>
+        <div class="wizard-nav">
+          <button id="routes-nav-back" class="btn-wizard-back" onclick="routesWizardBack()" style="display:none">← Retour</button>
+          <button id="routes-nav-next" class="btn-wizard-next" onclick="routesWizardNext()" disabled>Suivant →</button>
+        </div>
+      </div>
+
+      <!-- RÉSULTATS -->
+      <div id="routes-results" style="display:none">
+        <div class="plans-results-top">
+          <div id="routes-results-header"></div>
+          <button class="btn-plans-restart" onclick="routesRestart()">↺ Modifier les critères</button>
+        </div>
+        <div id="routes-results-list" class="plans-results-list"></div>
+      </div>
+    </div>
+
     <!-- 📌 PAGE : ADMIN 📌 -->
     <div class="page" id="page-admin">
       <div class="page-header">
@@ -1085,6 +1120,7 @@
   <script src="js/records.js?v=1786024863614"></script>
   <script src="js/health.js?v=1786276592310"></script>
   <script src="js/plans.js?v=1785854785389"></script>
+  <script src="js/routes.js?v=1786450733004"></script>
   <!-- ... MODAL LOGS ........................... -->
   <div id="logs-modal" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.55);backdrop-filter:blur(4px);" onclick="if(event.target===this)closeLogsModal()">
     <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:min(700px,95vw);max-height:80vh;background:#0f1117;border:1px solid #2a2a3a;border-radius:14px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 24px 64px rgba(0,0,0,0.6);">

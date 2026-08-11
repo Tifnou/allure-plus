@@ -1,5 +1,5 @@
 #define MyAppName "Allure+"
-#define MyAppVersion "1.11.2"
+#define MyAppVersion "1.12.0"
 #define MyAppPublisher "Allure+"
 
 [Setup]
@@ -24,7 +24,7 @@ ArchitecturesInstallIn64BitMode=x64compatible
 Name: "french"; MessagesFile: "compiler:Languages\French.isl"
 
 [Files]
-Source: "..\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion; Excludes: "\node_modules,\node_modules\*,\.git,\.git\*,\.claude,\.claude\*,\installer,\installer\*,\.env,\.campus_token,\.garmin_tokens,\.garmin_tokens\*,\cache.json,\imported_plan.json,\*.log,\Allure+.lnk,\uploads,\uploads\*,\Images,\Images\*,\data,\data\*"
+Source: "..\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion; Excludes: "\node_modules,\node_modules\*,\.git,\.git\*,\.claude,\.claude\*,\installer,\installer\*,\.env,\.campus_token,\.garmin_tokens,\.garmin_tokens\*,\cache.json,\imported_plan.json,\*.log,\Allure+.lnk,\uploads,\uploads\*,\Images,\Images\*,\data,\data\*,\brouter,\brouter\*"
 ; Photos de fond : ne sont copiees que si le dossier n'existe pas encore ou est
 ; vide (installation neuve). Sur une mise a jour, on ne touche jamais aux photos
 ; de l'utilisateur (par defaut ou personnalisees) - voir ShouldSeedImages ci-dessous.

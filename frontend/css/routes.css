@@ -1,0 +1,119 @@
+/* routes.css — page "Itinéraires" */
+
+.routes-text-input,
+.routes-number-input {
+  font-family: var(--font-body);
+  font-size: 15px;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-white);
+  color: var(--text-primary);
+  width: 100%;
+  max-width: 420px;
+}
+
+.routes-number-input { width: 100px; max-width: 100px; }
+
+.routes-number-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 15px;
+  color: var(--text-secondary);
+  margin-top: 12px;
+}
+
+.routes-hint {
+  margin-top: 10px;
+  font-size: 13px;
+  color: var(--text-muted);
+  max-width: 480px;
+}
+
+.routes-toggle {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.routes-toggle-btn {
+  font-family: var(--font-body);
+  font-size: 14.5px;
+  padding: 10px 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-white);
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: var(--transition);
+}
+.routes-toggle-btn:hover { background: var(--bg-hover); }
+.routes-toggle-btn.active {
+  background: var(--accent-light);
+  border-color: var(--accent);
+  color: var(--accent-text);
+  font-weight: 600;
+}
+
+.routes-results-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 10px;
+}
+
+.routes-warning-banner {
+  background: var(--orange-bg);
+  color: var(--orange);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  font-size: 13.5px;
+  margin-bottom: 14px;
+}
+.routes-warning-banner--info {
+  background: var(--accent-light);
+  color: var(--accent-text);
+}
+
+.routes-result-card {
+  background: var(--bg-white);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 18px;
+  margin-bottom: 20px;
+  box-shadow: var(--shadow-sm);
+}
+
+.routes-result-header { margin-bottom: 12px; }
+.routes-result-label { font-size: 16px; font-weight: 700; color: var(--text-primary); }
+
+.routes-result-stats {
+  display: flex;
+  gap: 24px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+.routes-stat { display: flex; flex-direction: column; }
+.routes-stat-value { font-family: var(--font-mono); font-size: 22px; font-weight: 700; color: var(--text-primary); }
+.routes-stat-unit { font-size: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; }
+
+.routes-result-map {
+  width: 100%;
+  height: 320px;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  border: 1px solid var(--border);
+  margin-bottom: 14px;
+}
+
+.routes-download-btn { display: inline-flex; }
+
+[data-theme="dark"] .routes-text-input,
+[data-theme="dark"] .routes-number-input,
+[data-theme="dark"] .routes-toggle-btn,
+[data-theme="dark"] .routes-result-card {
+  background: #12151f;
+  border-color: #2a2a3a;
+  color: var(--text-primary);
+}

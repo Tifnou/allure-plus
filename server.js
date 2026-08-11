@@ -51,6 +51,9 @@ const {
   buildGarminFunctions
 } = require('./garmin_client');
 const { getZoneRange, annotatePaceZones, ZONE_LABELS } = require('./zones');
+const { isBrouterConfigured } = require('./brouter_manager');
+const { geocode, generateRouteOptions, buildGpxXml } = require('./route_generator');
+const { getPaceProfile, refreshPaceProfile } = require('./pace_profile');
 const { buildPlanWorkbook } = require('./xlsx_export');
 const {
   campusLogin,
@@ -515,8 +518,66 @@ app.get('/api/status', (req, res) => {
     displayName:    s?.displayName || null,
     envEmail:       ENV_EMAIL || null,
     campusEnabled:  CAMPUS_ENABLED,
+    brouterConfigured: isBrouterConfigured(),
     version:        APP_VERSION,
   });
+});
+
+// ─────────────────────────────────────────────
+// Génération d'itinéraires (BRouter)
+// ─────────────────────────────────────────────
+
+app.get('/api/routes/geocode', requireSession, async (req, res) => {
+  try {
+    const address = (req.query.address || '').trim();
+    if (!address) return res.status(400).json({ error: 'Adresse manquante' });
+    const candidates = await geocode(address);
+    res.json({ candidates });
+  } catch (err) { handleError(res, err); }
+});
+
+app.post('/api/routes/generate', requireSession, async (req, res) => {
+  try {
+    const { start, targetDistanceM, targetAscentM, terrain } = req.body || {};
+    if (!start || typeof start.lat !== 'number' || typeof start.lon !== 'number') {
+      return res.status(400).json({ error: 'Point de départ invalide (adresse non confirmée ?)' });
+    }
+    if (!targetDistanceM || targetDistanceM < 500) {
+      return res.status(400).json({ error: 'Distance cible invalide' });
+    }
+    const paceProfile = getPaceProfile();
+    const result = await generateRouteOptions({
+      start, targetDistanceM, targetAscentM: targetAscentM || null,
+      terrain: terrain === 'route' ? 'route' : 'trail',
+      paceMinPerKm: paceProfile.paceMinPerKm,
+    });
+    res.json({ ...result, paceProfileIsGeneric: paceProfile.isGeneric });
+  } catch (err) { handleError(res, err); }
+});
+
+app.post('/api/routes/gpx', requireSession, (req, res) => {
+  try {
+    const { points, label } = req.body || {};
+    if (!Array.isArray(points) || points.length < 2) {
+      return res.status(400).json({ error: 'Points de tracé manquants' });
+    }
+    const gpx = buildGpxXml(points, label);
+    const filename = (label || 'itineraire').replace(/[^a-zA-Z0-9-_]+/g, '_') + '.gpx';
+    res.set('Content-Type', 'application/gpx+xml');
+    res.set('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(gpx);
+  } catch (err) { handleError(res, err); }
+});
+
+app.get('/api/routes/pace-profile', requireSession, (req, res) => {
+  res.json(getPaceProfile());
+});
+
+app.post('/api/routes/pace-profile/refresh', requireSession, async (req, res) => {
+  try {
+    const profile = await refreshPaceProfile();
+    res.json(profile);
+  } catch (err) { handleError(res, err); }
 });
 
 // Admin info d©taill©
