@@ -1169,42 +1169,6 @@ function getZoneColor(zKey) {
   return map[(zKey||'').toUpperCase()] || map.DEFAULT;
 }
 
-// "?"? Catégories exportables vers Garmin "?"?"?"?"?"?"?"?"?"?"?"?"?"?"?
-// Règle : toutes les séances SAUF renforcement (gpp) et EF simple (trail_basic_endurance)
-const GARMIN_EXPORTABLE_CATEGORIES = [
-  // Trail
-  'trail_basic_endurance_with_straight_lines',
-  'trail_intensity',
-  'trail_threshold',
-  'trail_threshold_uphill',
-  'trail_vma',
-  'trail_vma_uphill',
-  'trail_long_run',
-  'trail_race_simulation',
-  'trail_special',
-  'trail_competition',
-  'trail_strength',
-  'trail_strides',
-  'trail_hill_repeats',
-  // Route
-  'road_intensity',
-  'road_threshold',
-  'road_threshold_intervals',
-  'road_vma',
-  'road_vma_intervals',
-  'road_long_run',
-  'road_race_simulation',
-  'road_race_pace',
-  'road_strides',
-  'road_hill_repeats',
-  'road_basic_endurance_with_straight_lines',
-  // Communs
-  'competition',
-  'trail_race',
-  'road_race',
-];
-
-
 // "?"? Sanitisation des textes coach "?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?
 function sanitizeCoachText(text) {
   if (!text) return text;
@@ -1442,10 +1406,10 @@ function renderSessionDetail(session, weekId, isCurrentWeek) {
         + '</button></div>';
     }
   }
-  // Bouton export Garmin selon la catégorie (sans restriction de semaine)
-  const cat = session.trainingCategory || '';
+  // Bouton export Garmin : toute séance course/trail (le rendu PPG a un
+  // "return" plus haut, avant ce point - jamais atteint pour du renforcement).
   let exportBtn = '';
-  if (weekId && GARMIN_EXPORTABLE_CATEGORIES.includes(cat)) {
+  if (weekId) {
     exportBtn = `
       <button class="btn-export-garmin btn-export-garmin--detail"
         onclick="event.stopPropagation(); exportWeekToGarmin('${weekId}', ${session.trainingIndex ?? 0})">
