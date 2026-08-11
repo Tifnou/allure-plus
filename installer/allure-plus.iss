@@ -1,5 +1,5 @@
 #define MyAppName "Allure+"
-#define MyAppVersion "1.11.1"
+#define MyAppVersion "1.11.2"
 #define MyAppPublisher "Allure+"
 
 [Setup]
@@ -36,6 +36,14 @@ Name: "{group}\Arreter Allure+"; Filename: "{app}\stop_serveur.bat"; WorkingDir:
 Name: "{group}\Desinstaller Allure+"; Filename: "{uninstallexe}"
 
 [Run]
+; L'app tourne ensuite en utilisateur standard (non elevee) mais ecrit ses
+; donnees (data\, uploads\, tokens, cache.json...) directement dans {app},
+; qui est sous Program Files. Program Files refuse l'ecriture aux comptes
+; standard par defaut -> EPERM des qu'un nouveau fichier doit y etre cree
+; (constate en prod : EPERM sur data\session_analyses.json). On accorde donc
+; explicitement Modify au groupe Users (SID S-1-5-32-545, insensible a la
+; langue de l'OS) sur tout le dossier applicatif, une fois pour toutes.
+Filename: "icacls"; Parameters: """{app}"" /grant *S-1-5-32-545:(OI)(CI)M /T /C"; Flags: runhidden waituntilterminated; StatusMsg: "Configuration des permissions..."
 Filename: "{app}\install.bat"; WorkingDir: "{app}"; Flags: waituntilterminated; Description: "Installer Node.js et les dependances d'Allure+"
 
 [Code]

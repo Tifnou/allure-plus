@@ -122,8 +122,31 @@ function readJsonSafe(filePath, fallback) {
     return JSON.parse(fs.readFileSync(filePath, 'utf8'));
   } catch (e) { return fallback; }
 }
-function writeJsonSafe(filePath, data) {
-  fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
+// Pause synchrone (pas de callback/await possible ici, writeJsonSafe doit
+// rester synchrone pour ses appelants) - via Atomics.wait, sans dependance.
+function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+// EPERM/EBUSY/EACCES sur un fichier de data/ deja existant est generalement
+// transitoire sous Windows (antivirus qui scanne le fichier juste apres une
+// ecriture precedente, outil de sync qui l'a brievement ouvert...) plutot
+// qu'un vrai probleme de droits permanent - constate en prod (EPERM sur
+// session_analyses.json alors que d'autres liaisons avaient deja fonctionne
+// sur la meme machine sans reinstallation entre-temps). On retente avant
+// d'abandonner, pour ne pas faire perdre la saisie de l'utilisateur.
+function writeJsonSafe(filePath, data, retries = 5) {
+  const payload = JSON.stringify(data, null, 2);
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      fs.writeFileSync(filePath, payload, 'utf8');
+      return;
+    } catch (e) {
+      const transient = e.code === 'EPERM' || e.code === 'EBUSY' || e.code === 'EACCES';
+      if (!transient || attempt === retries) throw e;
+      sleepSync(150 * attempt);
+    }
+  }
 }
 
 app.get('/api/avatar', requireSession, (req, res) => {
