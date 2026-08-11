@@ -1432,7 +1432,7 @@ function renderSessionDetail(session, weekId, isCurrentWeek) {
       const infoRows = forced ? '' : zonesResolved.map((z, idx) => buildZoneRow(z, idx, goalPaceInfo.impliedVma)).join('');
       zonesHTML += '<div class="session-detail-section session-goal-pace-block">'
         + '<div class="session-detail-section-title">&#127919;&nbsp;Allure objectif <span class="zones-source-note">'
-        + goalPaceInfo.targetTime + ' &middot; ' + fmtPace(goalPaceInfo.targetPaceSec) + '/km = ' + goalPaceInfo.zoneLabel + '</span></div>'
+        + goalPaceInfo.targetTime + ' &middot; ' + goalPaceInfo.zoneLabel + '</span></div>'
         + (forced
           ? '<div class="session-goal-pace-hint">Ces allures sont actuellement appliquées ci-dessus (et seront envoyées à Garmin) pour cette séance.</div>'
           : '<div class="pace-zones-list session-goal-pace-list">' + infoRows + '</div>'
@@ -2272,27 +2272,57 @@ function getDistFromGoal(goal) {
 
 // Allure objectif (info séances, cf renderSessionDetail) : depuis le temps
 // cible saisi dans Objectifs et la distance de l'objectif, calcule une VMA
-// "implicite" telle que l'allure cible corresponde exactement au milieu de
-// la zone AS de cette distance (RACE_GOAL_ZONE) - permet ensuite de dériver
-// les allures des autres zones avec la même table de %VMA que le reste de
-// l'appli. Non pertinent en trail (pas de zone AS liée au D+) ni sans temps
-// cible/distance renseignés : retourne null, l'appelant n'affiche alors rien.
+// "implicite" - permet ensuite de dériver les allures de toutes les zones
+// avec la même table de %VMA que le reste de l'appli.
+// - Route (10km/semi/marathon) : la VMA implicite est celle pour laquelle
+//   l'allure cible correspond exactement au milieu de la zone AS de cette
+//   distance (RACE_GOAL_ZONE), ex: 4'45/km = AS21 pour un objectif semi.
+// - Trail : pas de zone AS liée au D+, donc pas d'ancrage sur une zone
+//   nommée - on inverse plutôt la même formule d'estimation de temps que le
+//   bloc "Estimations" d'Objectifs (estimateRaceTime : D+ converti en km
+//   plat équivalent à 100m/km, % VMA fixe selon la distance) pour retrouver
+//   la VMA qui produirait le temps cible sur CE parcours (distance + D+).
+// Retourne null sans temps cible/distance renseignés : l'appelant n'affiche
+// alors rien.
 function computeGoalPaceInfo() {
   const goal = campusState.goal || {};
   const goalType = (goal.goalType || '');
-  if (goalType.toLowerCase().includes('trail')) return null;
-  const zoneKey = RACE_GOAL_ZONE[goalType];
-  if (!zoneKey) return null;
+  const isTrailGoal = goalType.toLowerCase().includes('trail');
   const saved = JSON.parse(localStorage.getItem('suivi_personal_goals') || '{}');
   const targetSecs = parseTargetTime(saved.targetTime);
-  const distKm = getDistFromGoal(goal);
+  // Beaucoup de types d'objectif (dont trail-v2) ne portent pas de distance
+  // exploitable dans goal.specificData/planCategory (catégories textuelles
+  // du type "Moyen (21-42 km)") - la distance/D+ réels viennent alors de la
+  // saisie utilisateur sur la page Objectifs, sauvegardée à part (mêmes clés
+  // que le bloc Estimations : suivi_objectif_dist_/dplus_<planId>).
+  const planId = goal._id || 'plan';
+  const savedDist = parseFloat(localStorage.getItem('suivi_objectif_dist_' + planId)) || 0;
+  const distKm = savedDist || getDistFromGoal(goal);
   if (!targetSecs || !distKm) return null;
+
+  if (isTrailGoal) {
+    const savedDplus = parseInt(localStorage.getItem('suivi_objectif_dplus_' + planId)) || 0;
+    const dplusM = savedDplus || goal.specificData?.elevationGain || 0;
+    const equivKm = dplusM > 0 ? distKm + dplusM / 100 : distKm;
+    const pctVma = distKm <= 21 ? 0.70 : distKm <= 42 ? 0.65 : distKm <= 80 ? 0.58 : 0.50;
+    const impliedVma = Math.round((equivKm * 3600 / (pctVma * targetSecs)) * 100) / 100;
+    return {
+      targetSecs, targetTime: saved.targetTime, distKm, dplusM, impliedVma, isTrailGoal: true,
+      zoneLabel: `${distKm} km · ${dplusM} m D+ (~${Math.round(pctVma * 100)}% VMA)`,
+    };
+  }
+
+  const zoneKey = RACE_GOAL_ZONE[goalType];
+  if (!zoneKey) return null;
   const targetPaceSec = targetSecs / distKm;
   const targetSpeedKmH = 3600 / targetPaceSec;
   const zoneDef = ALLURE_PLUS_ZONES[zoneKey];
   const pctMid = (zoneDef.pctLow + zoneDef.pctHigh) / 2;
   const impliedVma = Math.round((targetSpeedKmH / pctMid) * 100) / 100;
-  return { targetSecs, targetTime: saved.targetTime, distKm, targetPaceSec, zoneKey, zoneLabel: zoneDef.label, impliedVma };
+  return {
+    targetSecs, targetTime: saved.targetTime, distKm, targetPaceSec, zoneKey, impliedVma, isTrailGoal: false,
+    zoneLabel: fmtPace(targetPaceSec) + '/km = ' + zoneDef.label,
+  };
 }
 
 /** Rend les estimations de performance (Bloc 3) */
