@@ -859,6 +859,7 @@ function showActivityDetail(activity, backTo = 'activities') {
         <div class="activity-stat"><div class="activity-stat-value">${elev}</div><div class="activity-stat-label">Denivele +</div></div>
         <div class="activity-stat"><div class="activity-stat-value">${cal}</div><div class="activity-stat-label">Calories</div></div>
         <div class="activity-stat"><div class="activity-stat-value">${activity.vO2MaxValue || '\u2014'}</div><div class="activity-stat-label">VO2max estimee</div></div>
+        ${(type.toLowerCase().includes('run') || type.toLowerCase().includes('trail')) ? `<div class="activity-stat"><div class="activity-stat-value" id="activity-gear-value">\u2014</div><div class="activity-stat-label">Chaussures</div></div>` : ''}
       </div>
       <div style="display:flex;gap:10px;flex-wrap:wrap">
         ${activity.id ? `<a href="https://connect.garmin.com/modern/activity/${activity.id}" target="_blank" class="activity-link">Voir sur Garmin Connect</a>` : ''}
@@ -870,6 +871,7 @@ function showActivityDetail(activity, backTo = 'activities') {
   const sendBtn = el('btn-send-to-races');
   if (sendBtn) sendBtn.onclick = () => sendActivityToRaces(activity);
   if (typeof wireActivityAnalysisButtons === 'function') wireActivityAnalysisButtons(activity);
+  if (typeof mountActivityGearField === 'function') mountActivityGearField(activity);
 
   // Reinitialise la carte GPS (elements statiques, reutilises a chaque activite)
   const routeLoading = el('route-loading');
@@ -2445,6 +2447,9 @@ function renderProfile() {
 
   // Applications connect\u00e9es
   renderProfileApps();
+
+  // \u00c9quipement (chaussures)
+  if (typeof initGearSection === 'function') initGearSection();
 }
 
 function initProfileForm() {

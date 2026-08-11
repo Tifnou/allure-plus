@@ -115,6 +115,8 @@ const PREFS_FILE              = path.join(DATA_DIR, 'prefs.json');
 const USER_DATA_FILE          = path.join(DATA_DIR, 'user_data.json');
 const ACTIVITIES_CACHE_FILE   = path.join(DATA_DIR, 'activities_cache.json');
 const SESSION_ANALYSES_FILE   = path.join(DATA_DIR, 'session_analyses.json');
+const GEAR_FILE                = path.join(DATA_DIR, 'gear.json');
+const ACTIVITY_GEAR_FILE       = path.join(DATA_DIR, 'activity_gear.json');
 
 // Tampon "Pref 2" — case a cocher reservee a ce compte, dans Profil > Mes informations
 const PREF2_EMAIL = 'floflopavard@gmail.com';
@@ -1132,6 +1134,118 @@ app.delete('/api/races/:id/certificate', requireSession, (req, res) => {
     }
     delete races[idx].certificateFile;
     writeJsonSafe(RACES_FILE, races);
+    res.json({ success: true });
+  } catch (err) { handleError(res, err); }
+});
+
+// ─── Équipement (chaussures) ───────────────────────────────────────────
+// gear.json : liste des paires. activity_gear.json : { [activityId]: { gearId, distanceKm, date } }
+// Le kilometrage par paire est la somme des distances des activites assignees
+// au moment de l'assignation (snapshot, pas de reappel Garmin necessaire pour
+// recalculer le total a chaque affichage).
+function computeGearKm(gearId, activityGear) {
+  return Object.values(activityGear)
+    .filter(a => a.gearId === gearId)
+    .reduce((sum, a) => sum + (Number(a.distanceKm) || 0), 0);
+}
+
+app.get('/api/gear', requireSession, (req, res) => {
+  const gear = readJsonSafe(GEAR_FILE, []);
+  const activityGear = readJsonSafe(ACTIVITY_GEAR_FILE, {});
+  const withKm = gear.map(g => ({ ...g, currentKm: Math.round(computeGearKm(g.id, activityGear) * 10) / 10 }));
+  res.json(withKm);
+});
+
+app.post('/api/gear', requireSession, (req, res) => {
+  try {
+    const { brand, name, type, maxKm, isDefault } = req.body || {};
+    if (!name || !['route', 'trail'].includes(type)) {
+      return res.status(400).json({ error: 'Champs obligatoires manquants (name, type)' });
+    }
+    const gear = readJsonSafe(GEAR_FILE, []);
+    const item = {
+      id: crypto.randomUUID(),
+      brand: brand ? String(brand).slice(0, 80) : '',
+      name: String(name).slice(0, 120),
+      type,
+      maxKm: maxKm != null && maxKm !== '' ? Number(maxKm) : null,
+      isDefault: !!isDefault,
+      createdAt: new Date().toISOString(),
+    };
+    if (item.isDefault) gear.forEach(g => { if (g.type === type) g.isDefault = false; });
+    gear.push(item);
+    writeJsonSafe(GEAR_FILE, gear);
+    res.json({ success: true, gear: item });
+  } catch (err) { handleError(res, err); }
+});
+
+app.put('/api/gear/:id', requireSession, (req, res) => {
+  try {
+    const gear = readJsonSafe(GEAR_FILE, []);
+    const idx = gear.findIndex(g => g.id === req.params.id);
+    if (idx === -1) return res.status(404).json({ error: 'Paire introuvable' });
+    const { brand, name, type, maxKm, isDefault } = req.body || {};
+    if (!name || !['route', 'trail'].includes(type)) {
+      return res.status(400).json({ error: 'Champs obligatoires manquants (name, type)' });
+    }
+    if (isDefault) gear.forEach(g => { if (g.type === type && g.id !== req.params.id) g.isDefault = false; });
+    gear[idx] = {
+      ...gear[idx],
+      brand: brand ? String(brand).slice(0, 80) : '',
+      name: String(name).slice(0, 120),
+      type,
+      maxKm: maxKm != null && maxKm !== '' ? Number(maxKm) : null,
+      isDefault: !!isDefault,
+    };
+    writeJsonSafe(GEAR_FILE, gear);
+    res.json({ success: true, gear: gear[idx] });
+  } catch (err) { handleError(res, err); }
+});
+
+app.delete('/api/gear/:id', requireSession, (req, res) => {
+  try {
+    const gear = readJsonSafe(GEAR_FILE, []);
+    const filtered = gear.filter(g => g.id !== req.params.id);
+    writeJsonSafe(GEAR_FILE, filtered);
+    const activityGear = readJsonSafe(ACTIVITY_GEAR_FILE, {});
+    let changed = false;
+    for (const key of Object.keys(activityGear)) {
+      if (activityGear[key].gearId === req.params.id) { delete activityGear[key]; changed = true; }
+    }
+    if (changed) writeJsonSafe(ACTIVITY_GEAR_FILE, activityGear);
+    res.json({ success: true });
+  } catch (err) { handleError(res, err); }
+});
+
+// Chaussure assignee a une activite donnee — objet complet ou null
+app.get('/api/activity-gear/:activityId', requireSession, (req, res) => {
+  const activityGear = readJsonSafe(ACTIVITY_GEAR_FILE, {});
+  res.json(activityGear[req.params.activityId] || null);
+});
+
+app.put('/api/activity-gear/:activityId', requireSession, (req, res) => {
+  try {
+    const { gearId, distanceKm, date } = req.body || {};
+    const gear = readJsonSafe(GEAR_FILE, []);
+    if (!gearId || !gear.some(g => g.id === gearId)) {
+      return res.status(400).json({ error: 'Paire introuvable' });
+    }
+    const activityGear = readJsonSafe(ACTIVITY_GEAR_FILE, {});
+    activityGear[req.params.activityId] = {
+      gearId,
+      distanceKm: Number(distanceKm) || 0,
+      date: date || null,
+    };
+    writeJsonSafe(ACTIVITY_GEAR_FILE, activityGear);
+    res.json({ success: true });
+  } catch (err) { handleError(res, err); }
+});
+
+app.delete('/api/activity-gear/:activityId', requireSession, (req, res) => {
+  try {
+    const activityGear = readJsonSafe(ACTIVITY_GEAR_FILE, {});
+    delete activityGear[req.params.activityId];
+    writeJsonSafe(ACTIVITY_GEAR_FILE, activityGear);
     res.json({ success: true });
   } catch (err) { handleError(res, err); }
 });
