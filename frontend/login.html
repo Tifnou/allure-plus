@@ -515,10 +515,13 @@
 
         </div>
 
-        <div class="sep"></div>
+        <div class="sep" id="campus-sep" style="display:none"></div>
 
-        <!-- Section 2 : Campus Coach -->
-        <div class="campus-section">
+        <!-- Section 2 : Campus Coach — reservee au compte shiznogoud@gmail.com
+             pour le moment (cf CLAUDE.md, "Campus Coach masque pour les
+             autres profils") : masquee par defaut, revelee seulement si
+             l'e-mail Garmin saisi correspond. -->
+        <div class="campus-section" id="campus-section" style="display:none">
           <div class="section-title">Compte Campus Coach</div>
           <div class="yesno-row">
             <button class="yesno-btn" id="btn-campus-yes" onclick="setCampus(true)">✓ Oui, j'en ai un</button>
@@ -589,6 +592,7 @@
         // Pré-remplir email si déjà connu
         if (d.envEmail) {
           document.getElementById('garmin-email').value = d.envEmail;
+          updateCampusSectionVisibility();
         }
       })
       .catch(() => {});
@@ -610,6 +614,19 @@
 
     // Sélectionner Garmin par défaut
     selectApp('garmin');
+
+    // Campus Coach masqué pour tout le monde sauf ce compte (cf CLAUDE.md) —
+    // révélé en direct si l'e-mail Garmin saisi correspond, sinon on saute
+    // carrément la question (comportement "non" par défaut).
+    const CAMPUS_VISIBLE_EMAIL = 'shiznogoud@gmail.com';
+    function updateCampusSectionVisibility() {
+      const email = (document.getElementById('garmin-email').value || '').trim().toLowerCase();
+      const visible = email === CAMPUS_VISIBLE_EMAIL;
+      document.getElementById('campus-section').style.display = visible ? '' : 'none';
+      document.getElementById('campus-sep').style.display = visible ? '' : 'none';
+      if (!visible) campusEnabled = false;
+    }
+    document.getElementById('garmin-email').addEventListener('input', updateCampusSectionVisibility);
 
     // "?"? Campus Coach "?"?
     function setCampus(val) {
@@ -688,6 +705,8 @@
       const rememberGarmin = document.getElementById('remember-garmin').checked;
 
       if (!garminEmail || !garminPassword) { showErr('setup', 'Saisissez votre e-mail et mot de passe Garmin.'); return; }
+      const campusSectionVisible = document.getElementById('campus-section').style.display !== 'none';
+      if (!campusSectionVisible) campusEnabled = false;
       if (campusEnabled === null) { showErr('setup', 'Indiquez si vous avez un compte Campus Coach.'); return; }
 
       let campusEmail = '', campusPassword = '', rememberCampus = false;

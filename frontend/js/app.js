@@ -2687,6 +2687,14 @@ async function renderProfileApps() {
     const campusRow = el('app-campus-row');
     const campusHidden = localStorage.getItem('campus_hidden') === 'true';
 
+    // Campus masque au niveau du compte (cf campusVisibleForSession, server.js) :
+    // pas juste "non connecte", carrement hors sujet pour ce profil - la ligne
+    // entiere disparait, sans meme proposer le bouton "je n'ai pas de compte".
+    if (status && status.campusEnabled === false && !status.connected) {
+      if (campusRow) campusRow.style.display = 'none';
+      return;
+    }
+
     if (status?.connected) {
       // Campus connecte : afficher l'etat
       if (campusBadge) { campusBadge.textContent = '\u2713'; campusBadge.className = 'profile-app-badge connected'; }

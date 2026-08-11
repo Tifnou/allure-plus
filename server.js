@@ -121,6 +121,18 @@ const ACTIVITY_GEAR_FILE       = path.join(DATA_DIR, 'activity_gear.json');
 // Tampon "Pref 2" — case a cocher reservee a ce compte, dans Profil > Mes informations
 const PREF2_EMAIL = 'floflopavard@gmail.com';
 
+// Campus Coach masque pour tous les comptes sauf celui-ci (09/2026) : la
+// fonctionnalite reste entierement codee (routes, UI, sync du plan) mais
+// n'est utile qu'a ce compte pour le moment (aucun autre utilisateur n'a de
+// compte Campus Coach) - autant ne pas perturber les autres profils avec une
+// option qui ne les concerne pas. Pour rouvrir a tout le monde : supprimer
+// campusVisibleForSession() et repasser campusEnabled: CAMPUS_ENABLED (sans
+// le && ) dans /api/campus/status.
+const CAMPUS_VISIBLE_EMAIL = 'shiznogoud@gmail.com';
+function campusVisibleForSession(session) {
+  return (session?.email || '').toLowerCase() === CAMPUS_VISIBLE_EMAIL.toLowerCase();
+}
+
 function readJsonSafe(filePath, fallback) {
   try {
     if (!fs.existsSync(filePath)) return fallback;
@@ -1946,7 +1958,7 @@ app.get('/api/campus/status', (req, res) => {
     connected:          !!token,
     campusEmail,
     hasEnvCredentials:  !!(ENV_CAMPUS_EMAIL && ENV_CAMPUS_PASSWORD),
-    campusEnabled:      CAMPUS_ENABLED,
+    campusEnabled:      CAMPUS_ENABLED && campusVisibleForSession(s),
   });
 });
 
