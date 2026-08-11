@@ -70,7 +70,7 @@ const API = '';
 // COMBLER les cles manquantes au demarrage (jamais ecraser une valeur deja
 // presente en local) — protege contre un revert vers une copie serveur
 // perimee si un push precedent avait echoue (coupure reseau ponctuelle).
-const DURABLE_LS_KEYS = ['suivi_sport_profile', 'suivi_personal_goals', 'suivi_imported_plan', 'suivi_local_done', 'prefer_imported_plan'];
+const DURABLE_LS_KEYS = ['suivi_sport_profile', 'suivi_personal_goals', 'suivi_imported_plan', 'suivi_local_done', 'prefer_imported_plan', 'suivi_forced_goal_pace'];
 const DURABLE_LS_PREFIXES = ['suivi_objectif_dist_', 'suivi_objectif_dplus_', 'suivi_objectif_validated_'];
 function isDurableLsKey(key) {
   return DURABLE_LS_KEYS.includes(key) || DURABLE_LS_PREFIXES.some(p => key.startsWith(p));

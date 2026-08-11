@@ -348,6 +348,22 @@ function _getLocalDoneMap() {
 function getLocalSessionStatus(weekId, trainingIndex) {
   return _getLocalDoneMap()[weekId + '_' + trainingIndex] || null;
 }
+// "?"? Forçage des allures objectif par séance (bouton "Forcer les allures
+// de l'objectif", cf renderSessionDetail/computeGoalPaceInfo) "?"?
+const FORCED_GOAL_PACE_KEY = 'suivi_forced_goal_pace';
+function _getForcedGoalPaceMap() {
+  try { return JSON.parse(localStorage.getItem(FORCED_GOAL_PACE_KEY) || '{}'); } catch(e) { return {}; }
+}
+function isGoalPaceForced(sessionKey) {
+  return !!_getForcedGoalPaceMap()[sessionKey];
+}
+function toggleForceGoalPace(sessionKey) {
+  const m = _getForcedGoalPaceMap();
+  if (m[sessionKey]) delete m[sessionKey]; else m[sessionKey] = true;
+  localStorage.setItem(FORCED_GOAL_PACE_KEY, JSON.stringify(m));
+  renderSessionList(campusState.selectedWeekIdx);
+}
+
 function markSessionDone(weekId, trainingIndex) {
   const m = _getLocalDoneMap(); m[weekId + '_' + trainingIndex] = 'done';
   localStorage.setItem(LOCAL_DONE_KEY, JSON.stringify(m));
@@ -1350,7 +1366,9 @@ function renderSessionDetail(session, weekId, isCurrentWeek) {
       const az = z.resolvedZone;
       return az && az !== 'EF' && az !== 'RECOVER' && az !== 'WARMUP' && az !== 'COOLDOWN';
     });
-    const zoneRows = zonesResolved.map((z, idx) => {
+    // Extrait pour pouvoir recalculer la meme liste avec une VMA differente
+    // (allures objectif "info", cf buildZoneRow) sans dupliquer la logique.
+    const buildZoneRow = (z, idx, vmaToUse) => {
       const zKey    = (z.kind || '').toUpperCase();
       const apZone  = z.resolvedZone;
       const zoneDef = apZone ? ALLURE_PLUS_ZONES[apZone] : null;
@@ -1374,8 +1392,8 @@ function renderSessionDetail(session, weekId, isCurrentWeek) {
       const useTrail   = isSessTrail && !isEfWarmup;
       // Calcul allures depuis VMA utilisateur (correctement calibré + correction trail +7/+8/+10%)
       // Les pace.value du fichier .aplus sont des valeurs template non calibrées à l'utilisateur
-      const apRef = apZone && vma
-        ? (useTrail ? calcAllureRefTrail(apZone, vma) : calcAllureRef(apZone, vma))
+      const apRef = apZone && vmaToUse
+        ? (useTrail ? calcAllureRefTrail(apZone, vmaToUse) : calcAllureRef(apZone, vmaToUse))
         : null;
       const paceColor = apRef?.isTrail ? 'var(--text-trail, #6b7a8f)' : 'var(--text-pace, var(--text-primary))';
       const paceCell = apRef
@@ -1388,12 +1406,41 @@ function renderSessionDetail(session, weekId, isCurrentWeek) {
         + '<span class="pace-zone-kind">' + zoneLbl + '</span>'
         + '<span class="pace-zone-duration">' + fmtDuration(z.duration) + '</span>'
         + paceCell + '</div>';
-    }).join('');
+    };
+
+    // Allures objectif (info) : si un temps cible est defini sur un objectif
+    // route (10km/semi/marathon), calcule une VMA "implicite" telle que
+    // l'allure cible corresponde a la zone AS de cette distance (ex: 4'45/km
+    // = AS21 pour un objectif semi) puis en deduit les allures des AUTRES
+    // zones par la meme table de %VMA - juste pour affichage, l'appli
+    // continue par defaut a s'appuyer sur la VMA reelle du coureur.
+    const goalPaceInfo = computeGoalPaceInfo();
+    const sessionKey   = weekId + '_' + (session.trainingIndex ?? 0);
+    const forced       = goalPaceInfo && isGoalPaceForced(sessionKey);
+    const displayVma   = forced ? goalPaceInfo.impliedVma : vma;
+
+    const zoneRows = zonesResolved.map((z, idx) => buildZoneRow(z, idx, displayVma)).join('');
     const trailNote = isSessTrail ? ' &nbsp;<span style="font-size:11px;color:#888">allures trail ajustées</span>' : '';
+    const vmaBadge = forced
+      ? '<span class="zones-source-note zones-source-note--goal">ALLURES OBJECTIF &middot; ' + goalPaceInfo.targetTime + '</span>'
+      : (vma ? '<span class="zones-source-note">CALCULÉES · VMA ' + vma + ' km/h</span>' : '');
     zonesHTML = '<div class="session-detail-section"><div class="session-detail-section-title">'
-      + modeBadge + "&nbsp;Zones d'allure" + trailNote
-      + (vma ? '<span class="zones-source-note">CALCULÉES · VMA ' + vma + ' km/h</span>' : '')
+      + modeBadge + "&nbsp;Zones d'allure" + trailNote + vmaBadge
       + '</div><div class="pace-zones-list">' + zoneRows + '</div></div>';
+
+    if (goalPaceInfo) {
+      const infoRows = forced ? '' : zonesResolved.map((z, idx) => buildZoneRow(z, idx, goalPaceInfo.impliedVma)).join('');
+      zonesHTML += '<div class="session-detail-section session-goal-pace-block">'
+        + '<div class="session-detail-section-title">&#127919;&nbsp;Allure objectif <span class="zones-source-note">'
+        + goalPaceInfo.targetTime + ' &middot; ' + fmtPace(goalPaceInfo.targetPaceSec) + '/km = ' + goalPaceInfo.zoneLabel + '</span></div>'
+        + (forced
+          ? '<div class="session-goal-pace-hint">Ces allures sont actuellement appliquées ci-dessus (et seront envoyées à Garmin) pour cette séance.</div>'
+          : '<div class="pace-zones-list session-goal-pace-list">' + infoRows + '</div>'
+            + '<div class="session-goal-pace-hint">Info uniquement : Allure+ continue par défaut de s\'appuyer sur votre VMA réelle. Forcez ces allures pour <em>cette séance</em> si vous voulez vous entraîner au niveau de votre objectif.</div>')
+        + '<button type="button" class="btn-force-goal-pace' + (forced ? ' active' : '') + '" onclick="event.stopPropagation(); toggleForceGoalPace(\'' + sessionKey + '\')">'
+        + (forced ? '&#10003; Revenir à ma VMA réelle' : 'Forcer les allures de l\'objectif pour cette séance')
+        + '</button></div>';
+    }
   }
   // Bouton export Garmin selon la catégorie (sans restriction de semaine)
   const cat = session.trainingCategory || '';
@@ -1500,9 +1547,16 @@ async function exportWeekToGarmin(weekId, sessionNum) {
     const _prof = JSON.parse(localStorage.getItem('suivi_sport_profile') || '{}');
     const _sex  = _prof.sex || 'M';
     const _fact = _sex === 'F' ? 0.315 : 0.313;
-    const vmaExport = (_vo2 && _vo2 > 3.5)
+    let vmaExport = (_vo2 && _vo2 > 3.5)
       ? Math.round((_vo2 - 3.5) * _fact * 10) / 10
       : null;
+
+    // ── Allure objectif forcée pour CETTE séance (cf computeGoalPaceInfo/
+    // toggleForceGoalPace) : remplace la VMA réelle par la VMA implicite de
+    // l'objectif, donc le workout envoyé à Garmin utilise ces allures-là.
+    const sessionKeyExport = weekId + '_' + sessionNum;
+    const goalPaceInfoExport = isGoalPaceForced(sessionKeyExport) ? computeGoalPaceInfo() : null;
+    if (goalPaceInfoExport) vmaExport = goalPaceInfoExport.impliedVma;
 
     // ── Détection trail / côte ────────────────────────────────────────────────
     const isTrailExport = isTrailSession(session);
@@ -1535,7 +1589,7 @@ async function exportWeekToGarmin(weekId, sessionNum) {
 
     if (res.success) {
       const name = res.workout?.workoutName || session.displayName || '';
-      showToast('✓ « ' + name + ' » envoyée vers Garmin !', 'success');
+      showToast('✓ « ' + name + ' »' + (goalPaceInfoExport ? ' (allures objectif)' : '') + ' envoyée vers Garmin !', 'success');
     }
   } catch(err) {
     showToast('Erreur export Garmin : ' + err.message, 'error');
@@ -2214,6 +2268,31 @@ function getDistFromGoal(goal) {
     if (parts.length === 1) return parts[0];
   }
   return 0;
+}
+
+// Allure objectif (info séances, cf renderSessionDetail) : depuis le temps
+// cible saisi dans Objectifs et la distance de l'objectif, calcule une VMA
+// "implicite" telle que l'allure cible corresponde exactement au milieu de
+// la zone AS de cette distance (RACE_GOAL_ZONE) - permet ensuite de dériver
+// les allures des autres zones avec la même table de %VMA que le reste de
+// l'appli. Non pertinent en trail (pas de zone AS liée au D+) ni sans temps
+// cible/distance renseignés : retourne null, l'appelant n'affiche alors rien.
+function computeGoalPaceInfo() {
+  const goal = campusState.goal || {};
+  const goalType = (goal.goalType || '');
+  if (goalType.toLowerCase().includes('trail')) return null;
+  const zoneKey = RACE_GOAL_ZONE[goalType];
+  if (!zoneKey) return null;
+  const saved = JSON.parse(localStorage.getItem('suivi_personal_goals') || '{}');
+  const targetSecs = parseTargetTime(saved.targetTime);
+  const distKm = getDistFromGoal(goal);
+  if (!targetSecs || !distKm) return null;
+  const targetPaceSec = targetSecs / distKm;
+  const targetSpeedKmH = 3600 / targetPaceSec;
+  const zoneDef = ALLURE_PLUS_ZONES[zoneKey];
+  const pctMid = (zoneDef.pctLow + zoneDef.pctHigh) / 2;
+  const impliedVma = Math.round((targetSpeedKmH / pctMid) * 100) / 100;
+  return { targetSecs, targetTime: saved.targetTime, distKm, targetPaceSec, zoneKey, zoneLabel: zoneDef.label, impliedVma };
 }
 
 /** Rend les estimations de performance (Bloc 3) */

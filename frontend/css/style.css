@@ -2486,6 +2486,41 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
   font-size: 11px;
 }
 
+/* ── Allure objectif (info + forçage par séance) ── */
+.zones-source-note--goal { color: #b45309; background: #fef3c7; }
+[data-theme="dark"] .zones-source-note--goal { color: #fbbf24; background: rgba(251,191,36,0.15); }
+.session-goal-pace-block {
+  border: 1px dashed #f59e0b;
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  background: rgba(245,158,11,0.06);
+}
+.session-goal-pace-list { gap: 2px; margin-bottom: 8px; }
+.session-goal-pace-list .pace-zone-row { padding: 3px 8px; font-size: 11.5px; opacity: 0.9; }
+.session-goal-pace-hint {
+  font-family: var(--font-body);
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.5;
+  margin-bottom: 8px;
+}
+.btn-force-goal-pace {
+  font-family: var(--font-body);
+  font-size: 11.5px;
+  font-weight: 600;
+  border: 1px solid #f59e0b;
+  color: #b45309;
+  background: transparent;
+  border-radius: 20px;
+  padding: 6px 14px;
+  cursor: pointer;
+  transition: all var(--transition);
+}
+.btn-force-goal-pace:hover { background: rgba(245,158,11,0.12); }
+.btn-force-goal-pace.active { background: #f59e0b; color: #fff; border-color: #f59e0b; }
+[data-theme="dark"] .btn-force-goal-pace { color: #fbbf24; }
+[data-theme="dark"] .btn-force-goal-pace.active { color: #1c1917; }
+
 /* Zone row coloring — light mode (via data-zone) */
 .pace-zone-row { border-radius: 4px; margin-bottom: 3px; padding: 5px 8px; transition: background 0.2s, opacity 0.15s; }
 .pace-zone-row[data-zone="Z1"]                         { background: #f3f3f3; }
