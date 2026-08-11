@@ -225,6 +225,14 @@ const MAX_OVERSHOOT_RATIO = 1.3;
 // inutile de multiplier les angles en plus).
 const ALT_START_BEARINGS = [0, 90, 180, 270];
 
+// Paliers de distance testes pour un depart alternatif, en fraction du rayon
+// demande par l'utilisateur - du plus proche au plus loin. Sans ca, le point
+// de depart alternatif sautait directement a la distance MAXIMALE du rayon
+// (ex: rayon 5 km -> toujours a 5 km pile, jamais a 1-2 km meme quand un
+// point proche suffisait deja) : personne n'a envie de faire 15 km en
+// voiture pour un depart si un point a 3-4 km fait tout aussi bien l'affaire.
+const ALT_START_RADIUS_FRACTIONS = [1 / 3, 2 / 3, 1];
+
 // Orchestration : construit une ou deux options selon que la boucle
 // naturelle suffit ou non a atteindre le D+ vise. Si searchRadiusM est
 // fourni et que le depart exact ne suffit pas, teste aussi quelques points
@@ -251,14 +259,21 @@ async function generateRouteOptions({ start, targetDistanceM, targetAscentM, tar
   if (initialNeedsMoreAscent && searchRadiusM) {
     // Recherche sequentielle (pas tout en parallele - chaque candidat lance
     // deja 8 appels BRouter en interne, inutile de saturer le process local).
+    // Paliers du plus proche au plus loin (ALT_START_RADIUS_FRACTIONS) : on
+    // s'arrete au premier palier qui atteint deja la cible de D+, pour ne
+    // jamais s'eloigner plus que necessaire du depart demande.
     let best = null;
-    for (const bearing of ALT_START_BEARINGS) {
-      const altStart = destinationPoint(start.lat, start.lon, bearing, searchRadiusM);
-      try {
-        const loop = await generateLoop(altStart, targetDistanceM, profile, { maxRefineIterations: 0 });
-        const ascentM = calibrateAscent(loop.filteredAscendM);
-        if (!best || ascentM > best.ascentM) best = { altStart, loop, ascentM };
-      } catch (err) { /* point non routable, on ignore */ }
+    for (const frac of ALT_START_RADIUS_FRACTIONS) {
+      const radiusM = searchRadiusM * frac;
+      for (const bearing of ALT_START_BEARINGS) {
+        const altStart = destinationPoint(start.lat, start.lon, bearing, radiusM);
+        try {
+          const loop = await generateLoop(altStart, targetDistanceM, profile, { maxRefineIterations: 0 });
+          const ascentM = calibrateAscent(loop.filteredAscendM);
+          if (!best || ascentM > best.ascentM) best = { altStart, loop, ascentM };
+        } catch (err) { /* point non routable, on ignore */ }
+      }
+      if (best && targetAscentM && best.ascentM >= targetAscentM - ASCENT_TOLERANCE_M) break;
     }
     if (best && best.ascentM > naturalAscentM) {
       effectiveStart = best.altStart;
