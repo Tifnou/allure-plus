@@ -3,22 +3,37 @@
 // françaises) : la sélection explicite à chaque étape vaut confirmation,
 // pas besoin de modale bloquante. Résultats compacts, repliables par défaut.
 
-const routesState = {
-  postcode: '',
-  communes: [],
-  selectedCommune: null,   // { nom, code, lat, lon }
-  street: '',
-  selectedStreet: null,    // { label, lat, lon }
-  mode: 'distance',        // 'distance' | 'duration'
-  distanceKm: 10,
-  durationMin: 60,
-  terrain: 'trail',        // 'trail' | 'route'
-  ascentM: 300,
-  searchWider: false,
-  searchRadiusKm: 5,
-  lastResult: null,
-  openIndex: null,         // index de la carte résultat ouverte (une seule à la fois)
-};
+function routesDefaultState() {
+  return {
+    postcode: '',
+    communes: [],
+    selectedCommune: null,   // { nom, code, lat, lon }
+    street: '',
+    selectedStreet: null,    // { label, lat, lon }
+    mode: 'distance',        // 'distance' | 'duration'
+    distanceKm: 10,
+    durationMin: 60,
+    terrain: 'trail',        // 'trail' | 'route'
+    ascentM: 300,
+    searchWider: false,
+    searchRadiusKm: 5,
+    lastResult: null,
+    openIndex: null,         // index de la carte résultat ouverte (une seule à la fois)
+  };
+}
+
+const routesState = routesDefaultState();
+
+// Le formulaire gardait la saisie precedente (adresse, distance, D+...)
+// jusqu'a un refresh complet de la page - aucun moyen de repartir a zero
+// sans ca. Reinitialise tout l'etat aux valeurs par defaut et re-affiche
+// un formulaire vierge.
+function routesResetForm() {
+  Object.assign(routesState, routesDefaultState());
+  showRoutesView('form');
+  renderRoutesForm();
+  showToast('Formulaire réinitialisé', 'info');
+}
 
 function debounce(fn, delay) {
   let t;
@@ -226,8 +241,16 @@ async function routesResolveStart() {
   if (routesState.street.trim().length === 0) {
     const res = await fetch(`${API}/api/routes/town-hall?citycode=${routesState.selectedCommune.code}`);
     const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Mairie introuvable pour cette commune');
-    return data.townHall;
+    if (res.ok) return data.townHall;
+    // La recherche de mairie repose sur une adresse "Place/Rue de la Mairie"
+    // dans la Base Adresse Nationale — fiable dans les petites communes,
+    // souvent absente dans les villes moyennes/grandes (autre nommage de
+    // voirie autour de l'hôtel de ville). Plutôt que de bloquer la
+    // génération, on repart du centre de la commune déjà connu (issu de
+    // /api/routes/communes), toujours disponible.
+    const c = routesState.selectedCommune;
+    showToast(`Mairie non localisée précisément pour ${c.nom} — départ pris au centre de la commune`, 'info');
+    return { label: `Centre de ${c.nom}`, lat: c.lat, lon: c.lon };
   }
   if (!routesState.selectedStreet) {
     showToast('Sélectionnez une rue dans la liste, ou videz le champ pour partir de la mairie', 'error');

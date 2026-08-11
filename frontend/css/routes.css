@@ -5,8 +5,12 @@
   display: flex;
   align-items: flex-start;
   gap: 10px;
-  background: rgba(220, 38, 38, 0.06);
-  border: 1px solid rgba(220, 38, 38, 0.25);
+  /* Fond quasi-opaque (comme les autres cartes) : la page a un
+     diaporama-photo derriere, un simple tint a 6% d'opacite y devenait
+     illisible quelle que soit la photo/le theme. */
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--red);
   border-radius: var(--radius-md);
   padding: 12px 14px;
   margin-bottom: 18px;
@@ -14,6 +18,7 @@
   font-size: 12.5px;
   line-height: 1.5;
   color: var(--text-secondary);
+  box-shadow: var(--shadow-sm);
 }
 .routes-beta-banner strong { color: var(--text-primary); display: block; margin-bottom: 2px; }
 .routes-beta-banner-icon { font-size: 16px; flex-shrink: 0; line-height: 1.4; }
@@ -149,7 +154,8 @@
   gap: 6px;
 }
 
-/* ---------- bouton générer ---------- */
+/* ---------- boutons générer / réinitialiser ---------- */
+.routes-form-actions { display: flex; align-items: center; gap: 10px; max-width: 480px; }
 #routes-generate-btn { font-size: 13.5px; padding: 9px 20px; }
 
 /* ---------- résultats : cartes compactes repliables ---------- */

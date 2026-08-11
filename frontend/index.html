@@ -14,7 +14,7 @@
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <link rel="stylesheet" href="css/style.css?v=1786460618001" />
   <link rel="stylesheet" href="css/plans.css?v=1786014624239" />
-  <link rel="stylesheet" href="css/routes.css?v=1786455574364" />
+  <link rel="stylesheet" href="css/routes.css?v=1786460618001" />
 </head>
 <body>
 <!-- ✨ SPLASH SCREEN ✨ -->
@@ -1052,7 +1052,10 @@
       <!-- FORMULAIRE (un seul écran, tous les critères) -->
       <div id="routes-form">
         <div id="routes-form-content" class="routes-form-card"></div>
-        <button id="routes-generate-btn" class="btn-wizard-next" onclick="routesGenerateClicked()">Générer →</button>
+        <div class="routes-form-actions">
+          <button id="routes-generate-btn" class="btn-wizard-next" onclick="routesGenerateClicked()">Générer →</button>
+          <button type="button" class="btn-wizard-back" onclick="routesResetForm()">↺ Réinitialiser</button>
+        </div>
       </div>
 
       <!-- RÉSULTATS -->
@@ -1137,7 +1140,7 @@
   <script src="js/records.js?v=1786024863614"></script>
   <script src="js/health.js?v=1786459900000"></script>
   <script src="js/plans.js?v=1785854785389"></script>
-  <script src="js/routes.js?v=1786455574364"></script>
+  <script src="js/routes.js?v=1786460978821"></script>
   <!-- ... MODAL LOGS ........................... -->
   <div id="logs-modal" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.55);backdrop-filter:blur(4px);" onclick="if(event.target===this)closeLogsModal()">
     <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:min(700px,95vw);max-height:80vh;background:#0f1117;border:1px solid #2a2a3a;border-radius:14px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 24px 64px rgba(0,0,0,0.6);">
