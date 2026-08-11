@@ -1407,6 +1407,23 @@ function renderSessionDetail(session, weekId, isCurrentWeek) {
       </button>`;
   }
 
+  // Bouton "Générer un parcours" (page Itinéraires, bêta) - pré-remplit
+  // durée/D+/terrain depuis la séance, l'utilisateur complète juste l'adresse.
+  let generateRouteBtn = '';
+  if (typeof goToRoutesWithPrefill === 'function') {
+    const durMin  = session.stats?.expectedDuration ? Math.round(session.stats.expectedDuration / 60) : null;
+    const elevLo  = session.stats?.expectedElevationGain || 0;
+    const elevHi  = session.stats?.maxExpectedElevationGain || 0;
+    const ascentM = (elevLo || elevHi) ? Math.round(((elevLo || elevHi) + (elevHi || elevLo)) / 2) : null;
+    const terrainVal = isTrailSession(session) ? 'trail' : 'route';
+    const prefill = JSON.stringify({ durationMin: durMin, ascentM, terrain: terrainVal }).replace(/"/g, '&quot;');
+    generateRouteBtn = `
+      <button class="btn-generate-route" onclick='event.stopPropagation(); goToRoutesWithPrefill(${prefill})'>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 20l-5.447-2.724A1 1 0 0 1 3 16.382V5.618a1 1 0 0 1 1.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0 0 21 18.382V7.618a1 1 0 0 0-.553-.894L15 4m0 13V4m0 0L9 7"/></svg>
+        Générer un parcours
+      </button>`;
+  }
+
   return `
     <div class="session-detail-panel" onclick="event.stopPropagation()">
       ${session.description ? `
@@ -1422,6 +1439,7 @@ function renderSessionDetail(session, weekId, isCurrentWeek) {
       ${zonesHTML}
       <div class="session-detail-actions">
         ${exportBtn}
+        ${generateRouteBtn}
         ${typeof renderSessionAnalysisButton === 'function' ? renderSessionAnalysisButton(session, weekId) : ''}
         ${(() => {
           if (!campusState.usingImportedPlan || !weekId) return '';

@@ -2065,9 +2065,9 @@ function calcHRMax(age, hrmaxMeasured) {
 // jamais en valeur unique, meme logique que fcZone sur ALLURE_PLUS_ZONES.
 function calcHRZones(hrMax, hrRest) {
   const zones = [
-    { name:'Z1 — Récupération',       pLow:0.50, pHigh:0.60, color:'#60a5fa', desc:'Effort très léger, récupération active', allureZone:'Récupération' },
-    { name:'Z2 — Endurance aérobie',  pLow:0.60, pHigh:0.70, color:'#4ade80', desc:'Effort facile, base aérobie', allureZone:'EF à Tempo' },
-    { name:'Z3 — Endurance soutenue', pLow:0.70, pHigh:0.80, color:'#facc15', desc:'Effort modéré, encore confortable', allureZone:'Tempo à AS21' },
+    { name:'Z1 — Récupération',       pLow:0.50, pHigh:0.60, color:'#9ca3af', desc:'Effort très léger, récupération active', allureZone:'Récupération' },
+    { name:'Z2 — Endurance aérobie',  pLow:0.60, pHigh:0.70, color:'#60a5fa', desc:'Effort facile, base aérobie', allureZone:'EF à Tempo' },
+    { name:'Z3 — Endurance soutenue', pLow:0.70, pHigh:0.80, color:'#4ade80', desc:'Effort modéré, encore confortable', allureZone:'Tempo à AS21' },
     { name:'Z4 — Seuil',              pLow:0.80, pHigh:0.90, color:'#fb923c', desc:'Effort soutenu à difficile', allureZone:'AS21 à S30' },
     { name:'Z5 — VO₂max',             pLow:0.90, pHigh:1.00, color:'#f87171', desc:'Effort maximal, haute intensité', allureZone:'S30 à VMA' },
   ];

@@ -51,7 +51,7 @@ const {
   buildGarminFunctions
 } = require('./garmin_client');
 const { getZoneRange, annotatePaceZones, ZONE_LABELS } = require('./zones');
-const { isBrouterConfigured } = require('./brouter_manager');
+const { isBrouterConfigured, isTilePresent, getTileRemoteSize, downloadTile } = require('./brouter_manager');
 const { geocode, getCommunesForPostcode, searchStreet, getTownHall, generateRouteOptions, buildGpxXml } = require('./route_generator');
 const { getPaceProfile, refreshPaceProfile } = require('./pace_profile');
 const { buildPlanWorkbook } = require('./xlsx_export');
@@ -564,6 +564,37 @@ app.get('/api/routes/town-hall', requireSession, async (req, res) => {
     const townHall = await getTownHall(citycode);
     if (!townHall) return res.status(404).json({ error: 'Mairie introuvable pour cette commune' });
     res.json({ townHall });
+  } catch (err) { handleError(res, err); }
+});
+
+// Verifie si la tuile OSM (segments4/*.rd5) couvrant ce point est deja
+// presente en local ; sinon renvoie sa taille reelle (HEAD distant) pour
+// que l'utilisateur confirme le telechargement avant de l'engager.
+app.get('/api/routes/tile-check', requireSession, async (req, res) => {
+  try {
+    const lat = parseFloat(req.query.lat);
+    const lon = parseFloat(req.query.lon);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+      return res.status(400).json({ error: 'Coordonnées invalides' });
+    }
+    const { tileName, present } = isTilePresent(lat, lon);
+    if (present) return res.json({ tileName, present: true });
+    let sizeBytes = null;
+    try { sizeBytes = await getTileRemoteSize(tileName); } catch (e) { /* taille non critique */ }
+    res.json({ tileName, present: false, sizeBytes });
+  } catch (err) { handleError(res, err); }
+});
+
+app.post('/api/routes/tile-download', requireSession, async (req, res) => {
+  try {
+    const { lat, lon } = req.body || {};
+    if (typeof lat !== 'number' || typeof lon !== 'number') {
+      return res.status(400).json({ error: 'Coordonnées invalides' });
+    }
+    const { tileName, present } = isTilePresent(lat, lon);
+    if (present) return res.json({ success: true, tileName, alreadyPresent: true });
+    await downloadTile(tileName);
+    res.json({ success: true, tileName });
   } catch (err) { handleError(res, err); }
 });
 

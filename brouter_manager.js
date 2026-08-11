@@ -109,8 +109,60 @@ process.on('exit', () => shutdownBrouter()); // handler 'exit' : uniquement sync
 process.on('SIGINT', () => shutdownBrouter(() => process.exit(0)));
 process.on('SIGTERM', () => shutdownBrouter(() => process.exit(0)));
 
+// ─────────────────────────────────────────────
+// Tuiles OSM (segments4/*.rd5) - telechargement a la demande
+// ─────────────────────────────────────────────
+// Convention de nommage verifiee ce soir (brouter.de/brouter/segments4/) :
+// tuiles de 5x5 degres, nommees par leur coin sud-ouest.
+const SEGMENTS_BASE_URL = 'https://brouter.de/brouter/segments4';
+
+function tileNameForPoint(lat, lon) {
+  const tileLon = Math.floor(lon / 5) * 5;
+  const tileLat = Math.floor(lat / 5) * 5;
+  const slon = tileLon < 0 ? `W${Math.abs(tileLon)}` : `E${tileLon}`;
+  const slat = tileLat < 0 ? `S${Math.abs(tileLat)}` : `N${tileLat}`;
+  return `${slon}_${slat}.rd5`;
+}
+
+function isTilePresent(lat, lon) {
+  const tileName = tileNameForPoint(lat, lon);
+  return { tileName, present: fs.existsSync(path.join(SEGMENTS_DIR, tileName)) };
+}
+
+async function getTileRemoteSize(tileName) {
+  const res = await fetch(`${SEGMENTS_BASE_URL}/${tileName}`, { method: 'HEAD' });
+  if (!res.ok) throw new Error(`Tuile introuvable sur le serveur BRouter (HTTP ${res.status}) - secteur peut-être hors couverture.`);
+  const len = res.headers.get('content-length');
+  return len ? parseInt(len, 10) : null;
+}
+
+// Telechargement direct sur disque (fichier temporaire puis rename atomique,
+// pour ne jamais laisser une tuile a moitie ecrite si l'operation echoue).
+async function downloadTile(tileName) {
+  const res = await fetch(`${SEGMENTS_BASE_URL}/${tileName}`);
+  if (!res.ok || !res.body) {
+    throw new Error(`Téléchargement de la tuile échoué (HTTP ${res.status})`);
+  }
+  fs.mkdirSync(SEGMENTS_DIR, { recursive: true });
+  const destPath = path.join(SEGMENTS_DIR, tileName);
+  const tmpPath = `${destPath}.part`;
+  const { Readable } = require('stream');
+  const fileStream = fs.createWriteStream(tmpPath);
+  await new Promise((resolve, reject) => {
+    Readable.fromWeb(res.body).pipe(fileStream);
+    fileStream.on('finish', resolve);
+    fileStream.on('error', reject);
+  });
+  fs.renameSync(tmpPath, destPath);
+  return destPath;
+}
+
 module.exports = {
   ensureBrouterRunning,
   isBrouterConfigured,
   getPort: () => PORT,
+  tileNameForPoint,
+  isTilePresent,
+  getTileRemoteSize,
+  downloadTile,
 };

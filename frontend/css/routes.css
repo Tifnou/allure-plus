@@ -1,6 +1,23 @@
 /* routes.css — page "Itinéraires" : style compact, aligné sur les patterns
    existants de l'app (stats-tile, race-group) plutôt que des cartes larges. */
 
+.routes-beta-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  background: rgba(220, 38, 38, 0.06);
+  border: 1px solid rgba(220, 38, 38, 0.25);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  margin-bottom: 18px;
+  max-width: 560px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+.routes-beta-banner strong { color: var(--text-primary); display: block; margin-bottom: 2px; }
+.routes-beta-banner-icon { font-size: 16px; flex-shrink: 0; line-height: 1.4; }
+
 .routes-form-card {
   background: var(--bg-white);
   border: 1px solid var(--border);

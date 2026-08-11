@@ -12,9 +12,9 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <link rel="stylesheet" href="css/style.css?v=1786278970998" />
+  <link rel="stylesheet" href="css/style.css?v=1786455574364" />
   <link rel="stylesheet" href="css/plans.css?v=1786014624239" />
-  <link rel="stylesheet" href="css/routes.css?v=1786454393486" />
+  <link rel="stylesheet" href="css/routes.css?v=1786455574364" />
 </head>
 <body>
 <!-- ✨ SPLASH SCREEN ✨ -->
@@ -120,6 +120,7 @@
           <path d="M9 20l-5.447-2.724A1 1 0 0 1 3 16.382V5.618a1 1 0 0 1 1.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0 0 21 18.382V7.618a1 1 0 0 0-.553-.894L15 4m0 13V4m0 0L9 7"/>
         </svg>
         Itinéraires
+        <span class="nav-badge-beta">Bêta</span>
       </a>
       <a class="nav-item nav-item--admin" data-page="admin" id="nav-admin">
         <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -1030,6 +1031,14 @@
         </div>
       </div>
 
+      <div class="routes-beta-banner">
+        <span class="routes-beta-banner-icon">🧪</span>
+        <div>
+          <strong>Fonctionnalité en cours d'amélioration.</strong>
+          Les parcours générés sont une aide au calcul, pas une garantie — vérifiez toujours le tracé et le D+ avant de partir, et n'hésitez pas à ajuster les critères si le résultat ne correspond pas à vos attentes.
+        </div>
+      </div>
+
       <!-- FORMULAIRE (un seul écran, tous les critères) -->
       <div id="routes-form">
         <div id="routes-form-content" class="routes-form-card"></div>
@@ -1110,14 +1119,14 @@
 
   </div><!-- /app-content -->
 
-  <script src="js/app.js?v=1786284724496"></script>
-  <script src="js/campus.js?v=1786276592310"></script>
+  <script src="js/app.js?v=1786455574364"></script>
+  <script src="js/campus.js?v=1786455574364"></script>
   <script src="js/session-analysis.js?v=1786279341818"></script>
   <script src="js/stats.js?v=1786285200450"></script>
   <script src="js/records.js?v=1786024863614"></script>
   <script src="js/health.js?v=1786276592310"></script>
   <script src="js/plans.js?v=1785854785389"></script>
-  <script src="js/routes.js?v=1786454393486"></script>
+  <script src="js/routes.js?v=1786455574364"></script>
   <!-- ... MODAL LOGS ........................... -->
   <div id="logs-modal" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.55);backdrop-filter:blur(4px);" onclick="if(event.target===this)closeLogsModal()">
     <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:min(700px,95vw);max-height:80vh;background:#0f1117;border:1px solid #2a2a3a;border-radius:14px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 24px 64px rgba(0,0,0,0.6);">

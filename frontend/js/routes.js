@@ -30,6 +30,24 @@ function initRoutesPage() {
   renderRoutesForm();
 }
 
+// Appelé depuis une carte de séance (Entraînements) pour pré-remplir les
+// critères (durée, D+, terrain) avant de basculer sur la page Itinéraires -
+// l'utilisateur n'a plus qu'à compléter le point de départ.
+function goToRoutesWithPrefill(prefill = {}) {
+  if (prefill.durationMin) {
+    routesState.mode = 'duration';
+    routesState.durationMin = Math.round(prefill.durationMin);
+  }
+  if (prefill.ascentM) {
+    routesState.ascentM = Math.round(prefill.ascentM);
+  }
+  if (prefill.terrain) {
+    routesState.terrain = prefill.terrain;
+  }
+  navigateTo('routes');
+  showToast('Critères de la séance pré-remplis — complétez le point de départ', 'info');
+}
+
 function showRoutesView(view) {
   el('routes-form').style.display = view === 'form' ? '' : 'none';
   el('routes-results').style.display = view === 'results' ? '' : 'none';
@@ -225,6 +243,37 @@ function routesRestart() {
   renderRoutesForm();
 }
 
+// Verifie que la tuile OSM couvrant ce depart est presente localement ;
+// sinon propose le telechargement (taille reelle affichee) avant de
+// poursuivre. Retourne false si l'utilisateur refuse ou si ca echoue.
+async function routesEnsureTileAvailable(start, btn) {
+  const res = await fetch(`${API}/api/routes/tile-check?lat=${start.lat}&lon=${start.lon}`);
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Vérification des données cartographiques impossible');
+  if (data.present) return true;
+
+  const sizeLabel = data.sizeBytes ? `${Math.round(data.sizeBytes / 1024 / 1024)} Mo` : 'taille inconnue';
+  const ok = await showConfirmModal({
+    title: 'Données cartographiques manquantes',
+    message: `Cette zone (tuile ${data.tileName}) n'est pas encore téléchargée sur cette machine (~${sizeLabel}). Télécharger maintenant ? Cela peut prendre plusieurs minutes.`,
+    confirmLabel: 'Télécharger',
+    cancelLabel: 'Annuler',
+    icon: '🗺️',
+  });
+  if (!ok) return false;
+
+  btn.textContent = 'Téléchargement des données (peut prendre plusieurs minutes)…';
+  const dlRes = await fetch(`${API}/api/routes/tile-download`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ lat: start.lat, lon: start.lon }),
+  });
+  const dlData = await dlRes.json();
+  if (!dlRes.ok) throw new Error(dlData.error || 'Téléchargement des données cartographiques échoué');
+  showToast('Données cartographiques téléchargées', 'success');
+  return true;
+}
+
 async function routesGenerateClicked() {
   const btn = el('routes-generate-btn');
   btn.disabled = true;
@@ -232,6 +281,10 @@ async function routesGenerateClicked() {
   try {
     const start = await routesResolveStart();
     if (!start) return;
+
+    const tileReady = await routesEnsureTileAvailable(start, btn);
+    if (!tileReady) return;
+    btn.textContent = 'Génération…';
 
     const body = {
       start: { lat: start.lat, lon: start.lon },

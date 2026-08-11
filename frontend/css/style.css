@@ -283,6 +283,20 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
   border-radius:20px;
 }
 
+.nav-badge-beta{
+  margin-left:auto;
+  font-size:9px;
+  font-weight:700;
+  font-family:var(--font-body);
+  text-transform:uppercase;
+  letter-spacing:0.05em;
+  background:rgba(220,38,38,0.12);
+  color:var(--red);
+  border:1px solid rgba(220,38,38,0.3);
+  padding:1px 6px;
+  border-radius:20px;
+}
+
 .nav-section-label{
   font-size:10px;
   font-family:var(--font-body);
@@ -1914,6 +1928,22 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
 .btn-export-garmin--detail:hover {
   background: var(--accent-text);
 }
+.btn-generate-route {
+  background: var(--bg-white);
+  color: var(--green-text);
+  border: 1px solid var(--green);
+  border-radius: var(--radius-sm);
+  padding: 7px 14px;
+  font-size: 12px;
+  font-family: var(--font-body);
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: background var(--transition);
+}
+.btn-generate-route:hover { background: var(--green-bg); }
 .btn-close-session {
   background: transparent;
   color: var(--text-muted);
