@@ -148,9 +148,8 @@ function buildFractionneSession(idx, terrain, rotationOffset, light) {
   };
 }
 
-// ─── Génération de la semaine courante ──────────────────────────────────
-function generateFreeSessionsWeek(prefs, now = Date.now()) {
-  const weekNum = freeSessionsWeekNumber(prefs, now);
+// ─── Génération d'une semaine donnée ────────────────────────────────────
+function buildFreeSessionsWeekData(prefs, weekNum) {
   const light = isLightFreeWeek(weekNum);
   const terrain = prefs.terrain;
   const sessions = [];
@@ -162,16 +161,39 @@ function generateFreeSessionsWeek(prefs, now = Date.now()) {
   return { weekNum, light, sessions };
 }
 
+// Conservée pour compat (tests) : une seule semaine, calculée depuis `now`.
+function generateFreeSessionsWeek(prefs, now = Date.now()) {
+  return buildFreeSessionsWeekData(prefs, freeSessionsWeekNumber(prefs, now));
+}
+
 // ─── Rendu ───────────────────────────────────────────────────────────────
+// Ce n'est pas un plan avec une fin (séances "d'entretien" reconduites
+// indéfiniment) : on génère et affiche quand même un horizon d'au moins
+// 12 semaines (avec onglets, comme un vrai plan) - purement pour que
+// l'utilisateur puisse parcourir à l'avance et valider la rotation des
+// fractionnés / la cadence des semaines allégées, sans attendre semaine
+// après semaine. La fenêtre glisse avec le temps (12 semaines mini,
+// toujours au moins 8 semaines d'avance sur la semaine courante).
+const FREE_SESSIONS_MIN_WEEKS = 12;
+const FREE_SESSIONS_LOOKAHEAD = 8;
+
 function renderFreeSessionsWeek() {
   const prefs = getFreeSessionsPrefs();
   if (!prefs) return;
-  const { weekNum, light, sessions } = generateFreeSessionsWeek(prefs);
-  const monday = mondayOfWeek(Date.now());
-  const weekId = 'free_' + monday;
+  const currentWeekNum = freeSessionsWeekNumber(prefs);
+  const currentLight = isLightFreeWeek(currentWeekNum);
+  const totalWeeks = Math.max(FREE_SESSIONS_MIN_WEEKS, currentWeekNum + FREE_SESSIONS_LOOKAHEAD);
 
-  campusState.weeks = [{ _id: weekId, weekDate: monday, sessions, context: {} }];
-  campusState.selectedWeekIdx = 0;
+  const weeks = [];
+  for (let wn = 1; wn <= totalWeeks; wn++) {
+    const { light, sessions } = buildFreeSessionsWeekData(prefs, wn);
+    const weekDate = prefs.anchorMonday + (wn - 1) * 7 * 86400000;
+    weeks.push({ _id: 'free_' + weekDate, weekDate, sessions, context: {}, light });
+  }
+
+  campusState.weeks = weeks;
+  const currentIdx = Math.min(Math.max(currentWeekNum - 1, 0), weeks.length - 1);
+  campusState.selectedWeekIdx = currentIdx;
   campusState.openSessionIdx = -1;
   campusState.usingImportedPlan = true; // active "Marquer comme fait" (getLocalSessionStatus)
   campusState.campusConnected = false;
@@ -189,13 +211,28 @@ function renderFreeSessionsWeek() {
       <div class="plan-header-top">
         <div>
           <div class="plan-title">Séances libres — entretien</div>
-          <div class="plan-subtitle-desc">${NOT_A_PLAN_ADVICE}${light ? ' <strong>Semaine allégée cette semaine</strong> (récupération).' : ''}</div>
+          <div class="plan-subtitle-desc">${NOT_A_PLAN_ADVICE}${currentLight ? ' <strong>Semaine allégée cette semaine</strong> (récupération).' : ''}</div>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
           <span class="plan-type-badge">${terrainLabel}</span>
           <span class="plan-type-badge">${prefs.frequency}x/sem</span>
-          ${light ? '<span class="plan-type-badge" style="background:#fef3c7;color:#b45309">Semaine légère</span>' : ''}
+          ${currentLight ? '<span class="plan-type-badge" style="background:#fef3c7;color:#b45309">Semaine légère</span>' : ''}
         </div>
+      </div>
+    </div>`;
+
+  const weekTabs = `
+    <div class="week-tabs-wrap">
+      <div class="week-tabs" id="week-tabs">
+        ${weeks.map((w, i) => {
+          const isCurrent = i === currentIdx;
+          const isPast = i < currentIdx;
+          return `
+            <button class="week-tab${i === campusState.selectedWeekIdx ? ' week-tab--active' : ''}${isCurrent ? ' week-tab--current' : ''}${isPast ? ' week-tab--past' : ''}"
+              onclick="selectWeek(${i})" id="week-tab-${i}" title="${w.light ? 'Semaine allégée' : ''}">
+              <span class="week-tab-num">${isPast ? '✓ ' : ''}S${i + 1}${w.light ? ' \u{1FAB6}' : ''}</span>
+            </button>`;
+        }).join('')}
       </div>
     </div>`;
 
@@ -210,8 +247,8 @@ function renderFreeSessionsWeek() {
       </button>
     </div>`;
 
-  el('campus-plan-wrap').innerHTML = header + actions + `<div id="training-session-list"></div>`;
-  renderSessionList(0);
+  el('campus-plan-wrap').innerHTML = header + weekTabs + actions + `<div id="training-session-list"></div>`;
+  renderSessionList(campusState.selectedWeekIdx);
 }
 
 // ─── Configuration (démarrage / modification / arrêt) ──────────────────
