@@ -121,6 +121,13 @@ function renderHealthHistoryBody(bodyEl, chartId, cfg, result) {
     bodyEl.innerHTML = '<div class="health-empty">Aucune donnée sur cette période.</div>';
     return;
   }
+  // Une bande (min/max) a besoin d'au moins 2 points pour se remplir
+  // correctement (Chart.js) - avec un seul jour d'historique, mieux vaut
+  // l'annoncer clairement plutot que d'afficher un rendu degenere.
+  if (result.band && series.length < 2) {
+    bodyEl.innerHTML = '<div class="health-empty">Un seul jour d\'historique pour l\'instant — revenez demain pour voir la courbe se dessiner.</div>';
+    return;
+  }
   bodyEl.innerHTML = `<canvas id="${chartId}"></canvas>`;
   const canvas = document.getElementById(chartId);
   const existing = Chart.getChart(canvas);
