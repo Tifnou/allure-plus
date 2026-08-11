@@ -761,6 +761,24 @@
             <p class="campus-import-hint">Fichier partagé par votre coach ou exporté depuis Allure+</p>
           </div>
         </div>
+
+        <!-- Séparateur -->
+        <div class="campus-or-sep"><span>ou</span></div>
+
+        <!-- Option 3 : Séances libres (sans plan, entretien) -->
+        <div class="campus-option-block" id="free-sessions-setup">
+          <div class="campus-option-label">Séances libres (sans plan)</div>
+          <p class="campus-import-hint" style="margin-bottom:10px">Pas de plan en cours ? Recevez chaque semaine 3 ou 4 séances d'entretien (EF, fractionné, sortie longue) pour continuer à progresser.</p>
+          <div class="routes-toggle" id="free-sessions-terrain-toggle" style="margin-bottom:10px">
+            <button type="button" class="routes-toggle-btn active" data-terrain="route">🏃 Route</button>
+            <button type="button" class="routes-toggle-btn" data-terrain="trail">🏔️ Trail</button>
+          </div>
+          <div class="routes-toggle" id="free-sessions-freq-toggle" style="margin-bottom:10px">
+            <button type="button" class="routes-toggle-btn active" data-freq="3">3 séances/sem.</button>
+            <button type="button" class="routes-toggle-btn" data-freq="4">4 séances/sem.</button>
+          </div>
+          <button type="button" class="campus-login-btn" id="free-sessions-start-btn" style="width:100%" onclick="startFreeSessions()">Générer mes séances</button>
+        </div>
       </div>
 
       <!-- "?"? Plan chargé "?"? -->
@@ -1132,9 +1150,10 @@
 
   </div><!-- /app-content -->
 
-  <script src="js/app.js?v=1786462208253"></script>
+  <script src="js/app.js?v=1786463144911"></script>
   <script src="js/gear.js?v=1786459105633"></script>
-  <script src="js/campus.js?v=1786461719840"></script>
+  <script src="js/campus.js?v=1786463144911"></script>
+  <script src="js/free_sessions.js?v=1786463232445"></script>
   <script src="js/session-analysis.js?v=1786279341818"></script>
   <script src="js/stats.js?v=1786285200450"></script>
   <script src="js/records.js?v=1786024863614"></script>

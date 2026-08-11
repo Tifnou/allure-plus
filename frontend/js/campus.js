@@ -662,6 +662,13 @@ function showTrainingLoading() {
 // Montre la carte de connexion mais en mode "import uniquement"
 // (masque le formulaire Campus Coach, garde uniquement le bouton d'import)
 function showTrainingEmpty() {
+  // Séances libres configurées (cf free_sessions.js) : proposer la semaine
+  // courante plutôt que le simple écran "aucun plan" - reste prioritaire
+  // sur l'écran vide tant qu'aucun vrai plan (Campus/importé) n'est actif.
+  if (typeof getFreeSessionsPrefs === 'function' && getFreeSessionsPrefs()) {
+    renderFreeSessionsWeek();
+    return;
+  }
   const el = id => document.getElementById(id);
   // Afficher la carte principale
   if (el('campus-connect-card')) el('campus-connect-card').style.display = '';
