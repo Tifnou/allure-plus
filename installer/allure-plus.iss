@@ -1,5 +1,5 @@
 #define MyAppName "Allure+"
-#define MyAppVersion "1.24.1"
+#define MyAppVersion "1.24.2"
 #define MyAppPublisher "Allure+"
 
 [Setup]
@@ -59,6 +59,28 @@ Filename: "{app}\install.bat"; WorkingDir: "{app}"; Flags: waituntilterminated; 
 Filename: "{app}\start.bat"; WorkingDir: "{app}"; Flags: nowait postinstall skipifsilent; Description: "Lancer Allure+"
 
 [Code]
+// Ferme une instance Allure+ deja en cours (fenetre navigateur --app +
+// serveur node) tout au debut du setup, avant meme la premiere page du
+// wizard - sinon, lors d'une mise a jour lancee depuis l'app elle-meme
+// (badge "Mise a jour disponible"), l'ancienne fenetre reste ouverte et
+// non rafraichie pendant l'installation, puis le postinstall (case
+// "Lancer Allure+") en ouvre une SECONDE : deux fenetres Allure+ en meme
+// temps au redemarrage (constat utilisateur). Le filtre WINDOWTITLE cible
+// precisement la fenetre app-mode du navigateur (son titre de fenetre
+// top-level reprend le <title> HTML en mode --app, contrairement au titre
+// "Onglet - Google Chrome" habituel en navigation classique) - le reste du
+// navigateur de l'utilisateur n'est jamais touche.
+function InitializeSetup(): Boolean;
+var
+  ResultCode: Integer;
+begin
+  Result := True;
+  Exec('taskkill.exe', '/F /FI "WINDOWTITLE eq Allure+ Dashboard*"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec('taskkill.exe', '/F /FI "WINDOWTITLE eq Allure+ - Configuration*"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec('taskkill.exe', '/F /IM node.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Sleep(1500);
+end;
+
 var
   // ShouldSeedImages est appelee une fois PAR FICHIER par Inno Setup (le
   // Check: d'une entree [Files] a wildcard est reevalue a chaque fichier,

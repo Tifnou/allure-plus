@@ -428,7 +428,18 @@ function showUpdateModal() {
   document.body.appendChild(bd);
   const close = () => bd.remove();
   bd.querySelector('#upd-later').onclick = close;
-  bd.querySelector('#upd-download').onclick = () => { window.open(_updateInfo.downloadUrl, '_blank'); close(); };
+  bd.querySelector('#upd-download').onclick = () => {
+    // Un <a download> declenche le telechargement sans ouvrir un nouvel
+    // onglet vide (contrairement a window.open, qui laissait une page
+    // blanche derriere le telechargement — constat utilisateur).
+    const a = document.createElement('a');
+    a.href = _updateInfo.downloadUrl;
+    a.download = '';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    close();
+  };
   attachBackdropClose(bd, close);
 }
 
