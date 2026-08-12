@@ -888,6 +888,26 @@ function renderTrainingPlan(goal, weeks) {
   const totalWeeks = goal?.durationInWeeks || weeks.length;
   const elapsed = weeks.filter(w => startOfDay(w.weekDate) < startOfDay(now)).length;
   const pct = totalWeeks > 0 ? Math.round((elapsed / totalWeeks) * 100) : 0;
+  // Position continue (au jour pres, pas juste par semaine entiere) du petit
+  // coureur + graduations par semaine - meme traitement que la barre
+  // "Avancement du plan" d'Objectifs (updateGoalsPage), demande explicitement
+  // pour harmoniser les deux pages.
+  const W7 = 7 * 86400000;
+  const planStartMs = weeks[0]?.weekDate ?? now;
+  const totalDurationMs = totalWeeks * W7;
+  const elapsedMs = Math.min(Math.max(now - planStartMs, 0), totalDurationMs);
+  const pctExact = totalDurationMs > 0 ? (elapsedMs / totalDurationMs) * 100 : 0;
+  const planProgressTicks = totalWeeks > 1
+    ? Array.from({ length: totalWeeks - 1 }, (_, i) => `<span class="goals-progress-tick" style="left:${(i + 1) / totalWeeks * 100}%"></span>`).join('')
+    : '';
+  const planProgressWeekLabels = totalWeeks > 0
+    ? Array.from({ length: totalWeeks }, (_, i) => {
+        const w = i + 1;
+        const centerPct = (i + 0.5) / totalWeeks * 100;
+        const done = w <= elapsed;
+        return `<span class="goals-progress-weeklabel${done ? ' goals-progress-weeklabel--done' : ''}" style="left:${centerPct}%">${w}</span>`;
+      }).join('')
+    : '';
   const compDate = goal?.competitionDate;
   const daysLeft = compDate ? Math.max(0, Math.ceil((new Date(compDate).getTime() - now) / 86400000)) : null;
 
@@ -935,8 +955,11 @@ function renderTrainingPlan(goal, weeks) {
         <span class="plan-progress-label">Semaine ${Math.max(1,elapsed)} / ${totalWeeks}</span>
         ${compDate ? `<span class="plan-comp-date">${fmtDate(compDate)}</span>` : ''}
       </div>
-      <div class="plan-progress-track">
-        <div class="plan-progress-fill" style="width:${pct}%"></div>
+      <div class="goals-progress-weeklabels">${planProgressWeekLabels}</div>
+      <div class="goals-progress-track" style="margin-top:2px">
+        <div class="goals-progress-fill" style="width:${pctExact}%"></div>
+        <div class="goals-progress-ticks">${planProgressTicks}</div>
+        <span class="goals-progress-marker" style="left:${pctExact}%">${typeof personEmoji === 'function' ? personEmoji('running') : ''}</span>
       </div>
     </div>`;
 

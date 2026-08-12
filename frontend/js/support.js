@@ -216,6 +216,11 @@ async function deleteSupportTicket(number, onDeleted) {
     icon: '🗑️',
   });
   if (!ok) return;
+  // Le relais Cloudflare -> GitHub prend 1-3s : sans retour visuel immediat,
+  // l'ecran semblait fige pendant ce delai (constat utilisateur, pris pour
+  // un bug de rafraichissement alors que la suppression aboutissait bien).
+  const btn = document.getElementById('support-delete-ticket') || document.getElementById('support-admin-delete-ticket');
+  if (btn) { btn.disabled = true; btn.textContent = 'Suppression…'; }
   try {
     const r = await fetch(`${API}/api/support/tickets/${number}`, { method: 'DELETE' });
     if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Erreur');
@@ -223,6 +228,7 @@ async function deleteSupportTicket(number, onDeleted) {
     onDeleted();
   } catch (err) {
     showToast('Erreur : ' + err.message, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = '🗑️ Supprimer ce ticket'; }
   }
 }
 
@@ -467,3 +473,25 @@ async function openSupportAdminTicket(number) {
     detail.innerHTML = '<div class="support-empty">Impossible de charger ce ticket.</div>';
   }
 }
+
+// ─── Rafraichissement periodique ─────────────────────────────────
+// checkStatus() (app.js) ne declenche checkSupportNotifications() qu'une
+// seule fois, au chargement de la page - sans boucle, une reponse admin ou
+// un nouveau ticket ne se voyait donc jamais tant que l'utilisateur ne
+// rechargeait pas la page a la main (constat utilisateur). Cette boucle
+// rafraichit aussi, en plus des badges, la vue actuellement affichee
+// (liste admin, fil de discussion ouvert) pour que l'app reste a jour sans
+// action de l'utilisateur.
+const SUPPORT_POLL_INTERVAL_MS = 30000;
+
+async function supportPollTick() {
+  await checkSupportNotifications();
+  if (!isSupportAdmin()) return;
+  await checkSupportAdminNotifications();
+  if (document.getElementById('page-support-admin')?.classList.contains('active')) {
+    renderSupportAdminList();
+    if (_supportAdminOpenTicket != null) openSupportAdminTicket(_supportAdminOpenTicket);
+  }
+}
+
+setInterval(supportPollTick, SUPPORT_POLL_INTERVAL_MS);
