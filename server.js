@@ -538,6 +538,51 @@ app.get('/api/status', (req, res) => {
 });
 
 // ─────────────────────────────────────────────
+// Verification de mise a jour (GitHub Releases)
+// ─────────────────────────────────────────────
+const UPDATE_REPO = 'Tifnou/allure-plus';
+let _updateCheckCache = null; // { data, ts }
+const UPDATE_CHECK_TTL_MS = 60 * 60 * 1000; // 1h — evite de solliciter l'API GitHub (limite 60 req/h sans auth) a chaque ouverture de l'app
+
+function isNewerVersion(latest, current) {
+  const a = String(latest).split('.').map(Number);
+  const b = String(current).split('.').map(Number);
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    const x = a[i] || 0, y = b[i] || 0;
+    if (x > y) return true;
+    if (x < y) return false;
+  }
+  return false;
+}
+
+app.get('/api/check-update', async (req, res) => {
+  try {
+    if (_updateCheckCache && (Date.now() - _updateCheckCache.ts) < UPDATE_CHECK_TTL_MS) {
+      return res.json(_updateCheckCache.data);
+    }
+    const r = await fetch(`https://api.github.com/repos/${UPDATE_REPO}/releases/latest`, {
+      headers: { 'Accept': 'application/vnd.github+json', 'User-Agent': 'AllurePlus-App' }
+    });
+    if (!r.ok) return res.json({ updateAvailable: false });
+    const rel = await r.json();
+    const latestVersion = (rel.tag_name || '').replace(/^v/, '');
+    const asset = (rel.assets || []).find(a => a.name.endsWith('.exe'));
+    const data = {
+      updateAvailable: !!latestVersion && isNewerVersion(latestVersion, APP_VERSION),
+      currentVersion: APP_VERSION,
+      latestVersion,
+      releaseNotes: rel.body || '',
+      downloadUrl: asset ? asset.browser_download_url : rel.html_url,
+      publishedAt: rel.published_at,
+    };
+    _updateCheckCache = { data, ts: Date.now() };
+    res.json(data);
+  } catch (e) {
+    res.json({ updateAvailable: false });
+  }
+});
+
+// ─────────────────────────────────────────────
 // Génération d'itinéraires (BRouter)
 // ─────────────────────────────────────────────
 

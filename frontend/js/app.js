@@ -346,6 +346,8 @@ async function checkStatus() {
     const versionEl = el('app-version');
     if (versionEl && data.version) versionEl.textContent = 'v' + data.version;
 
+    checkForUpdate();
+
   } catch {
     // Serveur hors ligne → voyant rouge + overlay
     setLed('led-ko', 'Serveur hors ligne');
@@ -360,6 +362,71 @@ async function handleLogout() {
     await fetch(`${API}/api/logout`, { method: 'POST' });
   } catch(e) {}
   window.location.href = '/login';
+}
+
+// ═══════════════════════════════════════════════
+// MISE À JOUR (GitHub Releases)
+// ═══════════════════════════════════════════════
+
+let _updateInfo = null;
+
+async function checkForUpdate() {
+  try {
+    const res = await fetch(`${API}/api/check-update`);
+    const data = await res.json();
+    _updateInfo = data;
+    const badge = el('app-update-badge');
+    if (badge) badge.style.display = data.updateAvailable ? 'inline-flex' : 'none';
+  } catch (e) { /* silencieux — ne doit jamais bloquer le chargement de l'app */ }
+}
+
+// Conversion minimale du markdown des release notes GitHub (##, listes, paragraphes)
+// en HTML — echape le texte pour eviter toute injection depuis le contenu distant.
+function renderChangelogHtml(md) {
+  if (!md) return '';
+  const escapeHtml = (str) => { const d = document.createElement('div'); d.textContent = str; return d.innerHTML; };
+  // **gras** -> <strong> — applique sur le texte deja echappe (** n'a aucun sens HTML, sans risque)
+  const inline = (str) => escapeHtml(str).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  let html = '';
+  let inList = false;
+  md.split('\n').forEach(raw => {
+    const line = raw.trim();
+    if (!line) { if (inList) { html += '</ul>'; inList = false; } return; }
+    if (line.startsWith('## ')) {
+      if (inList) { html += '</ul>'; inList = false; }
+      html += `<div class="update-modal-section-title">${inline(line.slice(3))}</div>`;
+    } else if (line.startsWith('- ') || line.startsWith('* ')) {
+      if (!inList) { html += '<ul class="update-modal-list">'; inList = true; }
+      html += `<li>${inline(line.slice(2))}</li>`;
+    } else {
+      if (inList) { html += '</ul>'; inList = false; }
+      html += `<p>${inline(line)}</p>`;
+    }
+  });
+  if (inList) html += '</ul>';
+  return html;
+}
+
+function showUpdateModal() {
+  if (!_updateInfo || !_updateInfo.updateAvailable) return;
+  const bd = document.createElement('div');
+  bd.className = 'confirm-modal-backdrop';
+  bd.innerHTML = `
+    <div class="confirm-modal update-modal">
+      <div class="confirm-modal-icon">🚀</div>
+      <div class="confirm-modal-title">Nouvelle version disponible</div>
+      <div class="update-modal-versions">v${_updateInfo.currentVersion} → v${_updateInfo.latestVersion}</div>
+      <div class="update-modal-changelog">${renderChangelogHtml(_updateInfo.releaseNotes) || '<p>Voir la page de la release pour le détail.</p>'}</div>
+      <div class="confirm-modal-actions">
+        <button class="confirm-modal-btn confirm-modal-btn--cancel" id="upd-later">Plus tard</button>
+        <button class="confirm-modal-btn confirm-modal-btn--confirm" id="upd-download">Télécharger</button>
+      </div>
+    </div>`;
+  document.body.appendChild(bd);
+  const close = () => bd.remove();
+  bd.querySelector('#upd-later').onclick = close;
+  bd.querySelector('#upd-download').onclick = () => { window.open(_updateInfo.downloadUrl, '_blank'); close(); };
+  attachBackdropClose(bd, close);
 }
 
 // ═══════════════════════════════════════════════
