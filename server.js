@@ -555,29 +555,56 @@ function isNewerVersion(latest, current) {
   return false;
 }
 
+// Recupere TOUTES les releases (pas juste /releases/latest) pour pouvoir
+// cumuler les notes de version quand un utilisateur a saute plusieurs
+// versions (ex: bloque sur 1.23.0 pendant que 1.24.0 puis 1.24.1 sortent) -
+// sinon la modale ne montrerait que le changelog de la toute derniere
+// version, en oubliant ce qui a change entre-temps.
 app.get('/api/check-update', async (req, res) => {
   try {
-    if (_updateCheckCache && (Date.now() - _updateCheckCache.ts) < UPDATE_CHECK_TTL_MS) {
-      return res.json(_updateCheckCache.data);
+    let releases = (_updateCheckCache && (Date.now() - _updateCheckCache.ts) < UPDATE_CHECK_TTL_MS)
+      ? _updateCheckCache.releases : null;
+    if (!releases) {
+      const r = await fetch(`https://api.github.com/repos/${UPDATE_REPO}/releases?per_page=20`, {
+        headers: { 'Accept': 'application/vnd.github+json', 'User-Agent': 'AllurePlus-App' },
+        cache: 'no-store',
+      });
+      if (!r.ok) return res.json({ updateAvailable: false });
+      releases = await r.json();
+      _updateCheckCache = { releases, ts: Date.now() };
     }
-    const r = await fetch(`https://api.github.com/repos/${UPDATE_REPO}/releases/latest`, {
-      headers: { 'Accept': 'application/vnd.github+json', 'User-Agent': 'AllurePlus-App' },
-      cache: 'no-store',
-    });
-    if (!r.ok) return res.json({ updateAvailable: false });
-    const rel = await r.json();
-    const latestVersion = (rel.tag_name || '').replace(/^v/, '');
-    const asset = (rel.assets || []).find(a => a.name.endsWith('.exe'));
-    const data = {
-      updateAvailable: !!latestVersion && isNewerVersion(latestVersion, APP_VERSION),
+
+    const parsed = releases
+      .filter(rel => !rel.draft && !rel.prerelease && rel.tag_name)
+      .map(rel => ({
+        version: rel.tag_name.replace(/^v/, ''),
+        body: rel.body || '',
+        assets: rel.assets || [],
+        html_url: rel.html_url,
+        published_at: rel.published_at,
+      }))
+      .sort((a, b) => isNewerVersion(a.version, b.version) ? 1 : -1); // ascending : plus ancien -> plus recent
+
+    const pending = parsed.filter(rel => isNewerVersion(rel.version, APP_VERSION));
+    if (pending.length === 0) {
+      return res.json({ updateAvailable: false, currentVersion: APP_VERSION, latestVersion: APP_VERSION });
+    }
+
+    const latest = pending[pending.length - 1];
+    const asset = latest.assets.find(a => a.name.endsWith('.exe'));
+    // Une section "## Version X.Y.Z" par release manquee, dans l'ordre
+    // chronologique, chacune gardant ses propres sous-titres ("## Nouveautes"
+    // etc.) tels quels dans son corps.
+    const releaseNotes = pending.map(rel => `## Version ${rel.version}\n\n${rel.body}`).join('\n\n');
+
+    res.json({
+      updateAvailable: true,
       currentVersion: APP_VERSION,
-      latestVersion,
-      releaseNotes: rel.body || '',
-      downloadUrl: asset ? asset.browser_download_url : rel.html_url,
-      publishedAt: rel.published_at,
-    };
-    _updateCheckCache = { data, ts: Date.now() };
-    res.json(data);
+      latestVersion: latest.version,
+      releaseNotes,
+      downloadUrl: asset ? asset.browser_download_url : latest.html_url,
+      publishedAt: latest.published_at,
+    });
   } catch (e) {
     res.json({ updateAvailable: false });
   }

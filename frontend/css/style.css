@@ -349,12 +349,14 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
   color:var(--accent-text); background:var(--accent-light);
   border:1px solid var(--accent); border-radius:20px; padding:3px 9px;
   cursor:pointer; transition:background var(--transition), color var(--transition);
-  animation:update-badge-pulse 1.8s ease-in-out infinite;
+  animation:update-badge-pulse 1.6s ease-in-out infinite;
 }
 .app-update-badge:hover{background:var(--accent); color:#fff; animation-play-state:paused;}
+/* Halo flou (pas juste un anneau net) autour de TOUTE la vignette, assez
+   marque pour attirer l'oeil dans la sidebar sans etre agressif. */
 @keyframes update-badge-pulse{
-  0%, 100% { box-shadow:0 0 0 0 color-mix(in srgb, var(--accent) 45%, transparent); transform:scale(1); }
-  50%      { box-shadow:0 0 0 6px color-mix(in srgb, var(--accent) 0%, transparent); transform:scale(1.04); }
+  0%, 100% { box-shadow:0 0 0 0 color-mix(in srgb, var(--accent) 55%, transparent); transform:scale(1); }
+  50%      { box-shadow:0 0 12px 5px color-mix(in srgb, var(--accent) 55%, transparent); transform:scale(1.06); }
 }
 .sidebar-footer-divider{height:1px;background:var(--border-light);margin:4px 0;}
 
@@ -3944,9 +3946,11 @@ body.plans-active .app-content { background: transparent !important; }
 .support-modal-body{ max-height:60vh; overflow-y:auto; }
 
 .support-form{ display:flex; flex-direction:column; gap:5px; }
+.support-form-row{ display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+.support-form-row .form-input{ max-width:none; }
 .support-form-label{ font-size:11.5px; font-weight:700; color:var(--text-muted); margin-top:8px; }
 .support-form-label:first-child{ margin-top:0; }
-.support-form-textarea{ min-height:100px; resize:vertical; font-family:var(--font-body); }
+.support-form-textarea{ min-height:140px; max-width:none; width:100%; resize:vertical; font-family:var(--font-body); box-sizing:border-box; }
 .support-form .btn-save-profile{ margin-top:14px; }
 
 .support-empty{ text-align:center; color:var(--text-muted); font-size:13px; padding:24px 10px; }

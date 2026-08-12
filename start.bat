@@ -1,4 +1,5 @@
 @echo off
+setlocal enabledelayedexpansion
 title Allure+ - Demarrage
 cd /d "%~dp0"
 set "PATH=C:\Program Files\nodejs;%APPDATA%\npm;%LOCALAPPDATA%\Programs\nodejs;%PATH%"
@@ -20,8 +21,27 @@ if not exist "node_modules\" (
     if errorlevel 1 (pause & exit /b 1)
 )
 
+REM Un "timeout /t 2" fixe ne garantissait pas que Windows ait vraiment
+REM libere le port avant de relancer un nouveau node.exe (incident reel
+REM 12/08 : un node.exe pas encore libere restait sur le port pendant
+REM qu'un second etait lance en parallele, echouait a se lier, et plantait
+REM silencieusement, laissant l'utilisateur sans le savoir sur l'ancienne
+REM instance perimee). On attend maintenant explicitement que "tasklist" ne
+REM voie plus aucun node.exe, avec un plafond de 10s pour ne jamais bloquer
+REM indefiniment si un processus refuse de mourir (droits, verrou...) - le
+REM serveur lui-meme retente aussi plusieurs fois au demarrage en filet de
+REM securite (cf server.js, EADDRINUSE).
 taskkill /F /IM node.exe >nul 2>&1
-timeout /t 2 /nobreak >nul
+set "KILLWAIT=0"
+:waitkill
+tasklist /FI "IMAGENAME eq node.exe" 2>nul | find /I "node.exe" >nul
+if not errorlevel 1 (
+    set /a KILLWAIT+=1
+    if !KILLWAIT! GEQ 10 goto :killdone
+    timeout /t 1 /nobreak >nul
+    goto :waitkill
+)
+:killdone
 if exist "server.log" del /f /q "server.log" >nul 2>&1
 
 powershell -ExecutionPolicy Bypass -WindowStyle Hidden -File "%~dp0start_server.ps1"

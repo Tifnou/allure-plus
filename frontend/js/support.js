@@ -70,13 +70,6 @@ function navItemLabel(navItem) {
   return clone.textContent.trim();
 }
 
-function currentPageLabel() {
-  const active = document.querySelector('.page.active');
-  if (!active) return '';
-  const navItem = document.querySelector(`.nav-item[data-page="${active.id.replace('page-', '')}"]`);
-  return navItem ? navItemLabel(navItem) : '';
-}
-
 // Pages reservees au compte admin (Admin, Centre de support lui-meme) —
 // jamais proposees dans "Page concernee", meme visibles pour ce compte-la :
 // un utilisateur normal ne les a de toute facon pas dans sa sidebar.
@@ -132,10 +125,16 @@ function renderSupportNewForm() {
   if (!body) return;
   body.innerHTML = `
     <form id="support-new-form" class="support-form">
-      <label class="support-form-label">Catégorie</label>
-      <select class="form-input" id="support-field-category">${SUPPORT_CATEGORIES.map(c => `<option value="${c.key}">${c.icon} ${c.label}</option>`).join('')}</select>
-      <label class="support-form-label">Page concernée</label>
-      <select class="form-input" id="support-field-page">${pageOptionsHtml(currentPageLabel())}</select>
+      <div class="support-form-row">
+        <div>
+          <label class="support-form-label">Catégorie</label>
+          <select class="form-input" id="support-field-category">${SUPPORT_CATEGORIES.map(c => `<option value="${c.key}">${c.icon} ${c.label}</option>`).join('')}</select>
+        </div>
+        <div>
+          <label class="support-form-label">Page concernée</label>
+          <select class="form-input" id="support-field-page"><option value="" selected>— Aucune en particulier —</option>${pageOptionsHtml('')}</select>
+        </div>
+      </div>
       <label class="support-form-label">Votre message</label>
       <textarea class="form-input support-form-textarea" id="support-field-message" placeholder="Décrivez le bug, l'idée ou la question…" required></textarea>
       <button class="btn-save-profile" type="submit">Envoyer le ticket</button>
