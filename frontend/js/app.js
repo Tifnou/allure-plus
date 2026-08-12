@@ -227,6 +227,7 @@ function navigateTo(pageId) {
   if (pageId === 'stats')      renderStatsPage();
   if (pageId === 'profile')    renderProfile();
   if (pageId === 'admin')      { loadAdminInfo(); loadAdminLogs(); }
+  if (pageId === 'support-admin' && typeof loadSupportAdminPage === 'function') loadSupportAdminPage();
   if (pageId === 'goals')      { if (typeof loadGoalsPage === 'function') loadGoalsPage(); }
   if (pageId === 'routes')     { if (typeof initRoutesPage === 'function') initRoutesPage(); }
   // Fond transparent uniquement sur la page Plans
@@ -329,6 +330,8 @@ async function checkStatus() {
     const userEmail = el('sidebar-user-email');
     if (userBox)  { userBox.style.display = 'flex'; }
     if (userEmail && data.user) { userEmail.textContent = data.user; }
+    if (data.user) { _currentUserEmail = data.user; }
+    if (typeof checkSupportNotifications === 'function') checkSupportNotifications();
 
     // Afficher menu Admin si compte administrateur
     showAdminNav(data.user);
@@ -3298,6 +3301,11 @@ function showAdminNav(userEmail) {
   const btnExport = document.getElementById('btn-export-plan-xlsx');
   if (btnExport && userEmail && userEmail.toLowerCase() === ADMIN_EMAIL.toLowerCase()) {
     btnExport.style.display = 'inline-flex';
+  }
+  const navSupportAdmin = document.getElementById('nav-support-admin');
+  if (navSupportAdmin && userEmail && userEmail.toLowerCase() === ADMIN_EMAIL.toLowerCase()) {
+    navSupportAdmin.style.display = 'flex';
+    if (typeof checkSupportAdminNotifications === 'function') checkSupportAdminNotifications();
   }
 }
 

@@ -12,7 +12,7 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <link rel="stylesheet" href="css/style.css?v=1786540998372" />
+  <link rel="stylesheet" href="css/style.css?v=1786543343476" />
   <link rel="stylesheet" href="css/plans.css?v=1786014624239" />
   <link rel="stylesheet" href="css/routes.css?v=1786529362401" />
 </head>
@@ -128,6 +128,13 @@
           <path d="M15.54 8.46a5 5 0 0 1 0 7.07M8.46 8.46a5 5 0 0 0 0 7.07"/>
         </svg>
         Admin
+      </a>
+      <a class="nav-item nav-item--admin" data-page="support-admin" id="nav-support-admin">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M9 18h6"/><path d="M10 22h4"/><path d="M12 2a7 7 0 0 0-4 12.7V17h8v-2.3A7 7 0 0 0 12 2z"/>
+        </svg>
+        Centre de support
+        <span class="nav-badge-count" id="support-admin-badge" style="display:none">0</span>
       </a>
     </nav>
 
@@ -1153,9 +1160,43 @@
       </div>
     </div>
 
+    <!-- 📌 PAGE : CENTRE DE SUPPORT (admin) 📌 -->
+    <div class="page" id="page-support-admin">
+      <div class="page-header">
+        <div>
+          <h1 class="page-title">💡 Centre de support</h1>
+          <div class="page-subtitle">Idées, bugs et questions remontés par les utilisateurs</div>
+        </div>
+      </div>
+      <div class="support-admin-filters" id="support-admin-filters">
+        <button class="stats-pill stats-pill--active" data-status="all" type="button">Tous</button>
+        <button class="stats-pill" data-status="nouveau" type="button">Nouveau</button>
+        <button class="stats-pill" data-status="en_cours" type="button">En cours</button>
+        <button class="stats-pill" data-status="resolu" type="button">Résolu</button>
+      </div>
+      <div class="support-admin-layout">
+        <div class="card">
+          <div class="card-body support-admin-list" id="support-admin-list">
+            <div class="table-loading">Chargement…</div>
+          </div>
+        </div>
+        <div class="card support-admin-detail">
+          <div class="card-body" id="support-admin-detail">
+            <div class="support-empty">Sélectionnez un ticket dans la liste.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
   </div><!-- /app-content -->
 
-  <script src="js/app.js?v=1786540501829"></script>
+  <!-- Icône discrète de remontée d'info (boîte à idées) -->
+  <button class="support-fab" id="support-fab" type="button" title="Remonter une idée, un bug, une question" onclick="openSupportModal()">
+    💡
+    <span class="support-fab-dot" id="support-fab-dot" style="display:none"></span>
+  </button>
+
+  <script src="js/app.js?v=1786543343476"></script>
   <script src="js/gear.js?v=1786459105633"></script>
   <script src="js/campus.js?v=1786463144911"></script>
   <script src="js/free_sessions.js?v=1786524404763"></script>
@@ -1165,6 +1206,7 @@
   <script src="js/health.js?v=1786539238242"></script>
   <script src="js/plans.js?v=1785854785389"></script>
   <script src="js/routes.js?v=1786537023487"></script>
+  <script src="js/support.js?v=1786543429296"></script>
   <!-- ... MODAL LOGS ........................... -->
   <div id="logs-modal" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.55);backdrop-filter:blur(4px);" onclick="if(event.target===this)closeLogsModal()">
     <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:min(700px,95vw);max-height:80vh;background:#0f1117;border:1px solid #2a2a3a;border-radius:14px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 24px 64px rgba(0,0,0,0.6);">

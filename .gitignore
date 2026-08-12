@@ -12,3 +12,5 @@ uploads/
 Images/
 data/
 brouter/
+support-relay/.wrangler/
+support-relay/node_modules/

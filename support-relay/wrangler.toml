@@ -1,0 +1,11 @@
+name = "allure-plus-support-relay"
+main = "src/index.js"
+compatibility_date = "2025-01-01"
+
+[vars]
+GITHUB_REPO = "Tifnou/allure-plus"
+
+# Secrets (definis via `wrangler secret put <NOM>`, jamais stockes ici) :
+#   GITHUB_TOKEN — PAT fine-grained, acces "Issues: read and write" sur ce seul repo
+#   ADMIN_KEY    — cle privee connue uniquement du serveur local de Stephane (actions maintainer)
+#   CLIENT_KEY   — cle partagee, embarquee dans chaque installation Allure+ (identifie l'app, pas une vraie protection)

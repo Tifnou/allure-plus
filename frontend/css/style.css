@@ -3901,6 +3901,104 @@ body.plans-active .app-content { background: transparent !important; }
 .update-modal-list{margin:0 0 6px 18px; padding:0;}
 .update-modal-list li{margin-bottom:4px;}
 
+/* ─── Badge numérique (nav-item), ex: Centre de support ─── */
+.nav-badge-count{
+  display:inline-flex;align-items:center;justify-content:center;
+  min-width:16px;height:16px;padding:0 4px;border-radius:20px;
+  background:#ef4444;color:#fff;
+  font-size:9px;font-weight:700;font-family:var(--font-body);
+  margin-left:auto;flex-shrink:0;
+  animation:badgePulse 2s ease-in-out infinite;
+}
+
+/* ─── Icône flottante "boîte à idées" (Centre de support) ─── */
+.support-fab{
+  position:fixed; right:22px; bottom:22px; z-index:900;
+  width:44px; height:44px; border-radius:50%;
+  background:var(--bg-white); border:1px solid var(--border);
+  box-shadow:0 4px 16px rgba(0,0,0,0.15);
+  font-size:19px; display:flex; align-items:center; justify-content:center;
+  cursor:pointer; transition:transform var(--transition), box-shadow var(--transition);
+}
+.support-fab:hover{ transform:translateY(-2px) scale(1.05); box-shadow:0 8px 22px rgba(0,0,0,0.2); }
+.support-fab-dot{
+  position:absolute; top:2px; right:2px; width:11px; height:11px; border-radius:50%;
+  background:#ef4444; border:2px solid var(--bg-white);
+  animation:update-badge-pulse 1.8s ease-in-out infinite;
+}
+
+/* ─── Modale du centre de support (icône flottante) ─── */
+.support-modal{ width:min(560px, 92vw); padding:24px 22px 22px; text-align:left; }
+.support-modal-header{ display:flex; align-items:center; justify-content:space-between; margin-bottom:14px; }
+.support-modal-title{ font-size:1.05rem; font-weight:800; color:var(--text-primary); }
+.support-modal-close{ background:none; border:none; font-size:15px; color:var(--text-muted); cursor:pointer; padding:4px; line-height:1; }
+.support-modal-close:hover{ color:var(--text-primary); }
+.support-modal-tabs{ display:flex; gap:6px; margin-bottom:16px; border-bottom:1px solid var(--border-light); }
+.support-tab{
+  background:none; border:none; border-bottom:2px solid transparent;
+  padding:8px 10px; font-family:var(--font-body); font-size:12.5px; font-weight:600;
+  color:var(--text-muted); cursor:pointer; transition:color var(--transition), border-color var(--transition);
+}
+.support-tab:hover{ color:var(--text-primary); }
+.support-tab.active{ color:var(--accent-text); border-bottom-color:var(--accent); }
+.support-modal-body{ max-height:60vh; overflow-y:auto; }
+
+.support-form{ display:flex; flex-direction:column; gap:5px; }
+.support-form-label{ font-size:11.5px; font-weight:700; color:var(--text-muted); margin-top:8px; }
+.support-form-label:first-child{ margin-top:0; }
+.support-form-textarea{ min-height:100px; resize:vertical; font-family:var(--font-body); }
+.support-form .btn-save-profile{ margin-top:14px; }
+
+.support-empty{ text-align:center; color:var(--text-muted); font-size:13px; padding:24px 10px; }
+
+.support-ticket-list{ display:flex; flex-direction:column; gap:6px; }
+.support-ticket-item{
+  display:flex; align-items:center; gap:10px; width:100%;
+  background:var(--bg-hover); border:1px solid transparent; border-radius:10px;
+  padding:10px 12px; cursor:pointer; text-align:left; transition:all var(--transition);
+  font-family:var(--font-body);
+}
+.support-ticket-item:hover{ border-color:var(--accent); }
+.support-ticket-item--unseen{ border-color:var(--accent); background:var(--accent-light); }
+.support-ticket-item--active{ border-color:var(--accent); box-shadow:0 0 0 1px var(--accent); }
+.support-ticket-cat{ font-size:17px; flex-shrink:0; }
+.support-ticket-info{ display:flex; flex-direction:column; gap:2px; min-width:0; flex:1; }
+.support-ticket-title{ font-size:13px; font-weight:600; color:var(--text-primary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.support-ticket-meta{ font-size:11px; color:var(--text-muted); }
+
+.support-status{
+  flex-shrink:0; font-size:10px; font-weight:700; padding:3px 9px; border-radius:20px;
+  font-family:var(--font-body); white-space:nowrap;
+}
+.support-status--new{ background:var(--accent-light); color:var(--accent-text); }
+.support-status--progress{ background:#fef3c7; color:#b45309; }
+.support-status--done{ background:var(--green-bg); color:var(--green-text); }
+
+.support-back{
+  background:none; border:none; color:var(--accent-text); font-family:var(--font-body);
+  font-size:12.5px; font-weight:600; cursor:pointer; padding:0 0 12px; display:block;
+}
+.support-thread-header{ display:flex; align-items:flex-start; gap:10px; margin-bottom:16px; }
+.support-thread-header .support-ticket-title{ white-space:normal; font-size:14px; }
+.support-thread-header .support-status{ margin-left:auto; }
+.support-thread-comments{ display:flex; flex-direction:column; gap:10px; margin-bottom:14px; }
+.support-comment{ border-radius:10px; padding:10px 12px; font-family:var(--font-body); }
+.support-comment--user{ background:var(--bg-hover); }
+.support-comment--admin{ background:var(--accent-light); }
+.support-comment-author{ font-size:11px; font-weight:700; color:var(--text-muted); margin-bottom:3px; }
+.support-comment--admin .support-comment-author{ color:var(--accent-text); }
+.support-comment-msg{ font-size:13px; color:var(--text-primary); white-space:pre-wrap; line-height:1.5; }
+.support-comment-date{ font-size:10.5px; color:var(--text-muted); margin-top:4px; }
+.support-reply-form{ display:flex; flex-direction:column; gap:8px; }
+
+/* ─── Page admin "Centre de support" ─── */
+.support-admin-layout{ display:grid; grid-template-columns:320px 1fr; gap:16px; align-items:start; }
+.support-admin-list{ display:flex; flex-direction:column; gap:6px; max-height:70vh; overflow-y:auto; }
+.support-admin-filters{ display:flex; gap:6px; margin-bottom:10px; flex-wrap:wrap; }
+.support-admin-detail{ min-height:200px; }
+.support-status-select{ margin-left:auto; }
+@media (max-width: 900px){ .support-admin-layout{ grid-template-columns:1fr; } }
+
 /* ─── Modale de gestion des photos de fond ─── */
 .bgmgr-modal-backdrop {
   position: fixed; inset: 0; z-index: 10000;

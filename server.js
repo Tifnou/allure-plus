@@ -583,6 +583,97 @@ app.get('/api/check-update', async (req, res) => {
 });
 
 // ─────────────────────────────────────────────
+// Centre de support (remontee d'idees/bugs/questions)
+// ─────────────────────────────────────────────
+// Le backend reel est le relais Cloudflare (support-relay/), qui garde le
+// token GitHub hors de portee de toute installation distribuee — server.js
+// ne fait que relayer les requetes en y ajoutant l'email de la session
+// (identite Garmin, deja connue) et la cle client. Voir support-relay/src/index.js
+// pour le detail du fonctionnement (Issues GitHub = tickets, labels = categorie/statut).
+const SUPPORT_RELAY_URL  = process.env.SUPPORT_RELAY_URL;
+const SUPPORT_CLIENT_KEY = process.env.SUPPORT_CLIENT_KEY;
+const SUPPORT_ADMIN_KEY  = process.env.SUPPORT_ADMIN_KEY;
+
+async function callSupportRelay(path, options = {}) {
+  if (!SUPPORT_RELAY_URL) throw new Error('Centre de support non configure (SUPPORT_RELAY_URL manquant)');
+  const res = await fetch(`${SUPPORT_RELAY_URL}${path}`, {
+    ...options,
+    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) {
+    const err = new Error(data?.message || `Erreur relais (${res.status})`);
+    err.status = res.status;
+    throw err;
+  }
+  return data;
+}
+
+app.post('/api/support/tickets', requireSession, async (req, res) => {
+  try {
+    const { category, page, message } = req.body || {};
+    const data = await callSupportRelay('/tickets', {
+      method: 'POST',
+      body: JSON.stringify({ email: req.session.email, category, page, message, clientKey: SUPPORT_CLIENT_KEY }),
+    });
+    res.json(data);
+  } catch (err) { handleError(res, err); }
+});
+
+app.get('/api/support/tickets', requireSession, async (req, res) => {
+  try {
+    const scope = req.query.scope === 'all' ? 'all' : 'mine';
+    const params = new URLSearchParams({ email: req.session.email, scope });
+    const data = await callSupportRelay(`/tickets?${params}`);
+    res.json(data);
+  } catch (err) { handleError(res, err); }
+});
+
+app.get('/api/support/tickets/:number', requireSession, async (req, res) => {
+  try {
+    const data = await callSupportRelay(`/tickets/${Number(req.params.number)}`);
+    res.json(data);
+  } catch (err) { handleError(res, err); }
+});
+
+app.post('/api/support/tickets/:number/comments', requireSession, async (req, res) => {
+  try {
+    const { message } = req.body || {};
+    const isAdmin = req.session.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
+    const data = await callSupportRelay(`/tickets/${Number(req.params.number)}/comments`, {
+      method: 'POST',
+      body: JSON.stringify({
+        email: req.session.email,
+        message,
+        clientKey: SUPPORT_CLIENT_KEY,
+        adminKey: isAdmin ? SUPPORT_ADMIN_KEY : undefined,
+      }),
+    });
+    res.json(data);
+  } catch (err) { handleError(res, err); }
+});
+
+// ─ Centre de support admin (reserve au compte admin) ─
+app.get('/api/support/admin/tickets', requireAdmin, async (req, res) => {
+  try {
+    const params = new URLSearchParams({ scope: 'all', adminKey: SUPPORT_ADMIN_KEY });
+    const data = await callSupportRelay(`/tickets?${params}`);
+    res.json(data);
+  } catch (err) { handleError(res, err); }
+});
+
+app.post('/api/support/admin/tickets/:number/status', requireAdmin, async (req, res) => {
+  try {
+    const { status } = req.body || {};
+    const data = await callSupportRelay(`/tickets/${Number(req.params.number)}/status`, {
+      method: 'POST',
+      body: JSON.stringify({ status, adminKey: SUPPORT_ADMIN_KEY }),
+    });
+    res.json(data);
+  } catch (err) { handleError(res, err); }
+});
+
+// ─────────────────────────────────────────────
 // Génération d'itinéraires (BRouter)
 // ─────────────────────────────────────────────
 
