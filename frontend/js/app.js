@@ -425,15 +425,20 @@ async function loadDashboard() {
 
     _allActivities = allActivities || lastRuns || [];
     _vo2maxSeries = stats.vo2maxSeries || [];
-    // Stocker VO2max le plus récent pour le Profil
-    if (_vo2maxSeries.length > 0) {
+    // Valeur precise (non arrondie) renvoyee par Garmin (metrics-service/maxmet) —
+    // c'est celle-ci que Garmin utilise en interne (classification, courbe), l'entier
+    // affiche a l'ecran arrondit toujours au meme chiffre pendant plusieurs jours.
+    _latestVO2MaxPrecise = (typeof stats.vo2MaxPrecise === 'number') ? stats.vo2MaxPrecise : null;
+    // _latestVO2Max sert de source unique a tout le reste de l'app (VMA, zones
+    // d'allure, Profil...) : on lui donne la valeur precise quand elle est
+    // disponible pour que ces calculs en beneficient automatiquement.
+    if (_latestVO2MaxPrecise != null) {
+      _latestVO2Max = _latestVO2MaxPrecise;
+    } else if (_vo2maxSeries.length > 0) {
       _latestVO2Max = _vo2maxSeries[_vo2maxSeries.length - 1].vo2max || stats.latestVO2Max || null;
     } else if (stats.latestVO2Max) {
       _latestVO2Max = stats.latestVO2Max;
     }
-    // Valeur precise (non arrondie) utilisee pour la classification couleur/categorie
-    // uniquement — Garmin classe sur cette valeur, pas sur l'entier affiche
-    _latestVO2MaxPrecise = (typeof stats.vo2MaxPrecise === 'number') ? stats.vo2MaxPrecise : null;
 
     renderHeroStats(stats);
     renderLastRun(lastRuns);
@@ -474,7 +479,11 @@ function renderHeroStats(stats) {
 
   // VO2max
   if (stats.latestVO2Max) {
-    setVal('stat-vo2max', stats.latestVO2Max.toFixed(0));
+    // Valeur precise renvoyee par Garmin (metrics-service/maxmet) quand disponible —
+    // l'entier seul reste souvent identique plusieurs jours de suite alors que la
+    // courbe Garmin, elle, bouge deja (cf. vo2MaxPrecise cote serveur).
+    const vo2Display = (typeof stats.vo2MaxPrecise === 'number') ? stats.vo2MaxPrecise : stats.latestVO2Max;
+    setVal('stat-vo2max', vo2Display.toFixed(1));
     // TASK 1 — Color the VO2max stat number
     const vo2StatEl = el('stat-vo2max');
     const profile = JSON.parse(localStorage.getItem('suivi_sport_profile') || '{}');
@@ -487,14 +496,13 @@ function renderHeroStats(stats) {
       if (m < 0 || (m === 0 && now.getDate() < b.getDate())) a--;
       return a;
     })() : (profile.age || null);
-    const vo2ForClass = (typeof stats.vo2MaxPrecise === 'number') ? stats.vo2MaxPrecise : stats.latestVO2Max;
     if (vo2StatEl && typeof vo2maxGarminColor === 'function') {
-      vo2StatEl.style.color = vo2maxGarminColor(vo2ForClass, profSex, profAge);
+      vo2StatEl.style.color = vo2maxGarminColor(vo2Display, profSex, profAge);
     }
-    if (typeof vo2maxLabel === 'function') setVal('dash-vo2-label', vo2maxLabel(vo2ForClass, profSex, profAge));
+    if (typeof vo2maxLabel === 'function') setVal('dash-vo2-label', vo2maxLabel(vo2Display, profSex, profAge));
     if (typeof renderVo2Bar === 'function') {
       const barEl = el('dash-vo2-bar-wrap');
-      if (barEl) barEl.innerHTML = renderVo2Bar(vo2ForClass, profSex, profAge);
+      if (barEl) barEl.innerHTML = renderVo2Bar(vo2Display, profSex, profAge);
     }
     if (typeof calcRunningCategory === 'function') {
       const runCat = calcRunningCategory(profAge, profSex);
@@ -506,13 +514,25 @@ function renderHeroStats(stats) {
     }
     const series = stats.vo2maxSeries || [];
     if (series.length >= 2) {
-      const prev = series[series.length - 2].value;
-      const diff = stats.latestVO2Max - prev;
+      const last = series[series.length - 1];
+      const prev = series[series.length - 2];
+      const lastP = (typeof last.preciseValue === 'number') ? last.preciseValue : last.value;
+      const prevP = (typeof prev.preciseValue === 'number') ? prev.preciseValue : prev.value;
+      // Arrondi au dixieme pour eviter des ecarts flottants illisibles (ex: 0.0999999)
+      const diff = Math.round((lastP - prevP) * 10) / 10;
       const tag = el('stat-vo2max-trend');
       if (tag) {
         tag.style.display = 'inline-flex';
-        tag.textContent = diff >= 0 ? `▲ +${diff.toFixed(1)}` : `▼ ${diff.toFixed(1)}`;
-        tag.className = `stat-tag ${diff >= 0 ? 'stat-tag--up' : 'stat-tag--down'}`;
+        if (diff === 0) {
+          tag.textContent = '● stable';
+          tag.className = 'stat-tag stat-tag--neutral';
+        } else if (diff > 0) {
+          tag.textContent = `▲ +${diff.toFixed(1)}`;
+          tag.className = 'stat-tag stat-tag--up';
+        } else {
+          tag.textContent = `▼ ${diff.toFixed(1)}`;
+          tag.className = 'stat-tag stat-tag--down';
+        }
       }
     }
   } else {
@@ -1514,7 +1534,10 @@ function renderVO2MaxChart(series) {
   }
 
   const byMonth = {};
-  series.forEach(p => { const m = p.date?.slice(0,7); if (m) byMonth[m] = p.value; });
+  series.forEach(p => {
+    const m = p.date?.slice(0,7);
+    if (m) byMonth[m] = (typeof p.preciseValue === 'number') ? p.preciseValue : p.value;
+  });
   const labels = Object.keys(byMonth).sort();
   const values = labels.map(m => byMonth[m]);
 
@@ -1973,6 +1996,15 @@ async function refreshAll() {
     if (document.getElementById('page-admin')?.classList.contains('active')) {
       await Promise.all([loadAdminInfo(), loadAdminLogs()]);
     }
+    // Santé/Performance : les catégories sont construites une seule fois par
+    // session (_healthCategoryBuilt), il faut les invalider explicitement
+    // pour qu'un refresh sur cette page ne reste pas figé sur les anciennes valeurs.
+    if (typeof invalidateHealthCategories === 'function') {
+      invalidateHealthCategories();
+      if (document.getElementById('page-health')?.classList.contains('active') && typeof renderHealthCategory === 'function') {
+        await renderHealthCategory();
+      }
+    }
   } finally {
     if (btn) { btn.classList.remove('spinning'); btn.disabled = false; }
   }
@@ -2228,19 +2260,17 @@ function renderProfile() {
   el('sex-f').classList.toggle('active', sex === 'F');
   renderWeightReminder();
 
-  // VO2max depuis données Garmin
-  // Affichage : valeur arrondie (comme Garmin) — Classification (couleur/categorie/curseur) :
-  // valeur precise quand disponible, car Garmin classe en interne sur la precision, pas l'arrondi
+  // VO2max depuis données Garmin — _latestVO2Max porte deja la valeur precise
+  // (avec decimale) quand Garmin la fournit, cf. loadDashboard()
   const vo2 = _latestVO2Max;
-  const vo2ForClass = _latestVO2MaxPrecise != null ? _latestVO2MaxPrecise : vo2;
   if (vo2) {
-    const vo2color = vo2maxGarminColor(vo2ForClass, sex, age);
-    setVal('profile-vo2-value', vo2.toFixed(0)); // Garmin shows integer
+    const vo2color = vo2maxGarminColor(vo2, sex, age);
+    setVal('profile-vo2-value', vo2.toFixed(1));
     const vo2El = el('profile-vo2-value');
     if (vo2El) vo2El.style.color = vo2color;
-    setVal('profile-vo2-label', vo2maxLabel(vo2ForClass, sex, age));
+    setVal('profile-vo2-label', vo2maxLabel(vo2, sex, age));
     const barEl = el('profile-vo2-bar-wrap');
-    if (barEl) barEl.innerHTML = renderVo2Bar(vo2ForClass, sex, age);
+    if (barEl) barEl.innerHTML = renderVo2Bar(vo2, sex, age);
   }
 
   // Catégorie de course FFA

@@ -30,6 +30,15 @@ let _healthActiveCategory = 'sante';
 const _healthDataCache = {};       // `${metric}_${days}` -> resultat de load()
 const _healthCategoryBuilt = { sante: false, performance: false };
 
+// Force la reconstruction des categories Sante/Performance au prochain
+// affichage (appele par "Actualiser les donnees" cote app.js) — sans ca,
+// _healthCategoryBuilt court-circuite le rechargement et la page continue
+// d'afficher les anciennes valeurs tant qu'on ne fait pas F5.
+function invalidateHealthCategories() {
+  _healthCategoryBuilt.sante = false;
+  _healthCategoryBuilt.performance = false;
+}
+
 async function fetchHealthMetric(key, days, loadFn) {
   const cacheKey = `${key}_${days}`;
   if (_healthDataCache[cacheKey]) return _healthDataCache[cacheKey];
@@ -391,18 +400,22 @@ async function loadVo2maxMetric(days) {
   const cutoff = Date.now() - days * 86400000;
   const all = _vo2maxSeries || [];
   const pts = all.filter(p => p.date && new Date(p.date).getTime() >= cutoff);
-  const series = pts.map(p => ({ label: formatDateShort(p.date, days > 60), value: p.value }));
+  // Valeur precise (avec decimale) quand Garmin la fournit, sinon repli sur l'entier —
+  // c'est elle qui fait bouger la courbe meme quand le chiffre affiche reste identique.
+  const preciseOf = p => (typeof p.preciseValue === 'number') ? p.preciseValue : p.value;
+  const series = pts.map(p => ({ label: formatDateShort(p.date, days > 60), value: preciseOf(p) }));
   const latest = pts.length ? pts[pts.length - 1] : (all.length ? all[all.length - 1] : null);
   let comment = null;
   let color = null;
   if (latest) {
+    const latestPrecise = preciseOf(latest);
     const prof = loadProfileData();
     const age = prof.birthDate ? Math.floor((Date.now() - new Date(prof.birthDate).getTime()) / (365.25 * 86400000)) : (prof.age || null);
     const sex = prof.sex || 'M';
     // Meme couleur que le barème Garmin utilisé sur Profil/Synthèse
     // (vo2maxGarminColor, app.js) plutôt qu'une couleur fixe pour ce graphique.
-    color = (typeof vo2maxGarminColor === 'function') ? vo2maxGarminColor(latest.value, sex, age) : null;
-    const cat = (typeof vo2maxLabel === 'function') ? vo2maxLabel(latest.value, sex, age) : '';
+    color = (typeof vo2maxGarminColor === 'function') ? vo2maxGarminColor(latestPrecise, sex, age) : null;
+    const cat = (typeof vo2maxLabel === 'function') ? vo2maxLabel(latestPrecise, sex, age) : '';
     const tierMap = { 'Faible': 'attention', 'Passable': 'neutral', 'Bon': 'neutral', 'Excellent': 'good', 'Supérieur': 'good' };
     const adviceByCat = {
       'Faible': "Un travail régulier d'endurance fondamentale (Z2, 3 à 4 fois par semaine) est le levier le plus efficace pour commencer à faire progresser ce chiffre.",
@@ -414,12 +427,12 @@ async function loadVo2maxMetric(days) {
     comment = {
       state: cat ? `Niveau ${cat.toLowerCase()}` : 'VO2max',
       tier: tierMap[cat] || 'neutral',
-      text: `Votre VO2max est de ${latest.value} ml/kg/min${cat ? `, un niveau classé "${cat}" pour votre profil` : ''}. C'est la quantité maximale d'oxygène que votre corps peut utiliser à l'effort : plus elle est haute, plus votre potentiel d'endurance est élevé et plus vous pouvez tenir une allure rapide longtemps. ${adviceByCat[cat] || ''}`,
+      text: `Votre VO2max est de ${latestPrecise.toFixed(1)} ml/kg/min${cat ? `, un niveau classé "${cat}" pour votre profil` : ''}. C'est la quantité maximale d'oxygène que votre corps peut utiliser à l'effort : plus elle est haute, plus votre potentiel d'endurance est élevé et plus vous pouvez tenir une allure rapide longtemps. ${adviceByCat[cat] || ''}`,
     };
   }
   return {
     series, comment, color,
-    current: latest ? { value: String(latest.value), unit: 'ml/kg/min', color, dateLabel: 'au ' + formatDate(latest.date) } : null,
+    current: latest ? { value: preciseOf(latest).toFixed(1), unit: 'ml/kg/min', color, dateLabel: 'au ' + formatDate(latest.date) } : null,
   };
 }
 

@@ -893,7 +893,7 @@ app.get('/api/dashboard', requireSession, async (req, res) => {
     try {
       const history = await req.session.fns.getVO2MaxHistory();
       if (Array.isArray(history) && history.length > 0) {
-        stats.vo2maxSeries = history.map(h => ({ date: h.date, value: h.value }));
+        stats.vo2maxSeries = history.map(h => ({ date: h.date, value: h.value, preciseValue: h.preciseValue }));
         const last = history[history.length - 1];
         stats.latestVO2Max = last.value;
         stats.vo2MaxPrecise = last.preciseValue;
