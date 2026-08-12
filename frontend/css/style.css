@@ -3913,7 +3913,7 @@ body.plans-active .app-content { background: transparent !important; }
 
 /* ─── Icône flottante "boîte à idées" (Centre de support) ─── */
 .support-fab{
-  position:fixed; right:22px; bottom:22px; z-index:900;
+  position:fixed; left:calc(var(--sidebar-w) + 20px); top:20px; z-index:900;
   width:44px; height:44px; border-radius:50%;
   background:var(--bg-white); border:1px solid var(--border);
   box-shadow:0 4px 16px rgba(0,0,0,0.15);

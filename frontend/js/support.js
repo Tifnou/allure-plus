@@ -77,8 +77,14 @@ function currentPageLabel() {
   return navItem ? navItemLabel(navItem) : '';
 }
 
+// Pages reservees au compte admin (Admin, Centre de support lui-meme) —
+// jamais proposees dans "Page concernee", meme visibles pour ce compte-la :
+// un utilisateur normal ne les a de toute facon pas dans sa sidebar.
+const SUPPORT_EXCLUDED_PAGES = ['admin', 'support-admin'];
+
 function pageOptionsHtml(selected) {
   const items = Array.from(document.querySelectorAll('.nav-item[data-page]'))
+    .filter(n => !SUPPORT_EXCLUDED_PAGES.includes(n.dataset.page))
     .filter(n => n.offsetParent !== null || n.style.display !== 'none')
     .map(navItemLabel)
     .filter(Boolean);

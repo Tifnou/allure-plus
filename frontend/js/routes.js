@@ -77,8 +77,8 @@ function renderRoutesForm() {
       <div class="routes-field-label">Point de départ</div>
       <div class="routes-address-row">
         <div>
-          <div class="routes-microlabel">Code postal</div>
-          <input type="text" id="routes-input-postcode" class="routes-text-input" inputmode="numeric" maxlength="5" value="${routesState.postcode}">
+          <div class="routes-microlabel">Code postal <span class="routes-microlabel-hint">(ou 2 chiffres du département)</span></div>
+          <input type="text" id="routes-input-postcode" class="routes-text-input" inputmode="text" maxlength="5" placeholder="ex: 75015 ou 33" value="${routesState.postcode}">
         </div>
         <div>
           <div class="routes-microlabel">Ville</div>
@@ -166,19 +166,29 @@ function wireRoutesAddressFields() {
   const cityInput = el('routes-input-city');
   const streetInput = el('routes-input-street');
 
+  // Accepte soit un code postal complet (5 chiffres), soit un code
+  // departement seul (2 chiffres, 2A/2B, ou 971-976 outre-mer) quand le code
+  // postal complet n'est pas connu — le debounce evite de declencher une
+  // recherche departement inutile pendant qu'on tape encore vers un code
+  // postal complet (ex: pause sur "75" avant de continuer vers "75015").
+  const DEPARTMENT_CODE_RE = /^(\d{2}|2[ab]|97[1-6])$/i;
   postcodeInput.oninput = debounce(async (e) => {
     routesState.postcode = e.target.value.trim();
     routesState.communes = [];
     routesState.selectedCommune = null;
     routesState.selectedStreet = null;
     routesState.street = '';
-    if (!/^\d{5}$/.test(routesState.postcode)) { renderRoutesForm(); return; }
+    const value = routesState.postcode;
+    const isPostcode = /^\d{5}$/.test(value);
+    const isDepartment = !isPostcode && DEPARTMENT_CODE_RE.test(value);
+    if (!isPostcode && !isDepartment) { renderRoutesForm(); return; }
     try {
-      const res = await fetch(`${API}/api/routes/communes?postcode=${routesState.postcode}`);
+      const param = isPostcode ? `postcode=${value}` : `department=${value}`;
+      const res = await fetch(`${API}/api/routes/communes?${param}`);
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Code postal introuvable');
+      if (!res.ok) throw new Error(data.error || 'Code introuvable');
       if (!data.communes || data.communes.length === 0) {
-        showToast('Aucune ville trouvée pour ce code postal', 'error');
+        showToast(isPostcode ? 'Aucune ville trouvée pour ce code postal' : 'Aucune ville trouvée pour ce département', 'error');
         return;
       }
       routesState.communes = data.communes;
@@ -337,6 +347,28 @@ function routesStopProgress() {
   el('routes-progress').style.display = 'none';
 }
 
+// Recalcule le profil d'allure perso (par pente) a partir des dernieres
+// sorties Garmin — operation lente (telechargement + parsing FIT), d'ou le
+// bouton explicite plutot qu'un declenchement automatique. Relance ensuite
+// la derniere recherche pour que les durees affichees refletent le nouveau
+// profil sans action supplementaire de l'utilisateur.
+async function recalcPaceProfile() {
+  const btn = el('routes-recalc-pace-profile');
+  if (!btn) return;
+  btn.disabled = true;
+  btn.textContent = 'Analyse de vos sorties…';
+  try {
+    await fetch(`${API}/api/routes/pace-profile/refresh`, { method: 'POST' })
+      .then(async r => { if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Erreur'); });
+    showToast('✅ Profil d\'allure recalculé', 'success');
+    if (routesState.lastResult) await routesGenerateClicked();
+  } catch (err) {
+    showToast('Erreur : ' + err.message, 'error');
+    btn.disabled = false;
+    btn.textContent = 'Recalculer maintenant';
+  }
+}
+
 async function routesGenerateClicked() {
   const btn = el('routes-generate-btn');
   btn.disabled = true;
@@ -399,8 +431,14 @@ function renderRoutesResults(data) {
   header.innerHTML = `
     <div class="routes-results-title">${routesResultsTitle(data.options.length)}</div>
     ${data.warning ? `<div class="routes-warning-banner">${data.warning}</div>` : ''}
-    ${data.paceProfileIsGeneric ? `<div class="routes-warning-banner routes-warning-banner--info">Durées estimées avec une allure générique — recalculez votre profil d'allure personnel dans Réglages pour des estimations plus fiables.</div>` : ''}
+    ${data.paceProfileIsGeneric ? `
+    <div class="routes-warning-banner routes-warning-banner--info">
+      Durées estimées avec une allure générique — recalculez votre profil d'allure personnel à partir de vos dernières sorties Garmin pour des estimations plus fiables.
+      <button class="btn-text-link routes-pace-profile-btn" id="routes-recalc-pace-profile" type="button">Recalculer maintenant</button>
+    </div>` : ''}
   `;
+  const recalcBtn = el('routes-recalc-pace-profile');
+  if (recalcBtn) recalcBtn.onclick = recalcPaceProfile;
 
   const list = el('routes-results-list');
   list.innerHTML = '';
@@ -409,6 +447,13 @@ function renderRoutesResults(data) {
     const durH = Math.floor(opt.predictedDurationMin / 60);
     const durM = Math.round(opt.predictedDurationMin % 60);
     const hasRepeatZone = routesHasRepeatZone(opt);
+    // Distance entre le point litteralement demande et le vrai point de
+    // depart du trace (BRouter accroche toujours au reseau routable le plus
+    // proche, meme sans recherche de depart alternatif) - affichee
+    // systematiquement, pas seulement dans le cas d'un depart tres decale
+    // (cf opt.alternateStart, deja couvert par son propre message).
+    const startOffsetKm = (data.requestedStart && opt.points && opt.points[0])
+      ? haversineKm(data.requestedStart, opt.points[0]) : null;
 
     const card = document.createElement('div');
     card.className = 'routes-result-card';
@@ -420,6 +465,7 @@ function renderRoutesResults(data) {
           <div class="routes-mini-stat"><b>${(opt.distanceM / 1000).toFixed(1)}</b> km</div>
           <div class="routes-mini-stat"><b>${opt.ascentM}</b> m D+</div>
           <div class="routes-mini-stat"><b>${durH}h${String(durM).padStart(2, '0')}</b></div>
+          ${startOffsetKm !== null ? `<div class="routes-mini-stat" title="Distance entre le point demandé et le départ réel du parcours"><b>${formatStartOffset(startOffsetKm)}</b> du départ</div>` : ''}
         </div>
       </div>
       <div class="routes-result-body" style="display:${open ? '' : 'none'}">
@@ -457,6 +503,11 @@ function renderRoutesResults(data) {
       });
     }, 0);
   }
+}
+
+function formatStartOffset(km) {
+  if (km < 0.1) return `${Math.round(km * 1000)} m`;
+  return `${km.toFixed(1)} km`;
 }
 
 function haversineKm(a, b) {

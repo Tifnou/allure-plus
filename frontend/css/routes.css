@@ -54,6 +54,7 @@
   letter-spacing: 0.04em;
   margin-bottom: 4px;
 }
+.routes-microlabel-hint { text-transform: none; font-weight: 500; letter-spacing: normal; opacity: 0.75; }
 
 .routes-text-input,
 .routes-number-input,
@@ -208,6 +209,8 @@
   margin-bottom: 10px;
 }
 .routes-warning-banner--info { background: var(--accent-light); color: var(--accent-text); }
+.routes-pace-profile-btn { margin-left: 8px; font-weight: 700; text-decoration: underline; white-space: nowrap; }
+.routes-pace-profile-btn:disabled { opacity: 0.6; cursor: default; text-decoration: none; }
 
 .routes-result-card {
   border: 1px solid var(--border);

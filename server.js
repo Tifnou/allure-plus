@@ -52,7 +52,7 @@ const {
 } = require('./garmin_client');
 const { getZoneRange, annotatePaceZones, ZONE_LABELS } = require('./zones');
 const { isBrouterConfigured, isTilePresent, getTileRemoteSize, downloadTile } = require('./brouter_manager');
-const { geocode, getCommunesForPostcode, searchStreet, getTownHall, generateRouteOptions, buildGpxXml } = require('./route_generator');
+const { geocode, getCommunesForPostcode, getCommunesForDepartment, searchStreet, getTownHall, generateRouteOptions, buildGpxXml } = require('./route_generator');
 const { getPaceProfile, refreshPaceProfile } = require('./pace_profile');
 const { buildPlanWorkbook } = require('./xlsx_export');
 const {
@@ -687,13 +687,24 @@ app.get('/api/routes/geocode', requireSession, async (req, res) => {
 });
 
 // Recherche en cascade (code postal -> ville -> rue) via les API officielles
-// francaises, pour la saisie du depart sur la page Itineraires.
+// francaises, pour la saisie du depart sur la page Itineraires. Accepte
+// aussi un code departement seul (2 chiffres, 2A/2B, ou 971-976 outre-mer)
+// quand le code postal complet n'est pas connu - liste alors toutes les
+// communes du departement, triees par ordre alphabetique.
+const DEPARTMENT_CODE_RE = /^(\d{2}|2[AB]|97[1-6])$/i;
 app.get('/api/routes/communes', requireSession, async (req, res) => {
   try {
     const postcode = (req.query.postcode || '').trim();
-    if (!/^\d{5}$/.test(postcode)) return res.status(400).json({ error: 'Code postal invalide' });
-    const communes = await getCommunesForPostcode(postcode);
-    res.json({ communes });
+    const department = (req.query.department || '').trim();
+    if (/^\d{5}$/.test(postcode)) {
+      const communes = await getCommunesForPostcode(postcode);
+      return res.json({ communes });
+    }
+    if (DEPARTMENT_CODE_RE.test(department)) {
+      const communes = await getCommunesForDepartment(department.toUpperCase());
+      return res.json({ communes });
+    }
+    return res.status(400).json({ error: 'Code postal ou code département invalide' });
   } catch (err) { handleError(res, err); }
 });
 

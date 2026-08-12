@@ -98,14 +98,34 @@ async function geocode(address) {
 // code postal -> villes associees -> rues de cette ville en autocompletion.
 // La selection explicite a chaque etape (l'utilisateur clique une suggestion
 // reelle) tient lieu de confirmation - plus besoin de modale bloquante.
+function sortCommunes(communes) {
+  return communes.sort((a, b) => a.nom.localeCompare(b.nom, 'fr'));
+}
+
 async function getCommunesForPostcode(postcode) {
   const url = `https://geo.api.gouv.fr/communes?codePostal=${encodeURIComponent(postcode)}&fields=nom,code,centre`;
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Recherche de commune échouée (HTTP ${res.status})`);
   const data = await res.json();
-  return data
+  return sortCommunes(data
     .filter(c => c.centre && c.centre.coordinates)
-    .map(c => ({ nom: c.nom, code: c.code, lat: c.centre.coordinates[1], lon: c.centre.coordinates[0] }));
+    .map(c => ({ nom: c.nom, code: c.code, lat: c.centre.coordinates[1], lon: c.centre.coordinates[0] })));
+}
+
+// Repli quand le code postal complet n'est pas connu : les 2 premiers
+// chiffres (departement) suffisent a lister toutes ses communes, triees par
+// ordre alphabetique - meme API que ci-dessus, juste un autre parametre de
+// filtre (codeDepartement au lieu de codePostal). Un departement peut
+// compter plusieurs centaines de communes (ex: Pas-de-Calais ~890) mais un
+// <select> natif gere ca sans souci (recherche au clavier incluse).
+async function getCommunesForDepartment(deptCode) {
+  const url = `https://geo.api.gouv.fr/communes?codeDepartement=${encodeURIComponent(deptCode)}&fields=nom,code,centre`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Recherche de communes échouée (HTTP ${res.status})`);
+  const data = await res.json();
+  return sortCommunes(data
+    .filter(c => c.centre && c.centre.coordinates)
+    .map(c => ({ nom: c.nom, code: c.code, lat: c.centre.coordinates[1], lon: c.centre.coordinates[0] })));
 }
 
 async function searchStreet(query, citycode) {
@@ -694,6 +714,7 @@ function buildGpxXml(points, label = 'Allure+') {
 module.exports = {
   geocode,
   getCommunesForPostcode,
+  getCommunesForDepartment,
   searchStreet,
   getTownHall,
   destinationPoint,
