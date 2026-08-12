@@ -420,6 +420,9 @@ function showUpdateModal() {
       <div class="confirm-modal-title">Nouvelle version disponible</div>
       <div class="update-modal-versions">v${_updateInfo.currentVersion} → v${_updateInfo.latestVersion}</div>
       <div class="update-modal-changelog">${renderChangelogHtml(_updateInfo.releaseNotes) || '<p>Voir la page de la release pour le détail.</p>'}</div>
+      <div class="update-modal-smartscreen-note">
+        ⚠️ Windows peut afficher un écran bleu <strong>« Windows a protégé votre ordinateur »</strong> au lancement de l'installeur téléchargé — c'est normal, l'appli n'est pas signée numériquement (pas de risque, c'est bien Allure+). Cliquez sur <strong>« Informations complémentaires »</strong> puis <strong>« Exécuter quand même »</strong>.
+      </div>
       <div class="confirm-modal-actions">
         <button class="confirm-modal-btn confirm-modal-btn--cancel" id="upd-later">Plus tard</button>
         <button class="confirm-modal-btn confirm-modal-btn--confirm" id="upd-download">Télécharger</button>

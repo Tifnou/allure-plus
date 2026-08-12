@@ -3888,6 +3888,11 @@ body.plans-active .app-content { background: transparent !important; }
 .update-modal-section-title:first-child{margin-top:0;}
 .update-modal-list{margin:0 0 6px 18px; padding:0;}
 .update-modal-list li{margin-bottom:4px;}
+.update-modal-smartscreen-note{
+  text-align:left; font-family:var(--font-body); font-size:12px; line-height:1.5;
+  background:var(--orange-bg); color:var(--orange); border-radius:10px;
+  padding:10px 12px; margin-bottom:18px;
+}
 
 /* ─── Badge numérique (nav-item), ex: Centre de support ─── */
 .nav-badge-count{
