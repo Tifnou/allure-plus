@@ -71,6 +71,15 @@ function ticketStatus(issue) {
   return 'nouveau';
 }
 
+// "Suppression" = label dedie + fermeture, jamais une vraie suppression
+// GitHub (reservee aux proprietaires de repo, hors de portee d'un token
+// fine-grained Issues seul) - masque simplement le ticket de toutes les
+// vues de l'app (mine/all/admin/detail), recuperable manuellement sur
+// GitHub si besoin, sans droits supplementaires a demander.
+function isDeleted(issue) {
+  return (issue.labels || []).some(l => (l.name || l) === 'supprimé');
+}
+
 function categoryFromLabels(labels) {
   const names = (labels || []).map(l => l.name || l);
   return Object.values(CATEGORY_LABELS).find(l => names.includes(l)) || null;
@@ -134,7 +143,7 @@ async function handleListTickets(req, env, url) {
 
   const issues = await gh(env, '/issues?state=all&per_page=100&sort=updated');
   let tickets = issues
-    .filter(i => !i.pull_request)
+    .filter(i => !i.pull_request && !isDeleted(i))
     .map(i => summarizeIssue(i, { includeReporter: scope === 'mine' || isAdmin }));
 
   if (scope === 'mine') {
@@ -148,6 +157,7 @@ async function handleGetTicket(req, env, number) {
     gh(env, `/issues/${number}`),
     gh(env, `/issues/${number}/comments?per_page=100`),
   ]);
+  if (isDeleted(issue)) throw { status: 404, message: 'Ticket introuvable' };
   const summary = summarizeIssue(issue, { includeReporter: true });
   const thread = comments.map(c => {
     const { author, cleaned } = extractCommentAuthor(c.body || '');
@@ -205,6 +215,27 @@ async function handleSetStatus(req, env, number) {
   return json({ ok: true });
 }
 
+async function handleDeleteTicket(req, env, number) {
+  const body = await req.json();
+  if (String(body.clientKey || '') !== env.CLIENT_KEY) throw { status: 401, message: 'Client non autorisé' };
+  const isAdmin = body.adminKey && body.adminKey === env.ADMIN_KEY;
+  const email = String(body.email || '').slice(0, 200).trim().toLowerCase();
+
+  const issue = await gh(env, `/issues/${number}`);
+  if (!isAdmin) {
+    const { value: reporter } = extractReporter(issue.body || '');
+    if (reporter !== email) throw { status: 403, message: "Ce ticket n'appartient pas à cet utilisateur" };
+  }
+
+  const labels = [...new Set([...(issue.labels || []).map(l => l.name || l), 'supprimé'])];
+  await gh(env, `/issues/${number}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ state: 'closed', labels }),
+  });
+  return json({ ok: true });
+}
+
 export default {
   async fetch(req, env) {
     const url = new URL(req.url);
@@ -222,6 +253,7 @@ export default {
       if (parts.length === 2 && req.method === 'GET') return await handleGetTicket(req, env, number);
       if (parts.length === 3 && parts[2] === 'comments' && req.method === 'POST') return await handleAddComment(req, env, number);
       if (parts.length === 3 && parts[2] === 'status' && req.method === 'POST') return await handleSetStatus(req, env, number);
+      if (parts.length === 3 && parts[2] === 'delete' && req.method === 'POST') return await handleDeleteTicket(req, env, number);
 
       return json({ message: 'Not found' }, 404);
     } catch (e) {

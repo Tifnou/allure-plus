@@ -204,6 +204,28 @@ async function renderSupportList(scope) {
   }
 }
 
+// Utilise par la vue utilisateur (ses propres tickets) et la page admin
+// (n'importe quel ticket) - onDeleted() reprend la main pour rafraichir la
+// bonne liste selon le contexte appelant.
+async function deleteSupportTicket(number, onDeleted) {
+  const ok = await showConfirmModal({
+    title: 'Supprimer ce ticket ?',
+    message: 'Le ticket et son fil de discussion seront définitivement retirés de la liste. Cette action est irréversible.',
+    confirmLabel: 'Supprimer',
+    danger: true,
+    icon: '🗑️',
+  });
+  if (!ok) return;
+  try {
+    const r = await fetch(`${API}/api/support/tickets/${number}`, { method: 'DELETE' });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Erreur');
+    showToast('Ticket supprimé', 'success');
+    onDeleted();
+  } catch (err) {
+    showToast('Erreur : ' + err.message, 'error');
+  }
+}
+
 async function openSupportTicket(number, scope) {
   _supportOpenTicket = number;
   const body = el('support-modal-body');
@@ -238,9 +260,14 @@ async function openSupportTicket(number, scope) {
       <form id="support-reply-form" class="support-reply-form">
         <textarea class="form-input support-form-textarea" id="support-reply-message" placeholder="Votre réponse…" required></textarea>
         <button class="btn-save-profile" type="submit">Répondre</button>
-      </form>` : ''}
+      </form>
+      <button class="support-delete-btn" id="support-delete-ticket" type="button">🗑️ Supprimer ce ticket</button>` : ''}
     `;
     body.querySelector('#support-back').onclick = () => { _supportOpenTicket = null; renderSupportList(scope); };
+    const deleteBtn = body.querySelector('#support-delete-ticket');
+    if (deleteBtn) {
+      deleteBtn.onclick = () => deleteSupportTicket(number, () => { _supportOpenTicket = null; renderSupportList(scope); });
+    }
     const replyForm = body.querySelector('#support-reply-form');
     if (replyForm) {
       replyForm.addEventListener('submit', async (e) => {
@@ -397,7 +424,14 @@ async function openSupportAdminTicket(number) {
         <textarea class="form-input support-form-textarea" id="support-admin-reply-message" placeholder="Votre réponse…" required></textarea>
         <button class="btn-save-profile" type="submit">Répondre</button>
       </form>
+      <button class="support-delete-btn" id="support-admin-delete-ticket" type="button">🗑️ Supprimer ce ticket</button>
     `;
+    el('support-admin-delete-ticket').onclick = () => deleteSupportTicket(number, () => {
+      _supportAdminOpenTicket = null;
+      _supportAdminTicketsCache = _supportAdminTicketsCache.filter(t => t.number !== number);
+      renderSupportAdminList();
+      el('support-admin-detail').innerHTML = '<div class="support-empty">Sélectionnez un ticket dans la liste.</div>';
+    });
     el('support-admin-status-select').onchange = async (e) => {
       const status = e.target.value;
       try {

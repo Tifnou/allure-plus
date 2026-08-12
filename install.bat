@@ -281,15 +281,10 @@ if exist "%~dp0creer_raccourci.ps1" (
 echo    Installation terminee avec succes !
 echo  ===================================================
 echo.
-echo  Double-cliquez sur start.bat pour demarrer Allure+
-echo.
 
-set /p LAUNCH="  Lancer Allure+ maintenant ? (O/N) : "
-if /i "!LAUNCH!"=="O" (
-    start "" /D "%~dp0" "%~dp0start.bat"
-    exit /b 0
-)
-
-echo.
-pause
+:: Pas de prompt interactif ici (set /p) : le lancement de l'app est
+:: propose sur la page "Terminer" native de l'installeur Inno Setup (case
+:: a cocher "Lancer Allure+"), pas dans cette fenetre console - qui doit
+:: pouvoir se refermer seule des que ce script se termine, plutot que
+:: rester ouverte derriere le wizard en attendant une saisie (cf allure-plus.iss).
 exit /b 0

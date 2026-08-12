@@ -681,6 +681,24 @@ app.post('/api/support/tickets/:number/comments', requireSession, async (req, re
   } catch (err) { handleError(res, err); }
 });
 
+// Suppression (masquage) d'un ticket : l'auteur peut supprimer son propre
+// ticket, l'admin peut supprimer n'importe lequel (meme logique isAdmin que
+// pour les commentaires, deduite de la session cote serveur, jamais du client).
+app.delete('/api/support/tickets/:number', requireSession, async (req, res) => {
+  try {
+    const isAdmin = req.session.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
+    const data = await callSupportRelay(`/tickets/${Number(req.params.number)}/delete`, {
+      method: 'POST',
+      body: JSON.stringify({
+        email: req.session.email,
+        clientKey: SUPPORT_CLIENT_KEY,
+        adminKey: isAdmin ? SUPPORT_ADMIN_KEY : undefined,
+      }),
+    });
+    res.json(data);
+  } catch (err) { handleError(res, err); }
+});
+
 // ─ Centre de support admin (reserve au compte admin) ─
 app.get('/api/support/admin/tickets', requireAdmin, async (req, res) => {
   try {

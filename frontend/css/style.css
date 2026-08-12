@@ -3953,7 +3953,7 @@ body.plans-active .app-content { background: transparent !important; }
 .support-form-textarea{ min-height:140px; max-width:none; width:100%; resize:vertical; font-family:var(--font-body); box-sizing:border-box; }
 .support-form .btn-save-profile{ margin-top:14px; }
 
-.support-empty{ text-align:center; color:var(--text-muted); font-size:13px; padding:24px 10px; }
+.support-empty{ text-align:center; color:var(--text-secondary); font-size:13px; padding:24px 10px; }
 
 .support-ticket-list{ display:flex; flex-direction:column; gap:6px; }
 .support-ticket-item{
@@ -3968,7 +3968,7 @@ body.plans-active .app-content { background: transparent !important; }
 .support-ticket-cat{ font-size:17px; flex-shrink:0; }
 .support-ticket-info{ display:flex; flex-direction:column; gap:2px; min-width:0; flex:1; }
 .support-ticket-title{ font-size:13px; font-weight:600; color:var(--text-primary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.support-ticket-meta{ font-size:11px; color:var(--text-muted); }
+.support-ticket-meta{ font-size:11px; color:var(--text-secondary); }
 
 .support-status{
   flex-shrink:0; font-size:10px; font-weight:700; padding:3px 9px; border-radius:20px;
@@ -3989,14 +3989,25 @@ body.plans-active .app-content { background: transparent !important; }
 .support-comment{ border-radius:10px; padding:10px 12px; font-family:var(--font-body); }
 .support-comment--user{ background:var(--bg-hover); }
 .support-comment--admin{ background:var(--accent-light); }
-.support-comment-author{ font-size:11px; font-weight:700; color:var(--text-muted); margin-bottom:3px; }
+.support-comment-author{ font-size:11px; font-weight:700; color:var(--text-secondary); margin-bottom:3px; }
 .support-comment--admin .support-comment-author{ color:var(--accent-text); }
 .support-comment-msg{ font-size:13px; color:var(--text-primary); white-space:pre-wrap; line-height:1.5; }
-.support-comment-date{ font-size:10.5px; color:var(--text-muted); margin-top:4px; }
+.support-comment-date{ font-size:10.5px; color:var(--text-secondary); margin-top:4px; }
 .support-reply-form{ display:flex; flex-direction:column; gap:8px; }
+.support-delete-btn{
+  display:block; margin:14px auto 0; padding:6px 12px;
+  background:none; border:1px solid transparent; border-radius:8px;
+  font-family:var(--font-body); font-size:12px; font-weight:600;
+  color:var(--text-secondary); cursor:pointer; transition:all var(--transition);
+}
+.support-delete-btn:hover{ color:#ef4444; border-color:#ef4444; background:rgba(239,68,68,0.08); }
 
 /* ─── Page admin "Centre de support" ─── */
+/* Fond opaque (pas le --card-bg translucide habituel) : page dense en texte
+   fin, la photo de fond en transparence cassait trop le contraste (constat
+   utilisateur - meta des tickets et placeholder illisibles). */
 .support-admin-layout{ display:grid; grid-template-columns:320px 1fr; gap:16px; align-items:start; }
+.support-admin-layout .card{ background:var(--bg-white); }
 .support-admin-list{ display:flex; flex-direction:column; gap:6px; max-height:70vh; overflow-y:auto; }
 .support-admin-filters{ display:flex; gap:6px; margin-bottom:10px; flex-wrap:wrap; }
 .support-admin-detail{ min-height:200px; }

@@ -77,8 +77,8 @@ function renderRoutesForm() {
       <div class="routes-field-label">Point de départ</div>
       <div class="routes-address-row">
         <div>
-          <div class="routes-microlabel">Code postal <span class="routes-microlabel-hint">(ou 2 chiffres du département)</span></div>
-          <input type="text" id="routes-input-postcode" class="routes-text-input" inputmode="text" maxlength="5" placeholder="ex: 75015 ou 33" value="${routesState.postcode}">
+          <div class="routes-microlabel">Code postal</div>
+          <input type="text" id="routes-input-postcode" class="routes-text-input" inputmode="text" maxlength="5" placeholder="ex: 75015 ou 33" title="Code postal complet, ou 2 chiffres du département si vous ne le connaissez pas" value="${routesState.postcode}">
         </div>
         <div>
           <div class="routes-microlabel">Ville</div>

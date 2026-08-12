@@ -52,6 +52,11 @@ Name: "{group}\Desinstaller Allure+"; Filename: "{uninstallexe}"
 ; langue de l'OS) sur tout le dossier applicatif, une fois pour toutes.
 Filename: "icacls"; Parameters: """{app}"" /grant *S-1-5-32-545:(OI)(CI)M /T /C"; Flags: runhidden waituntilterminated; StatusMsg: "Configuration des permissions..."
 Filename: "{app}\install.bat"; WorkingDir: "{app}"; Flags: waituntilterminated; Description: "Installer Node.js et les dependances d'Allure+"
+; Lancement propose via la case a cocher native de la page "Terminer" du
+; wizard (postinstall skipifsilent), plutot qu'un prompt O/N dans la console
+; install.bat qui laissait cette derniere ouverte en arriere-plan derriere le
+; wizard en attendant une saisie clavier (constat utilisateur).
+Filename: "{app}\start.bat"; WorkingDir: "{app}"; Flags: nowait postinstall skipifsilent; Description: "Lancer Allure+"
 
 [Code]
 var
