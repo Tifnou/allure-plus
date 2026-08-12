@@ -12,9 +12,9 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <link rel="stylesheet" href="css/style.css?v=1786460618001" />
+  <link rel="stylesheet" href="css/style.css?v=1786535411009" />
   <link rel="stylesheet" href="css/plans.css?v=1786014624239" />
-  <link rel="stylesheet" href="css/routes.css?v=1786460618001" />
+  <link rel="stylesheet" href="css/routes.css?v=1786529362401" />
 </head>
 <body>
 <!-- ✨ SPLASH SCREEN ✨ -->
@@ -1062,8 +1062,8 @@
       <div class="routes-beta-banner">
         <span class="routes-beta-banner-icon">🧪</span>
         <div>
-          <strong>Fonctionnalité en cours d'amélioration.</strong>
-          Les parcours générés sont une aide au calcul, pas une garantie — vérifiez toujours le tracé et le D+ avant de partir, et n'hésitez pas à ajuster les critères si le résultat ne correspond pas à vos attentes.
+          <strong>Fonctionnalité en test — résultats non garantis.</strong>
+          Le calcul s'appuie sur des données cartographiques publiques (OpenStreetMap) et une estimation automatique du dénivelé : le tracé, la distance et le D+ peuvent s'écarter de la réalité du terrain. Vérifiez toujours l'itinéraire avant de partir, et ajustez les critères si le résultat ne correspond pas à vos attentes.
         </div>
       </div>
 
@@ -1073,6 +1073,10 @@
         <div class="routes-form-actions">
           <button id="routes-generate-btn" class="btn-wizard-next" onclick="routesGenerateClicked()">Générer →</button>
           <button type="button" class="btn-wizard-back" onclick="routesResetForm()">↺ Réinitialiser</button>
+        </div>
+        <div id="routes-progress" class="routes-progress" style="display:none">
+          <div class="routes-progress-bar"><div class="routes-progress-bar-fill"></div></div>
+          <div class="routes-progress-label" id="routes-progress-label">Recherche de directions autour du départ…</div>
         </div>
       </div>
 
@@ -1150,16 +1154,16 @@
 
   </div><!-- /app-content -->
 
-  <script src="js/app.js?v=1786463144911"></script>
+  <script src="js/app.js?v=1786535639818"></script>
   <script src="js/gear.js?v=1786459105633"></script>
   <script src="js/campus.js?v=1786463144911"></script>
-  <script src="js/free_sessions.js?v=1786463656463"></script>
+  <script src="js/free_sessions.js?v=1786524404763"></script>
   <script src="js/session-analysis.js?v=1786279341818"></script>
   <script src="js/stats.js?v=1786285200450"></script>
   <script src="js/records.js?v=1786024863614"></script>
-  <script src="js/health.js?v=1786459900000"></script>
+  <script src="js/health.js?v=1786535411009"></script>
   <script src="js/plans.js?v=1785854785389"></script>
-  <script src="js/routes.js?v=1786460978821"></script>
+  <script src="js/routes.js?v=1786537023487"></script>
   <!-- ... MODAL LOGS ........................... -->
   <div id="logs-modal" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.55);backdrop-filter:blur(4px);" onclick="if(event.target===this)closeLogsModal()">
     <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:min(700px,95vw);max-height:80vh;background:#0f1117;border:1px solid #2a2a3a;border-radius:14px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 24px 64px rgba(0,0,0,0.6);">

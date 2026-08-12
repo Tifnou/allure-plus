@@ -155,8 +155,40 @@
 }
 
 /* ---------- boutons générer / réinitialiser ---------- */
-.routes-form-actions { display: flex; align-items: center; gap: 10px; max-width: 480px; }
+/* Réinitialiser pousse a l'extremite opposee du cadre (justify-content:
+   space-between) pour eviter un clic accidentel dessus en visant Générer
+   juste a cote. */
+.routes-form-actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; max-width: 480px; }
 #routes-generate-btn { font-size: 13.5px; padding: 9px 20px; }
+
+/* ---------- progression pendant la génération ---------- */
+/* Pas de vraie progression serveur->client (un seul aller-retour HTTP) :
+   barre indeterminee + messages d'etape qui tournent, pour que l'attente
+   (peut depasser 30s avec recherche elargie + alternatives) ne donne jamais
+   l'impression que rien ne se passe. */
+.routes-progress { max-width: 480px; margin-top: 10px; }
+.routes-progress-bar {
+  height: 5px;
+  border-radius: 3px;
+  background: var(--bg-hover);
+  overflow: hidden;
+}
+.routes-progress-bar-fill {
+  height: 100%;
+  width: 40%;
+  border-radius: 3px;
+  background: var(--accent);
+  animation: routes-progress-slide 1.3s ease-in-out infinite;
+}
+@keyframes routes-progress-slide {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(350%); }
+}
+.routes-progress-label {
+  margin-top: 6px;
+  font-size: 11.5px;
+  color: var(--text-secondary);
+}
 
 /* ---------- résultats : cartes compactes repliables ---------- */
 .routes-results-title {
@@ -183,7 +215,7 @@
   overflow: hidden;
   margin-bottom: 10px;
   background: var(--bg);
-  max-width: 560px;
+  max-width: 640px;
 }
 .routes-result-card:last-child { margin-bottom: 0; }
 
@@ -231,16 +263,33 @@
   margin-bottom: 12px;
 }
 
-.routes-elev-container { height: 90px; margin-bottom: 12px; }
+.routes-elev-container { height: 100px; margin-bottom: 12px; cursor: crosshair; }
 
 .routes-result-map {
   width: 100%;
-  height: 190px;
+  height: 280px;
   border-radius: var(--radius-sm);
   overflow: hidden;
   border: 1px solid var(--border);
+  margin-bottom: 8px;
+}
+
+.routes-map-legend {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 0;
   margin-bottom: 12px;
 }
+.routes-legend-swatch {
+  display: inline-block;
+  width: 14px;
+  height: 3.5px;
+  border-radius: 2px;
+  vertical-align: middle;
+}
+.routes-legend-swatch--repeat { background: #e8590c; }
+.routes-legend-swatch--normal { background: #2f6f3e; }
 
 .routes-download-btn {
   font-size: 12px;
@@ -259,3 +308,18 @@
 }
 [data-theme="dark"] .routes-result-card { background: #0d0f16; }
 [data-theme="dark"] .routes-result-body { background: #12151f; }
+/* La regle generique ci-dessus (meme specificite qu'un simple .active,
+   attribut = 1 classe) ecrasait le fond/texte accent du bouton actif en
+   sombre - Distance/Durée et Trail/Route redevenaient indiscernables
+   (constate en prod). Specificite superieure ([data-theme] + 2 classes)
+   pour reprendre la main sans dependre de l'ordre des regles. */
+[data-theme="dark"] .routes-toggle-btn.active {
+  background: var(--accent-light);
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+/* --text-muted (#4B5278) est trop sombre sur le fond quasi-noir de cette
+   page (contraste ~2.8:1, illisible) - eclairci localement plutot que la
+   variable globale, utilisee ailleurs dans l'app sans ce probleme visuel
+   (fonds plus clairs). */
+[data-theme="dark"] #page-routes { --text-muted: #8890b4; }

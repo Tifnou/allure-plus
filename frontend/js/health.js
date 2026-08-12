@@ -467,7 +467,7 @@ async function loadTrainingStatusMetric(days) {
   const comment = info ? { state: info.label, tier: info.tier, text: info.text + (buildingNotice ? ' ' + buildingNotice : '') } : null;
   return {
     timeline, comment,
-    current: cur ? { value: info ? info.label : (cur.phrase || '—'), unit: '', color: info?.color, dateLabel: 'au ' + formatDate(cur.calendarDate) } : null,
+    current: cur ? { value: info ? info.label : (cur.phrase ? prettifyUnknownTrainingStatus(cur.phrase) : '—'), unit: '', color: info?.color, dateLabel: 'au ' + formatDate(cur.calendarDate) } : null,
   };
 }
 

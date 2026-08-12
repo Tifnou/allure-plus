@@ -32,7 +32,7 @@ where node >nul 2>&1
 if not errorlevel 1 (
     for /f "tokens=*" %%v in ('node --version 2^>nul') do set NODE_VER=%%v
     echo  [OK] Node.js est deja installe : !NODE_VER!
-    goto :install_deps
+    goto :check_java
 )
 
 echo  [INFO] Node.js non detecte. Installation automatique...
@@ -53,7 +53,7 @@ if not errorlevel 1 (
         if not errorlevel 1 (
             for /f "tokens=*" %%v in ('node --version 2^>nul') do set NODE_VER=%%v
             echo  [OK] Node.js installe via winget : !NODE_VER!
-            goto :install_deps
+            goto :check_java
         )
     )
     echo  [WARN] winget indisponible ou a echoue, tentative par telechargement...
@@ -131,7 +131,104 @@ for /f "tokens=*" %%v in ('node --version 2^>nul') do set NODE_VER=%%v
 echo  [OK] Node.js installe avec succes : !NODE_VER!
 
 :: ═══════════════════════════════════════════════════════════
-::  ETAPE 5 : Installer les dependances npm du projet
+::  ETAPE 5 : Java deja installe ? (necessaire pour BRouter,
+::  la generation d'itineraires - voir brouter_manager.js)
+:: ═══════════════════════════════════════════════════════════
+:check_java
+where java >nul 2>&1
+if not errorlevel 1 (
+    for /f "tokens=*" %%v in ('java -version 2^>^&1 ^| findstr /i "version"') do set JAVA_VER=%%v
+    echo  [OK] Java est deja installe : !JAVA_VER!
+    goto :install_deps
+)
+
+echo  [INFO] Java non detecte (necessaire pour la generation d'itineraires BRouter). Installation automatique...
+echo.
+
+:: ═══════════════════════════════════════════════════════════
+::  ETAPE 6 : Essai via winget (Eclipse Temurin JRE 21)
+:: ═══════════════════════════════════════════════════════════
+where winget >nul 2>&1
+if not errorlevel 1 (
+    echo  [INFO] Installation via Windows Package Manager...
+    winget install -e --id EclipseAdoptium.Temurin.21.JRE --silent --accept-source-agreements --accept-package-agreements
+    if not errorlevel 1 (
+        for /f "tokens=2*" %%a in ('reg query "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment" /v Path 2^>nul') do set "SYS_PATH=%%b"
+        set "PATH=!SYS_PATH!;%PATH%"
+        where java >nul 2>&1
+        if not errorlevel 1 (
+            echo  [OK] Java installe via winget.
+            goto :install_deps
+        )
+    )
+    echo  [WARN] winget indisponible ou a echoue, tentative par telechargement...
+)
+
+:: ═══════════════════════════════════════════════════════════
+::  ETAPE 7 : Telechargement du MSI depuis l'API Adoptium (JRE
+::  Temurin 21 - meme version que celle utilisee en developpement)
+:: ═══════════════════════════════════════════════════════════
+echo  [INFO] Preparation du script de telechargement...
+
+set "PS1_JAVA=%TEMP%\allureplus_dl_java.ps1"
+set "JRE_MSI=%TEMP%\jre_setup.msi"
+
+(
+    echo $ErrorActionPreference = 'Stop'
+    echo Write-Host '  Telechargement du JRE Eclipse Temurin 21 ^(Adoptium^)...'
+    echo $url = 'https://api.adoptium.net/v3/installer/latest/21/ga/windows/x64/jre/hotspot/normal/eclipse?project=jdk'
+    echo $wc = New-Object System.Net.WebClient
+    echo $wc.DownloadFile^($url, '%JRE_MSI%'^)
+    echo Write-Host '  Telechargement termine.'
+) > "%PS1_JAVA%"
+
+powershell -ExecutionPolicy Bypass -NoProfile -File "%PS1_JAVA%"
+set DL_ERR_JAVA=%ERRORLEVEL%
+del /f /q "%PS1_JAVA%" >nul 2>&1
+
+if %DL_ERR_JAVA% neq 0 (
+    echo.
+    echo  [ERREUR] Le telechargement du JRE a echoue ^(code %DL_ERR_JAVA%^).
+    echo  Verifiez votre connexion Internet.
+    echo.
+    echo  Installation manuelle : https://adoptium.net/temurin/releases/?package=jre
+    start https://adoptium.net/temurin/releases/?package=jre
+    pause
+    exit /b 1
+)
+
+:: ═══════════════════════════════════════════════════════════
+::  ETAPE 8 : Installation silencieuse du MSI
+:: ═══════════════════════════════════════════════════════════
+echo  [INFO] Installation du JRE ^(mode silencieux^)...
+msiexec /i "%JRE_MSI%" /quiet /norestart
+set JRE_MSI_ERR=%ERRORLEVEL%
+
+if %JRE_MSI_ERR% neq 0 (
+    echo  [WARN] Installation silencieuse echouee ^(code %JRE_MSI_ERR%^). Ouverture du mode normal...
+    msiexec /i "%JRE_MSI%"
+)
+del /f /q "%JRE_MSI%" >nul 2>&1
+
+:: Recharger PATH depuis le registre systeme
+for /f "tokens=2*" %%a in ('reg query "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment" /v Path 2^>nul') do set "SYS_PATH=%%b"
+set "PATH=!SYS_PATH!;%PATH%"
+
+where java >nul 2>&1
+if errorlevel 1 (
+    echo.
+    echo  [ERREUR] Java n'est pas detecte apres installation.
+    echo  Fermez cette fenetre, REDEMARREZ votre PC, puis relancez install.bat
+    echo  ^(la generation d'itineraires BRouter restera indisponible tant que Java n'est pas installe^)
+    echo.
+    pause
+    goto :install_deps
+)
+
+echo  [OK] Java installe avec succes.
+
+:: ═══════════════════════════════════════════════════════════
+::  ETAPE 9 : Installer les dependances npm du projet
 :: ═══════════════════════════════════════════════════════════
 :install_deps
 echo.

@@ -1638,8 +1638,24 @@ const TRAINING_STATUS_MAP = {
   STRAINED:     { label: 'Sous tension',         color: '#DB2777', tier: 'attention' },
 };
 function trainingStatusCategory(phrase) {
-  const base = String(phrase || '').replace(/_\d+$/, '');
+  // .trim().toUpperCase() : DETRAINING est bien dans TRAINING_STATUS_MAP,
+  // donc un statut vu non traduit ("désentraînement" attendu, brut affiché)
+  // est plus probablement un decalage de casse/espace cote Garmin (deja
+  // vu : la meme donnee existe aussi sous forme "affichable" ailleurs dans
+  // l'API, pas garantie majuscules strictes) qu'une cle reellement absente -
+  // normaliser avant comparaison ne peut que rattraper ces cas, jamais nuire
+  // (nos cles sont deja toutes en MAJUSCULES).
+  const base = String(phrase || '').trim().toUpperCase().replace(/_\d+$/, '');
   return TRAINING_STATUS_MAP[base] || null;
+}
+// Repli si Garmin renvoie un libelle absent de TRAINING_STATUS_MAP (nouveau
+// statut cote Garmin, pas encore rencontre) : plutot que d'afficher le code
+// brut ("NO_RECENT_TRAINING_HISTORY") tel quel, on le rend lisible - pas
+// une vraie traduction (on ne connait pas son sens), mais au moins un texte
+// qui ne ressemble pas a une erreur et ne deborde plus du cadre (les
+// espaces redonnent des points de coupure a la mise en page).
+function prettifyUnknownTrainingStatus(phrase) {
+  return String(phrase || '').replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
 }
 
 async function loadWellnessRow() {
@@ -1683,7 +1699,7 @@ async function loadWellnessRow() {
     }
 
     if (tsJson.data) {
-      const info = trainingStatusCategory(tsJson.data.phrase) || { label: tsJson.data.phrase || '—', color: '#9CA3AF' };
+      const info = trainingStatusCategory(tsJson.data.phrase) || { label: tsJson.data.phrase ? prettifyUnknownTrainingStatus(tsJson.data.phrase) : '—', color: '#9CA3AF' };
       set('wellness-ts-value', info.label);
       const valEl = el('wellness-ts-value');
       if (valEl) valEl.style.color = info.color;

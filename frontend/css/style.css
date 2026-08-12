@@ -919,6 +919,11 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
 .profile-ind-card{border-right:1px solid var(--border);padding:10px 12px;}
 .profile-ind-card:last-child{border-right:none;}
 .profile-ind-value{font-family:var(--font);font-size:20px;font-weight:700;color:var(--text-primary);font-variant-numeric:tabular-nums;}
+/* Statut d'entrainement (seule valeur texte de cette rangee, les autres
+   sont des nombres courts) : meme garde-fou que #health-value-trainingStatus
+   (style.css ~L671) - un statut non traduit ("NO_STATUS" etc, sans espace)
+   deborderait sinon du cadre au lieu de passer a la ligne. */
+#wellness-ts-value{overflow-wrap:break-word;hyphens:auto;}
 .profile-ind-unit{font-family:var(--font-body);font-size:10.5px;color:var(--text-muted);}
 .profile-ind-label{font-family:var(--font-body);font-size:11px;color:var(--text-secondary);font-weight:600;margin-top:3px;}
 .profile-ind-sub{font-family:var(--font-body);font-size:10px;color:var(--text-muted);margin-top:1px;}

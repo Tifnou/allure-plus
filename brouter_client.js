@@ -22,7 +22,10 @@ function parseGpx(gpxText) {
 
 // waypoints: [{lat, lon}, ...] dans l'ordre de passage souhaite.
 // profile: nom du fichier .brf sans extension (ex: 'hiking-mountain').
-async function routeThroughPoints(waypoints, profile, { trackname } = {}) {
+// profileParams: overrides des variables `assign %nom%` exposees par le
+// profil .brf (ex: { avoid_unsafe: 'true' }) - passes tels quels en query
+// params, BRouter les substitue aux valeurs par defaut du profil.
+async function routeThroughPoints(waypoints, profile, { trackname, profileParams } = {}) {
   if (!Array.isArray(waypoints) || waypoints.length < 2) {
     throw new Error('routeThroughPoints necessite au moins 2 points de passage.');
   }
@@ -36,6 +39,7 @@ async function routeThroughPoints(waypoints, profile, { trackname } = {}) {
     format: 'gpx',
   });
   if (trackname) params.set('trackname', trackname);
+  if (profileParams) Object.entries(profileParams).forEach(([k, v]) => params.set(k, v));
 
   const url = `http://localhost:${getPort()}/brouter?${params.toString()}`;
   const res = await fetch(url);

@@ -115,8 +115,13 @@ function renderRoutesForm() {
       <div class="routes-number-row">
         <input type="number" id="routes-input-ascent" class="routes-number-input" min="0" max="5000" step="10" value="${routesState.ascentM}"> m
       </div>
-      <div class="routes-hint">Si le secteur ne permet pas de l'atteindre sans trop s'écarter de la distance/durée demandée, la meilleure option trouvée sera proposée avec un message clair.</div>
+    </div>
 
+    <div class="routes-field">
+      <div class="routes-field-label">Recherche élargie</div>
+      <div class="routes-hint">${routesHasAscentField()
+        ? "Si le secteur ne permet pas d'atteindre le D+ (ou la distance/durée) visés sans trop s'écarter, la meilleure option trouvée sera proposée avec un message clair."
+        : "Si le secteur ne permet pas d'atteindre la distance/durée visée sans trop s'écarter (impasse, réseau clairsemé…), la meilleure option trouvée sera proposée avec un message clair."}</div>
       <label class="routes-checkbox-row">
         <input type="checkbox" id="routes-input-search-wider" ${routesState.searchWider ? 'checked' : ''}>
         Chercher dans un rayon de
@@ -146,9 +151,12 @@ function renderRoutesForm() {
 
   if (routesHasAscentField()) {
     el('routes-input-ascent').oninput = e => { routesState.ascentM = parseInt(e.target.value, 10) || 0; };
-    el('routes-input-search-wider').onchange = e => { routesState.searchWider = e.target.checked; renderRoutesForm(); };
-    el('routes-input-search-radius').oninput = e => { routesState.searchRadiusKm = parseFloat(e.target.value) || 0; };
   }
+  // Recherche élargie : utile quel que soit le terrain (repli sur le D+ en
+  // trail, sur la distance/durée en route) - plus conditionnée par
+  // routesHasAscentField().
+  el('routes-input-search-wider').onchange = e => { routesState.searchWider = e.target.checked; renderRoutesForm(); };
+  el('routes-input-search-radius').oninput = e => { routesState.searchRadiusKm = parseFloat(e.target.value) || 0; };
 
   updateStartConfirmLine();
 }
@@ -297,6 +305,38 @@ async function routesEnsureTileAvailable(start, btn) {
   return true;
 }
 
+// Pas de canal de progression reel serveur->client (un seul aller-retour
+// HTTP, la generation peut prendre 20-40s avec recherche elargie +
+// alternatives) - une barre indeterminee + des messages qui tournent au
+// fil des etapes reelles connues (scan des directions, alternatives,
+// recherche elargie si activee, recherche de repetitions si D+ vise) evite
+// que l'attente donne l'impression que rien ne se passe.
+let _routesProgressTimer = null;
+function routesStartProgress() {
+  const steps = ['Recherche de directions autour du départ…', 'Analyse du relief du secteur…', 'Construction du tracé…', 'Recherche de tracés alternatifs…'];
+  if (routesHasAscentField() && routesState.ascentM) {
+    steps.push('Vérification du dénivelé…');
+    if (routesState.searchWider) steps.push('Recherche élargie de points de départ plus vallonnés…');
+    steps.push('Recherche de côtes à répéter pour compléter le D+…');
+  } else if (routesState.searchWider) {
+    steps.push('Vérification de la distance/durée…');
+    steps.push('Recherche élargie de points de départ mieux connectés…');
+  }
+  steps.push('Finalisation du tracé…');
+  const label = el('routes-progress-label');
+  let i = 0;
+  label.textContent = steps[0];
+  el('routes-progress').style.display = '';
+  _routesProgressTimer = setInterval(() => {
+    i = Math.min(i + 1, steps.length - 1);
+    label.textContent = steps[i];
+  }, 3500);
+}
+function routesStopProgress() {
+  if (_routesProgressTimer) { clearInterval(_routesProgressTimer); _routesProgressTimer = null; }
+  el('routes-progress').style.display = 'none';
+}
+
 async function routesGenerateClicked() {
   const btn = el('routes-generate-btn');
   btn.disabled = true;
@@ -308,6 +348,7 @@ async function routesGenerateClicked() {
     const tileReady = await routesEnsureTileAvailable(start, btn);
     if (!tileReady) return;
     btn.textContent = 'Génération…';
+    routesStartProgress();
 
     const body = {
       start: { lat: start.lat, lon: start.lon },
@@ -316,7 +357,7 @@ async function routesGenerateClicked() {
     };
     if (routesState.mode === 'distance') body.targetDistanceM = routesState.distanceKm * 1000;
     else body.targetDurationMin = routesState.durationMin;
-    if (routesHasAscentField() && routesState.searchWider && routesState.searchRadiusKm > 0) {
+    if (routesState.searchWider && routesState.searchRadiusKm > 0) {
       body.searchRadiusKm = routesState.searchRadiusKm;
     }
 
@@ -335,6 +376,7 @@ async function routesGenerateClicked() {
   } catch (err) {
     showToast('Erreur : ' + err.message, 'error');
   } finally {
+    routesStopProgress();
     btn.disabled = false;
     btn.textContent = 'Générer →';
   }
@@ -345,10 +387,17 @@ function toggleRouteCard(idx) {
   renderRoutesResults(routesState.lastResult);
 }
 
+const ROUTES_OPTION_COUNT_WORDS = ['', 'Une', 'Deux', 'Trois', 'Quatre', 'Cinq'];
+function routesResultsTitle(count) {
+  if (count <= 1) return 'Itinéraire proposé';
+  const word = ROUTES_OPTION_COUNT_WORDS[count] || count;
+  return `${word} options trouvées`;
+}
+
 function renderRoutesResults(data) {
   const header = el('routes-results-header');
   header.innerHTML = `
-    <div class="routes-results-title">${data.options.length > 1 ? 'Deux options trouvées' : 'Itinéraire proposé'}</div>
+    <div class="routes-results-title">${routesResultsTitle(data.options.length)}</div>
     ${data.warning ? `<div class="routes-warning-banner">${data.warning}</div>` : ''}
     ${data.paceProfileIsGeneric ? `<div class="routes-warning-banner routes-warning-banner--info">Durées estimées avec une allure générique — recalculez votre profil d'allure personnel dans Réglages pour des estimations plus fiables.</div>` : ''}
   `;
@@ -359,6 +408,7 @@ function renderRoutesResults(data) {
     const open = routesState.openIndex === idx;
     const durH = Math.floor(opt.predictedDurationMin / 60);
     const durM = Math.round(opt.predictedDurationMin % 60);
+    const hasRepeatZone = routesHasRepeatZone(opt);
 
     const card = document.createElement('div');
     card.className = 'routes-result-card';
@@ -376,6 +426,7 @@ function renderRoutesResults(data) {
         <div class="routes-commentary">${opt.commentary || ''}</div>
         <div class="routes-elev-container"><canvas id="routes-elev-${idx}"></canvas></div>
         <div class="routes-result-map" id="routes-map-${idx}"></div>
+        ${hasRepeatZone ? '<div class="routes-hint routes-map-legend"><span class="routes-legend-swatch routes-legend-swatch--repeat"></span> Portion(s) répétée(s) (aller-retour) &nbsp; <span class="routes-legend-swatch routes-legend-swatch--normal"></span> Reste du parcours</div>' : ''}
         <button class="btn-plans-restart routes-download-btn" id="routes-download-${idx}">⬇ Télécharger le GPX</button>
       </div>
     `;
@@ -389,8 +440,21 @@ function renderRoutesResults(data) {
   if (routesState.openIndex !== null) {
     const opt = data.options[routesState.openIndex];
     setTimeout(() => {
-      renderRouteMap(`routes-map-${routesState.openIndex}`, opt.points);
-      renderElevationChart(`routes-elev-${routesState.openIndex}`, opt.points);
+      // La carte et le profil sont deux rendus independants : une erreur
+      // dans l'un (ex. Leaflet) ne doit jamais empecher l'autre de s'afficher
+      // (bug reel constate : une exception dans renderRouteMap coupait aussi
+      // le profil d'altitude, enchaîné juste apres dans le meme callback).
+      let mapCtrl = null;
+      try {
+        mapCtrl = renderRouteMap(`routes-map-${routesState.openIndex}`, opt, { requestedStart: data.requestedStart, searchRadiusM: data.searchRadiusM });
+      } catch (err) {
+        console.error('[routes] Erreur rendu carte:', err);
+      }
+      renderElevationChart(`routes-elev-${routesState.openIndex}`, opt.points, (index) => {
+        if (!mapCtrl) return;
+        if (index === null || !mapCtrl.latLngs[index]) mapCtrl.hideCursor();
+        else mapCtrl.showCursorAt(mapCtrl.latLngs[index]);
+      });
     }, 0);
   }
 }
@@ -404,9 +468,26 @@ function haversineKm(a, b) {
   return 2 * R * Math.asin(Math.sqrt(h));
 }
 
-function renderElevationChart(canvasId, points) {
+// opt.repeatedSegments[].{startIdx,endIdx} (calculés côté serveur, cf
+// route_generator.js findRepeatedZoneIndexRange) désignent, pour chaque côte
+// distincte sollicitée, la plage de points correspondant à sa zone
+// d'aller-retour répétée - utilisé pour les colorer différemment sur la
+// carte (une par une, jusqu'à 3) et afficher la légende dédiée. Un parcours
+// peut solliciter plusieurs côtes différentes plutôt qu'une seule répétée
+// en boucle (cf commentaire de MAX_REPEAT_SEGMENTS côté serveur).
+function routesRepeatZones(opt) {
+  return (opt.repeatedSegments || []).filter(seg => Number.isInteger(seg.startIdx) && Number.isInteger(seg.endIdx) && seg.endIdx > seg.startIdx);
+}
+function routesHasRepeatZone(opt) {
+  return routesRepeatZones(opt).length > 0;
+}
+
+// onHoverIndex(index|null) est rappelé à chaque déplacement de la souris sur
+// le graphique (index du point survolé, ou null en sortie) - permet de
+// synchroniser un curseur sur la carte (cf renderRouteMap/showCursorAt).
+function renderElevationChart(canvasId, points, onHoverIndex) {
   const canvas = el(canvasId);
-  if (!canvas || typeof Chart === 'undefined' || !points || points.length === 0) return;
+  if (!canvas || typeof Chart === 'undefined' || !points || points.length === 0) return null;
   let cum = 0;
   const labels = [];
   const data = [];
@@ -415,25 +496,102 @@ function renderElevationChart(canvasId, points) {
     labels.push(cum.toFixed(1) + ' km');
     data.push(Math.round(points[i].ele));
   }
-  new Chart(canvas.getContext('2d'), {
+  const baseOptions = typeof chartOptions === 'function' ? chartOptions() : { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } };
+  const chart = new Chart(canvas.getContext('2d'), {
     type: 'line',
     data: { labels, datasets: [{ data, borderColor: '#16A34A', backgroundColor: 'rgba(22,163,74,0.12)', borderWidth: 1.5, pointRadius: 0, tension: 0.3, fill: true }] },
-    options: typeof chartOptions === 'function' ? chartOptions() : { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } },
+    options: {
+      ...baseOptions,
+      onHover: (evt, activeElements) => {
+        if (typeof onHoverIndex === 'function') onHoverIndex(activeElements.length ? activeElements[0].index : null);
+      },
+    },
   });
+  if (typeof onHoverIndex === 'function') {
+    canvas.addEventListener('mouseleave', () => onHoverIndex(null));
+  }
+  return chart;
 }
 
-function renderRouteMap(mapDivId, points) {
+// Renvoie un controleur { map, latLngs, showCursorAt, hideCursor } pour que
+// l'appelant (renderElevationChart au survol) puisse deplacer un repere sur
+// la carte en synchro avec le profil d'altitude, sans coupler les deux
+// fonctions entre elles.
+// context.requestedStart / context.searchRadiusM (optionnels, communs à
+// toutes les options d'une même génération) : affichent le point réellement
+// demandé et le rayon de recherche élargie, pour que l'écart entre ce point
+// et le départ réel du tracé (déjà minimisé côté serveur, cf
+// reorientLoopToClosestPoint) reste visible et compréhensible plutôt que
+// silencieux.
+function renderRouteMap(mapDivId, opt, context = {}) {
   const mapDiv = el(mapDivId);
-  if (!mapDiv || typeof L === 'undefined' || !points || points.length === 0) return;
+  const points = opt && opt.points;
+  if (!mapDiv || typeof L === 'undefined' || !points || points.length === 0) return null;
   const latLngs = points.map(p => [p.lat, p.lon]);
   const bounds = L.latLngBounds(latLngs);
   const map = L.map(mapDiv, { zoomControl: true, attributionControl: true });
   L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
     maxZoom: 19, attribution: '&copy; <a href="https://openstreetmap.org">OSM</a> &copy; <a href="https://carto.com">CARTO</a>',
   }).addTo(map);
-  L.polyline(latLngs, { color: '#2f6f3e', weight: 3.5 }).addTo(map);
-  L.marker(latLngs[0]).addTo(map);
-  map.fitBounds(bounds, { padding: [20, 20] });
+
+  const repeatZones = routesRepeatZones(opt).slice().sort((a, b) => a.startIdx - b.startIdx);
+  if (repeatZones.length > 0) {
+    // Alterne vert (parcours normal) / orange (zone repetee), une paire par
+    // côte sollicitée - genéralise le cas a une seule côte (comportement
+    // inchangé) comme a plusieurs.
+    let cursor = 0;
+    repeatZones.forEach(zone => {
+      const before = latLngs.slice(cursor, zone.startIdx + 1);
+      if (before.length > 1) L.polyline(before, { color: '#2f6f3e', weight: 3.5 }).addTo(map);
+      L.polyline(latLngs.slice(zone.startIdx, zone.endIdx + 1), { color: '#e8590c', weight: 4 }).addTo(map);
+      cursor = zone.endIdx;
+    });
+    const after = latLngs.slice(cursor);
+    if (after.length > 1) L.polyline(after, { color: '#2f6f3e', weight: 3.5 }).addTo(map);
+  } else {
+    L.polyline(latLngs, { color: '#2f6f3e', weight: 3.5 }).addTo(map);
+  }
+  L.marker(latLngs[0]).addTo(map).bindTooltip('Départ du tracé');
+
+  if (context.requestedStart) {
+    const reqLatLng = [context.requestedStart.lat, context.requestedStart.lon];
+    L.circleMarker(reqLatLng, { radius: 8, color: '#fff', weight: 2, fillColor: '#dc2626', fillOpacity: 0.95 })
+      .addTo(map).bindTooltip('Point demandé');
+    bounds.extend(reqLatLng);
+    if (context.searchRadiusM) {
+      L.circle(reqLatLng, { radius: context.searchRadiusM, color: '#dc2626', weight: 1.5, dashArray: '6 6', fillOpacity: 0.04 }).addTo(map);
+      // Etend bounds via une approximation degres/metres plutot que
+      // circle.getBounds() : cette dernière projette via this._map (pixels
+      // au zoom courant), qui n'existe pas encore avant le tout premier
+      // fitBounds sur une carte fraichement créée - ça plantait ("Cannot
+      // read properties of undefined (reading 'layerPointToLatLng')") et
+      // interrompait tout le rendu de la carte (et du profil, enchaîné juste
+      // après par l'appelant).
+      const dLat = context.searchRadiusM / 111320;
+      const dLon = context.searchRadiusM / (111320 * Math.cos(context.requestedStart.lat * Math.PI / 180));
+      bounds.extend([context.requestedStart.lat + dLat, context.requestedStart.lon]);
+      bounds.extend([context.requestedStart.lat - dLat, context.requestedStart.lon]);
+      bounds.extend([context.requestedStart.lat, context.requestedStart.lon + dLon]);
+      bounds.extend([context.requestedStart.lat, context.requestedStart.lon - dLon]);
+    }
+  }
+  map.fitBounds(bounds, { padding: [12, 12] });
+
+  let cursorMarker = null;
+  return {
+    map,
+    latLngs,
+    showCursorAt(latlng) {
+      if (!cursorMarker) {
+        cursorMarker = L.circleMarker(latlng, { radius: 7, color: '#fff', weight: 2, fillColor: '#2563eb', fillOpacity: 1 }).addTo(map);
+      } else {
+        cursorMarker.setLatLng(latlng);
+      }
+    },
+    hideCursor() {
+      if (cursorMarker) { map.removeLayer(cursorMarker); cursorMarker = null; }
+    },
+  };
 }
 
 async function downloadRouteGpx(option) {
