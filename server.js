@@ -542,7 +542,7 @@ app.get('/api/status', (req, res) => {
 // ─────────────────────────────────────────────
 const UPDATE_REPO = 'Tifnou/allure-plus';
 let _updateCheckCache = null; // { data, ts }
-const UPDATE_CHECK_TTL_MS = 60 * 60 * 1000; // 1h — evite de solliciter l'API GitHub (limite 60 req/h sans auth) a chaque ouverture de l'app
+const UPDATE_CHECK_TTL_MS = 10 * 60 * 1000; // 10 min — evite de solliciter l'API GitHub (limite 60 req/h sans auth) a chaque ouverture de l'app, tout en restant reactif
 
 function isNewerVersion(latest, current) {
   const a = String(latest).split('.').map(Number);
@@ -561,7 +561,8 @@ app.get('/api/check-update', async (req, res) => {
       return res.json(_updateCheckCache.data);
     }
     const r = await fetch(`https://api.github.com/repos/${UPDATE_REPO}/releases/latest`, {
-      headers: { 'Accept': 'application/vnd.github+json', 'User-Agent': 'AllurePlus-App' }
+      headers: { 'Accept': 'application/vnd.github+json', 'User-Agent': 'AllurePlus-App' },
+      cache: 'no-store',
     });
     if (!r.ok) return res.json({ updateAvailable: false });
     const rel = await r.json();
@@ -3116,14 +3117,37 @@ app.get('/api/plans/load/:id', (req, res) => {
   } catch(err) { handleError(res, err); }
 });
 
-app.listen(PORT, () => {
+// Demarrage avec retry sur EADDRINUSE : incident reel constate (12/08) - un
+// node.exe zombie (jamais tue proprement, ex: crash anterieur ou permissions)
+// restait sur le port pendant que start.bat en relancait un second qui
+// echouait a se lier ET plantait silencieusement (fenetre masquee par
+// -WindowStyle Hidden, cf start_server.ps1) sans que l'utilisateur le voie -
+// il continuait sans le savoir a utiliser l'ancien process avec son cache
+// memoire perime (cache de mise a jour notamment). Quelques tentatives
+// espacees laissent le temps a Windows de liberer le port si c'est juste
+// une course avec le "timeout /t 2" de start.bat, et le message clair dans
+// server_err.log rend le vrai blocage diagnosticable si ca persiste.
+function startServer(retriesLeft = 5) {
+  const httpServer = app.listen(PORT, () => {
     console.log('\n[START] Allure+ Dashboard demarre !');
     console.log(`[INFO] Ouvrez votre navigateur sur : http://localhost:${PORT}\n`);
     if (ENV_EMAIL) {
-    console.log(`[OK] Auto-login configure pour : ${ENV_EMAIL}`);
+      console.log(`[OK] Auto-login configure pour : ${ENV_EMAIL}`);
     } else {
       console.log('[INFO] Aucun .env detecte - connexion requise via navigateur');
     }
   });
-});
+  httpServer.on('error', (err) => {
+    if (err.code === 'EADDRINUSE' && retriesLeft > 0) {
+      console.error(`[WARN] Port ${PORT} deja utilise (probablement un ancien node.exe pas encore libere) - nouvelle tentative dans 2s (${retriesLeft} restantes)`);
+      setTimeout(() => startServer(retriesLeft - 1), 2000);
+    } else {
+      console.error(`[ERREUR FATALE] Impossible de demarrer sur le port ${PORT} : ${err.message}`);
+      console.error('[ERREUR FATALE] Verifiez qu\'aucun autre node.exe ne tourne deja (Gestionnaire des taches) et relancez.');
+      process.exit(1);
+    }
+  });
+}
 
+startServer();
+});
