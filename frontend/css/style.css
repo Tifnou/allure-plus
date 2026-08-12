@@ -348,9 +348,14 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
   font-family:var(--font-body); font-size:10.5px; font-weight:700;
   color:var(--accent-text); background:var(--accent-light);
   border:1px solid var(--accent); border-radius:20px; padding:3px 9px;
-  cursor:pointer; transition:all var(--transition);
+  cursor:pointer; transition:background var(--transition), color var(--transition);
+  animation:update-badge-pulse 1.8s ease-in-out infinite;
 }
-.app-update-badge:hover{background:var(--accent); color:#fff;}
+.app-update-badge:hover{background:var(--accent); color:#fff; animation-play-state:paused;}
+@keyframes update-badge-pulse{
+  0%, 100% { box-shadow:0 0 0 0 color-mix(in srgb, var(--accent) 45%, transparent); transform:scale(1); }
+  50%      { box-shadow:0 0 0 6px color-mix(in srgb, var(--accent) 0%, transparent); transform:scale(1.04); }
+}
 .sidebar-footer-divider{height:1px;background:var(--border-light);margin:4px 0;}
 
 .server-controls{display:flex;gap:6px;flex-direction:column;}
