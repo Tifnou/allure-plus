@@ -432,22 +432,27 @@ function showUpdateModal() {
   const close = () => bd.remove();
   bd.querySelector('#upd-later').onclick = close;
   bd.querySelector('#upd-download').onclick = () => {
-    // target="_blank" est indispensable ici : l'appli tourne dans une
-    // fenetre Chrome/Edge "--app=" (start.bat/open_browser.ps1), qui ignore
-    // silencieusement une navigation MEME FENETRE vers une origine externe
-    // (github.com) - constat reel (13/08, PC distant bloque sur l'ancienne
-    // version : clic sur "Telecharger" sans aucun effet). "download" seul
-    // ne suffit pas non plus : l'attribut est ignore par les navigateurs
-    // pour une URL cross-origin, donc sans target="_blank" rien ne se
-    // produit du tout hors mode fenetre classique.
+    // Un <a download> declenche le telechargement sans ouvrir un nouvel
+    // onglet vide (contrairement a window.open, qui laissait une page
+    // blanche derriere le telechargement — constat utilisateur). Le
+    // telechargement demarre bien silencieusement (verifie 13/08), mais
+    // l'appli tourne dans une fenetre Chrome/Edge "--app=" sans barre de
+    // telechargement visible (pas de chrome de navigateur classique) - sans
+    // ce toast, rien ne confirme a l'utilisateur que le clic a eu un effet.
     const a = document.createElement('a');
     a.href = _updateInfo.downloadUrl;
-    a.target = '_blank';
-    a.rel = 'noopener';
+    a.download = '';
     document.body.appendChild(a);
     a.click();
     a.remove();
     close();
+    // Pas de 3e argument (duree) : campus.js redefinit showToast (charge
+    // apres app.js, ecrase cette fonction) avec une signature a 2 parametres
+    // seulement (msg, type) et une duree fixe de 4s cote-a-cote - un 3e
+    // argument ici serait silencieusement ignore.
+    if (typeof showToast === 'function') {
+      showToast('Téléchargement lancé — vérifiez votre dossier Téléchargements pour installer la mise à jour', 'success');
+    }
   };
   attachBackdropClose(bd, close);
 }
