@@ -726,10 +726,12 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
    visible par-dessus, quelle que soit la largeur de la barre - sinon un
    remplissage opaque qui depasse (ou n'atteint pas) la plage optimale la
    recouvre entierement et la rend invisible, seul moment ou elle serait
-   pourtant utile a voir. Pas de fond (juste les pointilles) : var(--text-primary)
-   est deja noir en theme clair / blanc en theme sombre, pas besoin d'une
-   2e regle [data-theme="dark"] separee pour ca.*/
-.health-bar-target{position:absolute; top:-1px; bottom:-1px; background:transparent; border-left:2px dashed var(--text-primary); border-right:2px dashed var(--text-primary); opacity:0.6; pointer-events:none;}
+   pourtant utile a voir. Pas de fond (juste le cadre en pointilles, sur les
+   4 cotes, pas seulement gauche/droite) : var(--text-primary) est deja noir
+   en theme clair / blanc casse (pas blanc pur, #E8EAF2) en theme sombre,
+   pas besoin d'une regle [data-theme="dark"] separee pour ca. Opacite assez
+   forte pour rester net sur les 3 couleurs de remplissage differentes.*/
+.health-bar-target{position:absolute; top:-1px; bottom:-1px; background:transparent; border:2px dashed var(--text-primary); border-radius:20px; opacity:0.9; pointer-events:none;}
 .health-bar-fill{position:absolute; top:0; bottom:0; left:0; background:var(--accent); border-radius:20px 0 0 20px; transition:width .5s ease;}
 .health-bar-value{font-family:var(--font-mono); font-size:12px; font-weight:700; color:var(--text-primary); text-align:right; white-space:nowrap;}
 .health-bar-range{font-family:var(--font-body); font-size:10.5px; font-weight:500; color:var(--text-muted); margin-left:4px;}
