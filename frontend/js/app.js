@@ -432,12 +432,18 @@ function showUpdateModal() {
   const close = () => bd.remove();
   bd.querySelector('#upd-later').onclick = close;
   bd.querySelector('#upd-download').onclick = () => {
-    // Un <a download> declenche le telechargement sans ouvrir un nouvel
-    // onglet vide (contrairement a window.open, qui laissait une page
-    // blanche derriere le telechargement — constat utilisateur).
+    // target="_blank" est indispensable ici : l'appli tourne dans une
+    // fenetre Chrome/Edge "--app=" (start.bat/open_browser.ps1), qui ignore
+    // silencieusement une navigation MEME FENETRE vers une origine externe
+    // (github.com) - constat reel (13/08, PC distant bloque sur l'ancienne
+    // version : clic sur "Telecharger" sans aucun effet). "download" seul
+    // ne suffit pas non plus : l'attribut est ignore par les navigateurs
+    // pour une URL cross-origin, donc sans target="_blank" rien ne se
+    // produit du tout hors mode fenetre classique.
     const a = document.createElement('a');
     a.href = _updateInfo.downloadUrl;
-    a.download = '';
+    a.target = '_blank';
+    a.rel = 'noopener';
     document.body.appendChild(a);
     a.click();
     a.remove();
