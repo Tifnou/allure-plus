@@ -81,8 +81,13 @@ function renderHealthHistoryBody(bodyEl, chartId, cfg, result) {
       bodyEl.innerHTML = '<div class="health-empty">Aucune donnée disponible.</div>';
       return;
     }
+    // Echelle COMMUNE aux 3 barres (pas une par barre) : sinon chaque barre
+    // s'etire independamment jusqu'a remplir sa propre ligne, rendant leurs
+    // largeurs incomparables d'une ligne a l'autre - une plage cible a 262
+    // (anaerobique) semblait alors "aller aussi loin" qu'une plage a 577
+    // (aerobie elevee), chacune etiree a l'echelle de sa propre ligne.
+    const scale = Math.max(...bars.map(b => Math.max(b.value, b.max)), 1) * 1.15;
     bodyEl.innerHTML = `<div class="health-bars">${bars.map(b => {
-      const scale = Math.max(b.value, b.max, 1) * 1.15;
       const fillPct = Math.min((b.value / scale) * 100, 100);
       const targetLeft = (b.min / scale) * 100;
       const targetWidth = ((b.max - b.min) / scale) * 100;
