@@ -1346,14 +1346,12 @@ function groupEffortsByDuration(effortEntries, vma, isTrail) {
     const dur = lap.elapsedDuration || lap.movingDuration || lap.duration || 0;
     let group = groups.find(g => Math.abs(dur - g.anchorDuration) <= Math.max(g.anchorDuration * 0.20, 8));
     if (!group) {
-      group = { anchorDuration: dur, memberIdx: [], paces: [], hrValues: [], elevGains: [], distances: [] };
+      group = { anchorDuration: dur, memberIdx: [], paces: [], hrValues: [] };
       groups.push(group);
     }
     group.memberIdx.push(idx);
     if (lap.averageSpeed > 0) group.paces.push(1000 / lap.averageSpeed);
     if (lap.averageHR) group.hrValues.push(Math.round(lap.averageHR));
-    group.elevGains.push(lap.elevationGain || 0);
-    group.distances.push(lap.distance || 0);
   });
   groups.forEach(g => {
     g.repCount = g.memberIdx.length;
@@ -1369,19 +1367,7 @@ function groupEffortsByDuration(effortEntries, vma, isTrail) {
       g.regularityMaxEcart = null; g.regularityLabel = null; g.splitDiffSec = null;
     }
     g.hrDriftBpm = g.hrValues.length >= 2 ? (g.hrValues[g.hrValues.length - 1] - g.hrValues[0]) : null;
-    // Une repetition courue sur une pente marquee (D+ moyen > 10m/km, meme
-    // seuil que le mode Circuits pour "terrain vallonne") doit etre jugee
-    // avec la correction trail, MEME SI l'activite entiere n'est pas taguee
-    // "Trail" par Garmin (ex: seance de cote enregistree en type "Course") —
-    // sinon l'allure, mecaniquement plus lente en montee, se fait comparer a
-    // tort aux zones plates et affiche une intensite plus faible que la
-    // realite (ex: "AS42 — Allure Marathon" au lieu de "S60 — Seuil 60min"
-    // pour un effort de seuil couru en cote).
-    const totalDist = g.distances.reduce((a, b) => a + b, 0);
-    const totalElev = g.elevGains.reduce((a, b) => a + b, 0);
-    const elevPerKm = totalDist > 0 ? (totalElev / (totalDist / 1000)) : 0;
-    const groupIsGraded = isTrail || elevPerKm > 10;
-    g.zoneKey = (vma && g.avgPaceSecKm) ? matchZoneFromPaceTrailAware(g.avgPaceSecKm, vma, groupIsGraded) : null;
+    g.zoneKey = (vma && g.avgPaceSecKm) ? matchZoneFromPaceTrailAware(g.avgPaceSecKm, vma, isTrail) : null;
     g.zoneLabel = (g.zoneKey && typeof ALLURE_PLUS_ZONES !== 'undefined') ? ALLURE_PLUS_ZONES[g.zoneKey]?.label : null;
     g.zoneColor = (g.zoneKey && typeof ALLURE_PLUS_ZONES !== 'undefined') ? ALLURE_PLUS_ZONES[g.zoneKey]?.color : null;
   });
@@ -1400,7 +1386,19 @@ async function loadActivityAnalysis(activity) {
 
   // Contexte pour la classification en zone (VMA du coureur + trail ou route)
   const activityTypeLower = (activity.activityType || '').toLowerCase();
-  const isTrail = activityTypeLower.includes('trail');
+  // Meme methode que pour les allures affichees dans le plan/l'analyse
+  // seance prevue/realisee (cf isTrailSession, campus.js) : on se fie a ce
+  // que la SEANCE declare (D+ attendu, bloc en cote, texte "cote/montee"),
+  // jamais au D+ reellement grimpe pendant l'activite (un profil vallonne ne
+  // signifie pas que la seance visait des allures ajustees) ni au seul type
+  // Garmin de l'activite (une seance en cote peut tres bien etre enregistree
+  // en type "Course"). Si cette activite est liee a une seance du plan, sa
+  // detection cote/trail (deja calculee et stockee) fait autorite ; sinon on
+  // retombe sur le type Garmin, seul signal disponible pour une sortie libre.
+  const linkedRecord = (typeof _analysisIndex !== 'undefined') ? _analysisIndex.byActivity[String(activity.id)] : null;
+  const isTrail = linkedRecord
+    ? !!linkedRecord.sessionSnapshot?.isTrail
+    : activityTypeLower.includes('trail');
   // Les zones d'allure (S60, AS10, EF...) sont calibrées sur la course à pied
   // — les appliquer à une autre activité (vélo, marche, cardio...) produirait
   // une analyse dénuée de sens (allure vélo comparée à une zone de course).
