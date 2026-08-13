@@ -241,6 +241,7 @@ app.post('/api/user-data', requireSession, (req, res) => {
   const store = readJsonSafe(USER_DATA_FILE, {});
   store[email] = { ...(store[email] || {}), ...updates };
   writeJsonSafe(USER_DATA_FILE, store);
+  Object.keys(updates).forEach(lsKey => scheduleSync('user_data', lsKey, email));
   res.json({ success: true });
 });
 

@@ -127,6 +127,19 @@ const SYNC_TYPES = {
     toEntries(obj) { return obj ? { profile: obj } : {}; },
     fromEntries(map) { return map.profile || null; },
   },
+  // { [email]: { [cleLocalStorage]: valeur } } - contrairement aux autres
+  // types, le fichier local est deja indexe par compte (plusieurs comptes
+  // peuvent en theorie partager le meme serveur, cf PREFS_FILE) : on ne push/
+  // pull JAMAIS que la tranche `rawLocal[email]` du compte courant, jamais
+  // les autres comptes eventuellement presents dans le meme fichier - sinon
+  // un push enverrait les donnees d'un autre compte vers le cloud de celui-ci.
+  user_data: {
+    file: path.join(DATA_DIR, 'user_data.json'),
+    sidecarFile: path.join(DATA_DIR, 'user_data.sync.json'),
+    defaultLocal: {},
+    toEntries(rawLocal, email) { return { ...((rawLocal || {})[email] || {}) }; },
+    fromEntries(map, email, rawLocal) { return { ...(rawLocal || {}), [email]: map }; },
+  },
 };
 
 // ─── Etat en memoire (dirty keys + debounce + statut) ───────────────────
@@ -169,13 +182,15 @@ function scheduleSync(type, key, email, deleted = false) {
 // Applique une enveloppe distante (recue par push ou pull) au fichier local
 // - n'adopte une entree que si elle est strictement plus recente que ce que
 // le sidecar local connait deja (protege contre l'ecrasement d'une donnee
-// locale plus fraiche par un echo/une valeur perimee).
-function reconcileEnvelope(type, envelope) {
+// locale plus fraiche par un echo/une valeur perimee). `email` n'est utilise
+// que par les types dont le fichier local est lui-meme indexe par compte
+// (voir user_data) - les autres adaptateurs l'ignorent silencieusement.
+function reconcileEnvelope(type, envelope, email) {
   const cfg = SYNC_TYPES[type];
   if (!cfg || !envelope || !envelope.entries) return;
   const sidecar = readJsonSafe(cfg.sidecarFile, {});
   const local = readJsonSafe(cfg.file, cfg.defaultLocal);
-  const map = cfg.toEntries(local);
+  const map = cfg.toEntries(local, email);
   let changed = false;
 
   Object.entries(envelope.entries).forEach(([key, entry]) => {
@@ -193,7 +208,7 @@ function reconcileEnvelope(type, envelope) {
   });
 
   if (changed) {
-    writeJsonSafe(cfg.file, cfg.fromEntries(map));
+    writeJsonSafe(cfg.file, cfg.fromEntries(map, email, local));
     writeJsonSafe(cfg.sidecarFile, sidecar);
   }
 }
@@ -206,7 +221,7 @@ async function flushType(type) {
 
   const sidecar = readJsonSafe(cfg.sidecarFile, {});
   const local = readJsonSafe(cfg.file, cfg.defaultLocal);
-  const map = cfg.toEntries(local);
+  const map = cfg.toEntries(local, email);
 
   const entries = {};
   keys.forEach(key => {
@@ -219,7 +234,7 @@ async function flushType(type) {
   // Succes : ces cles precises sont poussees, on les retire du set "sale"
   // (une nouvelle ecriture locale pendant l'appel reseau les y remettra).
   keys.clear();
-  reconcileEnvelope(type, envelope);
+  reconcileEnvelope(type, envelope, email);
   status.lastSyncAt = new Date().toISOString();
   status.lastSyncOk = true;
   status.lastError = null;
@@ -236,7 +251,7 @@ async function backfillUnsyncedLocal(type, email) {
   const cfg = SYNC_TYPES[type];
   const sidecar = readJsonSafe(cfg.sidecarFile, {});
   const local = readJsonSafe(cfg.file, cfg.defaultLocal);
-  const map = cfg.toEntries(local);
+  const map = cfg.toEntries(local, email);
   const missingKeys = Object.keys(map).filter(k => !sidecar[k]);
   if (missingKeys.length === 0) return;
 
@@ -248,7 +263,7 @@ async function backfillUnsyncedLocal(type, email) {
   });
   writeJsonSafe(cfg.sidecarFile, sidecar);
   const envelope = await syncClient.pushEntries(type, email, entries);
-  reconcileEnvelope(type, envelope);
+  reconcileEnvelope(type, envelope, email);
 }
 
 // Pull complet de tous les types enregistres - au demarrage du serveur et
@@ -261,7 +276,7 @@ async function runFullReconciliation(email) {
   for (const type of Object.keys(SYNC_TYPES)) {
     try {
       const envelope = await syncClient.pullEnvelope(type, email);
-      reconcileEnvelope(type, envelope);
+      reconcileEnvelope(type, envelope, email);
       await backfillUnsyncedLocal(type, email);
     } catch (e) {
       anyError = `${type}: ${e.message}`;
