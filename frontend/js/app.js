@@ -1420,7 +1420,38 @@ async function loadActivityAnalysis(activity) {
   }
 
   if (!isRunActivity) {
-    lapsEl.innerHTML = '<p class="no-data" style="font-size:11px">Analyse détaillée disponible pour la course à pied et le trail uniquement</p>';
+    // Pas d'analyse par zone d'allure hors course à pied/trail (cf. plus
+    // haut), mais Garmin envoie quand même des laps pour les autres sports
+    // (auto-lap à distance fixe : ~5 km en vélo, ~1 km en marche/rando...) —
+    // autant les afficher tels quels (tableau brut, sans interprétation)
+    // plutôt que de masquer une donnée que Garmin fournit déjà.
+    try {
+      const result = await fetchJSON(`/api/activity/${activity.id}/laps`);
+      const validLaps = Array.isArray(result?.laps) ? result.laps : [];
+      if (validLaps.length > 0) {
+        lapsEl.innerHTML = `
+          <table class="laps-table">
+            <thead><tr><th>Segment</th><th>Durée</th><th>Allure</th><th>FC</th></tr></thead>
+            <tbody>${validLaps.map(lap => {
+              const dur  = Math.round(lap.elapsedDuration || lap.movingDuration || lap.duration || 0);
+              const pace = (lap.averageSpeed && lap.averageSpeed > 0) ? formatPace(1000/lap.averageSpeed) : '—';
+              const hr   = lap.averageHR ? Math.round(lap.averageHR)+' bpm' : '—';
+              const dist = lap.distance ? (lap.distance/1000).toFixed(2)+' km' : '—';
+              return `<tr class="lap-row">
+                <td>${dist}</td>
+                <td>${formatDuration(dur)}</td>
+                <td class="pace-value">${pace}</td>
+                <td class="hr-value">${hr}</td>
+              </tr>`;
+            }).join('')}</tbody>
+          </table>`;
+      } else {
+        lapsEl.innerHTML = '<p class="no-data" style="font-size:11px">Intervalles non disponibles pour cette activité</p>';
+      }
+    } catch(e) {
+      lapsEl.innerHTML = '<p class="no-data">Chargement impossible</p>';
+      console.error('Laps error:', e);
+    }
     const basics = buildBasicAnalysis(activity);
     analysisEl.innerHTML = basics.map(i=>`<div class="analysis-item">${i}</div>`).join('') || '<p class="no-data">Aucune donnée disponible</p>';
     return;
