@@ -1,0 +1,205 @@
+// Orchestration de la synchro cross-appareils (voir sync-relay/ pour le
+// relais cloud, sync_client.js pour le protocole bas niveau). Ce module
+// traduit chaque fichier local data/<X>.json en une collection cle->valeur
+// horodatee (l'enveloppe generique que comprend le relais), et inversement.
+//
+// Principe de fusion "dernier ecrit gagne, par element" (voir CLAUDE.md /
+// plan de session) : les metadonnees de synchro (updatedAt/deletedAt) ne
+// sont JAMAIS ecrites dans le fichier metier lui-meme (sauf session_analyses/
+// pace_profile qui en ont deja un nativement, reutilise tel quel) - elles
+// vivent dans un fichier sidecar separe data/<X>.sync.json, invisible du
+// reste du code (aucune route existante ne les lit). Ca garantit qu'aucun
+// champ inattendu n'apparait jamais dans les reponses API existantes.
+//
+// scheduleSync(type, key, email, deleted) doit etre appele juste APRES
+// chaque ecriture locale reussie (writeJsonSafe) sur un fichier synchronise -
+// jamais a la place de l'ecriture locale, qui reste la source de verite
+// immediate pour l'utilisateur courant.
+const fs = require('fs');
+const path = require('path');
+const syncClient = require('./sync_client');
+
+const DATA_DIR = path.join(__dirname, 'data');
+try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch (e) {}
+
+function readJsonSafe(filePath, fallback) {
+  try {
+    if (!fs.existsSync(filePath)) return fallback;
+    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  } catch (e) { return fallback; }
+}
+function writeJsonSafe(filePath, data) {
+  try {
+    fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
+  } catch (e) {
+    console.error(`[sync] Ecriture ${path.basename(filePath)} echouee:`, e.message);
+  }
+}
+
+// ─── Registre des types synchronises ────────────────────────────────────
+// toEntries(local)   : transforme la forme native du fichier (array/objet)
+//                      en map { cle-metier: valeur } pour la fusion.
+// fromEntries(map)   : operation inverse, reconstruit la forme native.
+// Chaque type ajoute ici doit avoir son pendant cote sync-relay/src/index.js
+// (ALLOWED_TYPES).
+const SYNC_TYPES = {
+  weight_history: {
+    file: path.join(DATA_DIR, 'weight_history.json'),
+    sidecarFile: path.join(DATA_DIR, 'weight_history.sync.json'),
+    defaultLocal: [],
+    toEntries(list) {
+      const map = {};
+      (list || []).forEach(item => { map[item.date] = item; });
+      return map;
+    },
+    fromEntries(map) {
+      return Object.values(map).sort((a, b) => new Date(a.date) - new Date(b.date));
+    },
+  },
+};
+
+// ─── Etat en memoire (dirty keys + debounce + statut) ───────────────────
+const _dirty = {};   // type -> Set(cles) pas encore poussees avec succes
+const _timers = {};  // type -> handle setTimeout (debounce)
+const _emailByType = {}; // type -> dernier email connu (pour le flush debounced)
+const DEBOUNCE_MS = 4000;
+
+const status = { lastSyncAt: null, lastSyncOk: null, lastError: null, configured: syncClient.isConfigured() };
+
+function getSyncStatus() {
+  return { ...status };
+}
+
+// Marque une cle "sale" dans le sidecar (horodatage immediat) et programme
+// un push debounce (absorbe les ecritures rafales, ex: import en masse).
+function scheduleSync(type, key, email, deleted = false) {
+  if (!syncClient.isConfigured() || !email || !key) return;
+  const cfg = SYNC_TYPES[type];
+  if (!cfg) return;
+
+  const sidecar = readJsonSafe(cfg.sidecarFile, {});
+  const now = new Date().toISOString();
+  sidecar[key] = deleted ? { deletedAt: now, updatedAt: now } : { updatedAt: now, deletedAt: null };
+  writeJsonSafe(cfg.sidecarFile, sidecar);
+
+  _dirty[type] = _dirty[type] || new Set();
+  _dirty[type].add(key);
+  _emailByType[type] = email;
+
+  if (_timers[type]) clearTimeout(_timers[type]);
+  _timers[type] = setTimeout(() => {
+    flushType(type).catch(e => {
+      status.lastError = `${type}: ${e.message}`;
+      console.error(`[sync] flush ${type} echoue:`, e.message);
+    });
+  }, DEBOUNCE_MS);
+}
+
+// Applique une enveloppe distante (recue par push ou pull) au fichier local
+// - n'adopte une entree que si elle est strictement plus recente que ce que
+// le sidecar local connait deja (protege contre l'ecrasement d'une donnee
+// locale plus fraiche par un echo/une valeur perimee).
+function reconcileEnvelope(type, envelope) {
+  const cfg = SYNC_TYPES[type];
+  if (!cfg || !envelope || !envelope.entries) return;
+  const sidecar = readJsonSafe(cfg.sidecarFile, {});
+  const local = readJsonSafe(cfg.file, cfg.defaultLocal);
+  const map = cfg.toEntries(local);
+  let changed = false;
+
+  Object.entries(envelope.entries).forEach(([key, entry]) => {
+    const localMeta = sidecar[key];
+    const localTs = localMeta ? (localMeta.deletedAt || localMeta.updatedAt) : null;
+    if (localTs && entry.updatedAt <= localTs) return; // local deja a jour ou plus recent
+
+    if (entry.deletedAt) {
+      delete map[key];
+    } else {
+      map[key] = entry.value;
+    }
+    sidecar[key] = { updatedAt: entry.updatedAt, deletedAt: entry.deletedAt || null };
+    changed = true;
+  });
+
+  if (changed) {
+    writeJsonSafe(cfg.file, cfg.fromEntries(map));
+    writeJsonSafe(cfg.sidecarFile, sidecar);
+  }
+}
+
+async function flushType(type) {
+  const cfg = SYNC_TYPES[type];
+  const keys = _dirty[type];
+  const email = _emailByType[type];
+  if (!cfg || !keys || keys.size === 0 || !email) return;
+
+  const sidecar = readJsonSafe(cfg.sidecarFile, {});
+  const local = readJsonSafe(cfg.file, cfg.defaultLocal);
+  const map = cfg.toEntries(local);
+
+  const entries = {};
+  keys.forEach(key => {
+    const meta = sidecar[key];
+    if (!meta) return; // ne devrait pas arriver (ecrit par scheduleSync avant ce flush)
+    entries[key] = { value: meta.deletedAt ? null : (map[key] ?? null), updatedAt: meta.updatedAt, deletedAt: meta.deletedAt || null };
+  });
+
+  const envelope = await syncClient.pushEntries(type, email, entries);
+  // Succes : ces cles precises sont poussees, on les retire du set "sale"
+  // (une nouvelle ecriture locale pendant l'appel reseau les y remettra).
+  keys.clear();
+  reconcileEnvelope(type, envelope);
+  status.lastSyncAt = new Date().toISOString();
+  status.lastSyncOk = true;
+  status.lastError = null;
+}
+
+// Pousse les elements locaux qui n'ont ENCORE JAMAIS ete vus par la synchro
+// (aucune entree sidecar) - le cas typique est une donnee saisie AVANT
+// l'ajout de ce mecanisme (ou avant la toute premiere synchro reussie sur
+// cette machine), qui ne serait sinon jamais poussee (rien ne la modifie
+// plus pour re-declencher scheduleSync). Sans ca, un utilisateur avec des
+// mois d'historique existant verrait seulement ses FUTURES saisies se
+// synchroniser, jamais son historique deja present.
+async function backfillUnsyncedLocal(type, email) {
+  const cfg = SYNC_TYPES[type];
+  const sidecar = readJsonSafe(cfg.sidecarFile, {});
+  const local = readJsonSafe(cfg.file, cfg.defaultLocal);
+  const map = cfg.toEntries(local);
+  const missingKeys = Object.keys(map).filter(k => !sidecar[k]);
+  if (missingKeys.length === 0) return;
+
+  const now = new Date().toISOString();
+  const entries = {};
+  missingKeys.forEach(k => {
+    sidecar[k] = { updatedAt: now, deletedAt: null };
+    entries[k] = { value: map[k], updatedAt: now, deletedAt: null };
+  });
+  writeJsonSafe(cfg.sidecarFile, sidecar);
+  const envelope = await syncClient.pushEntries(type, email, entries);
+  reconcileEnvelope(type, envelope);
+}
+
+// Pull complet de tous les types enregistres - au demarrage du serveur et
+// via un job periodique (voir server.js). Rapatrie ce que les autres
+// appareils ont deja synchronise, PUIS pousse ce qui existe localement mais
+// n'a encore jamais ete synchronise (voir backfillUnsyncedLocal).
+async function runFullReconciliation(email) {
+  if (!syncClient.isConfigured() || !email) return;
+  let anyError = null;
+  for (const type of Object.keys(SYNC_TYPES)) {
+    try {
+      const envelope = await syncClient.pullEnvelope(type, email);
+      reconcileEnvelope(type, envelope);
+      await backfillUnsyncedLocal(type, email);
+    } catch (e) {
+      anyError = `${type}: ${e.message}`;
+      console.error(`[sync] reconciliation ${type} echouee:`, e.message);
+    }
+  }
+  status.lastSyncAt = new Date().toISOString();
+  status.lastSyncOk = !anyError;
+  status.lastError = anyError;
+}
+
+module.exports = { scheduleSync, runFullReconciliation, getSyncStatus, SYNC_TYPES };

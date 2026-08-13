@@ -54,6 +54,7 @@ const { getZoneRange, annotatePaceZones, ZONE_LABELS } = require('./zones');
 const { isBrouterConfigured, isTilePresent, getTileRemoteSize, downloadTile } = require('./brouter_manager');
 const { geocode, getCommunesForPostcode, getCommunesForDepartment, searchStreet, getTownHall, generateRouteOptions, buildGpxXml } = require('./route_generator');
 const { getPaceProfile, refreshPaceProfile } = require('./pace_profile');
+const { scheduleSync, runFullReconciliation, getSyncStatus } = require('./sync');
 const { buildPlanWorkbook } = require('./xlsx_export');
 const {
   campusLogin,
@@ -535,6 +536,13 @@ app.get('/api/status', (req, res) => {
     brouterConfigured: isBrouterConfigured(),
     version:        APP_VERSION,
   });
+});
+
+// Statut de la synchro cross-appareils (voir sync.js) - affiche par l'UI
+// (sync-status-bar, sidebar) pour confirmer que les donnees perso sont a
+// jour avec le cloud, ou signaler un probleme.
+app.get('/api/sync/status', requireSession, (req, res) => {
+  res.json(getSyncStatus());
 });
 
 // ─────────────────────────────────────────────
@@ -1694,6 +1702,7 @@ app.post('/api/weight-history', requireSession, (req, res) => {
     if (idx !== -1) history[idx] = entry; else history.push(entry);
     history.sort((a, b) => new Date(a.date) - new Date(b.date));
     writeJsonSafe(WEIGHT_HISTORY_FILE, history);
+    scheduleSync('weight_history', entryDate, req.session.email);
     res.json({ success: true, entry, history });
   } catch (err) { handleError(res, err); }
 });
@@ -1703,6 +1712,7 @@ app.delete('/api/weight-history/:date', requireSession, (req, res) => {
     const history = readJsonSafe(WEIGHT_HISTORY_FILE, []);
     const filtered = history.filter(e => e.date !== req.params.date);
     writeJsonSafe(WEIGHT_HISTORY_FILE, filtered);
+    scheduleSync('weight_history', req.params.date, req.session.email, true);
     res.json({ success: true });
   } catch (err) { handleError(res, err); }
 });
@@ -3242,6 +3252,13 @@ function startServer(retriesLeft = 5) {
     console.log(`[INFO] Ouvrez votre navigateur sur : http://localhost:${PORT}\n`);
     if (ENV_EMAIL) {
       console.log(`[OK] Auto-login configure pour : ${ENV_EMAIL}`);
+      // Rapatrie au demarrage tout ce que les autres appareils du meme
+      // compte ont synchronise entre-temps - jamais bloquant (best-effort,
+      // le serveur repond deja aux requetes independamment du resultat).
+      runFullReconciliation(ENV_EMAIL).catch(e => console.error('[sync] reconciliation demarrage echouee:', e.message));
+      setInterval(() => {
+        runFullReconciliation(ENV_EMAIL).catch(e => console.error('[sync] reconciliation periodique echouee:', e.message));
+      }, 5 * 60 * 1000);
     } else {
       console.log('[INFO] Aucun .env detecte - connexion requise via navigateur');
     }
