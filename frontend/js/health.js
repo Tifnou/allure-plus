@@ -456,7 +456,18 @@ function buildTrainingStatusTimeline(hist, days) {
   hist.forEach(e => { byDate[e.date] = e; });
   const now = Date.now();
   const cells = [];
+  const windowStartDateStr = parisISODate(new Date(now - (days - 1) * 86400000));
+  // Amorce avec le dernier releve connu STRICTEMENT AVANT le debut de la
+  // fenetre affichee (ex: fenetre "1 semaine" qui commence justement un
+  // jour sans releve exact) - sinon les tout premiers jours de la fenetre
+  // restent a tort vides alors qu'un statut etait bel et bien connu avant,
+  // juste pas exactement ce jour-la (meme logique de report que la boucle
+  // ci-dessous, simplement etendue a l'historique avant la fenetre).
   let lastInfo = null;
+  hist
+    .filter(e => e.date < windowStartDateStr)
+    .sort((a, b) => a.date < b.date ? -1 : 1)
+    .forEach(e => { lastInfo = trainingStatusInfo(e.value.phrase); });
   for (let i = days - 1; i >= 0; i--) {
     const dateStr = parisISODate(new Date(now - i * 86400000));
     const entry = byDate[dateStr];
@@ -468,7 +479,15 @@ function buildTrainingStatusTimeline(hist, days) {
 
 async function loadTrainingStatusMetric(days) {
   const cur = await fetch('/api/training-status').then(r => r.json()).then(r => r.data).catch(() => null);
-  const hist = await fetch(`/api/health-history/trainingStatus?days=${days}`).then(r => r.json()).catch(() => []);
+  // Historique COMPLET (pas filtre par `days`) : buildTrainingStatusTimeline
+  // reporte le dernier statut connu sur les jours sans releve (le statut ne
+  // change pas de lui-meme entre deux visites). Filtrer cote serveur par
+  // `days` privait cette logique des releves ANTERIEURS a la fenetre
+  // affichee, donc du seed necessaire pour remplir les tout premiers jours
+  // d'une petite fenetre (ex: vue "1 semaine" avec des cases vides que "4
+  // sem."/"6 mois" remplissaient correctement, faute d'etre lestes par la
+  // meme troncature) - hist reste petit (1 releve/jour max), aucun cout.
+  const hist = await fetch('/api/health-history/trainingStatus').then(r => r.json()).catch(() => []);
   const info = cur ? trainingStatusInfo(cur.phrase) : null;
   const timeline = buildTrainingStatusTimeline(hist, days);
   // Garmin n'expose pas d'historique de statut par API (verifie) : on
@@ -863,7 +882,7 @@ const HEALTH_METRICS = [
   { key: 'calories',           category: 'sante',       label: 'Calories brûlées',        icon: HEALTH_ICONS.flame,   mode: 'chart', color: '#EA580C', load: loadCaloriesMetric },
   { key: 'vo2max',             category: 'performance', label: 'VO₂max',                  icon: HEALTH_ICONS.vo2,     mode: 'chart', color: '#7C3AED', load: loadVo2maxMetric },
   { key: 'trainingStatus',     category: 'performance', label: "Statut d'entraînement",   icon: HEALTH_ICONS.trend,   mode: 'timeline',                load: loadTrainingStatusMetric },
-  { key: 'trainingLoad',       category: 'performance', label: "Charge d'entraînement",   icon: HEALTH_ICONS.gauge,  mode: 'chart', color: '#111827', load: loadTrainingLoadMetric },
+  { key: 'trainingLoad',       category: 'performance', label: "Charge d'entraînement",   icon: HEALTH_ICONS.gauge,  mode: 'chart', color: '#4F46E5', load: loadTrainingLoadMetric },
   { key: 'trainingIntensity',  category: 'performance', label: "Intensité d'entraînement", icon: HEALTH_ICONS.layers, mode: 'bars',                     load: loadTrainingIntensityMetric },
   { key: 'trainingReadiness',  category: 'performance', label: "Préparation à l'entraînement", icon: HEALTH_ICONS.gauge, mode: 'chart', color: '#0EA5E9', load: loadTrainingReadinessMetric },
   { key: 'trainingEffect',     category: 'performance', label: 'Training Effect',         icon: HEALTH_ICONS.layers,  mode: 'table',                   load: loadTrainingEffectMetric },
