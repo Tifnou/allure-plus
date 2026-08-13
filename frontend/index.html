@@ -12,7 +12,7 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <link rel="stylesheet" href="css/style.css?v=1786549146967" />
+  <link rel="stylesheet" href="css/style.css?v=1786612391761" />
   <link rel="stylesheet" href="css/plans.css?v=1786014624239" />
   <link rel="stylesheet" href="css/routes.css?v=1786547249351" />
 </head>
@@ -163,6 +163,15 @@
         <div class="server-led" id="server-led"></div>
         <span class="server-status-text" id="server-status-text">Connexion...?</span>
       </div>
+
+      <!-- Quitter : ferme la fenetre ET arrete node.exe (voir /api/quit,
+           server.js) - fermer juste la fenetre avec la croix laisse
+           habituellement node.exe tourner en tache de fond (fenetre app
+           Chrome/Edge independante du process serveur, cf start.bat). -->
+      <button class="btn-quit-app" id="btn-quit-app" type="button" title="Ferme Allure+ et arrête le serveur">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>
+        <span>Quitter l'application</span>
+      </button>
 
       <!-- Compte connecté + déconnexion (icône sobre, même ligne) -->
       <div class="sidebar-account" id="sidebar-user" style="display:none">
@@ -1196,7 +1205,7 @@
     <span class="support-fab-dot" id="support-fab-dot" style="display:none"></span>
   </button>
 
-  <script src="js/app.js?v=1786611143322"></script>
+  <script src="js/app.js?v=1786612391761"></script>
   <script src="js/gear.js?v=1786459105633"></script>
   <script src="js/campus.js?v=1786609755676"></script>
   <script src="js/free_sessions.js?v=1786524404763"></script>

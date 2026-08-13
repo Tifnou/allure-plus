@@ -3616,6 +3616,40 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
+  // Quitter l'application : arrête node.exe (voir /api/quit, server.js) puis
+  // referme la fenêtre — l'appli tourne dans une fenêtre Chrome/Edge "--app="
+  // indépendante du process serveur (start.bat), donc fermer juste la fenêtre
+  // avec la croix laisse habituellement node.exe tourner en tâche de fond.
+  const quitBtn = el('btn-quit-app');
+  if (quitBtn) {
+    quitBtn.addEventListener('click', async () => {
+      const ok = typeof showConfirmModal === 'function'
+        ? await showConfirmModal({
+            title: 'Quitter Allure+ ?',
+            message: 'Le serveur va s\'arrêter et la fenêtre va se fermer.',
+            confirmLabel: 'Quitter', cancelLabel: 'Annuler', danger: true, icon: '🚪',
+          })
+        : confirm('Quitter Allure+ ?\nLe serveur va s\'arrêter et la fenêtre va se fermer.');
+      if (!ok) return;
+      quitBtn.classList.add('quitting');
+      quitBtn.querySelector('span').textContent = 'Fermeture…';
+      try {
+        await fetch(`${API}/api/quit`, { method: 'POST' });
+      } catch {}
+      // window.close() n'aboutit que si la fenêtre a été ouverte par un
+      // script OU s'il s'agit d'une fenêtre "app" sans onglets (notre cas,
+      // cf --app= dans open_browser.ps1) — sinon Chrome l'ignore
+      // silencieusement ; dans ce cas on laisse un message clair plutôt que
+      // rien ne se passer sans explication.
+      window.close();
+      setTimeout(() => {
+        quitBtn.classList.remove('quitting');
+        quitBtn.querySelector('span').textContent = 'Quitter l\'application';
+        if (typeof showToast === 'function') showToast('Serveur arrêté — vous pouvez fermer cette fenêtre', 'success');
+      }, 600);
+    });
+  }
+
   // Voir tout → naviguer vers Activités
   const seeAll = el('see-all-runs');
   if (seeAll) seeAll.addEventListener('click', () => navigateTo('activities'));
