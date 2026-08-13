@@ -1346,12 +1346,14 @@ function groupEffortsByDuration(effortEntries, vma, isTrail) {
     const dur = lap.elapsedDuration || lap.movingDuration || lap.duration || 0;
     let group = groups.find(g => Math.abs(dur - g.anchorDuration) <= Math.max(g.anchorDuration * 0.20, 8));
     if (!group) {
-      group = { anchorDuration: dur, memberIdx: [], paces: [], hrValues: [] };
+      group = { anchorDuration: dur, memberIdx: [], paces: [], hrValues: [], elevGains: [], distances: [] };
       groups.push(group);
     }
     group.memberIdx.push(idx);
     if (lap.averageSpeed > 0) group.paces.push(1000 / lap.averageSpeed);
     if (lap.averageHR) group.hrValues.push(Math.round(lap.averageHR));
+    group.elevGains.push(lap.elevationGain || 0);
+    group.distances.push(lap.distance || 0);
   });
   groups.forEach(g => {
     g.repCount = g.memberIdx.length;
@@ -1367,7 +1369,19 @@ function groupEffortsByDuration(effortEntries, vma, isTrail) {
       g.regularityMaxEcart = null; g.regularityLabel = null; g.splitDiffSec = null;
     }
     g.hrDriftBpm = g.hrValues.length >= 2 ? (g.hrValues[g.hrValues.length - 1] - g.hrValues[0]) : null;
-    g.zoneKey = (vma && g.avgPaceSecKm) ? matchZoneFromPaceTrailAware(g.avgPaceSecKm, vma, isTrail) : null;
+    // Une repetition courue sur une pente marquee (D+ moyen > 10m/km, meme
+    // seuil que le mode Circuits pour "terrain vallonne") doit etre jugee
+    // avec la correction trail, MEME SI l'activite entiere n'est pas taguee
+    // "Trail" par Garmin (ex: seance de cote enregistree en type "Course") —
+    // sinon l'allure, mecaniquement plus lente en montee, se fait comparer a
+    // tort aux zones plates et affiche une intensite plus faible que la
+    // realite (ex: "AS42 — Allure Marathon" au lieu de "S60 — Seuil 60min"
+    // pour un effort de seuil couru en cote).
+    const totalDist = g.distances.reduce((a, b) => a + b, 0);
+    const totalElev = g.elevGains.reduce((a, b) => a + b, 0);
+    const elevPerKm = totalDist > 0 ? (totalElev / (totalDist / 1000)) : 0;
+    const groupIsGraded = isTrail || elevPerKm > 10;
+    g.zoneKey = (vma && g.avgPaceSecKm) ? matchZoneFromPaceTrailAware(g.avgPaceSecKm, vma, groupIsGraded) : null;
     g.zoneLabel = (g.zoneKey && typeof ALLURE_PLUS_ZONES !== 'undefined') ? ALLURE_PLUS_ZONES[g.zoneKey]?.label : null;
     g.zoneColor = (g.zoneKey && typeof ALLURE_PLUS_ZONES !== 'undefined') ? ALLURE_PLUS_ZONES[g.zoneKey]?.color : null;
   });
