@@ -544,6 +544,60 @@ const UPDATE_REPO = 'Tifnou/allure-plus';
 let _updateCheckCache = null; // { data, ts }
 const UPDATE_CHECK_TTL_MS = 10 * 60 * 1000; // 10 min — evite de solliciter l'API GitHub (limite 60 req/h sans auth) a chaque ouverture de l'app, tout en restant reactif
 
+// Decoupe le corps markdown d'UNE release en { "Nom de section" : [items] } —
+// items = puces (lignes "- "/"* "), tout le reste (paragraphes libres) est
+// ignore lors de la fusion multi-versions (rare dans nos notes de version).
+function parseReleaseSections(body) {
+  const sections = {};
+  let current = null;
+  (body || '').split('\n').forEach(raw => {
+    const line = raw.trim();
+    if (!line) return;
+    if (line.startsWith('## ')) {
+      current = line.slice(3).trim();
+      if (!sections[current]) sections[current] = [];
+    } else if (line.startsWith('- ') || line.startsWith('* ')) {
+      if (!current) return; // puce hors section (ne devrait pas arriver) -> ignoree
+      sections[current].push(line.slice(2).trim());
+    }
+  });
+  return sections;
+}
+
+// Normalise les titres de section libres (accents/orthographe variables
+// possibles d'une release a l'autre) vers une des 3 categories canoniques -
+// permet de FUSIONNER les puces de plusieurs versions sautees sous une seule
+// section par categorie, plutot que d'empiler "## Version X" x N avec des
+// sous-titres repetes (bien moins lisible quand plusieurs versions sont sautees).
+const CHANGELOG_CATEGORY_ORDER = ['Nouveautés', 'Améliorations', 'Corrections'];
+function normalizeChangelogCategory(name) {
+  const n = (name || '').toLowerCase();
+  if (n.includes('nouveaut')) return 'Nouveautés';
+  if (n.includes('amelior') || n.includes('amélior')) return 'Améliorations';
+  if (n.includes('correct') || n.includes('fix')) return 'Corrections';
+  return null; // categorie non reconnue (ancien format libre) -> ignoree
+}
+
+// Fusionne les notes de plusieurs releases en un seul changelog groupe par
+// categorie (au lieu d'un empilement par version) - cf commentaire sur
+// normalizeChangelogCategory. Reste du markdown simple ("## Titre" + "- item"),
+// compatible tel quel avec renderChangelogHtml (app.js) sans rien y changer.
+function mergeReleaseNotesByCategory(pendingReleases) {
+  const merged = {};
+  CHANGELOG_CATEGORY_ORDER.forEach(cat => { merged[cat] = []; });
+  pendingReleases.forEach(rel => {
+    const sections = parseReleaseSections(rel.body);
+    Object.entries(sections).forEach(([header, items]) => {
+      const cat = normalizeChangelogCategory(header);
+      if (cat) merged[cat].push(...items);
+    });
+  });
+  return CHANGELOG_CATEGORY_ORDER
+    .filter(cat => merged[cat].length > 0)
+    .map(cat => `## ${cat}\n` + merged[cat].map(i => `- ${i}`).join('\n'))
+    .join('\n\n');
+}
+
 function isNewerVersion(latest, current) {
   const a = String(latest).split('.').map(Number);
   const b = String(current).split('.').map(Number);
@@ -592,10 +646,10 @@ app.get('/api/check-update', async (req, res) => {
 
     const latest = pending[pending.length - 1];
     const asset = latest.assets.find(a => a.name.endsWith('.exe'));
-    // Une section "## Version X.Y.Z" par release manquee, dans l'ordre
-    // chronologique, chacune gardant ses propres sous-titres ("## Nouveautes"
-    // etc.) tels quels dans son corps.
-    const releaseNotes = pending.map(rel => `## Version ${rel.version}\n\n${rel.body}`).join('\n\n');
+    // Fusion par categorie (Nouveautes/Ameliorations/Corrections) de toutes
+    // les releases manquees, plutot qu'un empilement "## Version X.Y.Z" par
+    // release - voir mergeReleaseNotesByCategory.
+    const releaseNotes = mergeReleaseNotesByCategory(pending);
 
     res.json({
       updateAvailable: true,
