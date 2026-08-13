@@ -685,8 +685,17 @@ app.get('/api/check-update', async (req, res) => {
 // ne fait que relayer les requetes en y ajoutant l'email de la session
 // (identite Garmin, deja connue) et la cle client. Voir support-relay/src/index.js
 // pour le detail du fonctionnement (Issues GitHub = tickets, labels = categorie/statut).
-const SUPPORT_RELAY_URL  = process.env.SUPPORT_RELAY_URL;
-const SUPPORT_CLIENT_KEY = process.env.SUPPORT_CLIENT_KEY;
+// Valeurs par defaut EN DUR pour URL/CLIENT_KEY (pas seulement dans
+// .env.example) : embarquees dans CHAQUE installation Allure+, pas des
+// secrets par utilisateur - meme raisonnement/bug que SYNC_RELAY_URL
+// (sync_client.js) : /api/save-env n'ecrit que les identifiants Garmin dans
+// le .env genere lors de la config de l'auto-login, donc une installation
+// neuve n'avait jamais ces valeurs et le Centre de support restait
+// silencieusement non configure. ADMIN_KEY reste EXCLUSIVEMENT via .env
+// (vrai secret prive, jamais embarque - controle les actions admin sur les
+// tickets de tous les utilisateurs).
+const SUPPORT_RELAY_URL  = process.env.SUPPORT_RELAY_URL  || 'https://allure-plus-support-relay.support-relay.workers.dev';
+const SUPPORT_CLIENT_KEY = process.env.SUPPORT_CLIENT_KEY || '6a23376104f76e64d2d263b72ecc7bfb1fd3e0d7bd427dd8';
 const SUPPORT_ADMIN_KEY  = process.env.SUPPORT_ADMIN_KEY;
 
 async function callSupportRelay(path, options = {}) {
@@ -1091,12 +1100,14 @@ app.post('/api/login', async (req, res) => {
         sessionData = sessions.get(envSessionId);
         // On va cr©er un nouveau cookie qui pointe vers cette mªme session
         res.cookie('sid', envSessionId, { httpOnly: true, sameSite: 'lax' });
+        ensureSyncScheduled(sessionData.email);
         return res.json({ success: true, user: sessionData.email });
       }
       sessionData = await createGarminSession(ENV_EMAIL, ENV_PASSWORD);
       envSessionId = uuidv4();
       sessions.set(envSessionId, sessionData);
       res.cookie('sid', envSessionId, { httpOnly: true, sameSite: 'lax' });
+      ensureSyncScheduled(sessionData.email);
       return res.json({ success: true, user: sessionData.email });
     }
 
@@ -1109,6 +1120,11 @@ app.post('/api/login', async (req, res) => {
     const sid = uuidv4();
     sessions.set(sid, sessionData);
     res.cookie('sid', sid, { httpOnly: true, sameSite: 'lax' });
+    // Generique, pas seulement pour le compte auto-login .env - voir
+    // ensureSyncScheduled : sans ca, un compte connecte manuellement
+    // pousserait bien ses propres changements (scheduleSync, a chaque
+    // ecriture) mais ne recupererait jamais ceux des autres appareils.
+    ensureSyncScheduled(email);
     console.log('[OK] Session creee pour:', email);
     res.json({ success: true, user: email });
 
@@ -3305,19 +3321,31 @@ app.get('/api/plans/load/:id', (req, res) => {
 // espacees laissent le temps a Windows de liberer le port si c'est juste
 // une course avec le "timeout /t 2" de start.bat, et le message clair dans
 // server_err.log rend le vrai blocage diagnosticable si ca persiste.
+// Demarre (une seule fois par email, quel que soit le nombre de connexions/
+// onglets) une reconciliation immediate + un cycle periodique de synchro
+// cross-appareils pour CE compte. Appele aussi bien pour le compte
+// auto-login (.env) que pour tout compte connecte manuellement via le
+// navigateur - la synchro ne doit jamais dependre de la presence d'un .env,
+// sinon un compte sans auto-login pousserait bien ses propres changements
+// (scheduleSync est deja generique, declenche a chaque ecriture locale) mais
+// ne recupererait jamais automatiquement ceux pousses par un autre appareil.
+const _syncScheduledEmails = new Set();
+function ensureSyncScheduled(email) {
+  if (!email || _syncScheduledEmails.has(email)) return;
+  _syncScheduledEmails.add(email);
+  runFullReconciliation(email).catch(e => console.error('[sync] reconciliation initiale echouee:', e.message));
+  setInterval(() => {
+    runFullReconciliation(email).catch(e => console.error('[sync] reconciliation periodique echouee:', e.message));
+  }, 5 * 60 * 1000);
+}
+
 function startServer(retriesLeft = 5) {
   const httpServer = app.listen(PORT, () => {
     console.log('\n[START] Allure+ Dashboard demarre !');
     console.log(`[INFO] Ouvrez votre navigateur sur : http://localhost:${PORT}\n`);
     if (ENV_EMAIL) {
       console.log(`[OK] Auto-login configure pour : ${ENV_EMAIL}`);
-      // Rapatrie au demarrage tout ce que les autres appareils du meme
-      // compte ont synchronise entre-temps - jamais bloquant (best-effort,
-      // le serveur repond deja aux requetes independamment du resultat).
-      runFullReconciliation(ENV_EMAIL).catch(e => console.error('[sync] reconciliation demarrage echouee:', e.message));
-      setInterval(() => {
-        runFullReconciliation(ENV_EMAIL).catch(e => console.error('[sync] reconciliation periodique echouee:', e.message));
-      }, 5 * 60 * 1000);
+      ensureSyncScheduled(ENV_EMAIL);
     } else {
       console.log('[INFO] Aucun .env detecte - connexion requise via navigateur');
     }

@@ -2,8 +2,21 @@
 // connaissance des fichiers locaux ni de leur format, juste le protocole
 // (enveloppes JSON horodatees + fichiers binaires). La logique de fusion et
 // la traduction fichier-local <-> enveloppe vivent dans sync.js.
-const SYNC_RELAY_URL  = process.env.SYNC_RELAY_URL;
-const SYNC_CLIENT_KEY = process.env.SYNC_CLIENT_KEY;
+// Valeurs par defaut EN DUR (pas seulement dans .env.example) : ce sont des
+// valeurs partagees/embarquees dans CHAQUE installation Allure+ (identifient
+// l'app, pas une vraie protection - meme modele que SUPPORT_CLIENT_KEY), PAS
+// des secrets par utilisateur comme GARMIN_EMAIL/PASSWORD. Bug reel constate
+// (13/08) : /api/save-env (server.js, ecrit le .env lors de la configuration
+// de l'auto-login) n'ecrit QUE les identifiants Garmin - une installation
+// neuve n'a donc jamais ces deux valeurs dans son .env (jamais present dans
+// l'installeur non plus, .env est exclu du packaging), et la synchro restait
+// silencieusement non configuree (aucune erreur visible) sur toute machine
+// autre que celle de developpement. process.env reste prioritaire si present
+// (permet de pointer vers un autre relais en test), sinon ce filet de
+// securite garantit que la synchro fonctionne des l'installation, sans
+// dependre d'une etape .env manuelle que rien n'incite l'utilisateur a faire.
+const SYNC_RELAY_URL  = process.env.SYNC_RELAY_URL  || 'https://allure-plus-sync-relay.support-relay.workers.dev';
+const SYNC_CLIENT_KEY = process.env.SYNC_CLIENT_KEY || '635a64cf84014cfdd921fad461fc6373a90e037f713f9863';
 
 function isConfigured() {
   return !!(SYNC_RELAY_URL && SYNC_CLIENT_KEY);
