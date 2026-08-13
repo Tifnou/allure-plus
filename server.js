@@ -54,7 +54,7 @@ const { getZoneRange, annotatePaceZones, ZONE_LABELS } = require('./zones');
 const { isBrouterConfigured, isTilePresent, getTileRemoteSize, downloadTile } = require('./brouter_manager');
 const { geocode, getCommunesForPostcode, getCommunesForDepartment, searchStreet, getTownHall, generateRouteOptions, buildGpxXml } = require('./route_generator');
 const { getPaceProfile, refreshPaceProfile } = require('./pace_profile');
-const { scheduleSync, runFullReconciliation, getSyncStatus } = require('./sync');
+const { scheduleSync, runFullReconciliation, getSyncStatus, syncBinaryFile, deleteBinaryFile, syncAvatarFile } = require('./sync');
 const { buildPlanWorkbook } = require('./xlsx_export');
 const {
   campusLogin,
@@ -180,6 +180,7 @@ app.post('/api/avatar', requireSession, upload.single('avatar'), (req, res) => {
     const existing = findAvatarFile();
     if (existing) fs.unlinkSync(path.join(UPLOADS_DIR, existing));
     fs.writeFileSync(path.join(UPLOADS_DIR, 'avatar' + ext), req.file.buffer);
+    syncAvatarFile(req.session.email).catch(() => {});
     res.json({ url: '/uploads/avatar' + ext });
   } catch (err) { handleError(res, err); }
 });
@@ -187,7 +188,10 @@ app.post('/api/avatar', requireSession, upload.single('avatar'), (req, res) => {
 app.delete('/api/avatar', requireSession, (req, res) => {
   try {
     const f = findAvatarFile();
-    if (f) fs.unlinkSync(path.join(UPLOADS_DIR, f));
+    if (f) {
+      fs.unlinkSync(path.join(UPLOADS_DIR, f));
+      deleteBinaryFile(req.session.email, f).catch(() => {});
+    }
     res.json({ ok: true });
   } catch (err) { handleError(res, err); }
 });
@@ -1333,6 +1337,7 @@ app.post('/api/races', requireSession, (req, res) => {
     };
     races.push(race);
     writeJsonSafe(RACES_FILE, races);
+    scheduleSync('races', race.id, req.session.email);
     res.json({ success: true, race });
   } catch (err) { handleError(res, err); }
 });
@@ -1358,6 +1363,7 @@ app.put('/api/races/:id', requireSession, (req, res) => {
       activityId: activityId ? String(activityId) : (races[idx].activityId || null),
     };
     writeJsonSafe(RACES_FILE, races);
+    scheduleSync('races', races[idx].id, req.session.email);
     res.json({ success: true, race: races[idx] });
   } catch (err) { handleError(res, err); }
 });
@@ -1368,9 +1374,11 @@ app.delete('/api/races/:id', requireSession, (req, res) => {
     const race = races.find(r => r.id === req.params.id);
     if (race?.certificateFile) {
       try { fs.unlinkSync(path.join(UPLOADS_DIR, race.certificateFile)); } catch (e) {}
+      deleteBinaryFile(req.session.email, race.certificateFile).catch(() => {});
     }
     const filtered = races.filter(r => r.id !== req.params.id);
     writeJsonSafe(RACES_FILE, filtered);
+    scheduleSync('races', req.params.id, req.session.email, true);
     res.json({ success: true });
   } catch (err) { handleError(res, err); }
 });
@@ -1386,11 +1394,14 @@ app.post('/api/races/:id/certificate', requireSession, upload.single('certificat
     if (idx === -1) return res.status(404).json({ error: 'Course introuvable' });
     if (races[idx].certificateFile) {
       try { fs.unlinkSync(path.join(UPLOADS_DIR, races[idx].certificateFile)); } catch (e) {}
+      deleteBinaryFile(req.session.email, races[idx].certificateFile).catch(() => {});
     }
     const filename = 'race-' + races[idx].id + ext;
     fs.writeFileSync(path.join(UPLOADS_DIR, filename), req.file.buffer);
     races[idx].certificateFile = filename;
     writeJsonSafe(RACES_FILE, races);
+    scheduleSync('races', races[idx].id, req.session.email);
+    syncBinaryFile(req.session.email, filename).catch(() => {});
     res.json({ success: true, certificateUrl: '/uploads/' + filename });
   } catch (err) { handleError(res, err); }
 });
@@ -1402,9 +1413,11 @@ app.delete('/api/races/:id/certificate', requireSession, (req, res) => {
     if (idx === -1) return res.status(404).json({ error: 'Course introuvable' });
     if (races[idx].certificateFile) {
       try { fs.unlinkSync(path.join(UPLOADS_DIR, races[idx].certificateFile)); } catch (e) {}
+      deleteBinaryFile(req.session.email, races[idx].certificateFile).catch(() => {});
     }
     delete races[idx].certificateFile;
     writeJsonSafe(RACES_FILE, races);
+    scheduleSync('races', races[idx].id, req.session.email);
     res.json({ success: true });
   } catch (err) { handleError(res, err); }
 });
@@ -1919,6 +1932,8 @@ app.post('/api/pps', requireSession, upload.single('pdf'), async (req, res) => {
     const entry = { id, number, expiryDate, lastName, filename, uploadedAt: new Date().toISOString() };
     list.push(entry);
     writeJsonSafe(PPS_FILE, list);
+    scheduleSync('pps', entry.id, req.session.email);
+    syncBinaryFile(req.session.email, filename).catch(() => {});
     res.json({ success: true, entry });
   } catch (err) { handleError(res, err); }
 });
@@ -1933,6 +1948,7 @@ app.put('/api/pps/:id', requireSession, (req, res) => {
     if (expiryDate != null) list[idx].expiryDate = expiryDate;
     if (lastName != null) list[idx].lastName = String(lastName).slice(0, 60);
     writeJsonSafe(PPS_FILE, list);
+    scheduleSync('pps', list[idx].id, req.session.email);
     res.json({ success: true, entry: list[idx] });
   } catch (err) { handleError(res, err); }
 });
@@ -1941,9 +1957,13 @@ app.delete('/api/pps/:id', requireSession, (req, res) => {
   try {
     const list = readJsonSafe(PPS_FILE, []);
     const entry = list.find(e => e.id === req.params.id);
-    if (entry?.filename) { try { fs.unlinkSync(path.join(UPLOADS_DIR, entry.filename)); } catch (e) {} }
+    if (entry?.filename) {
+      try { fs.unlinkSync(path.join(UPLOADS_DIR, entry.filename)); } catch (e) {}
+      deleteBinaryFile(req.session.email, entry.filename).catch(() => {});
+    }
     const filtered = list.filter(e => e.id !== req.params.id);
     writeJsonSafe(PPS_FILE, filtered);
+    scheduleSync('pps', req.params.id, req.session.email, true);
     res.json({ success: true });
   } catch (err) { handleError(res, err); }
 });
@@ -1969,6 +1989,14 @@ app.post('/api/records-import', requireSession, (req, res) => {
     // etre resynchronisee, pas seulement les prochaines ecritures - sinon un
     // import restaure localement mais jamais pousse vers le cloud.
     Object.keys(records_overrides).forEach(k => scheduleSync('records_overrides', k, req.session.email));
+    races.forEach(r => {
+      scheduleSync('races', r.id, req.session.email);
+      // L'export ne contient jamais le contenu binaire du certificat (JSON
+      // uniquement) - si le fichier reference existe deja cote cloud (import
+      // sur une machine qui l'a deja synchronise avant), le rapatrier ;
+      // sinon syncNamedFile ne fait rien (ni push ni pull possible).
+      if (r.certificateFile) syncBinaryFile(req.session.email, r.certificateFile).catch(() => {});
+    });
     if (Array.isArray(weight_history)) {
       writeJsonSafe(WEIGHT_HISTORY_FILE, weight_history);
       weight_history.forEach(e => scheduleSync('weight_history', e.date, req.session.email));

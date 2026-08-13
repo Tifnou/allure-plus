@@ -18,6 +18,7 @@
 const fs = require('fs');
 const path = require('path');
 const syncClient = require('./sync_client');
+const syncFiles = require('./sync_files');
 
 const DATA_DIR = path.join(__dirname, 'data');
 try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch (e) {}
@@ -82,6 +83,32 @@ const SYNC_TYPES = {
     defaultLocal: {},
     toEntries(obj) { return { ...(obj || {}) }; },
     fromEntries(map) { return map; },
+  },
+  // Metadonnees JSON uniquement (nom/date/distance...) - le certificat
+  // binaire eventuel (champ certificateFile) est synchronise separement
+  // par sync_files.js, derive de ces entrees une fois reconciliees.
+  races: {
+    file: path.join(DATA_DIR, 'races.json'),
+    sidecarFile: path.join(DATA_DIR, 'races.sync.json'),
+    defaultLocal: [],
+    toEntries(list) {
+      const map = {};
+      (list || []).forEach(item => { map[item.id] = item; });
+      return map;
+    },
+    fromEntries(map) { return Object.values(map); },
+  },
+  // Idem races : le PDF (champ filename) est synchronise separement.
+  pps: {
+    file: path.join(DATA_DIR, 'pps.json'),
+    sidecarFile: path.join(DATA_DIR, 'pps.sync.json'),
+    defaultLocal: [],
+    toEntries(list) {
+      const map = {};
+      (list || []).forEach(item => { map[item.id] = item; });
+      return map;
+    },
+    fromEntries(map) { return Object.values(map); },
   },
   session_analyses: {
     file: path.join(DATA_DIR, 'session_analyses.json'),
@@ -283,9 +310,30 @@ async function runFullReconciliation(email) {
       console.error(`[sync] reconciliation ${type} echouee:`, e.message);
     }
   }
+
+  // Fichiers binaires : deduits des entrees races/pps qui viennent d'etre
+  // reconciliees ci-dessus (voir sync_files.js) - doit toujours passer APRES
+  // la boucle JSON, jamais avant, sinon on se baserait sur des metadonnees
+  // perimees pour decider quels fichiers rapatrier.
+  try {
+    const races = readJsonSafe(SYNC_TYPES.races.file, SYNC_TYPES.races.defaultLocal);
+    const ppsList = readJsonSafe(SYNC_TYPES.pps.file, SYNC_TYPES.pps.defaultLocal);
+    await syncFiles.syncRaceCertificates(email, races);
+    await syncFiles.syncPpsFiles(email, ppsList);
+    await syncFiles.syncAvatarFile(email);
+  } catch (e) {
+    anyError = `fichiers: ${e.message}`;
+    console.error('[sync] reconciliation fichiers echouee:', e.message);
+  }
+
   status.lastSyncAt = new Date().toISOString();
   status.lastSyncOk = !anyError;
   status.lastError = anyError;
 }
 
-module.exports = { scheduleSync, runFullReconciliation, getSyncStatus, SYNC_TYPES };
+module.exports = {
+  scheduleSync, runFullReconciliation, getSyncStatus, SYNC_TYPES,
+  syncBinaryFile: syncFiles.syncNamedFile,
+  deleteBinaryFile: syncFiles.deleteNamedFile,
+  syncAvatarFile: syncFiles.syncAvatarFile,
+};

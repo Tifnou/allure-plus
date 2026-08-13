@@ -141,7 +141,15 @@ async function handlePutFile(req, env, url, email, filename) {
   if (existing && !existing.deletedAt && existing.mtimeMs >= mtimeMs && existing.hash !== hash) {
     return json({ applied: false, remoteHash: existing.hash, remoteMtimeMs: existing.mtimeMs }, 409);
   }
-  if (existing && existing.hash === hash) {
+  // Le raccourci "contenu deja identique, rien a ecrire" ne doit JAMAIS
+  // s'appliquer sur une entree tombstonee (deletedAt pose) : la suppression
+  // preserve le hash/mtime d'origine dans les metadata (voir
+  // handleDeleteFile), donc re-uploader le MEME contenu apres une
+  // suppression matcherait ce hash et court-circuiterait l'ecriture -
+  // laissant le fichier "supprime" pour toujours malgre un push reussi cote
+  // client (bug reel constate : restauration d'un avatar identique a
+  // l'original reste invisible car deletedAt jamais efface).
+  if (existing && !existing.deletedAt && existing.hash === hash) {
     return json({ applied: true, unchanged: true });
   }
 
