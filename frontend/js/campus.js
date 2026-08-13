@@ -134,14 +134,30 @@ function calcAllureRef(zoneKey, vma) {
 
 // Détecte si une séance doit utiliser les allures Trail
 // Detecte si une seance doit utiliser les allures Trail
-// Règle : Trail si D+, uphill, texte "cote/EN COTE/montée", ou compétition trail
+// Règle : Trail si CETTE seance signale un D+/une cote (D+ attendu, bloc
+// uphill, texte "cote/EN COTE/montée"), ou une competition trail — jamais
+// juste parce que le PLAN dans son ensemble est un plan Trail. Un footing EF
+// plat au sein d'un plan trail doit rester en allures route (§ retour
+// utilisateur, seances plates faussement passees en trail par un signal
+// plan-wide `session.sport==='trailV2'` commun a TOUTES les seances du plan,
+// y compris les footings sans aucun D+/cote).
 function isTrailSession(session) {
   const cat  = (session.trainingCategory || '').toLowerCase();
-  const name = (session.displayName || session.name || '').toLowerCase();
+  // displayName (libelle affiche, souvent generique type "Seuil 60") ET name
+  // (identifiant interne du gabarit, ex: "S60_600_Cote6'+_1") sont tous deux
+  // sondes — un OR entre les deux masquerait les indices textuels portes par
+  // l'un des deux (ex: "cote" present uniquement dans name).
+  const name = ((session.displayName || '') + ' ' + (session.name || '')).toLowerCase();
   const desc = (session.description  || '').toLowerCase();
   const combined    = name + ' ' + desc;
   const hasUphill   = cat.includes('uphill');
   const hasElev     = (session.stats?.expectedElevationGain || 0) > 0;
+  // Signal structurel par bloc d'exercice (ex: terrainIncline: "uphill" sur
+  // les repetitions d'un seuil en cote) — plus precis qu'un texte a chercher,
+  // et conserve dans sessionSnapshot (persiste donc correctement lors d'un
+  // recalcul d'analyse, contrairement a `description`).
+  const hasUphillExercise = (session.exercisesBlocks || []).some(b =>
+    (b.exercises || []).some(e => (e.terrainIncline || '').toLowerCase() === 'uphill'));
   // Detection textuelle : "cote", "côte", "montee", "montée", "uphill"
   // On cherche le mot "cote" (avec ou sans accent, majuscule ou non)
   const hasCoteText = combined.includes('cote') || combined.includes('côte') ||
@@ -154,7 +170,7 @@ function isTrailSession(session) {
   // l'objectif global du plan (goalType) faisait passer en allures trail
   // (plus lentes) des courses de prepa sur route sans D+ ni cote.
   const isCompTrail = cat.includes('trail_competition');
-  return hasUphill || hasElev || hasCoteText || isCompTrail;
+  return hasUphill || hasElev || hasUphillExercise || hasCoteText || isCompTrail;
 }
 
 // Calcule les allures Trail = allures route × (1 + trailCorr de la zone)

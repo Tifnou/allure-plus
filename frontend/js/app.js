@@ -1251,8 +1251,27 @@ function drawRouteTrace(canvas, rawPoints) {
 // Garmin Intervalles = laps manuels avec distances variées
 // Extrait de loadActivityAnalysis (etait une closure interne) pour etre
 // reutilisable par le moteur de comparaison seance prevue/realisee (session-analysis.js)
+// Une seance structuree (Garmin distingue explicitement les laps WARMUP/
+// ACTIVE/RECOVERY/COOLDOWN, cas d'un entrainement guide envoye sur la montre)
+// n'est JAMAIS un simple decoupage automatique au km, meme si les distances
+// des blocs se ressemblent par coincidence (ex: 5' d'effort et 4' de recup a
+// une allure proche produisent des laps de longueur similaire) — le tag
+// Garmin explicite doit toujours primer sur l'heuristique de distance
+// ci-dessous, sinon une vraie seance fractionnee (3x5' Seuil 60 par exemple)
+// se fait classer a tort en "circuits" et perd toute son analyse par bloc.
+function hasExplicitIntervalStructure(laps) {
+  const tags = laps.map(l => {
+    const raw = (typeof l.intensityType === 'string' ? l.intensityType : l.intensityType?.typeKey) || l.intensity || '';
+    return raw.toLowerCase();
+  });
+  const hasActive = tags.some(t => t === 'active');
+  const hasNonActive = tags.some(t => t === 'recovery' || t === 'rest' || t === 'warmup' || t === 'cooldown');
+  return hasActive && hasNonActive;
+}
+
 function isKmCircuits(laps) {
   if (laps.length < 3) return false;
+  if (hasExplicitIntervalStructure(laps)) return false;
   // Exclure le dernier lap (souvent très court = fin de parcours)
   const mainLaps = laps.slice(0, -1);
   const dists = mainLaps.map(l => l.distance || 0).filter(d => d > 50);
@@ -1366,11 +1385,30 @@ async function loadActivityAnalysis(activity) {
   if (analysisCard) analysisCard.style.display = '';
 
   // Contexte pour la classification en zone (VMA du coureur + trail ou route)
-  const isTrail = (activity.activityType || '').toLowerCase().includes('trail');
+  const activityTypeLower = (activity.activityType || '').toLowerCase();
+  // Meme methode que pour les allures affichees dans le plan/l'analyse
+  // seance prevue/realisee (cf isTrailSession, campus.js) : on se fie a ce
+  // que la SEANCE declare (D+ attendu, bloc en cote, texte "cote/montee"),
+  // jamais au D+ reellement grimpe pendant l'activite (un profil vallonne ne
+  // signifie pas que la seance visait des allures ajustees) ni au seul type
+  // Garmin de l'activite (une seance en cote peut tres bien etre enregistree
+  // en type "Course"). Si cette activite est liee a une seance du plan, sa
+  // detection cote/trail (deja calculee et stockee) fait autorite ; sinon on
+  // retombe sur le type Garmin, seul signal disponible pour une sortie libre.
+  const linkedRecord = (typeof _analysisIndex !== 'undefined') ? _analysisIndex.byActivity[String(activity.id)] : null;
+  const isTrail = linkedRecord
+    ? !!linkedRecord.sessionSnapshot?.isTrail
+    : activityTypeLower.includes('trail');
+  // Les zones d'allure (S60, AS10, EF...) sont calibrées sur la course à pied
+  // — les appliquer à une autre activité (vélo, marche, cardio...) produirait
+  // une analyse dénuée de sens (allure vélo comparée à une zone de course).
+  // Tant que le vélo n'a pas sa propre analyse (§ non demandée pour l'instant),
+  // ces activités se limitent aux statistiques basiques.
+  const isRunActivity = activityTypeLower.includes('run') || isTrail;
   const _zoneProfile = loadProfileData();
   const vma = calcVMA(_latestVO2Max, _zoneProfile.sex || 'M');
 
-  // ─── Analyse basique (fallback sans laps) ────────────────────
+  // ─── Analyse basique (fallback sans laps, ou activités non course à pied) ────────────────────
   function buildBasicAnalysis(act) {
     const insights = [];
     if (act.avgPaceSecPerKm > 0) insights.push(`Allure moyenne : <strong>${formatPace(act.avgPaceSecPerKm)}</strong>`);
@@ -1379,6 +1417,13 @@ async function loadActivityAnalysis(activity) {
     if (act.distanceKm) insights.push(`Distance : <strong>${act.distanceKm.toFixed(2)} km</strong>`);
     if (act.calories)   insights.push(`Calories : <strong>${Math.round(act.calories)} kcal</strong>`);
     return insights;
+  }
+
+  if (!isRunActivity) {
+    lapsEl.innerHTML = '<p class="no-data" style="font-size:11px">Analyse détaillée disponible pour la course à pied et le trail uniquement</p>';
+    const basics = buildBasicAnalysis(activity);
+    analysisEl.innerHTML = basics.map(i=>`<div class="analysis-item">${i}</div>`).join('') || '<p class="no-data">Aucune donnée disponible</p>';
+    return;
   }
 
   try {
