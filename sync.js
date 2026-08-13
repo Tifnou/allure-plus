@@ -56,6 +56,77 @@ const SYNC_TYPES = {
       return Object.values(map).sort((a, b) => new Date(a.date) - new Date(b.date));
     },
   },
+  records_overrides: {
+    // Deja un objet cle=distance -> aucune transformation necessaire.
+    file: path.join(DATA_DIR, 'records_overrides.json'),
+    sidecarFile: path.join(DATA_DIR, 'records_overrides.sync.json'),
+    defaultLocal: {},
+    toEntries(obj) { return { ...(obj || {}) }; },
+    fromEntries(map) { return map; },
+  },
+  gear: {
+    file: path.join(DATA_DIR, 'gear.json'),
+    sidecarFile: path.join(DATA_DIR, 'gear.sync.json'),
+    defaultLocal: [],
+    toEntries(list) {
+      const map = {};
+      (list || []).forEach(item => { map[item.id] = item; });
+      return map;
+    },
+    fromEntries(map) { return Object.values(map); },
+  },
+  activity_gear: {
+    // Deja un objet cle=activityId -> aucune transformation necessaire.
+    file: path.join(DATA_DIR, 'activity_gear.json'),
+    sidecarFile: path.join(DATA_DIR, 'activity_gear.sync.json'),
+    defaultLocal: {},
+    toEntries(obj) { return { ...(obj || {}) }; },
+    fromEntries(map) { return map; },
+  },
+  session_analyses: {
+    file: path.join(DATA_DIR, 'session_analyses.json'),
+    sidecarFile: path.join(DATA_DIR, 'session_analyses.sync.json'),
+    defaultLocal: [],
+    toEntries(list) {
+      const map = {};
+      (list || []).forEach(item => { map[item.id] = item; });
+      return map;
+    },
+    fromEntries(map) { return Object.values(map); },
+  },
+  // { [metric]: [{date, value}] } -> aplati en cle composite "metric::date"
+  // pour que la fusion se fasse au bon grain (un instantane par jour et par
+  // metrique, jamais tout le tableau d'une metrique d'un coup).
+  health_snapshots: {
+    file: path.join(DATA_DIR, 'health_snapshots.json'),
+    sidecarFile: path.join(DATA_DIR, 'health_snapshots.sync.json'),
+    defaultLocal: {},
+    toEntries(obj) {
+      const map = {};
+      Object.entries(obj || {}).forEach(([metric, arr]) => {
+        (arr || []).forEach(entry => { map[`${metric}::${entry.date}`] = entry; });
+      });
+      return map;
+    },
+    fromEntries(map) {
+      const obj = {};
+      Object.entries(map).forEach(([key, entry]) => {
+        const metric = key.split('::')[0];
+        if (!obj[metric]) obj[metric] = [];
+        obj[metric].push(entry);
+      });
+      Object.values(obj).forEach(arr => arr.sort((a, b) => new Date(a.date) - new Date(b.date)));
+      return obj;
+    },
+  },
+  // Objet unique (pas une collection) -> une seule cle fixe "profile".
+  pace_profile: {
+    file: path.join(DATA_DIR, 'pace_profile.json'),
+    sidecarFile: path.join(DATA_DIR, 'pace_profile.sync.json'),
+    defaultLocal: null,
+    toEntries(obj) { return obj ? { profile: obj } : {}; },
+    fromEntries(map) { return map.profile || null; },
+  },
 };
 
 // ─── Etat en memoire (dirty keys + debounce + statut) ───────────────────

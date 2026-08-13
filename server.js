@@ -916,6 +916,7 @@ app.get('/api/routes/pace-profile', requireSession, (req, res) => {
 app.post('/api/routes/pace-profile/refresh', requireSession, async (req, res) => {
   try {
     const profile = await refreshPaceProfile();
+    scheduleSync('pace_profile', 'profile', req.session.email);
     res.json(profile);
   } catch (err) { handleError(res, err); }
 });
@@ -1278,6 +1279,7 @@ app.put('/api/records/:distance', requireSession, (req, res) => {
       pace: Number(durationSec) / (Number(distanceM) / 1000),
     };
     writeJsonSafe(RECORDS_OVERRIDES_FILE, overrides);
+    scheduleSync('records_overrides', distance, req.session.email);
     res.json({ success: true, record: overrides[distance] });
   } catch (err) { handleError(res, err); }
 });
@@ -1289,6 +1291,7 @@ app.delete('/api/records/:distance', requireSession, (req, res) => {
     const overrides = readJsonSafe(RECORDS_OVERRIDES_FILE, {});
     delete overrides[distance];
     writeJsonSafe(RECORDS_OVERRIDES_FILE, overrides);
+    scheduleSync('records_overrides', distance, req.session.email, true);
     res.json({ success: true });
   } catch (err) { handleError(res, err); }
 });
@@ -1448,6 +1451,7 @@ async function backfillGearKm(gear, firstUseDate, session) {
     if (new Date(a.date).getTime() < since) continue;
     activityGear[a.id] = { gearId: gear.id, distanceKm: a.distanceKm, date: a.date };
     changed = true;
+    scheduleSync('activity_gear', a.id, session.email);
   }
   if (changed) writeJsonSafe(ACTIVITY_GEAR_FILE, activityGear);
 }
@@ -1476,9 +1480,14 @@ app.post('/api/gear', requireSession, async (req, res) => {
       firstUseDate: firstUseDate || null,
       createdAt: new Date().toISOString(),
     };
+    // isDefault peut retirer le statut par defaut d'AUTRES paires du meme
+    // type -> ces paires-la aussi doivent etre resynchronisees, pas juste item.
+    const demoted = item.isDefault ? gear.filter(g => g.type === type && g.isDefault).map(g => g.id) : [];
     if (item.isDefault) gear.forEach(g => { if (g.type === type) g.isDefault = false; });
     gear.push(item);
     writeJsonSafe(GEAR_FILE, gear);
+    scheduleSync('gear', item.id, req.session.email);
+    demoted.forEach(id => scheduleSync('gear', id, req.session.email));
     if (item.firstUseDate) await backfillGearKm(item, item.firstUseDate, req.session);
     res.json({ success: true, gear: item });
   } catch (err) { handleError(res, err); }
@@ -1493,6 +1502,7 @@ app.put('/api/gear/:id', requireSession, async (req, res) => {
     if (!name || !['route', 'trail'].includes(type)) {
       return res.status(400).json({ error: 'Champs obligatoires manquants (name, type)' });
     }
+    const demoted = isDefault ? gear.filter(g => g.type === type && g.id !== req.params.id && g.isDefault).map(g => g.id) : [];
     if (isDefault) gear.forEach(g => { if (g.type === type && g.id !== req.params.id) g.isDefault = false; });
     const previousFirstUseDate = gear[idx].firstUseDate || null;
     gear[idx] = {
@@ -1505,6 +1515,8 @@ app.put('/api/gear/:id', requireSession, async (req, res) => {
       firstUseDate: firstUseDate || null,
     };
     writeJsonSafe(GEAR_FILE, gear);
+    scheduleSync('gear', gear[idx].id, req.session.email);
+    demoted.forEach(id => scheduleSync('gear', id, req.session.email));
     // Rattrapage relance seulement si la date a change (nouvelle ou modifiee) -
     // sinon inutile de re-parcourir les activites a chaque simple renommage.
     if (gear[idx].firstUseDate && gear[idx].firstUseDate !== previousFirstUseDate) {
@@ -1519,10 +1531,15 @@ app.delete('/api/gear/:id', requireSession, (req, res) => {
     const gear = readJsonSafe(GEAR_FILE, []);
     const filtered = gear.filter(g => g.id !== req.params.id);
     writeJsonSafe(GEAR_FILE, filtered);
+    scheduleSync('gear', req.params.id, req.session.email, true);
     const activityGear = readJsonSafe(ACTIVITY_GEAR_FILE, {});
     let changed = false;
     for (const key of Object.keys(activityGear)) {
-      if (activityGear[key].gearId === req.params.id) { delete activityGear[key]; changed = true; }
+      if (activityGear[key].gearId === req.params.id) {
+        delete activityGear[key];
+        changed = true;
+        scheduleSync('activity_gear', key, req.session.email, true);
+      }
     }
     if (changed) writeJsonSafe(ACTIVITY_GEAR_FILE, activityGear);
     res.json({ success: true });
@@ -1549,6 +1566,7 @@ app.put('/api/activity-gear/:activityId', requireSession, (req, res) => {
       date: date || null,
     };
     writeJsonSafe(ACTIVITY_GEAR_FILE, activityGear);
+    scheduleSync('activity_gear', req.params.activityId, req.session.email);
     res.json({ success: true });
   } catch (err) { handleError(res, err); }
 });
@@ -1556,6 +1574,7 @@ app.put('/api/activity-gear/:activityId', requireSession, (req, res) => {
 app.delete('/api/activity-gear/:activityId', requireSession, (req, res) => {
   try {
     const activityGear = readJsonSafe(ACTIVITY_GEAR_FILE, {});
+    scheduleSync('activity_gear', req.params.activityId, req.session.email, true);
     delete activityGear[req.params.activityId];
     writeJsonSafe(ACTIVITY_GEAR_FILE, activityGear);
     res.json({ success: true });
@@ -1610,6 +1629,7 @@ app.post('/api/session-analyses', requireSession, (req, res) => {
     const record = { ...body, id: crypto.randomUUID(), createdAt: now, updatedAt: now };
     analyses.push(record);
     writeJsonSafe(SESSION_ANALYSES_FILE, analyses);
+    scheduleSync('session_analyses', record.id, req.session.email);
     res.json({ success: true, analysis: record });
   } catch (err) { handleError(res, err); }
 });
@@ -1630,6 +1650,7 @@ app.put('/api/session-analyses/:id', requireSession, (req, res) => {
     }
     analyses[idx] = { ...analyses[idx], ...body, id: analyses[idx].id, createdAt: analyses[idx].createdAt, updatedAt: new Date().toISOString() };
     writeJsonSafe(SESSION_ANALYSES_FILE, analyses);
+    scheduleSync('session_analyses', analyses[idx].id, req.session.email);
     res.json({ success: true, analysis: analyses[idx] });
   } catch (err) { handleError(res, err); }
 });
@@ -1639,6 +1660,7 @@ app.delete('/api/session-analyses/:id', requireSession, (req, res) => {
     const analyses = readJsonSafe(SESSION_ANALYSES_FILE, []);
     const filtered = analyses.filter(a => a.id !== req.params.id);
     writeJsonSafe(SESSION_ANALYSES_FILE, filtered);
+    scheduleSync('session_analyses', req.params.id, req.session.email, true);
     res.json({ success: true });
   } catch (err) { handleError(res, err); }
 });
@@ -1661,7 +1683,7 @@ function todayParisISO() {
 // instantané "actuel", pas d'historique interrogeable par plage de dates.
 // On construit donc notre propre historique en capturant un instantané par
 // jour (au plus 1x/jour) à chaque fois que la valeur courante est consultée.
-function captureHealthSnapshot(metric, dateStr, value) {
+function captureHealthSnapshot(metric, dateStr, value, email) {
   if (value == null) return;
   const store = readJsonSafe(HEALTH_SNAPSHOTS_FILE, {});
   const arr = store[metric] || (store[metric] = []);
@@ -1669,6 +1691,7 @@ function captureHealthSnapshot(metric, dateStr, value) {
   arr.push({ date: dateStr, value });
   arr.sort((a, b) => new Date(a.date) - new Date(b.date));
   writeJsonSafe(HEALTH_SNAPSHOTS_FILE, store);
+  if (email) scheduleSync('health_snapshots', `${metric}::${dateStr}`, email);
 }
 
 function getHealthSnapshots(metric, days) {
@@ -1941,7 +1964,14 @@ app.post('/api/records-import', requireSession, (req, res) => {
     }
     writeJsonSafe(RECORDS_OVERRIDES_FILE, records_overrides);
     writeJsonSafe(RACES_FILE, races);
-    if (Array.isArray(weight_history)) writeJsonSafe(WEIGHT_HISTORY_FILE, weight_history);
+    // Import en masse (restauration d'un ancien export) : chaque cle doit
+    // etre resynchronisee, pas seulement les prochaines ecritures - sinon un
+    // import restaure localement mais jamais pousse vers le cloud.
+    Object.keys(records_overrides).forEach(k => scheduleSync('records_overrides', k, req.session.email));
+    if (Array.isArray(weight_history)) {
+      writeJsonSafe(WEIGHT_HISTORY_FILE, weight_history);
+      weight_history.forEach(e => scheduleSync('weight_history', e.date, req.session.email));
+    }
     res.json({ success: true, racesCount: races.length });
   } catch (err) { handleError(res, err); }
 });
@@ -1988,7 +2018,7 @@ app.get('/api/fitness', requireSession, async (req, res) => {
       };
     }
 
-    if (ltPaceSec || ltHR) captureHealthSnapshot('lactateThreshold', todayParisISO(), { ltPaceSec, ltHR });
+    if (ltPaceSec || ltHR) captureHealthSnapshot('lactateThreshold', todayParisISO(), { ltPaceSec, ltHR }, req.session.email);
 
     res.json({ vo2max, vma, ltPaceSec, ltHR, zones });
   } catch (err) { handleError(res, err); }
@@ -2067,8 +2097,8 @@ app.get('/api/training-status', requireSession, async (req, res) => {
   try {
     const data = await req.session.fns.getTrainingStatusData();
     if (data) {
-      captureHealthSnapshot('trainingStatus', todayParisISO(), { trainingStatus: data.trainingStatus, phrase: data.phrase });
-      if (data.load) captureHealthSnapshot('trainingLoad', todayParisISO(), data.load);
+      captureHealthSnapshot('trainingStatus', todayParisISO(), { trainingStatus: data.trainingStatus, phrase: data.phrase }, req.session.email);
+      if (data.load) captureHealthSnapshot('trainingLoad', todayParisISO(), data.load, req.session.email);
     }
     res.json({ data });
   } catch (err) { handleError(res, err); }
