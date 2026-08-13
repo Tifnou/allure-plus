@@ -1,0 +1,12 @@
+name = "allure-plus-sync-relay"
+main = "src/index.js"
+compatibility_date = "2025-01-01"
+
+[[kv_namespaces]]
+binding = "SYNC_KV"
+id = "9d23ff620c70498b9a845b13ffd64b95"
+
+# Secrets (definis via `wrangler secret put <NOM>`, jamais stockes ici) :
+#   CLIENT_KEY — cle partagee, embarquee dans chaque installation Allure+
+#                (identifie l'app, pas une vraie protection — meme modele
+#                de confiance que support-relay/SUPPORT_CLIENT_KEY)
