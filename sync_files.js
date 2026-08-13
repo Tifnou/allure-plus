@@ -68,25 +68,37 @@ async function deleteNamedFile(email, filename) {
 }
 
 // ─── Avatar : cas particulier ────────────────────────────────────────────
-// Slot logique UNIQUE mais nom de fichier variable selon l'extension
-// (avatar.jpg, avatar.png...) - il faut garantir qu'un seul avatar.* existe
-// apres synchro, jamais deux extensions simultanement (contrairement aux
-// certificats/PDF, dont le nom est stable et unique par id).
-function findLocalAvatarFile() {
-  try { return fs.readdirSync(UPLOADS_DIR).find(f => /^avatar\.[a-z0-9]+$/i.test(f)) || null; }
-  catch (e) { return null; }
+// Slot logique UNIQUE PAR COMPTE mais nom de fichier variable selon
+// l'extension (avatar-<slug>.jpg, avatar-<slug>.png...) - il faut garantir
+// qu'un seul avatar-<slug>.* existe apres synchro pour CE compte, jamais deux
+// extensions simultanement (contrairement aux certificats/PDF, dont le nom
+// est stable et unique par id). Le slug embarque l'identite du compte dans
+// le nom de fichier car uploads/ est un dossier plat partage par n'importe
+// quel compte connecte sur cette machine (voir server.js: slugifyEmail).
+function slugifyEmail(email) {
+  return (email || '').toLowerCase().replace(/[^a-z0-9]/g, '_');
+}
+function findLocalAvatarFile(email) {
+  const slug = slugifyEmail(email);
+  if (!slug) return null;
+  try {
+    const re = new RegExp(`^avatar-${slug}\\.[a-z0-9]+$`, 'i');
+    return fs.readdirSync(UPLOADS_DIR).find(f => re.test(f)) || null;
+  } catch (e) { return null; }
 }
 
 async function syncAvatarFile(email) {
   if (!syncClient.isConfigured() || !email) return;
   try {
+    const slug = slugifyEmail(email);
+    const avatarRe = new RegExp(`^avatar-${slug}\\.[a-z0-9]+$`, 'i');
     const manifest = await syncClient.pullFileManifest(email);
-    const remoteEntries = Object.entries(manifest).filter(([name]) => /^avatar\.[a-z0-9]+$/i.test(name));
+    const remoteEntries = Object.entries(manifest).filter(([name]) => avatarRe.test(name));
     const remoteLatest = remoteEntries
       .filter(([, meta]) => !meta.deletedAt)
       .sort((a, b) => (b[1].mtimeMs || 0) - (a[1].mtimeMs || 0))[0];
 
-    const localFilename = findLocalAvatarFile();
+    const localFilename = findLocalAvatarFile(email);
     const localMeta = localFilename ? fileHashAndMtime(path.join(UPLOADS_DIR, localFilename)) : null;
 
     if (localMeta && (!remoteLatest || localMeta.mtimeMs > remoteLatest[1].mtimeMs)) {

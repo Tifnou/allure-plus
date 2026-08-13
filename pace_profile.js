@@ -57,6 +57,20 @@ function writeJsonSafe(filePath, data, retries = 5) {
   return false;
 }
 
+// Cloisonnement par compte (voir server.js: readScoped/writeScoped) - deux
+// comptes Garmin utilises successivement sur la meme machine ne doivent
+// jamais partager le meme profil d'allure.
+function readScoped(filePath, email, fallback) {
+  const all = readJsonSafe(filePath, {});
+  const v = all && typeof all === 'object' ? all[(email || '').toLowerCase()] : undefined;
+  return v !== undefined ? v : fallback;
+}
+function writeScoped(filePath, email, data) {
+  const all = readJsonSafe(filePath, {});
+  all[(email || '').toLowerCase()] = data;
+  writeJsonSafe(filePath, all);
+}
+
 const R_EARTH = 6371000;
 function haversine(a, b) {
   const dLat = (b.lat - a.lat) * Math.PI / 180;
@@ -114,7 +128,7 @@ async function downloadAndParseFit(client, activity, tmpDir) {
 // Operation lente (telechargement + parsing FIT par activite) - a appeler
 // explicitement (bouton "Recalculer"), jamais en bloquant une requete de
 // generation d'itineraire.
-async function refreshPaceProfile(sampleSize = ACTIVITIES_TO_SAMPLE) {
+async function refreshPaceProfile(email, sampleSize = ACTIVITIES_TO_SAMPLE) {
   const client = await getGarminClient();
   const activities = await getActivities();
 
@@ -169,14 +183,14 @@ async function refreshPaceProfile(sampleSize = ACTIVITIES_TO_SAMPLE) {
     sampleDistanceKm: Object.values(buckets).reduce((s, b) => s + b.distM, 0) / 1000,
     paceMinPerKm,
   };
-  writeJsonSafe(PACE_PROFILE_FILE, profile);
+  writeScoped(PACE_PROFILE_FILE, email, profile);
   return profile;
 }
 
 // Lecture seule, rapide, sans appel reseau - a utiliser dans le chemin de
 // generation d'itineraire.
-function getPaceProfile() {
-  const cached = readJsonSafe(PACE_PROFILE_FILE, null);
+function getPaceProfile(email) {
+  const cached = readScoped(PACE_PROFILE_FILE, email, null);
   if (cached && cached.paceMinPerKm) {
     const ageMs = Date.now() - new Date(cached.computedAt).getTime();
     return { ...cached, isStale: ageMs > PROFILE_MAX_AGE_MS, isGeneric: false };
@@ -184,10 +198,24 @@ function getPaceProfile() {
   return { paceMinPerKm: GENERIC_FALLBACK_PACE, isStale: true, isGeneric: true, computedAt: null };
 }
 
+// Migration ponctuelle du fichier existant (a plat, un seul profil pour toute
+// la machine) vers le format cloisonne par compte {[email]: profil} - a
+// appeler une fois au demarrage du serveur (voir server.js), avant tout appel
+// a getPaceProfile/refreshPaceProfile. Idempotent.
+function migratePaceProfileToScoped(envEmail) {
+  if (!envEmail) return;
+  const raw = readJsonSafe(PACE_PROFILE_FILE, null);
+  if (raw === null) return;
+  const looksScoped = typeof raw === 'object' && Object.keys(raw).every(k => k.includes('@'));
+  if (looksScoped) return;
+  writeJsonSafe(PACE_PROFILE_FILE, { [envEmail.toLowerCase()]: raw });
+}
+
 module.exports = {
   bucketForGrade,
   getPaceProfile,
   refreshPaceProfile,
+  migratePaceProfileToScoped,
   GRADIENT_BUCKETS,
   GENERIC_FALLBACK_PACE,
 };

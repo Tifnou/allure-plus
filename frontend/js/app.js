@@ -364,6 +364,14 @@ async function handleLogout() {
   try {
     await fetch(`${API}/api/logout`, { method: 'POST' });
   } catch(e) {}
+  // Purge totale (pas une liste de cles a enumerer) : un changement de compte
+  // sur ce meme navigateur ne doit jamais repousser les anciennes valeurs
+  // (profil, plan, objectifs...) du compte precedent vers le nouveau via le
+  // mecanisme de synchro localStorage -> /api/user-data (voir app.js,
+  // syncUserDataFromServer/DURABLE_LS_KEYS). Sans danger : tout ce qui compte
+  // redescend du serveur au prochain login, les preferences UI pures
+  // (theme, groupes replies...) se re-choisissent sans consequence.
+  try { localStorage.clear(); } catch (e) {}
   window.location.href = '/login';
 }
 

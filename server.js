@@ -53,7 +53,7 @@ const {
 const { getZoneRange, annotatePaceZones, ZONE_LABELS } = require('./zones');
 const { isBrouterConfigured, isTilePresent, getTileRemoteSize, downloadTile } = require('./brouter_manager');
 const { geocode, getCommunesForPostcode, getCommunesForDepartment, searchStreet, getTownHall, generateRouteOptions, buildGpxXml } = require('./route_generator');
-const { getPaceProfile, refreshPaceProfile } = require('./pace_profile');
+const { getPaceProfile, refreshPaceProfile, migratePaceProfileToScoped } = require('./pace_profile');
 const { scheduleSync, runFullReconciliation, getSyncStatus, syncBinaryFile, deleteBinaryFile, syncAvatarFile } = require('./sync');
 const { buildPlanWorkbook } = require('./xlsx_export');
 const {
@@ -97,9 +97,19 @@ const UPLOADS_DIR = path.join(__dirname, 'uploads');
 try { fs.mkdirSync(UPLOADS_DIR, { recursive: true }); } catch (e) {}
 app.use('/uploads', express.static(UPLOADS_DIR));
 
-function findAvatarFile() {
+// Cloisonnement par compte : uploads/ est un dossier plat partage par
+// n'importe quel compte connecte sur cette machine - le nom de fichier porte
+// donc l'identite du compte (avatar-<slug>.<ext>) pour qu'un compte sans
+// avatar n'affiche jamais celui d'un autre compte deja utilise ici.
+function slugifyEmail(email) {
+  return (email || '').toLowerCase().replace(/[^a-z0-9]/g, '_');
+}
+function findAvatarFile(email) {
+  const slug = slugifyEmail(email);
+  if (!slug) return null;
   try {
-    return fs.readdirSync(UPLOADS_DIR).find(f => /^avatar\.[a-z0-9]+$/i.test(f)) || null;
+    const re = new RegExp(`^avatar-${slug}\\.[a-z0-9]+$`, 'i');
+    return fs.readdirSync(UPLOADS_DIR).find(f => re.test(f)) || null;
   } catch (e) { return null; }
 }
 
@@ -167,8 +177,27 @@ function writeJsonSafe(filePath, data, retries = 5) {
   }
 }
 
+// Cloisonnement par compte des fichiers de donnees locaux (records, courses,
+// chaussures, PPS, poids, sante, analyses de seance, cache d'activites,
+// profil d'allure) - meme motif que user_data.json (deja scope). Sans ca, un
+// meme PC utilise successivement avec deux comptes Garmin differents (usage
+// reel constate) affiche/melange les donnees de l'un sous l'autre, la synchro
+// cloud etant elle deja correctement scopee par email cote relais. Voir
+// migrateToScoped ci-dessous pour la conversion ponctuelle des fichiers
+// existants (a plat) vers ce format.
+function readScoped(filePath, email, fallback) {
+  const all = readJsonSafe(filePath, {});
+  const v = all && typeof all === 'object' ? all[(email || '').toLowerCase()] : undefined;
+  return v !== undefined ? v : fallback;
+}
+function writeScoped(filePath, email, data) {
+  const all = readJsonSafe(filePath, {});
+  all[(email || '').toLowerCase()] = data;
+  writeJsonSafe(filePath, all);
+}
+
 app.get('/api/avatar', requireSession, (req, res) => {
-  const f = findAvatarFile();
+  const f = findAvatarFile(req.session.email);
   res.json({ url: f ? '/uploads/' + f : null });
 });
 
@@ -177,17 +206,18 @@ app.post('/api/avatar', requireSession, upload.single('avatar'), (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'Aucun fichier recu' });
     const ext = (path.extname(req.file.originalname) || '.jpg').toLowerCase();
     if (!/^\.(jpe?g|png|webp|gif)$/.test(ext)) return res.status(400).json({ error: "Format d'image non supporte" });
-    const existing = findAvatarFile();
+    const existing = findAvatarFile(req.session.email);
     if (existing) fs.unlinkSync(path.join(UPLOADS_DIR, existing));
-    fs.writeFileSync(path.join(UPLOADS_DIR, 'avatar' + ext), req.file.buffer);
+    const filename = 'avatar-' + slugifyEmail(req.session.email) + ext;
+    fs.writeFileSync(path.join(UPLOADS_DIR, filename), req.file.buffer);
     syncAvatarFile(req.session.email).catch(() => {});
-    res.json({ url: '/uploads/avatar' + ext });
+    res.json({ url: '/uploads/' + filename });
   } catch (err) { handleError(res, err); }
 });
 
 app.delete('/api/avatar', requireSession, (req, res) => {
   try {
-    const f = findAvatarFile();
+    const f = findAvatarFile(req.session.email);
     if (f) {
       fs.unlinkSync(path.join(UPLOADS_DIR, f));
       deleteBinaryFile(req.session.email, f).catch(() => {});
@@ -435,6 +465,40 @@ let   CAMPUS_ENABLED = process.env.CAMPUS_ENABLED !== 'false';
 let   envSessionId = null;
 let   _envCampusTokenCache = loadCampusTokenFromFile();
 if (_envCampusTokenCache) console.log('[START] Token Campus restaure depuis fichier');
+
+// ─── Migration ponctuelle des fichiers locaux vers le format cloisonne par
+// compte {[email]: donnees} (voir readScoped/writeScoped) ─────────────────
+// Convertit les fichiers historiques "a plat" (un seul compte implicite par
+// machine) en presumant qu'ils appartiennent au compte d'auto-connexion de
+// cette machine (ENV_EMAIL) - meme convention que la migration deja faite
+// pour user_data.json. Idempotent : si le fichier a deja l'air scope (toutes
+// ses cles racine ressemblent a un email), ne fait rien. Doit tourner avant
+// tout appel a ensureSyncScheduled/app.listen, jamais apres.
+function migrateToScoped(filePath, envEmail) {
+  if (!envEmail) return;
+  const raw = readJsonSafe(filePath, null);
+  if (raw === null) return;
+  const looksScoped = !Array.isArray(raw) && typeof raw === 'object' &&
+    Object.keys(raw).every(k => k.includes('@'));
+  if (looksScoped) return;
+  writeJsonSafe(filePath, { [envEmail.toLowerCase()]: raw });
+}
+[RECORDS_OVERRIDES_FILE, RACES_FILE, WEIGHT_HISTORY_FILE, HEALTH_SNAPSHOTS_FILE,
+ PPS_FILE, SESSION_ANALYSES_FILE, GEAR_FILE, ACTIVITY_GEAR_FILE, ACTIVITIES_CACHE_FILE]
+  .forEach(f => migrateToScoped(f, ENV_EMAIL));
+migratePaceProfileToScoped(ENV_EMAIL);
+
+// Avatar legacy (avatar.<ext>, sans compte) -> avatar-<slug>.<ext> pour le
+// compte d'auto-connexion de cette machine, meme logique que ci-dessus.
+(function migrateLegacyAvatar() {
+  if (!ENV_EMAIL) return;
+  try {
+    const legacy = fs.readdirSync(UPLOADS_DIR).find(f => /^avatar\.[a-z0-9]+$/i.test(f));
+    if (!legacy) return;
+    const ext = path.extname(legacy);
+    fs.renameSync(path.join(UPLOADS_DIR, legacy), path.join(UPLOADS_DIR, 'avatar-' + slugifyEmail(ENV_EMAIL) + ext));
+  } catch (e) {}
+})();
 
 // Dossier de persistance des tokens Garmin OAuth
 const GARMIN_TOKEN_DIR = path.join(__dirname, '.garmin_tokens');
@@ -890,7 +954,7 @@ app.post('/api/routes/generate', requireSession, async (req, res) => {
     if ((!targetDistanceM || targetDistanceM < 500) && (!targetDurationMin || targetDurationMin < 5)) {
       return res.status(400).json({ error: 'Distance ou durée cible invalide' });
     }
-    const paceProfile = getPaceProfile();
+    const paceProfile = getPaceProfile(req.session.email);
     // Si seule la duree est fournie, estimation de depart pour la forme de la
     // boucle (affinee ensuite par generateLoop) - au rythme "plat", optimiste
     // par construction mais recalcule reellement une fois le tracé obtenu.
@@ -924,12 +988,12 @@ app.post('/api/routes/gpx', requireSession, (req, res) => {
 });
 
 app.get('/api/routes/pace-profile', requireSession, (req, res) => {
-  res.json(getPaceProfile());
+  res.json(getPaceProfile(req.session.email));
 });
 
 app.post('/api/routes/pace-profile/refresh', requireSession, async (req, res) => {
   try {
-    const profile = await refreshPaceProfile();
+    const profile = await refreshPaceProfile(req.session.email);
     scheduleSync('pace_profile', 'profile', req.session.email);
     res.json(profile);
   } catch (err) { handleError(res, err); }
@@ -1217,7 +1281,7 @@ app.get('/api/activities/year/:year', requireSession, async (req, res) => {
     // navigateur, sans dependre du localStorage du tout.
     const isPastYear = year < currentYear;
     if (isPastYear) {
-      const cached = readJsonSafe(ACTIVITIES_CACHE_FILE, {})[year];
+      const cached = readScoped(ACTIVITIES_CACHE_FILE, req.session.email, {})[year];
       if (cached) return res.json({ year, activities: cached, count: cached.length, cached: true });
     }
     const { getActivitiesForYear } = req.session.fns;
@@ -1243,9 +1307,9 @@ app.get('/api/activities/year/:year', requireSession, async (req, res) => {
       anaerobicTrainingEffectMessage: a.anaerobicTrainingEffectMessage,
     }));
     if (isPastYear) {
-      const cache = readJsonSafe(ACTIVITIES_CACHE_FILE, {});
+      const cache = readScoped(ACTIVITIES_CACHE_FILE, req.session.email, {});
       cache[year] = mapped;
-      writeJsonSafe(ACTIVITIES_CACHE_FILE, cache);
+      writeScoped(ACTIVITIES_CACHE_FILE, req.session.email, cache);
     }
     res.json({ year, activities: mapped, count: mapped.length });
   } catch (err) { handleError(res, err); }
@@ -1259,7 +1323,7 @@ app.get('/api/records', requireSession, async (req, res) => {
     const { getActivities } = req.session.fns;
     const activities = await getActivities(200);
     const computed = getPersonalRecords(activities);
-    const overrides = readJsonSafe(RECORDS_OVERRIDES_FILE, {});
+    const overrides = readScoped(RECORDS_OVERRIDES_FILE, req.session.email, {});
     const result = {};
     RECORD_KEYS.forEach(key => {
       const override = overrides[key];
@@ -1291,7 +1355,7 @@ app.put('/api/records/:distance', requireSession, (req, res) => {
     if (!name || !date || !durationSec || !distanceM) {
       return res.status(400).json({ error: 'Champs manquants (name, date, durationSec, distanceM)' });
     }
-    const overrides = readJsonSafe(RECORDS_OVERRIDES_FILE, {});
+    const overrides = readScoped(RECORDS_OVERRIDES_FILE, req.session.email, {});
     overrides[distance] = {
       name: String(name).slice(0, 200),
       date,
@@ -1299,7 +1363,7 @@ app.put('/api/records/:distance', requireSession, (req, res) => {
       distance: Number(distanceM),
       pace: Number(durationSec) / (Number(distanceM) / 1000),
     };
-    writeJsonSafe(RECORDS_OVERRIDES_FILE, overrides);
+    writeScoped(RECORDS_OVERRIDES_FILE, req.session.email, overrides);
     scheduleSync('records_overrides', distance, req.session.email);
     res.json({ success: true, record: overrides[distance] });
   } catch (err) { handleError(res, err); }
@@ -1309,9 +1373,9 @@ app.delete('/api/records/:distance', requireSession, (req, res) => {
   try {
     const distance = req.params.distance;
     if (!RECORD_KEYS.includes(distance)) return res.status(400).json({ error: 'Distance inconnue' });
-    const overrides = readJsonSafe(RECORDS_OVERRIDES_FILE, {});
+    const overrides = readScoped(RECORDS_OVERRIDES_FILE, req.session.email, {});
     delete overrides[distance];
-    writeJsonSafe(RECORDS_OVERRIDES_FILE, overrides);
+    writeScoped(RECORDS_OVERRIDES_FILE, req.session.email, overrides);
     scheduleSync('records_overrides', distance, req.session.email, true);
     res.json({ success: true });
   } catch (err) { handleError(res, err); }
@@ -1319,7 +1383,7 @@ app.delete('/api/records/:distance', requireSession, (req, res) => {
 
 // ─── Courses personnelles (saisie libre) ──────────────────────────────
 app.get('/api/races', requireSession, (req, res) => {
-  const races = readJsonSafe(RACES_FILE, []);
+  const races = readScoped(RACES_FILE, req.session.email, []);
   races.sort((a, b) => {
     const byName = (a.name || '').localeCompare(b.name || '', 'fr', { sensitivity: 'base' });
     if (byName !== 0) return byName;
@@ -1334,7 +1398,7 @@ app.post('/api/races', requireSession, (req, res) => {
     if (!name || !['route', 'trail'].includes(type) || !date || !distanceKm || !durationSec) {
       return res.status(400).json({ error: 'Champs obligatoires manquants (name, type, date, distanceKm, durationSec)' });
     }
-    const races = readJsonSafe(RACES_FILE, []);
+    const races = readScoped(RACES_FILE, req.session.email, []);
     const race = {
       id: crypto.randomUUID(),
       name: String(name).slice(0, 200),
@@ -1352,7 +1416,7 @@ app.post('/api/races', requireSession, (req, res) => {
       activityId: activityId ? String(activityId) : null,
     };
     races.push(race);
-    writeJsonSafe(RACES_FILE, races);
+    writeScoped(RACES_FILE, req.session.email, races);
     scheduleSync('races', race.id, req.session.email);
     res.json({ success: true, race });
   } catch (err) { handleError(res, err); }
@@ -1360,7 +1424,7 @@ app.post('/api/races', requireSession, (req, res) => {
 
 app.put('/api/races/:id', requireSession, (req, res) => {
   try {
-    const races = readJsonSafe(RACES_FILE, []);
+    const races = readScoped(RACES_FILE, req.session.email, []);
     const idx = races.findIndex(r => r.id === req.params.id);
     if (idx === -1) return res.status(404).json({ error: 'Course introuvable' });
     const { name, type, date, distanceKm, durationSec, elevationGain, vo2max, dnf, activityId } = req.body || {};
@@ -1378,7 +1442,7 @@ app.put('/api/races/:id', requireSession, (req, res) => {
       dnf: !!dnf,
       activityId: activityId ? String(activityId) : (races[idx].activityId || null),
     };
-    writeJsonSafe(RACES_FILE, races);
+    writeScoped(RACES_FILE, req.session.email, races);
     scheduleSync('races', races[idx].id, req.session.email);
     res.json({ success: true, race: races[idx] });
   } catch (err) { handleError(res, err); }
@@ -1386,14 +1450,14 @@ app.put('/api/races/:id', requireSession, (req, res) => {
 
 app.delete('/api/races/:id', requireSession, (req, res) => {
   try {
-    const races = readJsonSafe(RACES_FILE, []);
+    const races = readScoped(RACES_FILE, req.session.email, []);
     const race = races.find(r => r.id === req.params.id);
     if (race?.certificateFile) {
       try { fs.unlinkSync(path.join(UPLOADS_DIR, race.certificateFile)); } catch (e) {}
       deleteBinaryFile(req.session.email, race.certificateFile).catch(() => {});
     }
     const filtered = races.filter(r => r.id !== req.params.id);
-    writeJsonSafe(RACES_FILE, filtered);
+    writeScoped(RACES_FILE, req.session.email, filtered);
     scheduleSync('races', req.params.id, req.session.email, true);
     res.json({ success: true });
   } catch (err) { handleError(res, err); }
@@ -1405,7 +1469,7 @@ app.post('/api/races/:id/certificate', requireSession, upload.single('certificat
     if (!req.file) return res.status(400).json({ error: 'Aucun fichier recu' });
     const ext = (path.extname(req.file.originalname) || '.pdf').toLowerCase();
     if (!/^\.(pdf|jpe?g|png)$/.test(ext)) return res.status(400).json({ error: 'Format non supporte (PDF, JPG ou PNG)' });
-    const races = readJsonSafe(RACES_FILE, []);
+    const races = readScoped(RACES_FILE, req.session.email, []);
     const idx = races.findIndex(r => r.id === req.params.id);
     if (idx === -1) return res.status(404).json({ error: 'Course introuvable' });
     if (races[idx].certificateFile) {
@@ -1415,7 +1479,7 @@ app.post('/api/races/:id/certificate', requireSession, upload.single('certificat
     const filename = 'race-' + races[idx].id + ext;
     fs.writeFileSync(path.join(UPLOADS_DIR, filename), req.file.buffer);
     races[idx].certificateFile = filename;
-    writeJsonSafe(RACES_FILE, races);
+    writeScoped(RACES_FILE, req.session.email, races);
     scheduleSync('races', races[idx].id, req.session.email);
     syncBinaryFile(req.session.email, filename).catch(() => {});
     res.json({ success: true, certificateUrl: '/uploads/' + filename });
@@ -1424,7 +1488,7 @@ app.post('/api/races/:id/certificate', requireSession, upload.single('certificat
 
 app.delete('/api/races/:id/certificate', requireSession, (req, res) => {
   try {
-    const races = readJsonSafe(RACES_FILE, []);
+    const races = readScoped(RACES_FILE, req.session.email, []);
     const idx = races.findIndex(r => r.id === req.params.id);
     if (idx === -1) return res.status(404).json({ error: 'Course introuvable' });
     if (races[idx].certificateFile) {
@@ -1432,7 +1496,7 @@ app.delete('/api/races/:id/certificate', requireSession, (req, res) => {
       deleteBinaryFile(req.session.email, races[idx].certificateFile).catch(() => {});
     }
     delete races[idx].certificateFile;
-    writeJsonSafe(RACES_FILE, races);
+    writeScoped(RACES_FILE, req.session.email, races);
     scheduleSync('races', races[idx].id, req.session.email);
     res.json({ success: true });
   } catch (err) { handleError(res, err); }
@@ -1473,7 +1537,7 @@ async function backfillGearKm(gear, firstUseDate, session) {
   if (!Number.isFinite(since)) return;
   const activities = await session.fns.getActivities(300);
   const mapped = getRecentActivities(activities, 300);
-  const activityGear = readJsonSafe(ACTIVITY_GEAR_FILE, {});
+  const activityGear = readScoped(ACTIVITY_GEAR_FILE, session.email, {});
   let changed = false;
   for (const a of mapped) {
     if (!a.id || !a.distanceKm || activityGear[a.id]) continue;
@@ -1483,12 +1547,12 @@ async function backfillGearKm(gear, firstUseDate, session) {
     changed = true;
     scheduleSync('activity_gear', a.id, session.email);
   }
-  if (changed) writeJsonSafe(ACTIVITY_GEAR_FILE, activityGear);
+  if (changed) writeScoped(ACTIVITY_GEAR_FILE, session.email, activityGear);
 }
 
 app.get('/api/gear', requireSession, (req, res) => {
-  const gear = readJsonSafe(GEAR_FILE, []);
-  const activityGear = readJsonSafe(ACTIVITY_GEAR_FILE, {});
+  const gear = readScoped(GEAR_FILE, req.session.email, []);
+  const activityGear = readScoped(ACTIVITY_GEAR_FILE, req.session.email, {});
   const withKm = gear.map(g => ({ ...g, currentKm: Math.round(computeGearKm(g.id, activityGear) * 10) / 10 }));
   res.json(withKm);
 });
@@ -1499,7 +1563,7 @@ app.post('/api/gear', requireSession, async (req, res) => {
     if (!name || !['route', 'trail'].includes(type)) {
       return res.status(400).json({ error: 'Champs obligatoires manquants (name, type)' });
     }
-    const gear = readJsonSafe(GEAR_FILE, []);
+    const gear = readScoped(GEAR_FILE, req.session.email, []);
     const item = {
       id: crypto.randomUUID(),
       brand: brand ? String(brand).slice(0, 80) : '',
@@ -1515,7 +1579,7 @@ app.post('/api/gear', requireSession, async (req, res) => {
     const demoted = item.isDefault ? gear.filter(g => g.type === type && g.isDefault).map(g => g.id) : [];
     if (item.isDefault) gear.forEach(g => { if (g.type === type) g.isDefault = false; });
     gear.push(item);
-    writeJsonSafe(GEAR_FILE, gear);
+    writeScoped(GEAR_FILE, req.session.email, gear);
     scheduleSync('gear', item.id, req.session.email);
     demoted.forEach(id => scheduleSync('gear', id, req.session.email));
     if (item.firstUseDate) await backfillGearKm(item, item.firstUseDate, req.session);
@@ -1525,7 +1589,7 @@ app.post('/api/gear', requireSession, async (req, res) => {
 
 app.put('/api/gear/:id', requireSession, async (req, res) => {
   try {
-    const gear = readJsonSafe(GEAR_FILE, []);
+    const gear = readScoped(GEAR_FILE, req.session.email, []);
     const idx = gear.findIndex(g => g.id === req.params.id);
     if (idx === -1) return res.status(404).json({ error: 'Paire introuvable' });
     const { brand, name, type, maxKm, isDefault, firstUseDate } = req.body || {};
@@ -1544,7 +1608,7 @@ app.put('/api/gear/:id', requireSession, async (req, res) => {
       isDefault: !!isDefault,
       firstUseDate: firstUseDate || null,
     };
-    writeJsonSafe(GEAR_FILE, gear);
+    writeScoped(GEAR_FILE, req.session.email, gear);
     scheduleSync('gear', gear[idx].id, req.session.email);
     demoted.forEach(id => scheduleSync('gear', id, req.session.email));
     // Rattrapage relance seulement si la date a change (nouvelle ou modifiee) -
@@ -1558,11 +1622,11 @@ app.put('/api/gear/:id', requireSession, async (req, res) => {
 
 app.delete('/api/gear/:id', requireSession, (req, res) => {
   try {
-    const gear = readJsonSafe(GEAR_FILE, []);
+    const gear = readScoped(GEAR_FILE, req.session.email, []);
     const filtered = gear.filter(g => g.id !== req.params.id);
-    writeJsonSafe(GEAR_FILE, filtered);
+    writeScoped(GEAR_FILE, req.session.email, filtered);
     scheduleSync('gear', req.params.id, req.session.email, true);
-    const activityGear = readJsonSafe(ACTIVITY_GEAR_FILE, {});
+    const activityGear = readScoped(ACTIVITY_GEAR_FILE, req.session.email, {});
     let changed = false;
     for (const key of Object.keys(activityGear)) {
       if (activityGear[key].gearId === req.params.id) {
@@ -1571,31 +1635,31 @@ app.delete('/api/gear/:id', requireSession, (req, res) => {
         scheduleSync('activity_gear', key, req.session.email, true);
       }
     }
-    if (changed) writeJsonSafe(ACTIVITY_GEAR_FILE, activityGear);
+    if (changed) writeScoped(ACTIVITY_GEAR_FILE, req.session.email, activityGear);
     res.json({ success: true });
   } catch (err) { handleError(res, err); }
 });
 
 // Chaussure assignee a une activite donnee — objet complet ou null
 app.get('/api/activity-gear/:activityId', requireSession, (req, res) => {
-  const activityGear = readJsonSafe(ACTIVITY_GEAR_FILE, {});
+  const activityGear = readScoped(ACTIVITY_GEAR_FILE, req.session.email, {});
   res.json(activityGear[req.params.activityId] || null);
 });
 
 app.put('/api/activity-gear/:activityId', requireSession, (req, res) => {
   try {
     const { gearId, distanceKm, date } = req.body || {};
-    const gear = readJsonSafe(GEAR_FILE, []);
+    const gear = readScoped(GEAR_FILE, req.session.email, []);
     if (!gearId || !gear.some(g => g.id === gearId)) {
       return res.status(400).json({ error: 'Paire introuvable' });
     }
-    const activityGear = readJsonSafe(ACTIVITY_GEAR_FILE, {});
+    const activityGear = readScoped(ACTIVITY_GEAR_FILE, req.session.email, {});
     activityGear[req.params.activityId] = {
       gearId,
       distanceKm: Number(distanceKm) || 0,
       date: date || null,
     };
-    writeJsonSafe(ACTIVITY_GEAR_FILE, activityGear);
+    writeScoped(ACTIVITY_GEAR_FILE, req.session.email, activityGear);
     scheduleSync('activity_gear', req.params.activityId, req.session.email);
     res.json({ success: true });
   } catch (err) { handleError(res, err); }
@@ -1603,10 +1667,10 @@ app.put('/api/activity-gear/:activityId', requireSession, (req, res) => {
 
 app.delete('/api/activity-gear/:activityId', requireSession, (req, res) => {
   try {
-    const activityGear = readJsonSafe(ACTIVITY_GEAR_FILE, {});
+    const activityGear = readScoped(ACTIVITY_GEAR_FILE, req.session.email, {});
     scheduleSync('activity_gear', req.params.activityId, req.session.email, true);
     delete activityGear[req.params.activityId];
-    writeJsonSafe(ACTIVITY_GEAR_FILE, activityGear);
+    writeScoped(ACTIVITY_GEAR_FILE, req.session.email, activityGear);
     res.json({ success: true });
   } catch (err) { handleError(res, err); }
 });
@@ -1618,12 +1682,12 @@ app.delete('/api/activity-gear/:activityId', requireSession, (req, res) => {
 // Une activite ne peut etre liee qu'a une seule seance, et reciproquement
 // (contrainte imposee ici, jamais seulement cote client).
 app.get('/api/session-analyses', requireSession, (req, res) => {
-  const analyses = readJsonSafe(SESSION_ANALYSES_FILE, []);
+  const analyses = readScoped(SESSION_ANALYSES_FILE, req.session.email, []);
   res.json(analyses);
 });
 
 app.get('/api/session-analyses/by-activity/:activityId', requireSession, (req, res) => {
-  const analyses = readJsonSafe(SESSION_ANALYSES_FILE, []);
+  const analyses = readScoped(SESSION_ANALYSES_FILE, req.session.email, []);
   const found = analyses.find(a => String(a.activityId) === String(req.params.activityId));
   if (!found) return res.status(404).json({ error: 'Aucune analyse pour cette activite' });
   res.json(found);
@@ -1634,7 +1698,7 @@ app.get('/api/session-analyses/by-session', requireSession, (req, res) => {
   if (!weekId || trainingIndex === undefined) {
     return res.status(400).json({ error: 'weekId et trainingIndex requis' });
   }
-  const analyses = readJsonSafe(SESSION_ANALYSES_FILE, []);
+  const analyses = readScoped(SESSION_ANALYSES_FILE, req.session.email, []);
   const found = analyses.find(a =>
     a.planKey?.weekId === weekId && String(a.planKey?.trainingIndex) === String(trainingIndex));
   if (!found) return res.status(404).json({ error: 'Aucune analyse pour cette seance' });
@@ -1648,7 +1712,7 @@ app.post('/api/session-analyses', requireSession, (req, res) => {
     if (!planKey?.weekId || planKey?.trainingIndex === undefined || !activityId) {
       return res.status(400).json({ error: 'planKey (weekId, trainingIndex) et activityId requis' });
     }
-    const analyses = readJsonSafe(SESSION_ANALYSES_FILE, []);
+    const analyses = readScoped(SESSION_ANALYSES_FILE, req.session.email, []);
     if (analyses.some(a => String(a.activityId) === String(activityId))) {
       return res.status(409).json({ error: 'Cette activite est deja liee a une autre seance' });
     }
@@ -1658,7 +1722,7 @@ app.post('/api/session-analyses', requireSession, (req, res) => {
     const now = new Date().toISOString();
     const record = { ...body, id: crypto.randomUUID(), createdAt: now, updatedAt: now };
     analyses.push(record);
-    writeJsonSafe(SESSION_ANALYSES_FILE, analyses);
+    writeScoped(SESSION_ANALYSES_FILE, req.session.email, analyses);
     scheduleSync('session_analyses', record.id, req.session.email);
     res.json({ success: true, analysis: record });
   } catch (err) { handleError(res, err); }
@@ -1666,7 +1730,7 @@ app.post('/api/session-analyses', requireSession, (req, res) => {
 
 app.put('/api/session-analyses/:id', requireSession, (req, res) => {
   try {
-    const analyses = readJsonSafe(SESSION_ANALYSES_FILE, []);
+    const analyses = readScoped(SESSION_ANALYSES_FILE, req.session.email, []);
     const idx = analyses.findIndex(a => a.id === req.params.id);
     if (idx === -1) return res.status(404).json({ error: 'Analyse introuvable' });
     const body = req.body || {};
@@ -1679,7 +1743,7 @@ app.put('/api/session-analyses/:id', requireSession, (req, res) => {
       if (conflictSession) return res.status(409).json({ error: 'Cette seance est deja liee a une autre activite' });
     }
     analyses[idx] = { ...analyses[idx], ...body, id: analyses[idx].id, createdAt: analyses[idx].createdAt, updatedAt: new Date().toISOString() };
-    writeJsonSafe(SESSION_ANALYSES_FILE, analyses);
+    writeScoped(SESSION_ANALYSES_FILE, req.session.email, analyses);
     scheduleSync('session_analyses', analyses[idx].id, req.session.email);
     res.json({ success: true, analysis: analyses[idx] });
   } catch (err) { handleError(res, err); }
@@ -1687,9 +1751,9 @@ app.put('/api/session-analyses/:id', requireSession, (req, res) => {
 
 app.delete('/api/session-analyses/:id', requireSession, (req, res) => {
   try {
-    const analyses = readJsonSafe(SESSION_ANALYSES_FILE, []);
+    const analyses = readScoped(SESSION_ANALYSES_FILE, req.session.email, []);
     const filtered = analyses.filter(a => a.id !== req.params.id);
-    writeJsonSafe(SESSION_ANALYSES_FILE, filtered);
+    writeScoped(SESSION_ANALYSES_FILE, req.session.email, filtered);
     scheduleSync('session_analyses', req.params.id, req.session.email, true);
     res.json({ success: true });
   } catch (err) { handleError(res, err); }
@@ -1714,18 +1778,18 @@ function todayParisISO() {
 // On construit donc notre propre historique en capturant un instantané par
 // jour (au plus 1x/jour) à chaque fois que la valeur courante est consultée.
 function captureHealthSnapshot(metric, dateStr, value, email) {
-  if (value == null) return;
-  const store = readJsonSafe(HEALTH_SNAPSHOTS_FILE, {});
+  if (value == null || !email) return;
+  const store = readScoped(HEALTH_SNAPSHOTS_FILE, email, {});
   const arr = store[metric] || (store[metric] = []);
   if (arr.some(e => e.date === dateStr)) return;
   arr.push({ date: dateStr, value });
   arr.sort((a, b) => new Date(a.date) - new Date(b.date));
-  writeJsonSafe(HEALTH_SNAPSHOTS_FILE, store);
-  if (email) scheduleSync('health_snapshots', `${metric}::${dateStr}`, email);
+  writeScoped(HEALTH_SNAPSHOTS_FILE, email, store);
+  scheduleSync('health_snapshots', `${metric}::${dateStr}`, email);
 }
 
-function getHealthSnapshots(metric, days) {
-  const store = readJsonSafe(HEALTH_SNAPSHOTS_FILE, {});
+function getHealthSnapshots(metric, days, email) {
+  const store = readScoped(HEALTH_SNAPSHOTS_FILE, email, {});
   const arr = store[metric] || [];
   if (!days) return arr;
   const cutoff = Date.now() - days * 24 * 3600 * 1000;
@@ -1734,11 +1798,11 @@ function getHealthSnapshots(metric, days) {
 
 app.get('/api/health-history/:metric', requireSession, (req, res) => {
   const days = parseInt(req.query.days) || null;
-  res.json(getHealthSnapshots(req.params.metric, days));
+  res.json(getHealthSnapshots(req.params.metric, days, req.session.email));
 });
 
 app.get('/api/weight-history', requireSession, (req, res) => {
-  const history = readJsonSafe(WEIGHT_HISTORY_FILE, []);
+  const history = readScoped(WEIGHT_HISTORY_FILE, req.session.email, []);
   history.sort((a, b) => new Date(a.date) - new Date(b.date));
   res.json(history);
 });
@@ -1749,12 +1813,12 @@ app.post('/api/weight-history', requireSession, (req, res) => {
     const w = Number(weight);
     if (!w || w <= 0) return res.status(400).json({ error: 'Poids invalide' });
     const entryDate = date || todayParisISO();
-    const history = readJsonSafe(WEIGHT_HISTORY_FILE, []);
+    const history = readScoped(WEIGHT_HISTORY_FILE, req.session.email, []);
     const idx = history.findIndex(e => e.date === entryDate);
     const entry = { date: entryDate, weight: w };
     if (idx !== -1) history[idx] = entry; else history.push(entry);
     history.sort((a, b) => new Date(a.date) - new Date(b.date));
-    writeJsonSafe(WEIGHT_HISTORY_FILE, history);
+    writeScoped(WEIGHT_HISTORY_FILE, req.session.email, history);
     scheduleSync('weight_history', entryDate, req.session.email);
     res.json({ success: true, entry, history });
   } catch (err) { handleError(res, err); }
@@ -1762,9 +1826,9 @@ app.post('/api/weight-history', requireSession, (req, res) => {
 
 app.delete('/api/weight-history/:date', requireSession, (req, res) => {
   try {
-    const history = readJsonSafe(WEIGHT_HISTORY_FILE, []);
+    const history = readScoped(WEIGHT_HISTORY_FILE, req.session.email, []);
     const filtered = history.filter(e => e.date !== req.params.date);
-    writeJsonSafe(WEIGHT_HISTORY_FILE, filtered);
+    writeScoped(WEIGHT_HISTORY_FILE, req.session.email, filtered);
     scheduleSync('weight_history', req.params.date, req.session.email, true);
     res.json({ success: true });
   } catch (err) { handleError(res, err); }
@@ -1867,7 +1931,7 @@ async function extractPpsFromQr(buffer) {
 // effort - le texte d'un PDF n'est pas toujours extrait dans l'ordre
 // visuel), corrigibles manuellement via PUT si l'extraction se trompe.
 app.get('/api/pps', requireSession, (req, res) => {
-  res.json(readJsonSafe(PPS_FILE, []));
+  res.json(readScoped(PPS_FILE, req.session.email, []));
 });
 
 app.post('/api/pps', requireSession, upload.single('pdf'), async (req, res) => {
@@ -1876,7 +1940,7 @@ app.post('/api/pps', requireSession, upload.single('pdf'), async (req, res) => {
     if (req.file.mimetype !== 'application/pdf' && !/\.pdf$/i.test(req.file.originalname || '')) {
       return res.status(400).json({ error: 'Le fichier doit etre un PDF' });
     }
-    const list = readJsonSafe(PPS_FILE, []);
+    const list = readScoped(PPS_FILE, req.session.email, []);
     if (list.length >= 2) {
       return res.status(400).json({ error: 'Deux PPS sont deja enregistres — supprimez-en un avant d\'en ajouter un nouveau' });
     }
@@ -1947,7 +2011,7 @@ app.post('/api/pps', requireSession, upload.single('pdf'), async (req, res) => {
     fs.writeFileSync(path.join(UPLOADS_DIR, filename), req.file.buffer);
     const entry = { id, number, expiryDate, lastName, filename, uploadedAt: new Date().toISOString() };
     list.push(entry);
-    writeJsonSafe(PPS_FILE, list);
+    writeScoped(PPS_FILE, req.session.email, list);
     scheduleSync('pps', entry.id, req.session.email);
     syncBinaryFile(req.session.email, filename).catch(() => {});
     res.json({ success: true, entry });
@@ -1956,14 +2020,14 @@ app.post('/api/pps', requireSession, upload.single('pdf'), async (req, res) => {
 
 app.put('/api/pps/:id', requireSession, (req, res) => {
   try {
-    const list = readJsonSafe(PPS_FILE, []);
+    const list = readScoped(PPS_FILE, req.session.email, []);
     const idx = list.findIndex(e => e.id === req.params.id);
     if (idx === -1) return res.status(404).json({ error: 'PPS introuvable' });
     const { number, expiryDate, lastName } = req.body || {};
     if (number != null) list[idx].number = String(number).slice(0, 40);
     if (expiryDate != null) list[idx].expiryDate = expiryDate;
     if (lastName != null) list[idx].lastName = String(lastName).slice(0, 60);
-    writeJsonSafe(PPS_FILE, list);
+    writeScoped(PPS_FILE, req.session.email, list);
     scheduleSync('pps', list[idx].id, req.session.email);
     res.json({ success: true, entry: list[idx] });
   } catch (err) { handleError(res, err); }
@@ -1971,14 +2035,14 @@ app.put('/api/pps/:id', requireSession, (req, res) => {
 
 app.delete('/api/pps/:id', requireSession, (req, res) => {
   try {
-    const list = readJsonSafe(PPS_FILE, []);
+    const list = readScoped(PPS_FILE, req.session.email, []);
     const entry = list.find(e => e.id === req.params.id);
     if (entry?.filename) {
       try { fs.unlinkSync(path.join(UPLOADS_DIR, entry.filename)); } catch (e) {}
       deleteBinaryFile(req.session.email, entry.filename).catch(() => {});
     }
     const filtered = list.filter(e => e.id !== req.params.id);
-    writeJsonSafe(PPS_FILE, filtered);
+    writeScoped(PPS_FILE, req.session.email, filtered);
     scheduleSync('pps', req.params.id, req.session.email, true);
     res.json({ success: true });
   } catch (err) { handleError(res, err); }
@@ -1986,9 +2050,9 @@ app.delete('/api/pps/:id', requireSession, (req, res) => {
 
 // ─── Export / import des records + courses (changement de PC, reinstall) ──
 app.get('/api/records-export', requireSession, (req, res) => {
-  const records_overrides = readJsonSafe(RECORDS_OVERRIDES_FILE, {});
-  const races = readJsonSafe(RACES_FILE, []);
-  const weight_history = readJsonSafe(WEIGHT_HISTORY_FILE, []);
+  const records_overrides = readScoped(RECORDS_OVERRIDES_FILE, req.session.email, {});
+  const races = readScoped(RACES_FILE, req.session.email, []);
+  const weight_history = readScoped(WEIGHT_HISTORY_FILE, req.session.email, []);
   res.setHeader('Content-Disposition', 'attachment; filename=allure-plus-records.json');
   res.json({ records_overrides, races, weight_history, exportedAt: new Date().toISOString() });
 });
@@ -1999,8 +2063,8 @@ app.post('/api/records-import', requireSession, (req, res) => {
     if (typeof records_overrides !== 'object' || records_overrides === null || !Array.isArray(races)) {
       return res.status(400).json({ error: 'Structure invalide (records_overrides ou races manquant)' });
     }
-    writeJsonSafe(RECORDS_OVERRIDES_FILE, records_overrides);
-    writeJsonSafe(RACES_FILE, races);
+    writeScoped(RECORDS_OVERRIDES_FILE, req.session.email, records_overrides);
+    writeScoped(RACES_FILE, req.session.email, races);
     // Import en masse (restauration d'un ancien export) : chaque cle doit
     // etre resynchronisee, pas seulement les prochaines ecritures - sinon un
     // import restaure localement mais jamais pousse vers le cloud.
@@ -2014,7 +2078,7 @@ app.post('/api/records-import', requireSession, (req, res) => {
       if (r.certificateFile) syncBinaryFile(req.session.email, r.certificateFile).catch(() => {});
     });
     if (Array.isArray(weight_history)) {
-      writeJsonSafe(WEIGHT_HISTORY_FILE, weight_history);
+      writeScoped(WEIGHT_HISTORY_FILE, req.session.email, weight_history);
       weight_history.forEach(e => scheduleSync('weight_history', e.date, req.session.email));
     }
     res.json({ success: true, racesCount: races.length });
