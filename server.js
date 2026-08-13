@@ -438,8 +438,9 @@ function computeDisplayName(profile) {
 async function createGarminSession(email, password) {
   const gc = new GarminConnect({ username: email, password });
   await gc.login();
-  // Sauvegarder les tokens OAuth sur disque pour eviter le login SSO aux prochains demarrages
-  try { gc.exportTokenToFile(GARMIN_TOKEN_DIR); } catch(_) {}
+  // Sauvegarder les tokens OAuth sur disque (par compte, cf garminTokenDirFor)
+  // pour eviter le login SSO aux prochains demarrages.
+  try { gc.exportTokenToFile(garminTokenDirFor(email)); } catch(_) {}
   const fns = buildGarminFunctions(gc);
 
   let displayName = null;
@@ -500,30 +501,82 @@ migratePaceProfileToScoped(ENV_EMAIL);
   } catch (e) {}
 })();
 
-// Dossier de persistance des tokens Garmin OAuth
+// Dossier de persistance des tokens Garmin OAuth - cloisonne par compte
+// (sous-dossier .garmin_tokens/<slug-email>/) pour la meme raison que les
+// donnees locales (records, courses...) : deux comptes Garmin utilises sur
+// la meme machine ne doivent jamais se marcher dessus. Chaque connexion
+// reussie ecrit dans SON sous-dossier (createGarminSession) - au demarrage,
+// restoreGarminSession doit determiner CE compte parmi ceux deja connectes
+// sur cette machine avant de savoir ou lire.
 const GARMIN_TOKEN_DIR = path.join(__dirname, '.garmin_tokens');
 if (!fs.existsSync(GARMIN_TOKEN_DIR)) fs.mkdirSync(GARMIN_TOKEN_DIR, { recursive: true });
+function garminTokenDirFor(email) {
+  return path.join(GARMIN_TOKEN_DIR, slugifyEmail(email));
+}
 
-// Tenter de restaurer une session Garmin depuis les tokens sauvegardés sur disque
-async function restoreGarminSession() {
+// Migration ponctuelle : les jetons vivaient jusqu'ici a plat directement
+// dans GARMIN_TOKEN_DIR (un seul compte possible par machine). On les
+// deplace dans le sous-dossier du compte reellement proprietaire - determine
+// en interrogeant Garmin avec ces jetons memes (le seul moyen fiable, ENV_EMAIL
+// peut etre absent ou perime). Idempotent : no-op si deja migre.
+async function migrateLegacyGarminTokens() {
   const oauth1Path = path.join(GARMIN_TOKEN_DIR, 'oauth1_token.json');
   const oauth2Path = path.join(GARMIN_TOKEN_DIR, 'oauth2_token.json');
-  if (!fs.existsSync(oauth1Path) || !fs.existsSync(oauth2Path)) return null;
+  if (!fs.existsSync(oauth1Path) || !fs.existsSync(oauth2Path)) return;
   try {
     const gc = new GarminConnect({ username: ENV_EMAIL, password: ENV_PASSWORD });
     gc.loadTokenByFile(GARMIN_TOKEN_DIR);
+    const profile = await gc.getUserProfile();
+    const owner = (profile?.userName || '').toLowerCase();
+    if (!owner) return;
+    const destDir = garminTokenDirFor(owner);
+    fs.mkdirSync(destDir, { recursive: true });
+    fs.renameSync(oauth1Path, path.join(destDir, 'oauth1_token.json'));
+    fs.renameSync(oauth2Path, path.join(destDir, 'oauth2_token.json'));
+    console.log(`[START] Jetons Garmin migres vers le sous-dossier du compte : ${owner}`);
+  } catch (e) {
+    console.warn('[WARN] Migration des jetons Garmin impossible (jetons perimes) :', e.message);
+  }
+}
+
+// Tenter de restaurer une session Garmin depuis les tokens sauvegardés sur disque.
+// Sans indice explicite (ENV_EMAIL vide), on ne peut choisir automatiquement
+// entre plusieurs comptes deja connectes sur cette machine sans risquer de
+// restaurer le mauvais - dans ce cas precis, un seul sous-dossier present
+// reste un choix sur (c'est alors le seul compte jamais connecte ici).
+async function restoreGarminSession() {
+  await migrateLegacyGarminTokens();
+
+  let tokenDir;
+  if (ENV_EMAIL && fs.existsSync(garminTokenDirFor(ENV_EMAIL))) {
+    tokenDir = garminTokenDirFor(ENV_EMAIL);
+  } else if (!ENV_EMAIL) {
+    const subdirs = fs.readdirSync(GARMIN_TOKEN_DIR, { withFileTypes: true })
+      .filter(d => d.isDirectory()).map(d => d.name);
+    if (subdirs.length === 1) tokenDir = path.join(GARMIN_TOKEN_DIR, subdirs[0]);
+  }
+  if (!tokenDir) return null;
+
+  try {
+    const gc = new GarminConnect({ username: ENV_EMAIL, password: ENV_PASSWORD });
+    gc.loadTokenByFile(tokenDir);
     // Valider que la session est encore active avec un appel leger
     // (reutilise aussi pour calculer le nom d'affichage, comme au login complet)
     const profile = await gc.getUserProfile();
     const displayName = computeDisplayName(profile);
     const fns = buildGarminFunctions(gc);
     console.log('[START] Session Garmin restauree depuis tokens sauvegardes (pas de login SSO)');
-    return { gc, email: ENV_EMAIL, displayName, fns, lastAccess: Date.now() };
+    // email : toujours celui du PROFIL GARMIN reellement restaure (userName),
+    // jamais ENV_EMAIL - un email errone ici fait echouer TOUT le
+    // cloisonnement par compte des donnees locales (chaque route lit/ecrit
+    // sous req.session.email, cf readScoped/writeScoped).
+    const restoredEmail = (profile?.userName || ENV_EMAIL || '').toLowerCase();
+    return { gc, email: restoredEmail, displayName, fns, lastAccess: Date.now() };
   } catch(e) {
     console.warn('[WARN] Tokens Garmin sauvegardes expires ou invalides, login SSO necessaire.');
-    // Supprimer les tokens invalides
-    try { fs.unlinkSync(path.join(GARMIN_TOKEN_DIR, 'oauth1_token.json')); } catch(_) {}
-    try { fs.unlinkSync(path.join(GARMIN_TOKEN_DIR, 'oauth2_token.json')); } catch(_) {}
+    // Supprimer les tokens invalides (ce compte seulement)
+    try { fs.unlinkSync(path.join(tokenDir, 'oauth1_token.json')); } catch(_) {}
+    try { fs.unlinkSync(path.join(tokenDir, 'oauth2_token.json')); } catch(_) {}
     return null;
   }
 }
