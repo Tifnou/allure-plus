@@ -94,7 +94,7 @@ function renderHealthHistoryBody(bodyEl, chartId, cfg, result) {
             <div class="health-bar-fill" style="width:${fillPct}%;background:${fillColor}"></div>
             <div class="health-bar-target" style="left:${targetLeft}%;width:${targetWidth}%"></div>
           </div>
-          <div class="health-bar-value">${Math.round(b.value)}</div>
+          <div class="health-bar-value">${Math.round(b.value)}<span class="health-bar-range">(${Math.round(b.min)}–${Math.round(b.max)})</span></div>
         </div>`;
     }).join('')}
     <div class="health-bars-legend"><span class="health-bars-legend-swatch"></span> Plage optimale</div>
