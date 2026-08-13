@@ -383,6 +383,37 @@ async function checkForUpdate() {
   } catch (e) { /* silencieux — ne doit jamais bloquer le chargement de l'app */ }
 }
 
+// ═══════════════════════════════════════════════
+// SYNCHRO CROSS-APPAREILS (voir sync.js/server.js)
+// ═══════════════════════════════════════════════
+async function checkSyncStatus() {
+  const bar = el('sync-status-bar');
+  const led = el('sync-led');
+  const txt = el('sync-status-text');
+  if (!bar) return;
+  try {
+    const res = await fetch(`${API}/api/sync/status`);
+    if (!res.ok) { bar.style.display = 'none'; return; }
+    const data = await res.json();
+    // Masque totalement le voyant si la synchro n'est pas configuree
+    // (SYNC_RELAY_URL absent du .env) - inutile d'afficher un indicateur
+    // pour une fonctionnalite que cette installation n'utilise pas.
+    if (!data.configured) { bar.style.display = 'none'; return; }
+    bar.style.display = '';
+    if (data.lastSyncAt == null) {
+      led.className = 'sync-led led-loading';
+      txt.textContent = 'Synchro en cours…';
+    } else if (data.lastSyncOk) {
+      led.className = 'sync-led led-ok';
+      const when = new Date(data.lastSyncAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+      txt.textContent = `Synchronisé à ${when}`;
+    } else {
+      led.className = 'sync-led led-ko';
+      txt.textContent = 'Erreur de synchro';
+    }
+  } catch (e) { bar.style.display = 'none'; }
+}
+
 // Conversion minimale du markdown des release notes GitHub (##, listes, paragraphes)
 // en HTML — echape le texte pour eviter toute injection depuis le contenu distant.
 function renderChangelogHtml(md) {
@@ -3773,6 +3804,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (filterSearch) filterSearch.addEventListener('input', () => renderAllActivities(_allActivities, getCurrentSportFilter()));
   // Status + chargement initial
   await checkStatus();
+  // Non-bloquant : le voyant de synchro cloud est un filet de securite en
+  // arriere-plan, pas ce qui alimente l'affichage (les donnees locales sont
+  // deja a jour independamment du resultat) - inutile de retarder le
+  // chargement du dashboard pour lui.
+  checkSyncStatus();
+  setInterval(checkSyncStatus, 60000);
   await Promise.all([loadDashboard(), loadHeartRate(), loadSleep(), loadWellnessRow()]);
   if (typeof loadAnalysisIndex === 'function') loadAnalysisIndex();
 

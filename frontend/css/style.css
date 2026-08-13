@@ -1142,6 +1142,13 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
 .server-status-text{font-family:var(--font-body);font-size:11px;color:var(--text-muted);}
 @keyframes pulse-led{0%,100%{opacity:1;}50%{opacity:0.35;}}
 
+.sync-status-bar{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;background:rgba(255,255,255,0.03);border:1px solid var(--border);margin-bottom:8px;}
+.sync-led{width:9px;height:9px;border-radius:50%;background:#94a3b8;flex-shrink:0;transition:background 0.4s;}
+.sync-led.led-ok{background:#22c55e;box-shadow:0 0 6px rgba(34,197,94,0.5);}
+.sync-led.led-ko{background:#ef4444;box-shadow:0 0 6px rgba(239,68,68,0.5);}
+.sync-led.led-loading{background:#f59e0b;animation:pulse-led 1.2s ease-in-out infinite;}
+.sync-status-text{font-family:var(--font-body);font-size:11px;color:var(--text-muted);}
+
 /* ═══════════════════════════════════════════
    CAMPUS COACH — Entraînements & Objectifs
 ═══════════════════════════════════════════ */
@@ -3220,6 +3227,9 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
 
 /* ── Barre de statut serveur ── */
 [data-theme="dark"] .server-status-bar {
+  background: rgba(12,15,25,0.9) !important;
+}
+[data-theme="dark"] .sync-status-bar {
   background: rgba(12,15,25,0.9) !important;
 }
 

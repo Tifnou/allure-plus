@@ -12,7 +12,7 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <link rel="stylesheet" href="css/style.css?v=1786612391761" />
+  <link rel="stylesheet" href="css/style.css?v=1786623648089" />
   <link rel="stylesheet" href="css/plans.css?v=1786014624239" />
   <link rel="stylesheet" href="css/routes.css?v=1786547249351" />
 </head>
@@ -162,6 +162,15 @@
       <div class="server-status-bar" id="server-status-bar" title="Confirme que le serveur local Allure+ repond">
         <div class="server-led" id="server-led"></div>
         <span class="server-status-text" id="server-status-text">Connexion...?</span>
+      </div>
+
+      <!-- Voyant synchro cross-appareils : confirme que les donnees perso
+           (profil, objectifs, records, courses...) sont bien a jour avec le
+           cloud (voir sync.js/server.js) - masque si la synchro n'est pas
+           configuree (SYNC_RELAY_URL absent du .env). -->
+      <div class="sync-status-bar" id="sync-status-bar" style="display:none" title="État de la synchronisation cloud entre vos appareils">
+        <div class="sync-led" id="sync-led"></div>
+        <span class="sync-status-text" id="sync-status-text">Synchro…</span>
       </div>
 
       <!-- Quitter : ferme la fenetre ET arrete node.exe (voir /api/quit,
@@ -1205,7 +1214,7 @@
     <span class="support-fab-dot" id="support-fab-dot" style="display:none"></span>
   </button>
 
-  <script src="js/app.js?v=1786614963434"></script>
+  <script src="js/app.js?v=1786623648089"></script>
   <script src="js/gear.js?v=1786459105633"></script>
   <script src="js/campus.js?v=1786609755676"></script>
   <script src="js/free_sessions.js?v=1786524404763"></script>
