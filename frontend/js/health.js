@@ -86,13 +86,13 @@ function renderHealthHistoryBody(bodyEl, chartId, cfg, result) {
       const fillPct = Math.min((b.value / scale) * 100, 100);
       const targetLeft = (b.min / scale) * 100;
       const targetWidth = ((b.max - b.min) / scale) * 100;
-      const inRange = b.value >= b.min && b.value <= b.max;
+      const fillColor = b.color || 'var(--accent)';
       return `
         <div class="health-bar-row">
           <div class="health-bar-label">${escapeHtml(b.label)}</div>
           <div class="health-bar-track">
+            <div class="health-bar-fill" style="width:${fillPct}%;background:${fillColor}"></div>
             <div class="health-bar-target" style="left:${targetLeft}%;width:${targetWidth}%"></div>
-            <div class="health-bar-fill${inRange ? ' health-bar-fill--ok' : ''}" style="width:${fillPct}%"></div>
           </div>
           <div class="health-bar-value">${Math.round(b.value)}</div>
         </div>`;
@@ -550,14 +550,24 @@ async function loadTrainingIntensityMetric(_days) {
   const cur = await fetch('/api/training-status').then(r => r.json()).then(r => r.data).catch(() => null);
   const intensity = cur?.intensity || null;
   if (!intensity) return { bars: [], comment: null, current: null };
+  // Couleurs alignees sur le widget equivalent de Garmin Connect (violet
+  // clair/orange clair/turquoise), pour rester reconnaissable d'un outil a
+  // l'autre plutot que d'inventer une palette maison sur cet indicateur precis.
   const bars = [
-    { key: 'aerobicLow', label: 'Aérobie faible', value: intensity.aerobicLow, min: intensity.aerobicLowMin, max: intensity.aerobicLowMax },
-    { key: 'aerobicHigh', label: 'Aérobie élevée', value: intensity.aerobicHigh, min: intensity.aerobicHighMin, max: intensity.aerobicHighMax },
-    { key: 'anaerobic', label: 'Anaérobique', value: intensity.anaerobic, min: intensity.anaerobicMin, max: intensity.anaerobicMax },
+    { key: 'aerobicLow', label: 'Aérobie faible', value: intensity.aerobicLow, min: intensity.aerobicLowMin, max: intensity.aerobicLowMax, color: '#FB923C' },
+    { key: 'aerobicHigh', label: 'Aérobie élevée', value: intensity.aerobicHigh, min: intensity.aerobicHighMin, max: intensity.aerobicHighMax, color: '#2DD4BF' },
+    { key: 'anaerobic', label: 'Anaérobique', value: intensity.anaerobic, min: intensity.anaerobicMin, max: intensity.anaerobicMax, color: '#C084FC' },
   ];
+  // Commentaire chiffre (valeur reelle + plage cible), pas juste qualitatif -
+  // "genereux, pas besoin d'en rajouter" seul ne dit pas de combien on
+  // depasse ni jusqu'ou la plage va ; utile de pouvoir situer precisement
+  // son propre volume par rapport a la cible sans rouvrir Garmin Connect.
   const advices = bars
     .filter(b => b.value < b.min || b.value > b.max)
-    .map(b => INTENSITY_ADVICE[b.key][b.value < b.min ? 'below' : 'above']);
+    .map(b => {
+      const dir = b.value < b.min ? 'below' : 'above';
+      return `<strong>${escapeHtml(b.label)}</strong> (${Math.round(b.value)} min, plage ${Math.round(b.min)}–${Math.round(b.max)} min) : ${INTENSITY_ADVICE[b.key][dir]}`;
+    });
   const allInRange = advices.length === 0;
   const comment = {
     state: allInRange ? 'Répartition équilibrée' : 'Répartition à ajuster',

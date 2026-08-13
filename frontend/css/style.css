@@ -722,9 +722,13 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
 .health-bar-row{display:grid; grid-template-columns:100px 1fr 40px; align-items:center; gap:10px;}
 .health-bar-label{font-family:var(--font-body); font-size:12px; color:var(--text-secondary); font-weight:600;}
 .health-bar-track{position:relative; height:14px; background:var(--bg-light); border-radius:20px; border:1px solid var(--border-light); overflow:hidden;}
-.health-bar-target{position:absolute; top:0; bottom:0; background:rgba(34,197,94,0.18); border-left:1px dashed rgba(34,197,94,0.6); border-right:1px dashed rgba(34,197,94,0.6);}
+/* Dessine APRES .health-bar-fill dans le DOM (voir health.js) pour rester
+   visible par-dessus, quelle que soit la largeur de la barre - sinon un
+   remplissage opaque qui depasse (ou n'atteint pas) la plage optimale la
+   recouvre entierement et la rend invisible, seul moment ou elle serait
+   pourtant utile a voir. */
+.health-bar-target{position:absolute; top:-1px; bottom:-1px; background:rgba(34,197,94,0.22); border-left:2px dashed rgba(34,197,94,0.85); border-right:2px dashed rgba(34,197,94,0.85); pointer-events:none;}
 .health-bar-fill{position:absolute; top:0; bottom:0; left:0; background:var(--accent); border-radius:20px 0 0 20px; transition:width .5s ease;}
-.health-bar-fill--ok{background:var(--green);}
 .health-bar-value{font-family:var(--font-mono); font-size:12px; font-weight:700; color:var(--text-primary); text-align:right;}
 .health-bars-legend{display:flex; align-items:center; gap:6px; font-family:var(--font-body); font-size:10.5px; color:var(--text-muted); margin-top:2px;}
 .health-bars-legend-swatch{width:10px; height:10px; border-radius:3px; background:rgba(34,197,94,0.18); border:1px dashed rgba(34,197,94,0.6);}
