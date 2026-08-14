@@ -437,29 +437,6 @@ function purgeLocalDoneForWeeks(weeks) {
 // ......................................................
 
 // ──────────────────────────────────────────────────────────────
-// Nettoyage ciblé des métadonnées obsolètes dans localStorage
-// Version : 3.0  — efface le plan si l'utilisateur a changé
-// ──────────────────────────────────────────────────────────────
-const APP_LS_VERSION = '3.0';
-const APP_LS_VERSION_KEY = 'allureplus_data_version';
-
-function cleanStaleLocalStorage() {
-  const storedVersion = localStorage.getItem(APP_LS_VERSION_KEY);
-  if (storedVersion === APP_LS_VERSION) return; // déjà à jour, rien à faire
-
-  console.log('[Migration] Nettoyage localStorage v' + (storedVersion || '?') + ' → v' + APP_LS_VERSION);
-
-  // v3.0 : supprimer le plan hérité d'une session précédente
-  // (sera rechargé proprement si l'utilisateur a Campus)
-  localStorage.removeItem('suivi_imported_plan');
-  localStorage.removeItem('allureplus_plan_owner'); // clé propriétaire
-  console.log('[Migration v3.0] Plan et owner supprimés (nouveau schéma par utilisateur)');
-
-  // Marquer la version actuelle
-  localStorage.setItem(APP_LS_VERSION_KEY, APP_LS_VERSION);
-  console.log('[Migration] localStorage migration terminée → v' + APP_LS_VERSION);
-}
-
 // Efface le plan si l'utilisateur connecté a changé depuis la dernière session
 function cleanPlanIfUserChanged(currentUserEmail) {
   if (!currentUserEmail) return;
@@ -474,6 +451,16 @@ function cleanPlanIfUserChanged(currentUserEmail) {
 }
 
 async function initCampus() {
+  // Attendre la restauration des cles "durables" depuis le serveur/cloud
+  // (voir DURABLE_LS_KEYS, app.js) avant toute decision basee sur
+  // localStorage ci-dessous - filet de securite general, en plus du retrait
+  // de l'ancienne purge de migration ci-dessous (cause reelle du bug du
+  // 14/08 : plan importe perdu sur une machine neuve alors que le profil,
+  // synchronise par un autre chemin, arrivait bien).
+  if (typeof _userDataSyncPromise !== 'undefined' && _userDataSyncPromise) {
+    try { await _userDataSyncPromise; } catch (e) {}
+  }
+
   // ── Anti-flash : si un plan est déjà en localStorage, masquer immédiatement
   // le formulaire de connexion avant l'appel async pour éviter le scintillement
   if (localStorage.getItem('suivi_imported_plan') || localStorage.getItem('prefer_imported_plan') === 'true') {
@@ -482,9 +469,6 @@ async function initCampus() {
     if (_cc) _cc.style.display = 'none';
     if (_cl) _cl.style.display = 'flex';
   }
-
-  // Nettoyage ciblé des données obsolètes (ne touche pas au plan)
-  cleanStaleLocalStorage();
 
   const el = id => document.getElementById(id);
   try {

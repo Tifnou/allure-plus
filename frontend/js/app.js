@@ -72,6 +72,10 @@ const API = '';
 // perimee si un push precedent avait echoue (coupure reseau ponctuelle).
 const DURABLE_LS_KEYS = ['suivi_sport_profile', 'suivi_personal_goals', 'suivi_imported_plan', 'suivi_local_done', 'prefer_imported_plan', 'suivi_forced_goal_pace', 'suivi_free_sessions'];
 const DURABLE_LS_PREFIXES = ['suivi_objectif_dist_', 'suivi_objectif_dplus_', 'suivi_objectif_validated_'];
+// Promesse de syncUserDataFromServer() exposee globalement (scope partage
+// entre scripts) - campus.js l'attend avant toute decision basee sur
+// localStorage, voir initCampus() dans campus.js.
+let _userDataSyncPromise = null;
 function isDurableLsKey(key) {
   return DURABLE_LS_KEYS.includes(key) || DURABLE_LS_PREFIXES.some(p => key.startsWith(p));
 }
@@ -3794,7 +3798,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Recharge depuis le serveur les cles localStorage "durables" manquantes
   // (profil, objectifs...) AVANT tout le reste de l'init — cf commentaire
   // pres de DURABLE_LS_KEYS plus haut dans ce fichier.
-  try { await syncUserDataFromServer(); } catch (e) { console.error('syncUserDataFromServer (boot):', e); }
+  _userDataSyncPromise = syncUserDataFromServer();
+  try { await _userDataSyncPromise; } catch (e) { console.error('syncUserDataFromServer (boot):', e); }
 
   // ── Splash screen ────────────────────────────────────────────
   const splash = document.getElementById('splash-screen');
