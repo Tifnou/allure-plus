@@ -111,6 +111,29 @@ function requireFields(body, fields) {
   }
 }
 
+// Une image jointe (voir handleUploadImage) est simplement une URL publique
+// deja hebergee dans IMAGES_KV a ce point - GitHub affiche nativement une
+// image via son URL en markdown, aucun upload cote GitHub necessaire.
+function appendImage(text, imageUrl) {
+  if (!imageUrl) return text;
+  return `${text}\n\n![capture](${imageUrl})`;
+}
+
+// Repere les ids d'images hebergees par CE relais (IMAGES_KV) dans un texte
+// libre (corps d'issue/commentaire) - utilise pour le nettoyage a la
+// suppression d'un ticket (voir handleDeleteTicket). Se limite volontairement
+// aux URLs `<origin>/images/:id` (jamais d'URL externe), pour ne jamais
+// tenter de supprimer autre chose que ce que ce relais a lui-meme stocke.
+function extractImageIds(text, origin) {
+  if (!text) return [];
+  const escaped = origin.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(`${escaped}/images/([a-zA-Z0-9-]+)`, 'g');
+  const ids = [];
+  let m;
+  while ((m = re.exec(text))) ids.push(m[1]);
+  return ids;
+}
+
 async function handleCreateTicket(req, env) {
   const body = await req.json();
   requireFields(body, ['email', 'category', 'message']);
@@ -124,7 +147,7 @@ async function handleCreateTicket(req, env) {
   const title = `[${label}] ${(page ? page + ' — ' : '') + message}`.slice(0, 90).trim();
   const issueBody = [
     page ? `**Page concernée :** ${page}` : null,
-    message,
+    appendImage(message, body.imageUrl),
     `<!-- reporter:${email} -->`,
   ].filter(Boolean).join('\n\n');
 
@@ -188,7 +211,7 @@ async function handleAddComment(req, env, number) {
   // Pas de prefixe visible ici : l'app affiche deja "Reponse de l'equipe" via
   // le champ author separe (support.js), inutile de le repeter dans le texte.
   const marker = isAdmin ? 'admin' : email;
-  const commentBody = `<!-- author:${marker} -->\n${message}`;
+  const commentBody = `<!-- author:${marker} -->\n${appendImage(message, body.imageUrl)}`;
   await gh(env, `/issues/${number}/comments`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -227,6 +250,19 @@ async function handleDeleteTicket(req, env, number) {
     if (reporter !== email) throw { status: 403, message: "Ce ticket n'appartient pas à cet utilisateur" };
   }
 
+  // Nettoyage des images jointes (ticket + tous ses commentaires) - sinon
+  // IMAGES_KV grossit indefiniment meme apres suppression d'un ticket (retour
+  // utilisateur 14/08). Ne bloque jamais la suppression du ticket lui-meme
+  // si ce nettoyage echoue (ticket deja "supprime" plus important que la
+  // recuperation immediate de l'espace).
+  try {
+    const comments = await gh(env, `/issues/${number}/comments?per_page=100`);
+    const relayOrigin = new URL(req.url).origin;
+    const allText = [issue.body, ...comments.map(c => c.body)].filter(Boolean).join('\n');
+    const ids = [...new Set(extractImageIds(allText, relayOrigin))];
+    await Promise.all(ids.map(id => env.IMAGES_KV.delete(id)));
+  } catch (e) { /* silencieux */ }
+
   const labels = [...new Set([...(issue.labels || []).map(l => l.name || l), 'supprimé'])];
   await gh(env, `/issues/${number}`, {
     method: 'PATCH',
@@ -236,12 +272,118 @@ async function handleDeleteTicket(req, env, number) {
   return json({ ok: true });
 }
 
+// ─── Repertoire des utilisateurs (USERS_KV) ───────────────────────────────
+// Une entree par compte Garmin ayant deja ouvert Allure+ - seule visibilite
+// possible pour l'admin sur une appli distribuee en .exe, sans autre canal
+// de telemetrie. Permet aussi de couper l'acces (blocked) si l'executable
+// venait a circuler hors du controle de l'admin. Cle KV = email en minuscules.
+function userKey(email) {
+  return `user:${String(email).trim().toLowerCase()}`;
+}
+
+async function handleUserPing(req, env) {
+  const body = await req.json();
+  requireFields(body, ['email']);
+  if (String(body.clientKey || '') !== env.CLIENT_KEY) throw { status: 401, message: 'Client non autorisé' };
+  const email = String(body.email).slice(0, 200).trim().toLowerCase();
+  const displayName = body.displayName ? String(body.displayName).slice(0, 120).trim() : null;
+  const now = new Date().toISOString();
+
+  const key = userKey(email);
+  const existing = await env.USERS_KV.get(key, { type: 'json' });
+  const record = existing || { email, firstSeen: now, blocked: false, ticketAccess: true };
+  record.lastSeen = now;
+  if (displayName) record.displayName = displayName;
+  await env.USERS_KV.put(key, JSON.stringify(record));
+  return json({ blocked: !!record.blocked, ticketAccess: record.ticketAccess !== false });
+}
+
+// Endpoint volontairement leger (pas d'adminKey) : interroge en continu par
+// chaque installation pour detecter rapidement un blocage decide en cours de
+// session (voir server.js, checkBlockedAccounts) - une simple clientKey
+// suffit, aucune donnee sensible exposee (juste un booleen).
+async function handleUserStatus(req, env, email) {
+  if (new URL(req.url).searchParams.get('clientKey') !== env.CLIENT_KEY) throw { status: 401, message: 'Client non autorisé' };
+  const record = await env.USERS_KV.get(userKey(email), { type: 'json' });
+  return json({ blocked: !!(record && record.blocked) });
+}
+
+async function handleListUsers(req, env, url) {
+  if (url.searchParams.get('adminKey') !== env.ADMIN_KEY) throw { status: 401, message: 'Non autorisé' };
+  const list = await env.USERS_KV.list({ prefix: 'user:' });
+  const records = await Promise.all(list.keys.map(k => env.USERS_KV.get(k.name, { type: 'json' })));
+  const users = records.filter(Boolean).sort((a, b) => new Date(b.lastSeen) - new Date(a.lastSeen));
+  return json({ users });
+}
+
+async function handleSetUserFlag(req, env, email, field) {
+  const body = await req.json();
+  if (String(body.adminKey || '') !== env.ADMIN_KEY) throw { status: 401, message: 'Non autorisé' };
+  const key = userKey(email);
+  const record = await env.USERS_KV.get(key, { type: 'json' });
+  if (!record) throw { status: 404, message: 'Utilisateur introuvable' };
+  record[field] = !!body[field];
+  await env.USERS_KV.put(key, JSON.stringify(record));
+  return json({ ok: true, [field]: record[field] });
+}
+
+// ─── Images jointes aux tickets (IMAGES_KV) ───────────────────────────────
+// Simple stockage cle/valeur pour heberger une capture d'ecran et lui donner
+// une URL publique stable, que GitHub affiche nativement en markdown dans le
+// corps d'une issue/d'un commentaire - pas besoin d'API GitHub dediee aux
+// pieces jointes (non accessible avec un simple PAT Issues).
+const MAX_IMAGE_BYTES = 4 * 1024 * 1024; // large pour une capture compressee cote client
+
+async function handleUploadImage(req, env) {
+  const body = await req.json();
+  requireFields(body, ['dataBase64', 'contentType']);
+  if (String(body.clientKey || '') !== env.CLIENT_KEY) throw { status: 401, message: 'Client non autorisé' };
+  if (!/^image\/(png|jpe?g|webp|gif)$/.test(body.contentType)) throw { status: 400, message: "Type d'image non supporté" };
+  let bytes;
+  try {
+    bytes = Uint8Array.from(atob(body.dataBase64), c => c.charCodeAt(0));
+  } catch (e) {
+    throw { status: 400, message: 'Image invalide' };
+  }
+  if (bytes.length > MAX_IMAGE_BYTES) throw { status: 413, message: 'Image trop volumineuse' };
+  const id = crypto.randomUUID();
+  await env.IMAGES_KV.put(id, bytes, { metadata: { contentType: body.contentType } });
+  const url = new URL(req.url);
+  return json({ id, url: `${url.origin}/images/${id}` }, 201);
+}
+
+async function handleGetImage(env, id) {
+  const { value, metadata } = await env.IMAGES_KV.getWithMetadata(id, { type: 'arrayBuffer' });
+  if (!value) return json({ message: 'Image introuvable' }, 404);
+  return new Response(value, {
+    headers: {
+      'Content-Type': metadata?.contentType || 'application/octet-stream',
+      'Cache-Control': 'public, max-age=31536000, immutable',
+    },
+  });
+}
+
 export default {
   async fetch(req, env) {
     const url = new URL(req.url);
     const parts = url.pathname.split('/').filter(Boolean); // ['tickets', ':number'?, 'comments'|'status'?]
 
     try {
+      if (parts[0] === 'users') {
+        if (parts.length === 2 && parts[1] === 'ping' && req.method === 'POST') return await handleUserPing(req, env);
+        if (parts.length === 1 && req.method === 'GET') return await handleListUsers(req, env, url);
+        if (parts.length === 3 && parts[2] === 'status' && req.method === 'GET') return await handleUserStatus(req, env, decodeURIComponent(parts[1]));
+        if (parts.length === 3 && parts[2] === 'block' && req.method === 'POST') return await handleSetUserFlag(req, env, decodeURIComponent(parts[1]), 'blocked');
+        if (parts.length === 3 && parts[2] === 'ticket-access' && req.method === 'POST') return await handleSetUserFlag(req, env, decodeURIComponent(parts[1]), 'ticketAccess');
+        return json({ message: 'Not found' }, 404);
+      }
+
+      if (parts[0] === 'images') {
+        if (parts.length === 1 && req.method === 'POST') return await handleUploadImage(req, env);
+        if (parts.length === 2 && req.method === 'GET') return await handleGetImage(env, parts[1]);
+        return json({ message: 'Not found' }, 404);
+      }
+
       if (parts[0] !== 'tickets') return json({ message: 'Not found' }, 404);
 
       if (parts.length === 1 && req.method === 'POST') return await handleCreateTicket(req, env);

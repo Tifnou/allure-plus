@@ -5,6 +5,17 @@ compatibility_date = "2025-01-01"
 [vars]
 GITHUB_REPO = "Tifnou/allure-plus"
 
+# USERS_KV   — repertoire des comptes ayant deja lance Allure+ (email, nom
+#              Garmin, 1ere/derniere connexion, blocage, acces support).
+# IMAGES_KV  — pieces jointes (captures d'ecran) des tickets de support.
+[[kv_namespaces]]
+binding = "USERS_KV"
+id = "1409bdc640554411bea56131d16a994d"
+
+[[kv_namespaces]]
+binding = "IMAGES_KV"
+id = "3074e37a832a4541abbddfed52dd5a85"
+
 # Secrets (definis via `wrangler secret put <NOM>`, jamais stockes ici) :
 #   GITHUB_TOKEN — PAT fine-grained, acces "Issues: read and write" sur ce seul repo
 #   ADMIN_KEY    — cle privee connue uniquement du serveur local de Stephane (actions maintainer)
