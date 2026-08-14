@@ -147,6 +147,20 @@ async function getActiveGoal(token) {
       const fullGoal = await campusRequest('GET', `/smart-training/goal/${goalId}`, token);
       return fullGoal;
     }
+    // "Background goal" (kind:"background", ex: plan d'entretien route/trail
+    // hors préparation de course precise) : goal-list ne renvoie jamais d'id
+    // pour ce type (constate reel 14/08 - "ongoing/undefined" dans le log
+    // ci-dessus alors que le plan est bien actif), donc /smart-training/goal/
+    // {id} et tout ce qui en depend (getFullTrainingPlan, getGoalSummary...)
+    // sont inutilisables ici. Sa plage de dates (startDate/endDate) suffit en
+    // revanche a recuperer les semaines directement via /smart-training
+    // (getSmartTraining, sans id) - on les attache tout de suite pour eviter
+    // a l'appelant de refaire un aller-retour supplementaire.
+    if (active?.kind === 'background' && active.startDate && active.endDate) {
+      console.log('[Campus] Background goal actif (sans id) :', active.backgroundGoal, '|', active.sport);
+      const weeks = await getSmartTraining(token, active.startDate, active.endDate);
+      return { ...active, isBackgroundGoal: true, weeks: Array.isArray(weeks) ? weeks : [] };
+    }
   } catch(e) {
     console.warn('[Campus] /smart-training/goal-list failed:', e.message.slice(0, 80));
   }

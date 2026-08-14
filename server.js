@@ -367,10 +367,22 @@ setInterval(() => {
   }
 }, 60 * 60 * 1000);
 
+// Retombe sur la session d'auto-login (envSessionId) quand le cookie de la
+// requete est absent/perime - sans ca, seuls /api/status et / avaient ce
+// filet de securite (code duplique localement), toutes les AUTRES routes
+// (dont /api/campus/status, /api/campus/training) rendaient un etat "non
+// connecte" des que le cookie du navigateur ne correspondait plus a la
+// session en memoire du serveur courant. Ca arrive a chaque redemarrage
+// (mise a jour installee, `Redemarrer le serveur` admin...) si la fenetre
+// de l'appli n'est pas rechargee entierement avant de rappeler une de ces
+// routes - constate reel (14/08) : Campus Coach semblait deconnecte et
+// l'appli retombait sur "sans plan" alors que le plan etait toujours actif.
 function getSession(req) {
   const id = req.cookies?.sid;
-  if (!id) return null;
-  const s = sessions.get(id);
+  let s = id ? sessions.get(id) : null;
+  if (!s && envSessionId && sessions.has(envSessionId)) {
+    s = sessions.get(envSessionId);
+  }
   if (!s) return null;
   s.lastAccess = Date.now();
   return s;
@@ -947,9 +959,14 @@ async function callSupportRelay(path, options = {}) {
 // empecher un compte legitime de se connecter a Allure+.
 async function checkUserDirectory(email, displayName) {
   try {
+    // isAdmin : seul un nouveau compte (jamais vu du relais) en tient compte,
+    // pour s'ouvrir l'acces tickets d'office - tout autre compte demarre
+    // ferme par defaut, l'admin l'ouvre au cas par cas (retour utilisateur
+    // 14/08).
+    const isAdmin = (email || '').toLowerCase() === ADMIN_EMAIL.toLowerCase();
     const data = await callSupportRelay('/users/ping', {
       method: 'POST',
-      body: JSON.stringify({ email, displayName, clientKey: SUPPORT_CLIENT_KEY }),
+      body: JSON.stringify({ email, displayName, isAdmin, clientKey: SUPPORT_CLIENT_KEY }),
     });
     if (data.blocked) {
       const err = new Error("Accès à Allure+ suspendu pour ce compte. Contactez l'administrateur.");
@@ -964,31 +981,42 @@ async function checkUserDirectory(email, displayName) {
   }
 }
 
-// Sweep periodique : un compte bloque APRES coup (deja connecte au moment du
-// blocage) doit perdre l'acces sous quelques minutes, pas seulement a sa
-// prochaine connexion - decision explicite de l'utilisateur (14/08, scenario
-// executable qui fuite). Revoque toutes les sessions actives de ce compte,
-// et envSessionId si c'est la session d'auto-login concernee (meme geste que
-// le fix logout plus haut).
-const BLOCK_CHECK_INTERVAL_MS = 2 * 60 * 1000;
-async function checkBlockedAccounts() {
+// Sweep periodique : synchronise, pour chaque compte actuellement connecte,
+// son blocage ET son acces tickets depuis le repertoire - sans ca, une
+// action admin (bloquer, ou cocher/decocher l'acces tickets) ne prenait
+// effet qu'au prochain redemarrage de l'appli du compte concerne, ce qui
+// n'etait pas acceptable pour le blocage (scenario executable qui fuite,
+// decision explicite de l'utilisateur 14/08) ni tres pratique pour l'acces
+// tickets (meme retour 14/08). Un compte bloque voit toutes ses sessions
+// actives revoquees (et envSessionId si c'est la session d'auto-login
+// concernee, meme geste que le fix logout plus haut) ; un compte non
+// bloque voit juste son ticketAccess mis a jour sur ses sessions actives
+// (lu par /api/status, gate le bouton flottant du Centre de support cote
+// client).
+const ACCOUNT_SYNC_INTERVAL_MS = 2 * 60 * 1000;
+async function syncActiveSessionsFromDirectory() {
   const emails = new Set();
   for (const s of sessions.values()) if (s.email) emails.add(s.email.toLowerCase());
   for (const email of emails) {
     try {
       const data = await callSupportRelay(`/users/${encodeURIComponent(email)}/status?clientKey=${encodeURIComponent(SUPPORT_CLIENT_KEY)}`);
-      if (!data.blocked) continue;
-      for (const [sid, s] of sessions) {
-        if (s.email && s.email.toLowerCase() === email) {
-          sessions.delete(sid);
-          if (sid === envSessionId) envSessionId = null;
+      if (data.blocked) {
+        for (const [sid, s] of sessions) {
+          if (s.email && s.email.toLowerCase() === email) {
+            sessions.delete(sid);
+            if (sid === envSessionId) envSessionId = null;
+          }
         }
+        console.warn(`[users] Compte ${email} bloqué — session(s) révoquée(s)`);
+        continue;
       }
-      console.warn(`[users] Compte ${email} bloqué — session(s) révoquée(s)`);
+      for (const s of sessions.values()) {
+        if (s.email && s.email.toLowerCase() === email) s.ticketAccess = data.ticketAccess !== false;
+      }
     } catch (e) { /* silencieux, retente au prochain cycle */ }
   }
 }
-setInterval(checkBlockedAccounts, BLOCK_CHECK_INTERVAL_MS);
+setInterval(syncActiveSessionsFromDirectory, ACCOUNT_SYNC_INTERVAL_MS);
 
 app.get('/api/admin/users', requireAdmin, async (req, res) => {
   try {
@@ -3187,8 +3215,11 @@ app.get('/api/campus/training', (req, res, next) => {
 
   try {
     let goal = await getActiveGoal(token);
-    // Si goal vide → token probablement expiré → refresh et retry une fois
-    if (!goal?._id) {
+    // Si goal vide → token probablement expiré → refresh et retry une fois.
+    // Jamais pour un "background goal" deja trouve (isBackgroundGoal) : ce
+    // type n'a jamais de _id par construction (voir campus_client.js), le
+    // refresh serait un aller-retour inutile a chaque appel.
+    if (!goal?._id && !goal?.isBackgroundGoal) {
       console.log('[Campus] Pas de goal actif, tentative de refresh du token...');
       await tryAutoLoginCampus();
       if (_envCampusTokenCache && _envCampusTokenCache !== token) {
@@ -3196,12 +3227,16 @@ app.get('/api/campus/training', (req, res, next) => {
         goal = await getActiveGoal(_envCampusTokenCache);
       }
     }
-    const goalId = goal?._id;
-    if (!goalId) {
+    if (!goal?._id && !goal?.isBackgroundGoal) {
       return res.status(404).json({ error: 'Aucun plan actif trouvé sur Campus Coach', authError: false });
     }
-    const freshTok = _envCampusTokenCache || token;
-    const weeks = await getFullTrainingPlan(freshTok, goalId);
+    // Background goal : les semaines sont deja attachees par getActiveGoal
+    // (recuperees via la plage de dates, aucun _id disponible pour ce type
+    // de plan - voir campus_client.js). Plan "classique" sinon, identifie
+    // par _id.
+    const weeks = goal.isBackgroundGoal
+      ? goal.weeks
+      : await getFullTrainingPlan(_envCampusTokenCache || token, goal._id);
     res.json({ goal, weeks: Array.isArray(weeks) ? weeks : [] });
   } catch(err) {
     const msg = (err.message || '').toLowerCase();
