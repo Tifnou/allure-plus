@@ -3643,7 +3643,7 @@ async function loadAdminUsers() {
                 <td>${formatDate(u.lastSeen)}</td>
                 <td>
                   <label class="admin-users-checkbox">
-                    <input type="checkbox" data-email="${escapeHtml(u.email)}" data-field="ticketAccess" ${u.ticketAccess !== false ? 'checked' : ''}>
+                    <input type="checkbox" data-email="${escapeHtml(u.email)}" data-field="ticketAccess" ${u.ticketAccess !== false ? 'checked' : ''} title="Peut prendre jusqu'à 2 minutes pour s'appliquer si ce compte est déjà connecté">
                   </label>
                 </td>
                 <td>
