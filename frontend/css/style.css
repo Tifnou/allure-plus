@@ -814,7 +814,19 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
 /* ═══════════════════════════════════════════════
    PAGE STATISTIQUES
 ═══════════════════════════════════════════════ */
-#stats-filters{margin-bottom:16px;}
+.stats-header-row{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:16px;}
+#stats-filters{margin-bottom:0;}
+.stats-alltime-total{
+  display:flex;align-items:center;gap:18px;
+  background:var(--bg-white);border:1px solid var(--border);border-radius:var(--radius-sm);
+  padding:10px 18px;
+}
+[data-theme="dark"] .stats-alltime-total{background:#12151f;}
+.stats-alltime-total-title{font-size:10.5px;font-weight:700;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.05em;font-family:var(--font-body);white-space:nowrap;}
+.stats-alltime-total-loading{font-size:12px;color:var(--text-muted);font-family:var(--font-body);}
+.stats-alltime-total-item{display:flex;flex-direction:column;align-items:center;gap:1px;}
+.stats-alltime-total-num{font-size:16px;font-weight:800;color:var(--text-primary);font-family:var(--font-mono);white-space:nowrap;}
+.stats-alltime-total-lbl{font-size:9.5px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.04em;font-family:var(--font-body);white-space:nowrap;}
 .stats-compare-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:var(--accent-light);border:1px solid var(--accent);border-radius:var(--radius-md);padding:10px 14px;margin-bottom:14px;}
 .stats-compare-bar-label{font-size:12px;font-weight:700;color:var(--accent-text);}
 .stats-compare-bar-chips{display:flex;gap:6px;flex-wrap:wrap;}

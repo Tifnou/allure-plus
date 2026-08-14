@@ -3917,9 +3917,43 @@ document.addEventListener('DOMContentLoaded', async () => {
     '</td></tr>';
   }
 
+  // "Toutes les années" (valeur vide du filtre) affichait un total qui ne
+  // reflétait que ce qui se trouvait déjà en mémoire pour cette session
+  // (les 200 activités les plus récentes au démarrage, + les années
+  // visitées entre-temps) - jamais le veritable historique complet tant que
+  // la page Statistiques (qui charge tout automatiquement) n'avait pas ete
+  // visitee au moins une fois. Retour utilisateur 14/08 : total tres
+  // inferieur a celui annonce par Garmin. Charge desormais toutes les
+  // annees manquantes (reutilise ensureYearLoaded/getStatsYearRange de
+  // stats.js, meme mecanisme que la page Statistiques) avant de calculer
+  // le total "Toutes les années".
+  async function loadAllYearsForActivitiesTotal() {
+    if (typeof getStatsYearRange !== 'function' || typeof ensureYearLoaded !== 'function') return;
+    const missing = getStatsYearRange().filter(y => !_fullyLoadedYears.has(y));
+    if (!missing.length) return;
+    const loadTbody = document.getElementById('all-activities-tbody');
+    if (loadTbody) {
+      loadTbody.innerHTML = '<tr><td colspan="10" style="text-align:center;padding:48px 20px;">' +
+        '<div style="font-size:36px;margin-bottom:14px">&#x1F4E5;</div>' +
+        '<div style="font-size:16px;font-weight:700;color:var(--text-primary);margin-bottom:6px">Chargement de l\'historique complet</div>' +
+        '<div style="font-size:13px;color:var(--text-secondary)">Récupération de toutes vos années Garmin — merci de patienter...</div>' +
+      '</td></tr>';
+    }
+    showToast('⏳ Chargement de l\'historique complet…', 'loading', 0);
+    try {
+      await Promise.all(missing.map(y => ensureYearLoaded(y).catch(() => {})));
+    } finally {
+      const lt = document.getElementById('app-toast-loading');
+      if (lt) { lt.style.opacity = '0'; setTimeout(() => lt.remove(), 300); }
+    }
+    showToast('✓ Historique complet chargé', 'success', 4000);
+  }
+
   if (filterYear) filterYear.addEventListener('change', async () => {
     const year = parseInt(filterYear.value) || 0;
-    if (year && !_fullyLoadedYears.has(year)) {
+    if (!year) {
+      await loadAllYearsForActivitiesTotal();
+    } else if (!_fullyLoadedYears.has(year)) {
       // Afficher le chargement dans la table (ID correct)
       const loadTbody = document.getElementById('all-activities-tbody');
       if (loadTbody) {

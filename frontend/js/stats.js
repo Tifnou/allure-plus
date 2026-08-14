@@ -227,12 +227,47 @@ async function renderStatsPage() {
     wireSportFilterPills(document.getElementById('stats-filters'), async (filters) => {
       _statsSportFilter = filters;
       await renderStatsYearsList();
+      renderStatsAlltimeTotal();
     });
     const compareBtn = el('stats-compare-btn');
     if (compareBtn) compareBtn.addEventListener('click', () => openStatsCompareModal());
   }
   try { await ensureYearLoaded(new Date().getFullYear()); } catch (e) {}
   await renderStatsYearsList();
+  renderStatsAlltimeTotal();
+}
+
+// Total toutes années confondues (pas juste la somme des lignes visibles -
+// contrairement au tableau année par année, qui pagine les plus anciennes
+// derrière "Afficher les années plus anciennes", ce total charge TOUTES les
+// années avant de calculer, sinon il aurait le meme defaut que la page
+// Activités "Toutes les années" - retour utilisateur 14/08). Rendu en deux
+// temps comme renderStatsYearsList : affichage immediat si tout est deja
+// charge, sinon petit chargement pendant qu'on rapatrie les annees
+// manquantes en arriere-plan.
+async function renderStatsAlltimeTotal() {
+  const box = el('stats-alltime-total');
+  if (!box) return;
+  const allYears = getStatsYearRange();
+  const missing = allYears.filter(y => !_fullyLoadedYears.has(y));
+
+  if (missing.length) {
+    box.style.display = '';
+    box.innerHTML = `<span class="stats-alltime-total-title">Total toutes années</span><span class="stats-alltime-total-loading">Chargement…</span>`;
+    await Promise.all(missing.map(y => ensureYearLoaded(y).catch(() => {})));
+  }
+
+  const activities = _allActivities.filter(a => statsSportMatch(a.activityType, _statsSportFilter));
+  const s = computeYearStats(activities, new Date().getFullYear()).totals;
+  box.innerHTML = `
+    <span class="stats-alltime-total-title">Total toutes années</span>
+    <div class="stats-alltime-total-item"><span class="stats-alltime-total-num">${s.activities.toLocaleString('fr-FR')}</span><span class="stats-alltime-total-lbl">Activités</span></div>
+    <div class="stats-alltime-total-item"><span class="stats-alltime-total-num">${Math.round(s.km).toLocaleString('fr-FR')}</span><span class="stats-alltime-total-lbl">Km</span></div>
+    <div class="stats-alltime-total-item"><span class="stats-alltime-total-num">${Math.round(s.elevation).toLocaleString('fr-FR')}</span><span class="stats-alltime-total-lbl">D+ (m)</span></div>
+    <div class="stats-alltime-total-item"><span class="stats-alltime-total-num">${Math.round(s.hours).toLocaleString('fr-FR')}h</span><span class="stats-alltime-total-lbl">Durée</span></div>
+    <div class="stats-alltime-total-item"><span class="stats-alltime-total-num">${Math.round(s.calories).toLocaleString('fr-FR')}</span><span class="stats-alltime-total-lbl">Calories</span></div>
+  `;
+  box.style.display = '';
 }
 
 function getStatsYearRange() {
