@@ -678,14 +678,25 @@ async function restoreGarminSession() {
 // etait invisible depuis /api/login (avalee silencieusement par son
 // try/catch, l'utilisateur restait connecte mais sans synchro programmee, le
 // voyant restant bloque "en cours" indefiniment).
+// async + attend la toute PREMIERE reconciliation (les appelants peuvent
+// faire `await ensureSyncScheduled(email)` avant de repondre au client) -
+// sans ca, un tout nouveau PC (aucune donnee locale, tout a rapatrier
+// depuis le cloud : profil, objectifs, plan importe, PPS, avatar...)
+// recevait la reponse de connexion AVANT que la reconciliation initiale
+// n'ait fini de peupler data/*.json, et le frontend (syncUserDataFromServer,
+// appele une seule fois au demarrage) ne retentait jamais - l'utilisateur
+// se retrouvait avec une config vierge malgre des mois de donnees deja
+// synchronisees depuis un autre appareil (constat reel 14/08, femme de
+// l'utilisateur sur un PC neuf). Les cycles PERIODIQUES suivants restent
+// fire-and-forget (aucune raison de faire attendre une page deja ouverte).
 const _syncScheduledEmails = new Set();
-function ensureSyncScheduled(email) {
+async function ensureSyncScheduled(email) {
   if (!email || _syncScheduledEmails.has(email)) return;
   _syncScheduledEmails.add(email);
-  runFullReconciliation(email).catch(e => console.error('[sync] reconciliation initiale echouee:', e.message));
   setInterval(() => {
     runFullReconciliation(email).catch(e => console.error('[sync] reconciliation periodique echouee:', e.message));
   }, 5 * 60 * 1000);
+  await runFullReconciliation(email).catch(e => console.error('[sync] reconciliation initiale echouee:', e.message));
 }
 
 async function tryAutoLogin() {
@@ -698,7 +709,7 @@ async function tryAutoLogin() {
   if (restored) {
     envSessionId = uuidv4();
     sessions.set(envSessionId, restored);
-    ensureSyncScheduled(restored.email);
+    await ensureSyncScheduled(restored.email);
     await tryAutoLoginCampus();
     return;
   }
@@ -713,7 +724,7 @@ async function tryAutoLogin() {
     const s = await createGarminSession(ENV_EMAIL, ENV_PASSWORD);
     envSessionId = uuidv4();
     sessions.set(envSessionId, s);
-    ensureSyncScheduled(s.email);
+    await ensureSyncScheduled(s.email);
     console.log('[OK] Auto-login Garmin reussi');
   } catch(e) {
     console.warn('[WARN] Auto-login Garmin echoue:', e.message);
@@ -1421,6 +1432,16 @@ app.post('/api/setup', async (req, res) => {
     // 6) Ecrire le .env mis a jour
     fs.writeFileSync(envPath, envContent.trimStart(), 'utf8');
 
+    // 7) Synchro cross-appareils - CETTE route est la toute premiere
+    // connexion sur une machine neuve (login.html: "setup-card", jamais
+    // /api/login) et n'appelait jusqu'ici jamais ensureSyncScheduled : un
+    // compte deja utilise sur un autre appareil (profil, objectifs, plan
+    // importe, PPS, avatar...) demarrait ici sur une config entierement
+    // vierge, sans jamais rapatrier ses donnees existantes (constat reel
+    // 14/08 - femme de l'utilisateur sur un PC neuf). Attendu avant de
+    // repondre au client, pour la meme raison que /api/login.
+    await ensureSyncScheduled(garminEmail);
+
     console.log('Setup : configuration sauvegardee. Campus enabled:', CAMPUS_ENABLED);
     res.json({ success: true, campusEnabled: CAMPUS_ENABLED });
 
@@ -1455,14 +1476,14 @@ app.post('/api/login', async (req, res) => {
         sessionData = sessions.get(envSessionId);
         // On va cr©er un nouveau cookie qui pointe vers cette mªme session
         res.cookie('sid', envSessionId, { httpOnly: true, sameSite: 'lax' });
-        ensureSyncScheduled(sessionData.email);
+        await ensureSyncScheduled(sessionData.email);
         return res.json({ success: true, user: sessionData.email });
       }
       sessionData = await createGarminSession(ENV_EMAIL, ENV_PASSWORD);
       envSessionId = uuidv4();
       sessions.set(envSessionId, sessionData);
       res.cookie('sid', envSessionId, { httpOnly: true, sameSite: 'lax' });
-      ensureSyncScheduled(sessionData.email);
+      await ensureSyncScheduled(sessionData.email);
       return res.json({ success: true, user: sessionData.email });
     }
 
@@ -1479,7 +1500,10 @@ app.post('/api/login', async (req, res) => {
     // ensureSyncScheduled : sans ca, un compte connecte manuellement
     // pousserait bien ses propres changements (scheduleSync, a chaque
     // ecriture) mais ne recupererait jamais ceux des autres appareils.
-    ensureSyncScheduled(email);
+    // Attendu (pas fire-and-forget) : un tout nouveau PC doit rapatrier ses
+    // donnees existantes AVANT que le frontend ne verifie une seule fois au
+    // demarrage (voir commentaire sur ensureSyncScheduled).
+    await ensureSyncScheduled(email);
     console.log('[OK] Session creee pour:', email);
     res.json({ success: true, user: email });
 
@@ -3701,20 +3725,21 @@ app.get('/api/plans/load/:id', (req, res) => {
 // une course avec le "timeout /t 2" de start.bat, et le message clair dans
 // server_err.log rend le vrai blocage diagnosticable si ca persiste.
 function startServer(retriesLeft = 5) {
-  const httpServer = app.listen(PORT, () => {
+  const httpServer = app.listen(PORT, async () => {
     console.log('\n[START] Allure+ Dashboard demarre !');
     console.log(`[INFO] Ouvrez votre navigateur sur : http://localhost:${PORT}\n`);
     // email de la session .env reellement etablie au demarrage, jamais
     // ENV_EMAIL seul : quand l'auto-login vient des tokens Garmin sauvegardes
     // (restoreGarminSession, pas de mot de passe requis - cas le plus courant
     // apres le premier login), ENV_EMAIL/ENV_PASSWORD peuvent etre absents du
-    // .env alors qu'une session est bien active. Sans ca, ensureSyncScheduled
-    // n'etait jamais appele dans ce cas et la synchro restait bloquee "en
-    // cours" (voyant orange) indefiniment - constate reel (14/08).
+    // .env alors qu'une session est bien active. Filet de securite - les
+    // branches de tryAutoLogin() ont deja fait ce meme appel (idempotent via
+    // _syncScheduledEmails) avant que ce callback ne s'execute, dans les cas
+    // courants.
     const envEmail = sessions.get(envSessionId)?.email || ENV_EMAIL;
     if (envEmail) {
       console.log(`[OK] Auto-login actif pour : ${envEmail}`);
-      ensureSyncScheduled(envEmail);
+      await ensureSyncScheduled(envEmail);
     } else {
       console.log('[INFO] Aucun .env detecte - connexion requise via navigateur');
     }
