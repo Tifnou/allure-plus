@@ -12,7 +12,7 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <link rel="stylesheet" href="css/style.css?v=1786692556817" />
+  <link rel="stylesheet" href="css/style.css?v=1786694058072" />
   <link rel="stylesheet" href="css/plans.css?v=1786014624239" />
   <link rel="stylesheet" href="css/routes.css?v=1786547249351" />
 </head>
@@ -163,18 +163,29 @@
 
         <!-- Voyant statut serveur : confirme que le serveur local Allure+ repond
              (utile pour detecter une panne du process node.exe, pas juste
-             decoratif) - texte condense en tooltip (title, mis a jour en JS),
-             plus de place pour un libelle en permanence sur cette ligne. -->
+             decoratif) - icone dediee (tour serveur) pour distinguer ce voyant
+             de celui de synchro au premier coup d'oeil (les 2 points colores
+             seuls, sans texte, etaient impossibles a differencier - retour
+             utilisateur 14/08), libelle complet en tooltip (title, mis a jour
+             en JS). -->
         <div class="mini-status" id="server-status-bar" title="Confirme que le serveur local Allure+ repond">
+          <svg class="mini-status-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="2" y="3" width="20" height="7" rx="1.5"/><rect x="2" y="14" width="20" height="7" rx="1.5"/>
+            <line x1="6" y1="6.5" x2="6.01" y2="6.5"/><line x1="6" y1="17.5" x2="6.01" y2="17.5"/>
+          </svg>
           <div class="server-led" id="server-led"></div>
         </div>
 
         <!-- Voyant synchro cross-appareils : confirme que les donnees perso
              (profil, objectifs, records, courses...) sont bien a jour avec le
              cloud (voir sync.js/server.js) - masque si la synchro n'est pas
-             configuree (SYNC_RELAY_URL absent du .env). L'heure reste visible
-             (demande explicite), le reste du libelle passe en tooltip. -->
+             configuree (SYNC_RELAY_URL absent du .env). Icone nuage dediee
+             (meme raison que le voyant serveur ci-dessus). L'heure reste
+             visible (demande explicite), le reste du libelle passe en tooltip. -->
         <div class="mini-status mini-status--sync" id="sync-status-bar" style="display:none" title="État de la synchronisation cloud entre vos appareils">
+          <svg class="mini-status-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M17.5 19a4.5 4.5 0 0 0 0-9 6 6 0 0 0-11.6-1.5A5 5 0 0 0 6.5 19h11z"/>
+          </svg>
           <div class="sync-led" id="sync-led"></div>
           <span class="sync-status-text" id="sync-status-text"></span>
         </div>
