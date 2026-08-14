@@ -8,7 +8,7 @@ let _supportOpenTicket = null;
 let _supportTicketsCache = { mine: [], all: [] };
 
 const SUPPORT_CATEGORIES = [
-  { key: 'bug', label: 'Bug', icon: '🐞' },
+  { key: 'bug', label: 'Bug', icon: '🪳' },
   { key: 'amelioration', label: 'Amélioration', icon: '🔧' },
   { key: 'idee', label: 'Idée', icon: '💡' },
   { key: 'question', label: 'Question', icon: '❓' },
@@ -207,6 +207,64 @@ function extractImageFromMessage(message) {
   return { text: message.slice(0, m.index).trim(), imageUrl: m[1] };
 }
 
+// ─── Émojis rapides (équivalent léger du sélecteur Windows+.) ──────────
+const SUPPORT_QUICK_EMOJIS = [
+  '😀', '😂', '🙂', '😉', '😍', '😅', '😭', '😡', '😱', '🤔',
+  '👍', '👎', '👏', '🙏', '💪', '🤝', '❤️', '🔥', '🎉', '✅',
+  '❌', '⭐', '💡', '🚀', '😊', '🥳', '😴', '🤒', '☀️', '🌧️',
+];
+function emojiToolbarHtml(idPrefix) {
+  return `<div class="support-emoji-toolbar"><button type="button" class="support-emoji-btn" id="${idPrefix}-emoji-btn" title="Insérer un émoji">😀</button></div>`;
+}
+function wireEmojiPicker(idPrefix) {
+  const btn = document.getElementById(`${idPrefix}-emoji-btn`);
+  const textarea = document.getElementById(`${idPrefix}-message`);
+  if (!btn || !textarea) return;
+  btn.onclick = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    document.querySelectorAll('.support-emoji-popover').forEach(p => p.remove());
+    const pop = document.createElement('div');
+    pop.className = 'support-emoji-popover';
+    pop.innerHTML = SUPPORT_QUICK_EMOJIS.map(em => `<button type="button" class="support-emoji-opt">${em}</button>`).join('');
+    // Ajoute au <body> (pas au conteneur du bouton) et position:fixed calcule
+    // depuis le bouton - le modal support (.support-modal-body) a
+    // overflow-y:auto, ce qui force overflow-x a se couper (regle CSS
+    // implicite : un axe "visible" a cote d'un axe non-visible devient
+    // "auto") et coupait le popover en position:absolute (constat
+    // utilisateur, 14/08).
+    document.body.appendChild(pop);
+    const rect = btn.getBoundingClientRect();
+    const popW = pop.offsetWidth;
+    const left = Math.max(8, Math.min(rect.right - popW, window.innerWidth - popW - 8));
+    pop.style.left = left + 'px';
+    pop.style.top = (rect.bottom + 6) + 'px';
+    pop.querySelectorAll('.support-emoji-opt').forEach(opt => {
+      opt.onclick = (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        const start = textarea.selectionStart ?? textarea.value.length;
+        const end = textarea.selectionEnd ?? textarea.value.length;
+        const emoji = opt.textContent;
+        textarea.value = textarea.value.slice(0, start) + emoji + textarea.value.slice(end);
+        const newPos = start + emoji.length;
+        textarea.focus();
+        textarea.setSelectionRange(newPos, newPos);
+        pop.remove();
+      };
+    });
+    setTimeout(() => {
+      const closeOnOutside = (ev) => {
+        if (!pop.contains(ev.target) && ev.target !== btn) {
+          pop.remove();
+          document.removeEventListener('click', closeOnOutside);
+        }
+      };
+      document.addEventListener('click', closeOnOutside);
+    }, 0);
+  };
+}
+
 function renderSupportMsgHtml(message) {
   const { text, imageUrl } = extractImageFromMessage(message);
   return `${escapeHtml(text)}${imageUrl ? `<a href="${imageUrl}" target="_blank" rel="noopener"><img class="support-msg-image" src="${imageUrl}" alt="Capture d'écran jointe"></a>` : ''}`;
@@ -229,10 +287,12 @@ function renderSupportNewForm() {
       </div>
       <label class="support-form-label">Votre message</label>
       <textarea class="form-input support-form-textarea" id="support-field-message" placeholder="Décrivez le bug, l'idée ou la question…" required></textarea>
+      ${emojiToolbarHtml('support-field')}
       ${supportImagePickerHtml('support-new')}
       <button class="btn-save-profile" type="submit">Envoyer le ticket</button>
     </form>`;
   const imagePicker = wireSupportImagePicker('support-new');
+  wireEmojiPicker('support-field');
   body.querySelector('#support-new-form').addEventListener('submit', (e) => submitSupportTicket(e, imagePicker));
 }
 
@@ -360,6 +420,7 @@ async function openSupportTicket(number, scope) {
       ${canReply ? `
       <form id="support-reply-form" class="support-reply-form">
         <textarea class="form-input support-form-textarea" id="support-reply-message" placeholder="Votre réponse…" required></textarea>
+        ${emojiToolbarHtml('support-reply')}
         ${supportImagePickerHtml('support-reply')}
         <button class="btn-save-profile" type="submit">Répondre</button>
       </form>
@@ -372,6 +433,7 @@ async function openSupportTicket(number, scope) {
     }
     const replyForm = body.querySelector('#support-reply-form');
     if (replyForm) {
+      wireEmojiPicker('support-reply');
       const replyImagePicker = wireSupportImagePicker('support-reply');
       replyForm.addEventListener('submit', async (e) => {
         e.preventDefault();
@@ -545,6 +607,7 @@ async function openSupportAdminTicket(number) {
       </div>
       <form id="support-admin-reply-form" class="support-reply-form">
         <textarea class="form-input support-form-textarea" id="support-admin-reply-message" placeholder="Votre réponse…" required></textarea>
+        ${emojiToolbarHtml('support-admin-reply')}
         ${supportImagePickerHtml('support-admin-reply')}
         <button class="btn-save-profile" type="submit">Répondre</button>
       </form>
@@ -569,6 +632,7 @@ async function openSupportAdminTicket(number) {
         renderSupportAdminList();
       } catch (err) { showToast('Erreur : ' + err.message, 'error'); }
     };
+    wireEmojiPicker('support-admin-reply');
     const adminReplyImagePicker = wireSupportImagePicker('support-admin-reply');
     detail.querySelector('#support-admin-reply-form').addEventListener('submit', async (e) => {
       e.preventDefault();

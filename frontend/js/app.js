@@ -70,7 +70,7 @@ const API = '';
 // COMBLER les cles manquantes au demarrage (jamais ecraser une valeur deja
 // presente en local) — protege contre un revert vers une copie serveur
 // perimee si un push precedent avait echoue (coupure reseau ponctuelle).
-const DURABLE_LS_KEYS = ['suivi_sport_profile', 'suivi_personal_goals', 'suivi_imported_plan', 'suivi_local_done', 'prefer_imported_plan', 'suivi_forced_goal_pace', 'suivi_free_sessions'];
+const DURABLE_LS_KEYS = ['suivi_sport_profile', 'suivi_personal_goals', 'suivi_imported_plan', 'suivi_local_done', 'suivi_session_mood', 'prefer_imported_plan', 'suivi_forced_goal_pace', 'suivi_free_sessions'];
 const DURABLE_LS_PREFIXES = ['suivi_objectif_dist_', 'suivi_objectif_dplus_', 'suivi_objectif_validated_'];
 // Promesse de syncUserDataFromServer() exposee globalement (scope partage
 // entre scripts) - campus.js l'attend avant toute decision basee sur
@@ -947,7 +947,7 @@ function renderAllActivities(activities, filter = 'all', yearOverride = null) {
     return `
       <tr class="activity-row" data-activity-id="${a.id || ''}">
         <td>${formatDateShort(a.date, true)}</td>
-        <td><span class="activity-type-cell ${activityTypeClass(type)}">${icon}<span class="run-type-text">${activityTypeLabel(type)}</span>${typeof activityAnalysisBadge === 'function' ? activityAnalysisBadge(a.id) : ''}</span></td>
+        <td><span class="activity-type-cell ${activityTypeClass(type)}">${icon}<span class="run-type-text">${activityTypeLabel(type)}</span>${typeof activityAnalysisBadge === 'function' ? activityAnalysisBadge(a.id) : ''}${typeof sessionMoodBadgeForActivity === 'function' ? sessionMoodBadgeForActivity(a.id) : ''}</span></td>
         <td style="color:var(--text-primary);max-width:180px;overflow:hidden;text-overflow:ellipsis">${a.name || '\u2014'}</td>
         <td class="dist-value">${a.distanceKm ? a.distanceKm.toFixed(2)+' km' : '\u2014'}</td>
         <td style="color:var(--text-secondary)">${formatDuration(a.durationSec)}</td>

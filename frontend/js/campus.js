@@ -364,6 +364,86 @@ function _getLocalDoneMap() {
 function getLocalSessionStatus(weekId, trainingIndex) {
   return _getLocalDoneMap()[weekId + '_' + trainingIndex] || null;
 }
+
+// "?"? Ressenti d'une seance marquee faite ("Comment s'est passee la seance ?") "?"?
+const SESSION_MOOD_KEY = 'suivi_session_mood';
+const SESSION_MOOD_STYLES = {
+  good:    { color: '#22c55e', label: 'Très bien' },
+  neutral: { color: '#eab308', label: 'Moyen' },
+  bad:     { color: '#ef4444', label: 'Difficile' },
+};
+function _getSessionMoodMap() {
+  try { return JSON.parse(localStorage.getItem(SESSION_MOOD_KEY) || '{}'); } catch(e) { return {}; }
+}
+function getSessionMood(weekId, trainingIndex) {
+  if (!weekId) return null;
+  return _getSessionMoodMap()[weekId + '_' + trainingIndex] || null;
+}
+function setSessionMood(weekId, trainingIndex, mood) {
+  if (!weekId) return;
+  const m = _getSessionMoodMap();
+  const key = weekId + '_' + trainingIndex;
+  if (mood) m[key] = mood; else delete m[key];
+  localStorage.setItem(SESSION_MOOD_KEY, JSON.stringify(m));
+}
+// Icone visage colore (pas d'emoji Unicode natif disponible dans les 3
+// couleurs demandees) - reutilisee dans les cartes de seance (campus.js) et
+// le tableau des activites (app.js, via sessionMoodBadgeForActivity).
+function sessionMoodIconSvg(mood, size) {
+  const cfg = SESSION_MOOD_STYLES[mood];
+  if (!cfg) return '';
+  size = size || 18;
+  const mouth = mood === 'good' ? 'M8 14.5 Q12 18 16 14.5'
+              : mood === 'bad'  ? 'M8 17 Q12 13.5 16 17'
+              : 'M8.5 15.5h7';
+  return `<svg class="session-mood-icon" width="${size}" height="${size}" viewBox="0 0 24 24" title="${cfg.label}">
+    <circle cx="12" cy="12" r="11" fill="${cfg.color}"/>
+    <circle cx="8.3" cy="10" r="1.4" fill="#20232b"/>
+    <circle cx="15.7" cy="10" r="1.4" fill="#20232b"/>
+    <path d="${mouth}" stroke="#20232b" stroke-width="1.7" fill="none" stroke-linecap="round"/>
+  </svg>`;
+}
+// Badge affiche dans le tableau des activites (app.js, renderAllActivities)
+// quand une activite est liee a une seance qui a un ressenti enregistre.
+function sessionMoodBadgeForActivity(activityId) {
+  if (typeof _analysisIndex === 'undefined') return '';
+  const rec = _analysisIndex.byActivity[String(activityId)];
+  if (!rec?.planKey?.weekId) return '';
+  const mood = getSessionMood(rec.planKey.weekId, rec.planKey.trainingIndex);
+  return mood ? ` <span class="activity-mood-badge">${sessionMoodIconSvg(mood, 16)}</span>` : '';
+}
+
+// Petite modale "Comment s'est passee la seance ?" proposee juste apres
+// avoir marque une seance comme faite - 3 choix (facile a saisir, pas de
+// texte libre pour rester rapide). Ne bloque rien si l'utilisateur ferme
+// sans repondre (le ressenti reste simplement non renseigne).
+function promptSessionMood(weekId, trainingIndex) {
+  if (document.getElementById('session-mood-modal-backdrop')) return;
+  const bd = document.createElement('div');
+  bd.className = 'confirm-modal-backdrop';
+  bd.id = 'session-mood-modal-backdrop';
+  bd.innerHTML = `
+    <div class="confirm-modal">
+      <div class="confirm-modal-title">Comment s'est passée la séance ?</div>
+      <div class="session-mood-picker">
+        ${Object.keys(SESSION_MOOD_STYLES).map(mood => `
+          <button type="button" class="session-mood-btn" data-mood="${mood}" title="${SESSION_MOOD_STYLES[mood].label}">
+            ${sessionMoodIconSvg(mood, 40)}
+            <span>${SESSION_MOOD_STYLES[mood].label}</span>
+          </button>`).join('')}
+      </div>
+    </div>`;
+  document.body.appendChild(bd);
+  const close = () => bd.remove();
+  bd.querySelectorAll('.session-mood-btn').forEach(btn => {
+    btn.onclick = () => {
+      setSessionMood(weekId, trainingIndex, btn.dataset.mood);
+      close();
+      renderSessionList(campusState.selectedWeekIdx);
+    };
+  });
+  attachBackdropClose(bd, close);
+}
 // "?"? Forçage des allures objectif par séance (bouton "Forcer les allures
 // de l'objectif", cf renderSessionDetail/computeGoalPaceInfo) "?"?
 const FORCED_GOAL_PACE_KEY = 'suivi_forced_goal_pace';
@@ -384,6 +464,7 @@ function markSessionDone(weekId, trainingIndex) {
   const m = _getLocalDoneMap(); m[weekId + '_' + trainingIndex] = 'done';
   localStorage.setItem(LOCAL_DONE_KEY, JSON.stringify(m));
   renderSessionList(campusState.selectedWeekIdx);
+  promptSessionMood(weekId, trainingIndex);
   // Proposer de lier une activite Garmin reelle juste apres validation, si la
   // seance s'y prete (pas PPG/competition) et n'est pas deja liee.
   if (typeof openSessionLinkPicker === 'function' && typeof _analysisIndex !== 'undefined') {
@@ -398,11 +479,13 @@ function markSessionDone(weekId, trainingIndex) {
 function markSessionSkip(weekId, trainingIndex) {
   const m = _getLocalDoneMap(); m[weekId + '_' + trainingIndex] = 'skip';
   localStorage.setItem(LOCAL_DONE_KEY, JSON.stringify(m));
+  setSessionMood(weekId, trainingIndex, null);
   renderSessionList(campusState.selectedWeekIdx);
 }
 function clearSessionStatus(weekId, trainingIndex) {
   const m = _getLocalDoneMap(); delete m[weekId + '_' + trainingIndex];
   localStorage.setItem(LOCAL_DONE_KEY, JSON.stringify(m));
+  setSessionMood(weekId, trainingIndex, null);
   renderSessionList(campusState.selectedWeekIdx);
 }
 
@@ -1092,6 +1175,7 @@ function renderSessionCard(session, idx, weekIdx, weekId, isCurrentWeek) {
     const localStatus = getLocalSessionStatus(weekId, session.trainingIndex);
     if (localStatus) status = localStatus;
   }
+  const mood = weekId ? getSessionMood(weekId, session.trainingIndex) : null;
   const sport    = session.sport === 'ppg' ? 'PPG' : session.sport === 'trailV2' ? 'Trail' : '';
 
   const statusMap = {
@@ -1173,6 +1257,7 @@ function renderSessionCard(session, idx, weekIdx, weekId, isCurrentWeek) {
             return rec ? `<span class="session-analysis-score-badge" title="Séance analysée">📊 ${rec.score}%</span>` : '';
           })()}
           <span class="session-status-badge ${statusInfo.cls}">${statusInfo.label}</span>
+          ${mood ? `<span class="session-mood-badge" onclick="event.stopPropagation();promptSessionMood('${weekId}',${session.trainingIndex ?? 0})">${sessionMoodIconSvg(mood, 20)}</span>` : ''}
           <span class="session-expand-chevron">${isOpen ? '-' : '-'}</span>
         </div>
       </div>
@@ -1289,7 +1374,8 @@ function renderSessionDetail(session, weekId, isCurrentWeek) {
             if (!campusState.usingImportedPlan || !weekId) return '';
             const ti = session.trainingIndex ?? 0;
             const ls = getLocalSessionStatus(weekId, ti);
-            if (ls === 'done') return '<button class="btn-mark-done btn-mark-done--active" onclick="event.stopPropagation();clearSessionStatus(\'' + weekId + '\''  + ',' + ti + ')">\u21a9 Annuler (fait)</button>';
+            const moodBtn = '<button type="button" class="btn-mood-edit" onclick="event.stopPropagation();promptSessionMood(\'' + weekId + '\',' + ti + ')" title="Ressenti de la s\u00e9ance">' + (sessionMoodIconSvg(getSessionMood(weekId, ti), 22) || '\u{1F914}') + '</button>';
+            if (ls === 'done') return '<button class="btn-mark-done btn-mark-done--active" onclick="event.stopPropagation();clearSessionStatus(\'' + weekId + '\''  + ',' + ti + ')">\u21a9 Annuler (fait)</button>' + moodBtn;
             if (ls === 'skip') return '<button class="btn-mark-skip btn-mark-skip--active" onclick="event.stopPropagation();clearSessionStatus(\'' + weekId + '\'' + ',' + ti + ')">\u21a9 Annuler (pass\u00e9e)</button>';
             return '<button class="btn-mark-done" onclick="event.stopPropagation();markSessionDone(\'' + weekId + '\'' + ',' + ti + ')">\u2713 Marquer comme fait</button>'
                  + '<button class="btn-mark-skip" onclick="event.stopPropagation();markSessionSkip(\'' + weekId + '\'' + ',' + ti + ')">\u2715 Passer</button>';
@@ -1490,7 +1576,8 @@ function renderSessionDetail(session, weekId, isCurrentWeek) {
           const isSkip = ls === 'skip';
           let html = '';
           if (isDone) {
-            html = '<button class="btn-mark-done btn-mark-done--active" onclick="event.stopPropagation();clearSessionStatus(\'' + weekId + '\',' + ti + ')">\u21a9 Annuler (fait)</button>';
+            html = '<button class="btn-mark-done btn-mark-done--active" onclick="event.stopPropagation();clearSessionStatus(\'' + weekId + '\',' + ti + ')">\u21a9 Annuler (fait)</button>'
+                 + '<button type="button" class="btn-mood-edit" onclick="event.stopPropagation();promptSessionMood(\'' + weekId + '\',' + ti + ')" title="Ressenti de la s\u00e9ance">' + (sessionMoodIconSvg(getSessionMood(weekId, ti), 22) || '\u{1F914}') + '</button>';
           } else if (isSkip) {
             html = '<button class="btn-mark-skip btn-mark-skip--active" onclick="event.stopPropagation();clearSessionStatus(\'' + weekId + '\',' + ti + ')">\u21a9 Annuler (pass\u00e9e)</button>';
           } else {
