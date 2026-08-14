@@ -72,7 +72,10 @@ const APP_VERSION = require('./package.json').version;
 const PORT = process.env.PORT || 3001;
 
 app.use(cors());
-app.use(express.json({ limit: '5mb' }));
+// 8mb : encodage base64 d'une image jointe a un ticket de support (voir
+// /api/support/images) gonfle la taille brute d'~1/3 en plus de l'enveloppe
+// JSON - 5mb etait trop juste pour une capture d'ecran meme compressee.
+app.use(express.json({ limit: '8mb' }));
 app.use(cookie());
 // index:false f¢â, â," express.static ne sert PAS index.html directement
 // f¢â, â," la route GET '/' s'ex©cute toujours et pose le cookie de session
@@ -449,7 +452,13 @@ async function createGarminSession(email, password) {
     displayName = computeDisplayName(profile);
   } catch(e) { /* silencieux */ }
 
-  return { gc, email, displayName, fns, lastAccess: Date.now() };
+  // Enregistre/actualise ce compte dans le repertoire des utilisateurs et
+  // rejette la connexion s'il a ete bloque par l'admin (voir
+  // checkUserDirectory plus bas - throw si blocked) - seule visibilite/
+  // controle possible sur une appli distribuee en .exe, sans autre canal.
+  const { ticketAccess } = await checkUserDirectory(email, displayName);
+
+  return { gc, email, displayName, fns, lastAccess: Date.now(), ticketAccess };
 }
 
 // f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬
@@ -622,8 +631,18 @@ async function restoreGarminSession() {
     // cloisonnement par compte des donnees locales (chaque route lit/ecrit
     // sous req.session.email, cf readScoped/writeScoped).
     const restoredEmail = (profile?.userName || ENV_EMAIL || '').toLowerCase();
-    return { gc, email: restoredEmail, displayName, fns, lastAccess: Date.now() };
+    // Rejette la restauration si ce compte a ete bloque par l'admin - les
+    // jetons OAuth restent valides sur disque (pas d'unlinkSync ici, voir le
+    // catch ci-dessous reserve aux jetons vraiment perimes/invalides), le
+    // blocage est une decision Allure+, pas un probleme d'authentification
+    // Garmin.
+    const { ticketAccess } = await checkUserDirectory(restoredEmail, displayName);
+    return { gc, email: restoredEmail, displayName, fns, lastAccess: Date.now(), ticketAccess };
   } catch(e) {
+    if (e.blocked) {
+      console.warn(`[WARN] Compte bloque par l'administrateur, session non restauree : ${e.message}`);
+      return null;
+    }
     console.warn('[WARN] Tokens Garmin sauvegardes expires ou invalides, login SSO necessaire.');
     // Supprimer les tokens invalides (ce compte seulement)
     try { fs.unlinkSync(path.join(tokenDir, 'oauth1_token.json')); } catch(_) {}
@@ -735,6 +754,11 @@ app.get('/api/status', (req, res) => {
     campusEnabled:  CAMPUS_ENABLED,
     brouterConfigured: isBrouterConfigured(),
     version:        APP_VERSION,
+    // false uniquement si explicitement desactive par l'admin (voir
+    // checkUserDirectory) - undefined (relais jamais interroge, session
+    // restauree avant l'ajout de ce champ...) reste "true" par defaut,
+    // jamais bloquant pour un compte legitime.
+    ticketAccess:   s?.ticketAccess !== false,
   });
 });
 
@@ -908,12 +932,112 @@ async function callSupportRelay(path, options = {}) {
   return data;
 }
 
+// ─────────────────────────────────────────────
+// Repertoire des utilisateurs (voir support-relay/src/index.js, routes
+// /users/*) - meme relais/cles que le Centre de support ci-dessus, aucun
+// nouveau secret a configurer. Seule visibilite possible pour l'admin sur
+// une appli distribuee en .exe (qui l'a deja lancee, quand) et seul moyen de
+// couper l'acces si l'executable circule hors de son controle.
+// ─────────────────────────────────────────────
+
+// Enregistre/actualise ce compte a chaque connexion reussie (login complet
+// ET restauration par jetons - voir createGarminSession/restoreGarminSession)
+// et rejette la connexion si l'admin l'a bloque. Fail-open sur toute erreur
+// reseau/relais : un probleme de connectivite au relais ne doit jamais
+// empecher un compte legitime de se connecter a Allure+.
+async function checkUserDirectory(email, displayName) {
+  try {
+    const data = await callSupportRelay('/users/ping', {
+      method: 'POST',
+      body: JSON.stringify({ email, displayName, clientKey: SUPPORT_CLIENT_KEY }),
+    });
+    if (data.blocked) {
+      const err = new Error("Accès à Allure+ suspendu pour ce compte. Contactez l'administrateur.");
+      err.blocked = true;
+      throw err;
+    }
+    return { ticketAccess: data.ticketAccess !== false };
+  } catch (e) {
+    if (e.blocked) throw e;
+    console.warn('[users] Verification du repertoire impossible (fail-open) :', e.message);
+    return { ticketAccess: true };
+  }
+}
+
+// Sweep periodique : un compte bloque APRES coup (deja connecte au moment du
+// blocage) doit perdre l'acces sous quelques minutes, pas seulement a sa
+// prochaine connexion - decision explicite de l'utilisateur (14/08, scenario
+// executable qui fuite). Revoque toutes les sessions actives de ce compte,
+// et envSessionId si c'est la session d'auto-login concernee (meme geste que
+// le fix logout plus haut).
+const BLOCK_CHECK_INTERVAL_MS = 2 * 60 * 1000;
+async function checkBlockedAccounts() {
+  const emails = new Set();
+  for (const s of sessions.values()) if (s.email) emails.add(s.email.toLowerCase());
+  for (const email of emails) {
+    try {
+      const data = await callSupportRelay(`/users/${encodeURIComponent(email)}/status?clientKey=${encodeURIComponent(SUPPORT_CLIENT_KEY)}`);
+      if (!data.blocked) continue;
+      for (const [sid, s] of sessions) {
+        if (s.email && s.email.toLowerCase() === email) {
+          sessions.delete(sid);
+          if (sid === envSessionId) envSessionId = null;
+        }
+      }
+      console.warn(`[users] Compte ${email} bloqué — session(s) révoquée(s)`);
+    } catch (e) { /* silencieux, retente au prochain cycle */ }
+  }
+}
+setInterval(checkBlockedAccounts, BLOCK_CHECK_INTERVAL_MS);
+
+app.get('/api/admin/users', requireAdmin, async (req, res) => {
+  try {
+    const data = await callSupportRelay(`/users?adminKey=${encodeURIComponent(SUPPORT_ADMIN_KEY)}`);
+    res.json(data);
+  } catch (err) { handleError(res, err); }
+});
+
+app.post('/api/admin/users/:email/block', requireAdmin, async (req, res) => {
+  try {
+    const data = await callSupportRelay(`/users/${encodeURIComponent(req.params.email)}/block`, {
+      method: 'POST',
+      body: JSON.stringify({ adminKey: SUPPORT_ADMIN_KEY, blocked: !!req.body?.blocked }),
+    });
+    res.json(data);
+  } catch (err) { handleError(res, err); }
+});
+
+app.post('/api/admin/users/:email/ticket-access', requireAdmin, async (req, res) => {
+  try {
+    const data = await callSupportRelay(`/users/${encodeURIComponent(req.params.email)}/ticket-access`, {
+      method: 'POST',
+      body: JSON.stringify({ adminKey: SUPPORT_ADMIN_KEY, ticketAccess: !!req.body?.ticketAccess }),
+    });
+    res.json(data);
+  } catch (err) { handleError(res, err); }
+});
+
+// Upload d'une image jointe a un ticket (voir support-relay/src/index.js,
+// /images) - route generique, reutilisee par la creation de ticket ET les
+// reponses (support.js envoie d'abord l'image, recupere son URL, puis
+// l'inclut dans le payload du ticket/commentaire).
+app.post('/api/support/images', requireSession, async (req, res) => {
+  try {
+    const { dataBase64, contentType } = req.body || {};
+    const data = await callSupportRelay('/images', {
+      method: 'POST',
+      body: JSON.stringify({ dataBase64, contentType, clientKey: SUPPORT_CLIENT_KEY }),
+    });
+    res.json(data);
+  } catch (err) { handleError(res, err); }
+});
+
 app.post('/api/support/tickets', requireSession, async (req, res) => {
   try {
-    const { category, page, message } = req.body || {};
+    const { category, page, message, imageUrl } = req.body || {};
     const data = await callSupportRelay('/tickets', {
       method: 'POST',
-      body: JSON.stringify({ email: req.session.email, category, page, message, clientKey: SUPPORT_CLIENT_KEY }),
+      body: JSON.stringify({ email: req.session.email, category, page, message, imageUrl, clientKey: SUPPORT_CLIENT_KEY }),
     });
     res.json(data);
   } catch (err) { handleError(res, err); }
@@ -937,13 +1061,14 @@ app.get('/api/support/tickets/:number', requireSession, async (req, res) => {
 
 app.post('/api/support/tickets/:number/comments', requireSession, async (req, res) => {
   try {
-    const { message } = req.body || {};
+    const { message, imageUrl } = req.body || {};
     const isAdmin = req.session.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
     const data = await callSupportRelay(`/tickets/${Number(req.params.number)}/comments`, {
       method: 'POST',
       body: JSON.stringify({
         email: req.session.email,
         message,
+        imageUrl,
         clientKey: SUPPORT_CLIENT_KEY,
         adminKey: isAdmin ? SUPPORT_ADMIN_KEY : undefined,
       }),
@@ -1273,13 +1398,20 @@ app.post('/api/setup', async (req, res) => {
 
   } catch(err) {
     console.error('Setup error:', err.message);
-    const is429 = err.message.includes('429') || err.message.includes('427') || err.message.toLowerCase().includes('rate');
-    const msg = is429
-      ? 'Trop de tentatives de connexion. Garmin a temporairement bloqué l\'accès. Attendez 2-3 minutes et réessayez.'
-      : (err.message.includes('401') || err.message.toLowerCase().includes('invalid')
-          ? 'Identifiants Garmin incorrects. Vérifiez votre e-mail et mot de passe.'
-          : 'Erreur de connexion : ' + err.message);
-    res.status(is429 ? 429 : 401).json({ error: msg, retryable: is429 });
+    // err.blocked verifie EN PREMIER, avant toute recherche de sous-chaine :
+    // le message de blocage ("...administrateur.") contient lui-meme la
+    // sous-chaine "rate" (adminis-TRATE-ur), faussement classe comme un
+    // rate-limit Garmin par la recherche ci-dessous si on ne le court-
+    // circuite pas ici (constate reel 14/08).
+    const is429 = !err.blocked && (err.message.includes('429') || err.message.includes('427') || err.message.toLowerCase().includes('rate'));
+    const msg = err.blocked
+      ? err.message
+      : (is429
+        ? 'Trop de tentatives de connexion. Garmin a temporairement bloqué l\'accès. Attendez 2-3 minutes et réessayez.'
+        : (err.message.includes('401') || err.message.toLowerCase().includes('invalid')
+            ? 'Identifiants Garmin incorrects. Vérifiez votre e-mail et mot de passe.'
+            : 'Erreur de connexion : ' + err.message));
+    res.status(err.blocked ? 403 : (is429 ? 429 : 401)).json({ error: msg, retryable: is429 });
   }
 });
 
@@ -1325,11 +1457,16 @@ app.post('/api/login', async (req, res) => {
 
   } catch (err) {
     console.error('Login error:', err.message);
-    const is429 = err.message.includes('429') || err.message.includes('427') || err.message.toLowerCase().includes('rate');
-    const msg = is429
-      ? 'Trop de tentatives de connexion. Garmin a temporairement bloqué l\'accès. Attendez 2-3 minutes et réessayez.'
-      : 'Identifiants Garmin incorrects. Vérifiez votre e-mail et mot de passe.';
-    res.status(is429 ? 429 : 401).json({ error: msg, retryable: is429 });
+    // err.blocked verifie EN PREMIER - voir le meme correctif sur /api/setup
+    // juste au-dessus (le message de blocage contient "rate" via
+    // "administrateur", faussement classe rate-limit Garmin sinon).
+    const is429 = !err.blocked && (err.message.includes('429') || err.message.includes('427') || err.message.toLowerCase().includes('rate'));
+    const msg = err.blocked
+      ? err.message
+      : (is429
+        ? 'Trop de tentatives de connexion. Garmin a temporairement bloqué l\'accès. Attendez 2-3 minutes et réessayez.'
+        : 'Identifiants Garmin incorrects. Vérifiez votre e-mail et mot de passe.');
+    res.status(err.blocked ? 403 : (is429 ? 429 : 401)).json({ error: msg, retryable: is429 });
   }
 });
 
