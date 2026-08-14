@@ -292,12 +292,14 @@ function closeLogsModal() {
 
 async function checkStatus() {
   const led  = el('server-led');
-  const txt  = el('server-status-text');
+  const bar  = el('server-status-bar');
   const overlay = el('server-down-overlay');
 
+  // Plus de libellé texte visible (ligne condensée, voir CLAUDE.md) — le
+  // statut détaillé reste accessible via le tooltip (title) du voyant.
   function setLed(state, label) {
     if (led) { led.className = 'server-led ' + state; }
-    if (txt) { txt.textContent = label; }
+    if (bar) { bar.title = label; }
   }
 
   try {
@@ -381,6 +383,15 @@ async function handleLogout() {
 
 let _updateInfo = null;
 
+// Version dont la modale plein ecran a deja ete montree sur cet appareil -
+// purement locale (pas une cle "durable" DURABLE_LS_KEYS/PREFIXES, aucune
+// raison de la synchroniser entre appareils). Permet de ne montrer la
+// modale qu'une fois par version : "plus tard" comme "telecharger" la
+// marquent vue, elle ne revient donc pas le lendemain tant qu'aucune
+// version plus recente n'est publiee (le badge pulsant, lui, reste affiche
+// sans condition tant que la maj n'est pas faite - inchange).
+const UPDATE_PROMPT_SEEN_KEY = 'allure_update_prompt_seen_version';
+
 async function checkForUpdate() {
   try {
     const res = await fetch(`${API}/api/check-update`);
@@ -388,6 +399,11 @@ async function checkForUpdate() {
     _updateInfo = data;
     const badge = el('app-update-badge');
     if (badge) badge.style.display = data.updateAvailable ? 'inline-flex' : 'none';
+
+    if (data.updateAvailable && localStorage.getItem(UPDATE_PROMPT_SEEN_KEY) !== data.latestVersion) {
+      localStorage.setItem(UPDATE_PROMPT_SEEN_KEY, data.latestVersion);
+      showUpdateModal();
+    }
   } catch (e) { /* silencieux — ne doit jamais bloquer le chargement de l'app */ }
 }
 
@@ -410,14 +426,20 @@ async function checkSyncStatus() {
     bar.style.display = '';
     if (data.lastSyncAt == null) {
       led.className = 'sync-led led-loading';
-      txt.textContent = 'Synchro en cours…';
+      txt.textContent = '';
+      bar.title = 'Synchro en cours…';
     } else if (data.lastSyncOk) {
       led.className = 'sync-led led-ok';
+      // Libelle complet en tooltip (ligne condensee) - seule l'heure reste
+      // affichee en permanence (demande explicite, pour garder un repere
+      // rapide sans avoir a survoler).
       const when = new Date(data.lastSyncAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
-      txt.textContent = `Synchronisé à ${when}`;
+      txt.textContent = when;
+      bar.title = `Synchronisé à ${when}`;
     } else {
       led.className = 'sync-led led-ko';
-      txt.textContent = 'Erreur de synchro';
+      txt.textContent = '';
+      bar.title = 'Erreur de synchro';
     }
   } catch (e) { bar.style.display = 'none'; }
 }

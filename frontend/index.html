@@ -12,7 +12,7 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <link rel="stylesheet" href="css/style.css?v=1786626871599" />
+  <link rel="stylesheet" href="css/style.css?v=1786692556817" />
   <link rel="stylesheet" href="css/plans.css?v=1786014624239" />
   <link rel="stylesheet" href="css/routes.css?v=1786547249351" />
 </head>
@@ -139,13 +139,6 @@
     </nav>
 
     <div class="sidebar-footer">
-      <button class="nav-item" id="btn-bg-manager" title="Gérer les photos de fond" type="button">
-        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-          <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
-        </svg>
-        Photos de fond
-      </button>
-
       <button class="btn-refresh" id="refresh-btn" onclick="refreshAll()" title="Actualiser les données Garmin">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/>
@@ -157,20 +150,34 @@
 
       <div class="sidebar-footer-divider"></div>
 
-      <!-- Voyant statut serveur : confirme que le serveur local Allure+ repond
-           (utile pour detecter une panne du process node.exe, pas juste decoratif) -->
-      <div class="server-status-bar" id="server-status-bar" title="Confirme que le serveur local Allure+ repond">
-        <div class="server-led" id="server-led"></div>
-        <span class="server-status-text" id="server-status-text">Connexion...?</span>
-      </div>
+      <!-- Ligne condensee : gestion des photos de fond (icone seule) + les 2
+           voyants (serveur / synchro) sur une seule ligne pour liberer de la
+           hauteur au profit de la nav, masquee sur les ecrans bas (voir CLAUDE.md,
+           menus caches selon la resolution). -->
+      <div class="sidebar-quick-row">
+        <button class="icon-btn-bg" id="btn-bg-manager" title="Gérer les photos de fond" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/>
+          </svg>
+        </button>
 
-      <!-- Voyant synchro cross-appareils : confirme que les donnees perso
-           (profil, objectifs, records, courses...) sont bien a jour avec le
-           cloud (voir sync.js/server.js) - masque si la synchro n'est pas
-           configuree (SYNC_RELAY_URL absent du .env). -->
-      <div class="sync-status-bar" id="sync-status-bar" style="display:none" title="État de la synchronisation cloud entre vos appareils">
-        <div class="sync-led" id="sync-led"></div>
-        <span class="sync-status-text" id="sync-status-text">Synchro…</span>
+        <!-- Voyant statut serveur : confirme que le serveur local Allure+ repond
+             (utile pour detecter une panne du process node.exe, pas juste
+             decoratif) - texte condense en tooltip (title, mis a jour en JS),
+             plus de place pour un libelle en permanence sur cette ligne. -->
+        <div class="mini-status" id="server-status-bar" title="Confirme que le serveur local Allure+ repond">
+          <div class="server-led" id="server-led"></div>
+        </div>
+
+        <!-- Voyant synchro cross-appareils : confirme que les donnees perso
+             (profil, objectifs, records, courses...) sont bien a jour avec le
+             cloud (voir sync.js/server.js) - masque si la synchro n'est pas
+             configuree (SYNC_RELAY_URL absent du .env). L'heure reste visible
+             (demande explicite), le reste du libelle passe en tooltip. -->
+        <div class="mini-status mini-status--sync" id="sync-status-bar" style="display:none" title="État de la synchronisation cloud entre vos appareils">
+          <div class="sync-led" id="sync-led"></div>
+          <span class="sync-status-text" id="sync-status-text"></span>
+        </div>
       </div>
 
       <!-- Quitter : ferme la fenetre ET arrete node.exe (voir /api/quit,
@@ -1214,7 +1221,7 @@
     <span class="support-fab-dot" id="support-fab-dot" style="display:none"></span>
   </button>
 
-  <script src="js/app.js?v=1786623648090"></script>
+  <script src="js/app.js?v=1786692556817"></script>
   <script src="js/gear.js?v=1786459105633"></script>
   <script src="js/campus.js?v=1786609755676"></script>
   <script src="js/free_sessions.js?v=1786524404763"></script>

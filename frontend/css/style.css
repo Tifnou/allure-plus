@@ -379,7 +379,7 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
 
 .btn-quit-app{
   display:flex;align-items:center;gap:6px;
-  background:none;border:1px solid var(--border);
+  background:none;border:1.5px solid color-mix(in srgb, var(--red) 45%, var(--border));
   border-radius:6px;padding:5px 8px;margin-bottom:8px;
   color:var(--text-muted);font-size:12px;font-family:var(--font-body);
   cursor:pointer;transition:all var(--transition);width:100%;
@@ -1142,21 +1142,22 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
 @media(max-width:1100px){.hero-stats{grid-template-columns:repeat(2,1fr);}.dashboard-grid{grid-template-columns:repeat(2,1fr);}.card--wide{grid-column:span 2;}}
 @media(max-width:720px){:root{--sidebar-w:60px;}.brand-name,.brand-user,.nav-item span:not(.nav-icon),.sidebar-footer .last-updated,.sidebar-footer .btn-refresh span{display:none;}.nav-item{justify-content:center;padding:10px;}.sidebar-brand{justify-content:center;padding:16px 10px;}.page{padding:20px 16px;}.hero-stats{grid-template-columns:1fr 1fr;}.activity-stats-grid{grid-template-columns:repeat(2,1fr);}.profile-layout{grid-template-columns:1fr;}}
 .btn-logs{display:flex;align-items:center;gap:5px;flex:1;padding:5px 8px;background:none;border:1px solid var(--border);border-radius:6px;font-family:var(--font-body);font-size:11px;color:var(--text-muted);cursor:pointer;transition:all var(--transition);}.btn-logs:hover{background:rgba(37,99,235,0.06);border-color:rgba(37,99,235,0.3);color:var(--accent);}
-/* ── Voyant serveur ─────────────────────────────────── */
-.server-status-bar{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;background:rgba(255,255,255,0.03);border:1px solid var(--border);margin-bottom:8px;}
-.server-led{width:9px;height:9px;border-radius:50%;background:#94a3b8;flex-shrink:0;transition:background 0.4s;}
-.server-led.led-ok{background:#22c55e;box-shadow:0 0 6px rgba(34,197,94,0.5);animation:pulse-led 2.5s ease-in-out infinite;}
-.server-led.led-ko{background:#ef4444;box-shadow:0 0 6px rgba(239,68,68,0.5);animation:pulse-led 1s ease-in-out infinite;}
-.server-led.led-loading{background:#f59e0b;animation:pulse-led 1.2s ease-in-out infinite;}
-.server-status-text{font-family:var(--font-body);font-size:11px;color:var(--text-muted);}
-@keyframes pulse-led{0%,100%{opacity:1;}50%{opacity:0.35;}}
+/* ── Ligne condensee : icone photos de fond + voyants serveur/synchro ── */
+.sidebar-quick-row{display:flex;align-items:stretch;gap:6px;margin-bottom:8px;}
+.icon-btn-bg{display:flex;align-items:center;justify-content:center;flex-shrink:0;width:30px;background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:8px;color:var(--text-muted);cursor:pointer;transition:all var(--transition);padding:0;}
+.icon-btn-bg svg{width:14px;height:14px;}
+.icon-btn-bg:hover{color:var(--accent-text);border-color:var(--accent);background:var(--accent-light);}
 
-.sync-status-bar{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;background:rgba(255,255,255,0.03);border:1px solid var(--border);margin-bottom:8px;}
-.sync-led{width:9px;height:9px;border-radius:50%;background:#94a3b8;flex-shrink:0;transition:background 0.4s;}
-.sync-led.led-ok{background:#22c55e;box-shadow:0 0 6px rgba(34,197,94,0.5);}
-.sync-led.led-ko{background:#ef4444;box-shadow:0 0 6px rgba(239,68,68,0.5);}
-.sync-led.led-loading{background:#f59e0b;animation:pulse-led 1.2s ease-in-out infinite;}
-.sync-status-text{font-family:var(--font-body);font-size:11px;color:var(--text-muted);}
+.mini-status{flex:1;min-width:0;display:flex;align-items:center;justify-content:center;gap:5px;padding:8px 6px;border-radius:8px;background:rgba(255,255,255,0.03);border:1px solid var(--border);}
+.mini-status--sync{justify-content:flex-start;padding:8px 8px;}
+.server-led,.sync-led{width:9px;height:9px;border-radius:50%;background:#94a3b8;flex-shrink:0;transition:background 0.4s;}
+.server-led.led-ok,.sync-led.led-ok{background:#22c55e;box-shadow:0 0 6px rgba(34,197,94,0.5);}
+.server-led.led-ok{animation:pulse-led 2.5s ease-in-out infinite;}
+.server-led.led-ko,.sync-led.led-ko{background:#ef4444;box-shadow:0 0 6px rgba(239,68,68,0.5);}
+.server-led.led-ko{animation:pulse-led 1s ease-in-out infinite;}
+.server-led.led-loading,.sync-led.led-loading{background:#f59e0b;animation:pulse-led 1.2s ease-in-out infinite;}
+.sync-status-text{font-family:var(--font-body);font-size:10.5px;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+@keyframes pulse-led{0%,100%{opacity:1;}50%{opacity:0.35;}}
 
 /* ═══════════════════════════════════════════
    CAMPUS COACH — Entraînements & Objectifs
@@ -3235,10 +3236,8 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
 }
 
 /* ── Barre de statut serveur ── */
-[data-theme="dark"] .server-status-bar {
-  background: rgba(12,15,25,0.9) !important;
-}
-[data-theme="dark"] .sync-status-bar {
+[data-theme="dark"] .mini-status,
+[data-theme="dark"] .icon-btn-bg {
   background: rgba(12,15,25,0.9) !important;
 }
 
