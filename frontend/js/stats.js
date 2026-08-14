@@ -268,6 +268,72 @@ async function renderStatsAlltimeTotal() {
     <div class="stats-alltime-total-item stats-alltime-total-item--cal"><span class="stats-alltime-total-num">${Math.round(s.calories).toLocaleString('fr-FR')}</span><span class="stats-alltime-total-lbl">Calories</span></div>
   `;
   box.style.display = '';
+
+  startFunFactsCarousel(computeFunFacts(s));
+}
+
+const FUN_FACT_REFS = {
+  moonKm: 384400,
+  earthCircumferenceKm: 40075,
+  everestM: 8849,
+  marathonKm: 42.195,
+  bigMacKcal: 563,
+};
+
+function computeFunFacts(s) {
+  const facts = [];
+  const fmt = (n, d = 1) => n.toLocaleString('fr-FR', { maximumFractionDigits: d });
+
+  if (s.km > 0) {
+    facts.push(`Vous avez parcouru l'équivalent de <strong>${fmt(s.km / FUN_FACT_REFS.marathonKm, 0)} marathons</strong> !`);
+
+    const earthRatio = s.km / FUN_FACT_REFS.earthCircumferenceKm;
+    facts.push(earthRatio >= 1
+      ? `Vous avez fait <strong>${fmt(earthRatio)} fois le tour de la Terre</strong> !`
+      : `Vous avez parcouru <strong>${Math.round(earthRatio * 100)}% du tour de la Terre</strong> !`);
+
+    const moonRatio = s.km / FUN_FACT_REFS.moonKm;
+    facts.push(moonRatio >= 1
+      ? `Vous avez couvert <strong>${fmt(moonRatio)} fois la distance Terre-Lune</strong> !`
+      : `Vous avez parcouru <strong>${Math.round(moonRatio * 100)}% de la distance Terre-Lune</strong> !`);
+  }
+  if (s.elevation > 0) {
+    facts.push(`Vous avez grimpé l'équivalent de <strong>${fmt(s.elevation / FUN_FACT_REFS.everestM)} fois l'Everest</strong> !`);
+  }
+  if (s.hours > 0) {
+    facts.push(`Vous avez bougé pendant <strong>${fmt(s.hours / 24)} jours non-stop</strong> cumulés !`);
+  }
+  if (s.calories > 0) {
+    facts.push(`Vous avez brûlé l'équivalent de <strong>${fmt(s.calories / FUN_FACT_REFS.bigMacKcal, 0)} Big Mac</strong> !`);
+  }
+  return facts;
+}
+
+let _funFactsTimer = null;
+let _funFactsIdx = 0;
+function startFunFactsCarousel(facts) {
+  const box = el('stats-fun-facts');
+  const textEl = el('stats-fun-facts-text');
+  clearInterval(_funFactsTimer);
+  if (!box || !textEl || !facts.length) {
+    if (box) box.style.display = 'none';
+    return;
+  }
+  _funFactsIdx = 0;
+  textEl.className = 'stats-fun-facts-text';
+  textEl.innerHTML = facts[0];
+  box.style.display = '';
+  if (facts.length < 2) return;
+  _funFactsTimer = setInterval(() => {
+    textEl.className = 'stats-fun-facts-text stats-fun-facts-text--out';
+    setTimeout(() => {
+      _funFactsIdx = (_funFactsIdx + 1) % facts.length;
+      textEl.className = 'stats-fun-facts-text stats-fun-facts-text--jump';
+      textEl.innerHTML = facts[_funFactsIdx];
+      void textEl.offsetWidth;
+      textEl.className = 'stats-fun-facts-text';
+    }, 400);
+  }, 4000);
 }
 
 function getStatsYearRange() {
