@@ -600,11 +600,15 @@
           document.getElementById('setup-card').style.display = 'none';
           document.getElementById('reconnect-email').textContent = d.envEmail;
         }
-        // Pré-remplir email si déjà connu
-        if (d.envEmail) {
-          document.getElementById('garmin-email').value = d.envEmail;
-          updateCampusSectionVisibility();
-        }
+        // Le champ e-mail du formulaire manuel n'est PLUS pre-rempli avec
+        // d.envEmail (compte precedemment enregistre) : sur un PC partage
+        // entre plusieurs comptes Garmin, un utilisateur ouvrant "Modifier
+        // la configuration" pour se connecter avec SON compte se retrouvait
+        // avec l'adresse de l'AUTRE compte deja dans le champ - en tapant
+        // sans la selectionner/effacer d'abord, le texte s'inserait dans la
+        // valeur existante au lieu de la remplacer, produisant une adresse
+        // invalide et un refus de connexion pris a tort pour un probleme
+        // d'identifiants (incident reel constate 14/08).
       })
       .catch(() => {});
 
