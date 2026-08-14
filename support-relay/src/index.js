@@ -289,9 +289,14 @@ async function handleUserPing(req, env) {
   const displayName = body.displayName ? String(body.displayName).slice(0, 120).trim() : null;
   const now = new Date().toISOString();
 
+  // Nouveau compte : acces tickets ferme par defaut (l'admin l'ouvre au cas
+  // par cas depuis le tableau Utilisateurs) - sauf pour le compte admin
+  // lui-meme (isAdmin, transmis par server.js qui seul connait ADMIN_EMAIL),
+  // ouvert d'office. N'affecte jamais un compte deja existant (seule la
+  // creation initiale du record lit ce champ).
   const key = userKey(email);
   const existing = await env.USERS_KV.get(key, { type: 'json' });
-  const record = existing || { email, firstSeen: now, blocked: false, ticketAccess: true };
+  const record = existing || { email, firstSeen: now, blocked: false, ticketAccess: !!body.isAdmin };
   record.lastSeen = now;
   if (displayName) record.displayName = displayName;
   await env.USERS_KV.put(key, JSON.stringify(record));
@@ -305,7 +310,10 @@ async function handleUserPing(req, env) {
 async function handleUserStatus(req, env, email) {
   if (new URL(req.url).searchParams.get('clientKey') !== env.CLIENT_KEY) throw { status: 401, message: 'Client non autorisé' };
   const record = await env.USERS_KV.get(userKey(email), { type: 'json' });
-  return json({ blocked: !!(record && record.blocked) });
+  return json({
+    blocked: !!(record && record.blocked),
+    ticketAccess: record ? record.ticketAccess !== false : true,
+  });
 }
 
 async function handleListUsers(req, env, url) {
