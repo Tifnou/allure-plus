@@ -1,7 +1,8 @@
 // ============================================================
 // free_sessions.js — Séances libres (hors plan d'entraînement)
-// Propose chaque semaine 3 ou 4 séances d'entretien (EF, fractionné,
-// sortie longue) quand aucun plan Campus/importé n'est actif. Ce n'est
+// Propose chaque semaine 2 à 5 séances d'entretien (EF, fractionné, sortie
+// longue - voir FREE_SESSIONS_COMPOSITION pour la repartition par
+// frequence) quand aucun plan Campus/importé n'est actif. Ce n'est
 // PAS un plan structuré (pas d'objectif/date de fin), mais les 23 séances
 // de fractionné (QUALITE_POOL/QUALITE_TIERS) et les 12 sorties longues
 // (LONGUE_POOL/LONGUE_TIERS) suivent une vraie progression cyclique par
@@ -274,9 +275,13 @@ const QUALITE_TIERS = QUALITE_TIER_KEYS.map(keys => keys.map(k => QUALITE_POOL.f
 // buildFreeSessionsWeekData). blockIdx = numéro du bloc de 4 semaines
 // écoulé → fait varier la séance choisie *dans* le tier d'un bloc à
 // l'autre, pour ne pas reproposer toujours la même à charge égale.
-function buildFractionneSession(idx, terrain, blockPos, blockIdx, light) {
+// poolOffset : decale le choix dans le pool par rapport a blockIdx - permet
+// a une 2e seance fractionnee de la meme semaine (frequence 5) de piocher
+// une variante differente de la 1ere sans jamais les faire coincider, tout
+// en gardant chacune sa propre rotation independante bloc apres bloc.
+function buildFractionneSession(idx, terrain, blockPos, blockIdx, light, poolOffset = 0) {
   const pool = light ? LIGHT_QUALITE_POOL : QUALITE_TIERS[blockPos];
-  const variant = pool[blockIdx % pool.length];
+  const variant = pool[(blockIdx + poolOffset) % pool.length];
   const steps = [
     { kind: 'WARMUP', duration: 900, slug: 'ef' },
     ...variant.build(),
@@ -297,6 +302,23 @@ function buildFractionneSession(idx, terrain, blockPos, blockIdx, light) {
 }
 
 // ─── Génération d'une semaine donnée ────────────────────────────────────
+// Composition par fréquence choisie - la sortie longue est toujours
+// présente et vient toujours en dernier (repère fixe de la semaine), EF et
+// fractionné s'alternent avant elle pour une progression "logique"
+// (dur/facile) plutôt qu'un bloc de fractionnés d'affilée :
+//   2x/sem = 1 EF + 1 SL (pas de fractionné, la SL porte elle-même des
+//            variantes "actives" avec exercices ou "EF pure" sans, cf.
+//            LONGUE_POOL)
+//   3x/sem = 1 EF + 1 fractionné + 1 SL (comportement historique, inchangé)
+//   4x/sem = 2 EF + 1 fractionné + 1 SL (comportement historique, inchangé)
+//   5x/sem = 2 EF + 2 fractionnés + 1 SL
+const FREE_SESSIONS_COMPOSITION = {
+  2: { ef: 1, fractionne: 0 },
+  3: { ef: 1, fractionne: 1 },
+  4: { ef: 2, fractionne: 1 },
+  5: { ef: 2, fractionne: 2 },
+};
+
 // blockPos (0/1/2/3) = position dans le bloc de 4 semaines courant : 0→1→2
 // = montée en charge (léger→modéré→dur), 3 = semaine allégée (isLightFreeWeek
 // tombe exactement sur blockPos===3 puisque les deux utilisent % 4 sur la
@@ -307,11 +329,14 @@ function buildFreeSessionsWeekData(prefs, weekNum) {
   const blockPos = (weekNum - 1) % 4;
   const blockIdx = Math.floor((weekNum - 1) / 4);
   const terrain = prefs.terrain;
+  const comp = FREE_SESSIONS_COMPOSITION[prefs.frequency] || FREE_SESSIONS_COMPOSITION[3];
   const sessions = [];
   let idx = 0;
-  sessions.push(buildEfSession(idx++, terrain, weekNum - 1));
-  sessions.push(buildFractionneSession(idx++, terrain, blockPos, blockIdx, light));
-  if (prefs.frequency >= 4) sessions.push(buildEfSession(idx++, terrain, weekNum));
+  const rounds = Math.max(comp.ef, comp.fractionne);
+  for (let i = 0; i < rounds; i++) {
+    if (i < comp.ef) sessions.push(buildEfSession(idx++, terrain, weekNum - 1 + i));
+    if (i < comp.fractionne) sessions.push(buildFractionneSession(idx++, terrain, blockPos, blockIdx, light, i));
+  }
   sessions.push(buildSlSession(idx++, terrain, blockPos, blockIdx, light));
   return { weekNum, light, tier: light ? null : blockPos, sessions };
 }
