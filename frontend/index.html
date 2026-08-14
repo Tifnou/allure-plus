@@ -12,7 +12,7 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <link rel="stylesheet" href="css/style.css?v=1786694058072" />
+  <link rel="stylesheet" href="css/style.css?v=1786696098668" />
   <link rel="stylesheet" href="css/plans.css?v=1786014624239" />
   <link rel="stylesheet" href="css/routes.css?v=1786547249351" />
 </head>
@@ -168,7 +168,7 @@
              seuls, sans texte, etaient impossibles a differencier - retour
              utilisateur 14/08), libelle complet en tooltip (title, mis a jour
              en JS). -->
-        <div class="mini-status" id="server-status-bar" title="Confirme que le serveur local Allure+ repond">
+        <div class="mini-status mini-status--server" id="server-status-bar" title="Confirme que le serveur local Allure+ repond">
           <svg class="mini-status-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
             <rect x="2" y="3" width="20" height="7" rx="1.5"/><rect x="2" y="14" width="20" height="7" rx="1.5"/>
             <line x1="6" y1="6.5" x2="6.01" y2="6.5"/><line x1="6" y1="17.5" x2="6.01" y2="17.5"/>
@@ -209,6 +209,7 @@
       </div>
 
       <div class="app-version" id="app-version"></div>
+      <div class="app-author">Développé par Stéphane Martin</div>
       <button class="app-update-badge" id="app-update-badge" style="display:none" onclick="showUpdateModal()">✨ Mise à jour disponible</button>
     </div>
   </aside>

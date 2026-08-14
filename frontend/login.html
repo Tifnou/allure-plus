@@ -487,8 +487,10 @@
             </div>
           </div>
 
-          <!-- Suunto -->
-          <div class="app-item disabled">
+          <!-- Suunto — masque pour le moment (support non implemente), pas
+               supprime : a reactiver (retirer style="display:none") le jour
+               ou ce support sera ajoute. -->
+          <div class="app-item disabled" style="display:none">
             <div class="app-header">
               <div class="app-check"><div class="app-check-dot"></div></div>
               <div class="app-icon suunto">&#x231A;</div>
@@ -500,8 +502,8 @@
             </div>
           </div>
 
-          <!-- Coros -->
-          <div class="app-item disabled">
+          <!-- Coros — meme raison que Suunto ci-dessus. -->
+          <div class="app-item disabled" style="display:none">
             <div class="app-header">
               <div class="app-check"><div class="app-check-dot"></div></div>
               <div class="app-icon coros">&#x231A;</div>
@@ -550,6 +552,14 @@
           </div>
         </div>
 
+        <!-- Consentement connexion Garmin — affiche uniquement a cette
+             premiere configuration (ecran de reconnexion automatique
+             n'affiche pas ce formulaire, cf mode reconnexion plus haut). -->
+        <label class="remember-row consent-row" style="align-items:flex-start; margin-bottom:14px">
+          <input type="checkbox" id="consent-garmin" style="margin-top:2px">
+          <span>J'autorise Allure+ à se connecter automatiquement à mon compte Garmin Connect pour récupérer mes données d'activité, de santé et de performance.</span>
+        </label>
+
         <!-- Bouton Commencer -->
         <button class="btn-cta" id="btn-start" onclick="doSetup()">
           Commencer
@@ -566,7 +576,8 @@
 
     <div class="footer-note">
       Vos identifiants sont stockés uniquement sur ce PC.<br>
-      Aucune donnée n'est envoyée à un serveur externe.
+      Aucune donnée n'est envoyée à un serveur externe.<br>
+      <span style="opacity:0.75">Allure+ · développé par Stéphane Martin</span>
     </div>
 
   </div><!-- /page-wrap -->
@@ -705,6 +716,7 @@
       const rememberGarmin = document.getElementById('remember-garmin').checked;
 
       if (!garminEmail || !garminPassword) { showErr('setup', 'Saisissez votre e-mail et mot de passe Garmin.'); return; }
+      if (!document.getElementById('consent-garmin').checked) { showErr('setup', 'Vous devez autoriser Allure+ à se connecter à votre compte Garmin pour continuer.'); return; }
       const campusSectionVisible = document.getElementById('campus-section').style.display !== 'none';
       if (!campusSectionVisible) campusEnabled = false;
       if (campusEnabled === null) { showErr('setup', 'Indiquez si vous avez un compte Campus Coach.'); return; }

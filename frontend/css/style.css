@@ -349,6 +349,10 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
   background:var(--bg-hover);border:1px solid var(--border);
   border-radius:20px;padding:2px 9px;
 }
+.app-author{
+  font-size:10px;color:var(--text-muted);font-family:var(--font-body);
+  margin-top:4px;
+}
 .app-update-badge{
   align-items:center; gap:4px; margin-top:6px;
   font-family:var(--font-body); font-size:10.5px; font-weight:700;
@@ -1149,7 +1153,8 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
 .icon-btn-bg:hover{color:var(--accent-text);border-color:var(--accent);background:var(--accent-light);}
 
 .mini-status{flex:1;min-width:0;display:flex;align-items:center;justify-content:center;gap:5px;padding:8px 6px;border-radius:8px;background:rgba(255,255,255,0.03);border:1px solid var(--border);}
-.mini-status--sync{justify-content:flex-start;padding:8px 8px;}
+.mini-status--server{flex:0 0 auto;padding:8px 10px;}
+.mini-status--sync{flex:1 1 auto;justify-content:flex-start;padding:8px 8px;}
 .mini-status-icon{width:12px;height:12px;flex-shrink:0;color:var(--text-muted);}
 .server-led,.sync-led{width:9px;height:9px;border-radius:50%;background:#94a3b8;flex-shrink:0;transition:background 0.4s;}
 .server-led.led-ok,.sync-led.led-ok{background:#22c55e;box-shadow:0 0 6px rgba(34,197,94,0.5);}
