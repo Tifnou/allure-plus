@@ -140,6 +140,14 @@ function formatDate(dateStr) {
   return new Date(dateStr).toLocaleDateString('fr-FR', { day:'2-digit', month:'long', year:'numeric' });
 }
 
+function formatDateTime(dateStr) {
+  if (!dateStr) return '—';
+  const d = new Date(dateStr);
+  const date = d.toLocaleDateString('fr-FR', { day:'2-digit', month:'long', year:'numeric' });
+  const time = d.toLocaleTimeString('fr-FR', { hour:'2-digit', minute:'2-digit' });
+  return `${date} à ${time}`;
+}
+
 function formatDateShort(dateStr, includeYear = false) {
   if (!dateStr) return '—';
   const opts = { day:'2-digit', month:'short' };
@@ -3640,7 +3648,7 @@ async function loadAdminUsers() {
                 <td class="admin-users-email">${escapeHtml(u.email)}</td>
                 <td>${escapeHtml(u.displayName || '—')}</td>
                 <td>${formatDate(u.firstSeen)}</td>
-                <td>${formatDate(u.lastSeen)}</td>
+                <td>${formatDateTime(u.lastSeen)}</td>
                 <td>
                   <label class="admin-users-checkbox">
                     <input type="checkbox" data-email="${escapeHtml(u.email)}" data-field="ticketAccess" ${u.ticketAccess !== false ? 'checked' : ''} title="Peut prendre jusqu'à 2 minutes pour s'appliquer si ce compte est déjà connecté">
