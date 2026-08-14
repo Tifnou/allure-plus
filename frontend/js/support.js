@@ -405,6 +405,24 @@ async function openSupportTicket(number, scope) {
 let _supportAdminTicketsCache = [];
 let _supportAdminFilter = 'all';
 let _supportAdminOpenTicket = null;
+// Repertoire e-mail -> nom Garmin (reutilise /api/admin/users, deja charge
+// par la page Admin > Utilisateurs) pour afficher un nom plutot qu'un e-mail
+// dans le Centre de support admin.
+let _supportUserDirectory = {};
+
+function supportUserLabel(email) {
+  if (!email) return 'Utilisateur';
+  return _supportUserDirectory[email.toLowerCase()] || email;
+}
+
+async function loadSupportUserDirectory() {
+  try {
+    const { users } = await fetch(`${API}/api/admin/users`).then(r => r.json());
+    _supportUserDirectory = Object.fromEntries(
+      (users || []).filter(u => u.displayName).map(u => [u.email.toLowerCase(), u.displayName])
+    );
+  } catch (e) { /* silencieux - repli sur l'e-mail brut */ }
+}
 
 const SUPPORT_ADMIN_SEEN_KEY = 'support_admin_seen';
 function loadSupportAdminSeenMap() {
@@ -443,7 +461,7 @@ async function loadSupportAdminPage() {
   if (!list) return;
   list.innerHTML = '<div class="table-loading">Chargement…</div>';
   try {
-    const res = await fetch(`${API}/api/support/admin/tickets`);
+    const [res] = await Promise.all([fetch(`${API}/api/support/admin/tickets`), loadSupportUserDirectory()]);
     const { tickets } = await res.json();
     _supportAdminTicketsCache = tickets || [];
     updateSupportAdminBadge();
@@ -484,7 +502,7 @@ function renderSupportAdminList() {
         <span class="support-ticket-cat">${cat ? cat.icon : '📝'}</span>
         <span class="support-ticket-info">
           <span class="support-ticket-title">${escapeHtml(extractImageFromMessage(t.message || t.title || '').text.slice(0, 60))}</span>
-          <span class="support-ticket-meta">${t.reporterEmail ? escapeHtml(t.reporterEmail) + ' · ' : ''}${formatDate(t.updatedAt)}</span>
+          <span class="support-ticket-meta">${t.reporterEmail ? escapeHtml(supportUserLabel(t.reporterEmail)) + ' · ' : ''}${formatDate(t.updatedAt)}</span>
         </span>
         <span class="support-status ${status.cls}">${status.label}</span>
       </button>`;
@@ -510,7 +528,7 @@ async function openSupportAdminTicket(number) {
         <span class="support-ticket-cat">${cat ? cat.icon : '📝'}</span>
         <div>
           <div class="support-ticket-title">${renderSupportMsgHtml(ticket.message || ticket.title || '')}</div>
-          <div class="support-ticket-meta">${ticket.page ? escapeHtml(ticket.page) + ' · ' : ''}${ticket.reporterEmail ? escapeHtml(ticket.reporterEmail) + ' · ' : ''}Ouvert le ${formatDate(ticket.createdAt)}</div>
+          <div class="support-ticket-meta">${ticket.page ? escapeHtml(ticket.page) + ' · ' : ''}${ticket.reporterEmail ? escapeHtml(supportUserLabel(ticket.reporterEmail)) + ' · ' : ''}Ouvert le ${formatDate(ticket.createdAt)}</div>
         </div>
         <select class="form-input support-status-select" id="support-admin-status-select">
           ${Object.entries(SUPPORT_STATUS).map(([k, v]) => `<option value="${k}" ${ticket.status === k ? 'selected' : ''}>${v.label}</option>`).join('')}
@@ -519,7 +537,7 @@ async function openSupportAdminTicket(number) {
       <div class="support-thread-comments">
         ${comments.length === 0 ? '<div class="support-empty">Pas encore de réponse.</div>' : comments.map(c => `
           <div class="support-comment ${c.author === 'admin' ? 'support-comment--admin' : 'support-comment--user'}">
-            <div class="support-comment-author">${c.author === 'admin' ? 'Vous (équipe)' : (ticket.reporterEmail || 'Utilisateur')}</div>
+            <div class="support-comment-author">${c.author === 'admin' ? 'Vous (équipe)' : escapeHtml(supportUserLabel(ticket.reporterEmail))}</div>
             <div class="support-comment-msg">${renderSupportMsgHtml(c.message)}</div>
             <div class="support-comment-date">${formatDate(c.createdAt)}</div>
           </div>`).join('')}
@@ -591,7 +609,12 @@ async function supportPollTick() {
   await checkSupportAdminNotifications();
   if (document.getElementById('page-support-admin')?.classList.contains('active')) {
     renderSupportAdminList();
-    if (_supportAdminOpenTicket != null) openSupportAdminTicket(_supportAdminOpenTicket);
+    // Ne pas reconstruire le fil (et donc la zone de reponse) si l'admin est
+    // en train d'y taper - sinon le panneau clignote et le focus/texte saisi
+    // sont perdus toutes les 30s (constat utilisateur).
+    const replyEl = document.getElementById('support-admin-reply-message');
+    const isTyping = replyEl && (document.activeElement === replyEl || replyEl.value.trim() !== '');
+    if (_supportAdminOpenTicket != null && !isTyping) openSupportAdminTicket(_supportAdminOpenTicket);
   }
 }
 
