@@ -109,6 +109,14 @@ const SYNC_TYPES = {
     fromEntries(map, email, rawLocal) { return { ...(rawLocal || {}), [email]: Object.values(map) }; },
   },
   // Idem races : le PDF (champ filename) est synchronise separement.
+  // Cas vecu (13/08) : un PPS deja saisi independamment sur deux machines
+  // AVANT que cette synchro n'existe recoit un `id` different sur chacune -
+  // la fusion par id (comme toutes les autres collections ci-dessus) les
+  // traite alors comme deux PPS distincts et les additionne au lieu de les
+  // reconcilier, doublant l'affichage. Comme le numero PPS identifie le meme
+  // document reel quel que soit l'id local, fromEntries deduplique dessus
+  // (garde l'entree la plus recemment televersee) juste avant l'ecriture -
+  // toEntries reste par id pour ne pas perdre une entree pas encore numerotee.
   pps: {
     file: path.join(DATA_DIR, 'pps.json'),
     sidecarFile: path.join(DATA_DIR, 'pps.sync.json'),
@@ -118,7 +126,17 @@ const SYNC_TYPES = {
       ((rawLocal || {})[email] || []).forEach(item => { map[item.id] = item; });
       return map;
     },
-    fromEntries(map, email, rawLocal) { return { ...(rawLocal || {}), [email]: Object.values(map) }; },
+    fromEntries(map, email, rawLocal) {
+      const byNumber = new Map();
+      Object.values(map).forEach(entry => {
+        const dedupeKey = entry && entry.number ? entry.number : entry.id;
+        const existing = byNumber.get(dedupeKey);
+        if (!existing || new Date(entry.uploadedAt || 0) >= new Date(existing.uploadedAt || 0)) {
+          byNumber.set(dedupeKey, entry);
+        }
+      });
+      return { ...(rawLocal || {}), [email]: Array.from(byNumber.values()) };
+    },
   },
   session_analyses: {
     file: path.join(DATA_DIR, 'session_analyses.json'),

@@ -489,6 +489,35 @@ function migrateToScoped(filePath, envEmail) {
   .forEach(f => migrateToScoped(f, ENV_EMAIL));
 migratePaceProfileToScoped(ENV_EMAIL);
 
+// Nettoyage ponctuel des doublons PPS herites d'avant le dedoublonnage par
+// numero dans sync.js (voir SYNC_TYPES.pps/fromEntries) : un meme PPS saisi
+// independamment sur deux machines avant l'ajout de la synchro s'y trouvait
+// sous deux `id` differents, jamais fusionnes tant qu'aucun changement ne
+// redeclenchait fromEntries. Idempotent (ne reecrit que si un vrai doublon
+// est trouve), tourne une seule fois au demarrage.
+(function dedupeLegacyPps() {
+  const all = readJsonSafe(PPS_FILE, null);
+  if (!all || typeof all !== 'object') return;
+  let changed = false;
+  Object.keys(all).forEach(email => {
+    const list = all[email];
+    if (!Array.isArray(list) || list.length < 2) return;
+    const byNumber = new Map();
+    list.forEach(entry => {
+      const key = entry && entry.number ? entry.number : entry.id;
+      const existing = byNumber.get(key);
+      if (!existing || new Date(entry.uploadedAt || 0) >= new Date(existing.uploadedAt || 0)) {
+        byNumber.set(key, entry);
+      }
+    });
+    if (byNumber.size !== list.length) {
+      all[email] = Array.from(byNumber.values());
+      changed = true;
+    }
+  });
+  if (changed) writeJsonSafe(PPS_FILE, all);
+})();
+
 // Avatar legacy (avatar.<ext>, sans compte) -> avatar-<slug>.<ext> pour le
 // compte d'auto-connexion de cette machine, meme logique que ci-dessus.
 (function migrateLegacyAvatar() {
