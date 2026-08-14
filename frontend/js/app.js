@@ -327,11 +327,14 @@ async function checkStatus() {
       usernameEl.textContent = data.displayName || data.user?.split('@')[0] || '—';
     }
 
-    // Afficher email + bouton logout dans sidebar
-    const userBox   = el('sidebar-user');
-    const userEmail = el('sidebar-user-email');
-    if (userBox)  { userBox.style.display = 'flex'; }
-    if (userEmail && data.user) { userEmail.textContent = data.user; }
+    // Bouton deconnexion dans la sidebar - compte connecte visible
+    // uniquement au survol (title), plus en texte permanent (voir
+    // .sidebar-quit-row, index.html).
+    const logoutBtn = el('btn-logout');
+    if (logoutBtn) {
+      logoutBtn.style.display = 'flex';
+      if (data.user) logoutBtn.title = `Connecté : ${data.user} — changer de compte`;
+    }
     if (data.user) { _currentUserEmail = data.user; }
     if (typeof checkSupportNotifications === 'function') checkSupportNotifications();
 

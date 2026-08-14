@@ -12,7 +12,7 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <link rel="stylesheet" href="css/style.css?v=1786696411539" />
+  <link rel="stylesheet" href="css/style.css?v=1786696918419" />
   <link rel="stylesheet" href="css/plans.css?v=1786014624239" />
   <link rel="stylesheet" href="css/routes.css?v=1786547249351" />
 </head>
@@ -191,19 +191,19 @@
         </div>
       </div>
 
-      <!-- Quitter : ferme la fenetre ET arrete node.exe (voir /api/quit,
-           server.js) - fermer juste la fenetre avec la croix laisse
-           habituellement node.exe tourner en tache de fond (fenetre app
-           Chrome/Edge independante du process serveur, cf start.bat). -->
-      <button class="btn-quit-app" id="btn-quit-app" type="button" title="Ferme Allure+ et arrête le serveur">
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>
-        <span>Quitter l'application</span>
-      </button>
-
-      <!-- Compte connecté + déconnexion (icône sobre, même ligne) -->
-      <div class="sidebar-account" id="sidebar-user" style="display:none">
-        <span class="sidebar-account-email" id="sidebar-user-email"></span>
-        <button class="btn-logout-icon" id="btn-logout" onclick="handleLogout()" title="Changer de compte">
+      <!-- Quitter + deconnexion sur la meme ligne (l'adresse du compte
+           connecte n'est plus affichee en permanence, seulement au survol
+           du bouton de deconnexion via son title - voir checkStatus()
+           app.js). Quitter : ferme la fenetre ET arrete node.exe (voir
+           /api/quit, server.js) - fermer juste la fenetre avec la croix
+           laisse habituellement node.exe tourner en tache de fond (fenetre
+           app Chrome/Edge independante du process serveur, cf start.bat). -->
+      <div class="sidebar-quit-row">
+        <button class="btn-quit-app" id="btn-quit-app" type="button" title="Ferme Allure+ et arrête le serveur">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>
+          <span>Quitter l'application</span>
+        </button>
+        <button class="btn-logout-icon" id="btn-logout" style="display:none" onclick="handleLogout()" title="Changer de compte">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
         </button>
       </div>
@@ -1233,7 +1233,7 @@
     <span class="support-fab-dot" id="support-fab-dot" style="display:none"></span>
   </button>
 
-  <script src="js/app.js?v=1786692556817"></script>
+  <script src="js/app.js?v=1786696918419"></script>
   <script src="js/gear.js?v=1786459105633"></script>
   <script src="js/campus.js?v=1786609755676"></script>
   <script src="js/free_sessions.js?v=1786524404763"></script>

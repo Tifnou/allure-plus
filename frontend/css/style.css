@@ -381,13 +381,16 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
 .btn-restart:hover{border-color:var(--orange);color:var(--orange);background:var(--orange-bg);}
 .btn-restart.restarting{opacity:0.6;pointer-events:none;}
 
+.sidebar-quit-row{display:flex;align-items:stretch;gap:6px;margin-bottom:8px;}
+
 .btn-quit-app{
-  display:flex;align-items:center;gap:6px;
+  display:flex;align-items:center;gap:6px;flex:1;min-width:0;
   background:none;border:1.5px solid color-mix(in srgb, var(--red) 45%, var(--border));
-  border-radius:6px;padding:5px 8px;margin-bottom:8px;
+  border-radius:6px;padding:5px 8px;
   color:var(--text-muted);font-size:12px;font-family:var(--font-body);
-  cursor:pointer;transition:all var(--transition);width:100%;
+  cursor:pointer;transition:all var(--transition);
 }
+.btn-quit-app span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .btn-quit-app:hover{border-color:var(--red);color:var(--red);background:var(--red-bg);}
 .btn-quit-app.quitting{opacity:0.6;pointer-events:none;}
 
@@ -1122,22 +1125,16 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
 }
 @keyframes badgePulse{0%,100%{box-shadow:0 0 0 0 rgba(239,68,68,0.4);}50%{box-shadow:0 0 0 5px rgba(239,68,68,0);}}
 
-/* ─── Sidebar : compte connecté + déconnexion (même ligne, icône sobre) ─── */
-.sidebar-account{
-  display:flex;align-items:center;justify-content:space-between;gap:8px;
-  padding:2px 2px;
-}
-.sidebar-account-email{
-  font-family:var(--font-body);font-size:10.5px;color:var(--text-muted);
-  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
-}
+/* ─── Sidebar : bouton deconnexion, a cote de Quitter (voir
+   .sidebar-quit-row) - l'adresse du compte connecte n'apparait qu'au
+   survol (title), plus en texte permanent. ─── */
 .btn-logout-icon{
   display:flex;align-items:center;justify-content:center;flex-shrink:0;
-  width:22px;height:22px;padding:0;
-  background:none;border:none;border-radius:6px;
+  width:34px;padding:0;
+  background:none;border:1.5px solid var(--border);border-radius:6px;
   color:var(--text-muted);cursor:pointer;transition:all var(--transition);
 }
-.btn-logout-icon:hover{background:rgba(239,68,68,0.08);color:#dc2626;}
+.btn-logout-icon:hover{border-color:#dc2626;background:rgba(239,68,68,0.08);color:#dc2626;}
 
 /* Animations */
 @keyframes fadeIn{from{opacity:0;}to{opacity:1;}}
