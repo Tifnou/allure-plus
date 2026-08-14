@@ -12,7 +12,7 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <link rel="stylesheet" href="css/style.css?v=1786696918419" />
+  <link rel="stylesheet" href="css/style.css?v=1786700543721" />
   <link rel="stylesheet" href="css/plans.css?v=1786014624239" />
   <link rel="stylesheet" href="css/routes.css?v=1786547249351" />
 </head>
@@ -1140,10 +1140,21 @@
       <div class="page-header">
         <div>
           <h1 class="page-title">&#x2699;&#xFE0F; Administration</h1>
-          <div class="page-subtitle">Gestion du serveur et des connexions</div>
+          <div class="page-subtitle">Utilisateurs, accès et diagnostics</div>
         </div>
       </div>
-      <div class="admin-grid">
+
+      <!-- Bandeau compact toujours visible (statut serveur en un coup d'oeil)
+           + repli des cartes techniques ci-dessous, moins utiles au
+           quotidien que le tableau des utilisateurs (retour utilisateur
+           14/08 : "les infos prennent enormement de place"). -->
+      <div class="admin-status-strip" id="admin-status-strip">
+        <span class="admin-status-strip-dot" id="admin-strip-dot"></span>
+        <span id="admin-strip-text">Chargement…</span>
+        <button class="admin-diag-toggle" id="admin-diag-toggle" type="button">Diagnostics <span id="admin-diag-chevron">▾</span></button>
+      </div>
+
+      <div class="admin-grid" id="admin-diagnostics" style="display:none">
 
         <!-- Statut serveur -->
         <section class="card">
@@ -1167,7 +1178,7 @@
             <div class="table-loading">Chargement…</div>
           </div>
           <div style="padding:0 16px 16px">
-            <button class="btn-admin-action" id="refresh-btn" onclick="refreshAll()" style="border-color:var(--accent);background:var(--accent-light);color:var(--accent-text)">
+            <button class="btn-admin-action" id="admin-refresh-data-btn" onclick="refreshAll()" style="border-color:var(--accent);background:var(--accent-light);color:var(--accent-text)">
               &#x1F504; Actualiser les données
             </button>
           </div>
@@ -1195,6 +1206,21 @@
         </section>
 
       </div>
+
+      <!-- Utilisateurs : ecran principal de la page Admin. Repertoire des
+           comptes ayant deja lance Allure+ (seule visibilite possible sur
+           une appli distribuee en .exe) - voir server.js checkUserDirectory/
+           support-relay routes /users/*. -->
+      <section class="card admin-users-card">
+        <div class="card-header">
+          <h2 class="card-title"><span class="card-title-icon">&#x1F465;</span> Utilisateurs</h2>
+        </div>
+        <div class="card-body">
+          <div id="admin-users-table">
+            <div class="table-loading">Chargement…</div>
+          </div>
+        </div>
+      </section>
     </div>
 
     <!-- 📌 PAGE : CENTRE DE SUPPORT (admin) 📌 -->
@@ -1233,7 +1259,7 @@
     <span class="support-fab-dot" id="support-fab-dot" style="display:none"></span>
   </button>
 
-  <script src="js/app.js?v=1786698449656"></script>
+  <script src="js/app.js?v=1786700238126"></script>
   <script src="js/gear.js?v=1786459105633"></script>
   <script src="js/campus.js?v=1786609755676"></script>
   <script src="js/free_sessions.js?v=1786524404763"></script>
@@ -1243,7 +1269,7 @@
   <script src="js/health.js?v=1786627102345"></script>
   <script src="js/plans.js?v=1785854785389"></script>
   <script src="js/routes.js?v=1786698449656"></script>
-  <script src="js/support.js?v=1786548890437"></script>
+  <script src="js/support.js?v=1786700543721"></script>
   <!-- ... MODAL LOGS ........................... -->
   <div id="logs-modal" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.55);backdrop-filter:blur(4px);" onclick="if(event.target===this)closeLogsModal()">
     <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:min(700px,95vw);max-height:80vh;background:#0f1117;border:1px solid #2a2a3a;border-radius:14px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 24px 64px rgba(0,0,0,0.6);">

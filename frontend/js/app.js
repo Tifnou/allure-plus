@@ -226,7 +226,7 @@ function navigateTo(pageId) {
   if (pageId === 'health')     renderHealthPage();
   if (pageId === 'stats')      renderStatsPage();
   if (pageId === 'profile')    renderProfile();
-  if (pageId === 'admin')      { loadAdminInfo(); loadAdminLogs(); }
+  if (pageId === 'admin')      { loadAdminInfo(); loadAdminLogs(); loadAdminUsers(); }
   if (pageId === 'support-admin' && typeof loadSupportAdminPage === 'function') loadSupportAdminPage();
   if (pageId === 'goals')      { if (typeof loadGoalsPage === 'function') loadGoalsPage(); }
   if (pageId === 'routes')     { if (typeof initRoutesPage === 'function') initRoutesPage(); }
@@ -336,6 +336,13 @@ async function checkStatus() {
       if (data.user) logoutBtn.title = `Connecté : ${data.user} — changer de compte`;
     }
     if (data.user) { _currentUserEmail = data.user; }
+
+    // Icône du centre de support : masquée si l'admin a retiré l'accès pour
+    // ce compte (voir tableau Utilisateurs, page Admin) - visible par défaut
+    // (data.ticketAccess absent ou true).
+    const supportFab = el('support-fab');
+    if (supportFab) supportFab.style.display = data.ticketAccess === false ? 'none' : '';
+
     if (typeof checkSupportNotifications === 'function') checkSupportNotifications();
 
     // Afficher menu Admin si compte administrateur
@@ -2236,7 +2243,7 @@ async function refreshAll() {
     await Promise.all([loadDashboard(), loadHeartRate(), loadSleep(), loadWellnessRow()]);
     // Recharger les donnees admin si on est sur la page admin
     if (document.getElementById('page-admin')?.classList.contains('active')) {
-      await Promise.all([loadAdminInfo(), loadAdminLogs()]);
+      await Promise.all([loadAdminInfo(), loadAdminLogs(), loadAdminUsers()]);
     }
     // Santé/Performance : les catégories sont construites une seule fois par
     // session (_healthCategoryBuilt), il faut les invalider explicitement
@@ -3520,9 +3527,36 @@ async function loadPref2State() {
 // Implémentation réelle dans campus.js (a besoin de campusState.goal/weeks,
 // le plan tel qu'affiché à l'écran - voir la fonction là-bas pour le detail)
 
+// Bandeau compact toujours visible (voyant + version + uptime) - le detail
+// (cartes Serveur/Connexions/Logs/D+ trail) reste disponible derriere
+// "Diagnostics", replie par defaut (retour utilisateur 14/08).
+function wireAdminDiagToggle() {
+  const btn = document.getElementById('admin-diag-toggle');
+  if (!btn || btn.dataset.wired) return;
+  btn.dataset.wired = '1';
+  const chevron = document.getElementById('admin-diag-chevron');
+  btn.onclick = () => {
+    const diag = document.getElementById('admin-diagnostics');
+    if (!diag) return;
+    const open = diag.style.display === 'none';
+    diag.style.display = open ? '' : 'none';
+    if (chevron) chevron.textContent = open ? '▴' : '▾';
+  };
+}
+
 async function loadAdminInfo() {
+  wireAdminDiagToggle();
   try {
     const data = await fetch('/api/admin-info').then(r => r.json());
+
+    // Bandeau compact
+    const stripDot  = document.getElementById('admin-strip-dot');
+    const stripText = document.getElementById('admin-strip-text');
+    if (stripDot)  stripDot.className = 'admin-status-strip-dot admin-status-strip-dot--ok';
+    if (stripText) {
+      const version = document.getElementById('app-version')?.textContent || '';
+      stripText.textContent = `Serveur actif ${version ? '· ' + version + ' ' : ''}· uptime ${data.server.uptime}`;
+    }
 
     // Serveur
     const srvEl = document.getElementById('admin-server-info');
@@ -3572,6 +3606,99 @@ async function loadAdminInfo() {
   } catch(e) {
     const el = document.getElementById('admin-server-info');
     if (el) el.innerHTML = '<div class="table-loading">Erreur chargement</div>';
+  }
+}
+
+// Repertoire des utilisateurs (voir server.js /api/admin/users, relais
+// support-relay routes /users/*) - ecran principal de la page Admin.
+async function loadAdminUsers() {
+  const wrap = document.getElementById('admin-users-table');
+  if (!wrap) return;
+  wrap.innerHTML = '<div class="table-loading">Chargement…</div>';
+  try {
+    const { users } = await fetch(`${API}/api/admin/users`).then(r => r.json());
+    if (!users || users.length === 0) {
+      wrap.innerHTML = '<div class="support-empty">Aucun utilisateur pour le moment.</div>';
+      return;
+    }
+    wrap.innerHTML = `
+      <div class="admin-users-table-wrap">
+        <table class="admin-users-table">
+          <thead>
+            <tr>
+              <th>Compte</th>
+              <th>Nom Garmin</th>
+              <th>1ère connexion</th>
+              <th>Dernière connexion</th>
+              <th>Accès tickets</th>
+              <th>Accès Allure+</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${users.map(u => `
+              <tr class="${u.blocked ? 'admin-users-row--blocked' : ''}">
+                <td class="admin-users-email">${escapeHtml(u.email)}</td>
+                <td>${escapeHtml(u.displayName || '—')}</td>
+                <td>${formatDate(u.firstSeen)}</td>
+                <td>${formatDate(u.lastSeen)}</td>
+                <td>
+                  <label class="admin-users-checkbox">
+                    <input type="checkbox" data-email="${escapeHtml(u.email)}" data-field="ticketAccess" ${u.ticketAccess !== false ? 'checked' : ''}>
+                  </label>
+                </td>
+                <td>
+                  <button class="admin-users-block-btn ${u.blocked ? 'admin-users-block-btn--blocked' : ''}" data-email="${escapeHtml(u.email)}" type="button">
+                    ${u.blocked ? '🔒 Bloqué — débloquer' : '🔓 Bloquer'}
+                  </button>
+                </td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>`;
+
+    wrap.querySelectorAll('input[data-field="ticketAccess"]').forEach(cb => {
+      cb.onchange = async () => {
+        cb.disabled = true;
+        try {
+          await fetch(`${API}/api/admin/users/${encodeURIComponent(cb.dataset.email)}/ticket-access`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ticketAccess: cb.checked }),
+          });
+          showToast('Accès tickets mis à jour', 'success');
+        } catch (e) {
+          showToast('Erreur : ' + e.message, 'error');
+          cb.checked = !cb.checked;
+        }
+        cb.disabled = false;
+      };
+    });
+    wrap.querySelectorAll('.admin-users-block-btn').forEach(btn => {
+      btn.onclick = async () => {
+        const email = btn.dataset.email;
+        const willBlock = !btn.classList.contains('admin-users-block-btn--blocked');
+        if (willBlock) {
+          const ok = await showConfirmModal({
+            title: 'Bloquer ce compte ?',
+            message: `${email} ne pourra plus se connecter à Allure+ tant que vous ne le débloquez pas (coupure sous quelques minutes si déjà connecté).`,
+            confirmLabel: 'Bloquer', danger: true, icon: '🔒',
+          });
+          if (!ok) return;
+        }
+        btn.disabled = true;
+        try {
+          await fetch(`${API}/api/admin/users/${encodeURIComponent(email)}/block`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ blocked: willBlock }),
+          });
+          loadAdminUsers();
+        } catch (e) {
+          showToast('Erreur : ' + e.message, 'error');
+          btn.disabled = false;
+        }
+      };
+    });
+  } catch (e) {
+    wrap.innerHTML = '<div class="support-empty">Impossible de charger les utilisateurs.</div>';
   }
 }
 

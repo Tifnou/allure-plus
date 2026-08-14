@@ -120,6 +120,98 @@ function setSupportTab(tab) {
   else renderSupportList(tab);
 }
 
+// ─── Piece jointe (capture d'ecran) ────────────────────────────────────
+// Une seule image par ticket/reponse (garde le formulaire simple). Reduite
+// cote client (canvas, max 1600px de large) avant encodage base64, pour
+// rester loin de la limite de taille de requete (voir server.js,
+// express.json 8mb) et de la limite KV du relais (support-relay, 4mb bruts).
+function supportImagePickerHtml(idPrefix) {
+  return `
+    <div class="support-image-picker">
+      <label class="support-image-label" for="${idPrefix}-image">📎 Ajouter une capture d'écran (optionnel)</label>
+      <input type="file" accept="image/*" id="${idPrefix}-image" class="support-image-input">
+      <div class="support-image-preview" id="${idPrefix}-image-preview" style="display:none"></div>
+    </div>`;
+}
+
+function downscaleImageToDataUrl(file, maxDim) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        let { width, height } = img;
+        if (width > maxDim || height > maxDim) {
+          const scale = maxDim / Math.max(width, height);
+          width = Math.round(width * scale);
+          height = Math.round(height * scale);
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = width; canvas.height = height;
+        canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL('image/jpeg', 0.82));
+      };
+      img.onerror = () => reject(new Error("Image illisible"));
+      img.src = reader.result;
+    };
+    reader.onerror = () => reject(new Error("Lecture du fichier impossible"));
+    reader.readAsDataURL(file);
+  });
+}
+
+// Retourne un getter { getDataUrl() } lu au moment du submit - le picker
+// vit dans le DOM entre temps, pas besoin de le faire remonter autrement.
+function wireSupportImagePicker(idPrefix) {
+  const input = document.getElementById(`${idPrefix}-image`);
+  const preview = document.getElementById(`${idPrefix}-image-preview`);
+  let dataUrl = null;
+  if (!input) return { getDataUrl: () => null };
+  input.onchange = async () => {
+    const file = input.files[0];
+    if (!file) { dataUrl = null; preview.style.display = 'none'; preview.innerHTML = ''; return; }
+    try {
+      dataUrl = await downscaleImageToDataUrl(file, 1600);
+      preview.innerHTML = `<img src="${dataUrl}" alt="Aperçu"><button type="button" class="support-image-remove" title="Retirer">✕</button>`;
+      preview.style.display = 'flex';
+      preview.querySelector('.support-image-remove').onclick = () => {
+        dataUrl = null; input.value = ''; preview.style.display = 'none'; preview.innerHTML = '';
+      };
+    } catch (e) {
+      showToast('Image illisible : ' + e.message, 'error');
+      input.value = '';
+    }
+  };
+  return { getDataUrl: () => dataUrl };
+}
+
+async function uploadSupportImage(dataUrl) {
+  if (!dataUrl) return null;
+  const match = dataUrl.match(/^data:(.*);base64,(.*)$/);
+  if (!match) throw new Error('Image invalide');
+  const res = await fetch(`${API}/api/support/images`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ contentType: match[1], dataBase64: match[2] }),
+  });
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Échec de l'envoi de l'image");
+  const { url } = await res.json();
+  return url;
+}
+
+// Le relais (support-relay) stocke l'image en l'ajoutant en markdown
+// (`![capture](url)`) a la fin du texte brut sur GitHub - a l'affichage, on
+// l'extrait pour la rendre comme une vraie <img>, jamais comme du texte brut.
+function extractImageFromMessage(message) {
+  const m = (message || '').match(/\n*!\[[^\]]*\]\((https?:\/\/[^\s)]+)\)\s*$/);
+  if (!m) return { text: message || '', imageUrl: null };
+  return { text: message.slice(0, m.index).trim(), imageUrl: m[1] };
+}
+
+function renderSupportMsgHtml(message) {
+  const { text, imageUrl } = extractImageFromMessage(message);
+  return `${escapeHtml(text)}${imageUrl ? `<a href="${imageUrl}" target="_blank" rel="noopener"><img class="support-msg-image" src="${imageUrl}" alt="Capture d'écran jointe"></a>` : ''}`;
+}
+
 function renderSupportNewForm() {
   const body = el('support-modal-body');
   if (!body) return;
@@ -137,12 +229,14 @@ function renderSupportNewForm() {
       </div>
       <label class="support-form-label">Votre message</label>
       <textarea class="form-input support-form-textarea" id="support-field-message" placeholder="Décrivez le bug, l'idée ou la question…" required></textarea>
+      ${supportImagePickerHtml('support-new')}
       <button class="btn-save-profile" type="submit">Envoyer le ticket</button>
     </form>`;
-  body.querySelector('#support-new-form').addEventListener('submit', submitSupportTicket);
+  const imagePicker = wireSupportImagePicker('support-new');
+  body.querySelector('#support-new-form').addEventListener('submit', (e) => submitSupportTicket(e, imagePicker));
 }
 
-async function submitSupportTicket(e) {
+async function submitSupportTicket(e, imagePicker) {
   e.preventDefault();
   const category = el('support-field-category').value;
   const page = el('support-field-page').value;
@@ -151,10 +245,11 @@ async function submitSupportTicket(e) {
   const btn = e.target.querySelector('button[type="submit"]');
   btn.disabled = true; btn.textContent = 'Envoi…';
   try {
+    const imageUrl = await uploadSupportImage(imagePicker?.getDataUrl());
     const res = await fetch(`${API}/api/support/tickets`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ category, page, message }),
+      body: JSON.stringify({ category, page, message, imageUrl }),
     });
     if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Erreur');
     const { ticket } = await res.json();
@@ -190,7 +285,7 @@ async function renderSupportList(scope) {
         <button class="support-ticket-item ${isUnseen ? 'support-ticket-item--unseen' : ''}" data-number="${t.number}" type="button">
           <span class="support-ticket-cat">${cat ? cat.icon : '📝'}</span>
           <span class="support-ticket-info">
-            <span class="support-ticket-title">${escapeHtml((t.message || t.title || '').slice(0, 70))}</span>
+            <span class="support-ticket-title">${escapeHtml(extractImageFromMessage(t.message || t.title || '').text.slice(0, 70))}</span>
             <span class="support-ticket-meta">${t.page ? escapeHtml(t.page) + ' · ' : ''}${formatDate(t.updatedAt)}</span>
           </span>
           <span class="support-status ${status.cls}">${status.label}</span>
@@ -249,7 +344,7 @@ async function openSupportTicket(number, scope) {
       <div class="support-thread-header">
         <span class="support-ticket-cat">${cat ? cat.icon : '📝'}</span>
         <div>
-          <div class="support-ticket-title">${escapeHtml(ticket.message || ticket.title || '')}</div>
+          <div class="support-ticket-title">${renderSupportMsgHtml(ticket.message || ticket.title || '')}</div>
           <div class="support-ticket-meta">${ticket.page ? escapeHtml(ticket.page) + ' · ' : ''}Ouvert le ${formatDate(ticket.createdAt)}</div>
         </div>
         <span class="support-status ${status.cls}">${status.label}</span>
@@ -258,13 +353,14 @@ async function openSupportTicket(number, scope) {
         ${comments.length === 0 ? '<div class="support-empty">Pas encore de réponse.</div>' : comments.map(c => `
           <div class="support-comment ${c.author === 'admin' ? 'support-comment--admin' : 'support-comment--user'}">
             <div class="support-comment-author">${c.author === 'admin' ? "Réponse de l'équipe" : 'Vous'}</div>
-            <div class="support-comment-msg">${escapeHtml(c.message)}</div>
+            <div class="support-comment-msg">${renderSupportMsgHtml(c.message)}</div>
             <div class="support-comment-date">${formatDate(c.createdAt)}</div>
           </div>`).join('')}
       </div>
       ${canReply ? `
       <form id="support-reply-form" class="support-reply-form">
         <textarea class="form-input support-form-textarea" id="support-reply-message" placeholder="Votre réponse…" required></textarea>
+        ${supportImagePickerHtml('support-reply')}
         <button class="btn-save-profile" type="submit">Répondre</button>
       </form>
       <button class="support-delete-btn" id="support-delete-ticket" type="button">🗑️ Supprimer ce ticket</button>` : ''}
@@ -276,6 +372,7 @@ async function openSupportTicket(number, scope) {
     }
     const replyForm = body.querySelector('#support-reply-form');
     if (replyForm) {
+      const replyImagePicker = wireSupportImagePicker('support-reply');
       replyForm.addEventListener('submit', async (e) => {
         e.preventDefault();
         const msgEl = el('support-reply-message');
@@ -284,10 +381,11 @@ async function openSupportTicket(number, scope) {
         const btn = replyForm.querySelector('button[type="submit"]');
         btn.disabled = true; btn.textContent = 'Envoi…';
         try {
+          const imageUrl = await uploadSupportImage(replyImagePicker.getDataUrl());
           const r = await fetch(`${API}/api/support/tickets/${number}/comments`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ message }),
+            body: JSON.stringify({ message, imageUrl }),
           });
           if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Erreur');
           markTicketSeen(number);
@@ -385,7 +483,7 @@ function renderSupportAdminList() {
       <button class="support-ticket-item ${unseen ? 'support-ticket-item--unseen' : ''} ${_supportAdminOpenTicket === t.number ? 'support-ticket-item--active' : ''}" data-number="${t.number}" type="button">
         <span class="support-ticket-cat">${cat ? cat.icon : '📝'}</span>
         <span class="support-ticket-info">
-          <span class="support-ticket-title">${escapeHtml((t.message || t.title || '').slice(0, 60))}</span>
+          <span class="support-ticket-title">${escapeHtml(extractImageFromMessage(t.message || t.title || '').text.slice(0, 60))}</span>
           <span class="support-ticket-meta">${t.reporterEmail ? escapeHtml(t.reporterEmail) + ' · ' : ''}${formatDate(t.updatedAt)}</span>
         </span>
         <span class="support-status ${status.cls}">${status.label}</span>
@@ -411,7 +509,7 @@ async function openSupportAdminTicket(number) {
       <div class="support-thread-header">
         <span class="support-ticket-cat">${cat ? cat.icon : '📝'}</span>
         <div>
-          <div class="support-ticket-title">${escapeHtml(ticket.message || ticket.title || '')}</div>
+          <div class="support-ticket-title">${renderSupportMsgHtml(ticket.message || ticket.title || '')}</div>
           <div class="support-ticket-meta">${ticket.page ? escapeHtml(ticket.page) + ' · ' : ''}${ticket.reporterEmail ? escapeHtml(ticket.reporterEmail) + ' · ' : ''}Ouvert le ${formatDate(ticket.createdAt)}</div>
         </div>
         <select class="form-input support-status-select" id="support-admin-status-select">
@@ -422,12 +520,13 @@ async function openSupportAdminTicket(number) {
         ${comments.length === 0 ? '<div class="support-empty">Pas encore de réponse.</div>' : comments.map(c => `
           <div class="support-comment ${c.author === 'admin' ? 'support-comment--admin' : 'support-comment--user'}">
             <div class="support-comment-author">${c.author === 'admin' ? 'Vous (équipe)' : (ticket.reporterEmail || 'Utilisateur')}</div>
-            <div class="support-comment-msg">${escapeHtml(c.message)}</div>
+            <div class="support-comment-msg">${renderSupportMsgHtml(c.message)}</div>
             <div class="support-comment-date">${formatDate(c.createdAt)}</div>
           </div>`).join('')}
       </div>
       <form id="support-admin-reply-form" class="support-reply-form">
         <textarea class="form-input support-form-textarea" id="support-admin-reply-message" placeholder="Votre réponse…" required></textarea>
+        ${supportImagePickerHtml('support-admin-reply')}
         <button class="btn-save-profile" type="submit">Répondre</button>
       </form>
       <button class="support-delete-btn" id="support-admin-delete-ticket" type="button">🗑️ Supprimer ce ticket</button>
@@ -451,6 +550,7 @@ async function openSupportAdminTicket(number) {
         renderSupportAdminList();
       } catch (err) { showToast('Erreur : ' + err.message, 'error'); }
     };
+    const adminReplyImagePicker = wireSupportImagePicker('support-admin-reply');
     detail.querySelector('#support-admin-reply-form').addEventListener('submit', async (e) => {
       e.preventDefault();
       const msgEl = el('support-admin-reply-message');
@@ -459,8 +559,9 @@ async function openSupportAdminTicket(number) {
       const btn = e.target.querySelector('button[type="submit"]');
       btn.disabled = true; btn.textContent = 'Envoi…';
       try {
+        const imageUrl = await uploadSupportImage(adminReplyImagePicker.getDataUrl());
         const r = await fetch(`${API}/api/support/tickets/${number}/comments`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message }),
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message, imageUrl }),
         });
         if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Erreur');
         openSupportAdminTicket(number);
