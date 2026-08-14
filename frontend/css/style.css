@@ -1743,6 +1743,7 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
   gap: 8px;
 }
 .session-card {
+  position: relative;
   background: var(--bg-white);
   border: 1.5px solid var(--border);
   border-left: 4px solid var(--border);
@@ -1904,11 +1905,15 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
   margin-left: 2px;
 }
 .session-mood-badge {
+  position: absolute;
+  top: 4px;
+  right: 8px;
   display: flex;
   align-items: center;
   cursor: pointer;
   line-height: 0;
   transition: transform var(--transition);
+  z-index: 1;
 }
 .session-mood-badge:hover { transform: scale(1.15); }
 .session-mood-icon { display: block; }
@@ -4158,11 +4163,12 @@ body.plans-active .app-content { background: transparent !important; }
   display:grid; grid-template-columns:repeat(6, 1fr); gap:2px;
   background:var(--bg-white); border:1px solid var(--border); border-radius:10px;
   box-shadow:0 10px 30px rgba(0,0,0,0.35); padding:8px;
-  width:200px; animation:slideUp .15s ease;
+  width:240px; animation:slideUp .15s ease;
 }
 .support-emoji-opt{
   background:none; border:none; border-radius:6px; font-size:18px; line-height:1;
   padding:6px; cursor:pointer; transition:background var(--transition);
+  min-width:0; width:100%;
 }
 .support-emoji-opt:hover{ background:var(--bg-hover); }
 

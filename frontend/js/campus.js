@@ -412,6 +412,17 @@ function sessionMoodBadgeForActivity(activityId) {
   const mood = getSessionMood(rec.planKey.weekId, rec.planKey.trainingIndex);
   return mood ? ` <span class="activity-mood-badge">${sessionMoodIconSvg(mood, 16)}</span>` : '';
 }
+// Case "Ressenti" dans le detail d'une activite (app.js, showActivityDetail),
+// meme grille que Distance/Duree/... - uniquement si l'activite est liee a
+// une seance de plan avec un ressenti enregistre.
+function activityMoodStatHtml(activityId) {
+  if (typeof _analysisIndex === 'undefined') return '';
+  const rec = _analysisIndex.byActivity[String(activityId)];
+  if (!rec?.planKey?.weekId) return '';
+  const mood = getSessionMood(rec.planKey.weekId, rec.planKey.trainingIndex);
+  if (!mood) return '';
+  return `<div class="activity-stat"><div class="activity-stat-value">${sessionMoodIconSvg(mood, 24)}</div><div class="activity-stat-label">Ressenti</div></div>`;
+}
 
 // Petite modale "Comment s'est passee la seance ?" proposee juste apres
 // avoir marque une seance comme faite - 3 choix (facile a saisir, pas de
@@ -1257,7 +1268,7 @@ function renderSessionCard(session, idx, weekIdx, weekId, isCurrentWeek) {
             return rec ? `<span class="session-analysis-score-badge" title="Séance analysée">📊 ${rec.score}%</span>` : '';
           })()}
           <span class="session-status-badge ${statusInfo.cls}">${statusInfo.label}</span>
-          ${mood ? `<span class="session-mood-badge" onclick="event.stopPropagation();promptSessionMood('${weekId}',${session.trainingIndex ?? 0})">${sessionMoodIconSvg(mood, 20)}</span>` : ''}
+          ${mood ? `<span class="session-mood-badge" onclick="event.stopPropagation();promptSessionMood('${weekId}',${session.trainingIndex ?? 0})">${sessionMoodIconSvg(mood, 16)}</span>` : ''}
           <span class="session-expand-chevron">${isOpen ? '-' : '-'}</span>
         </div>
       </div>
