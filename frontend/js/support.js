@@ -521,6 +521,7 @@ async function openSupportAdminTicket(number) {
   try {
     const res = await fetch(`${API}/api/support/tickets/${number}`);
     const { ticket, comments } = await res.json();
+    _supportAdminOpenTicketSig = `${ticket.status}|${comments.length}|${comments[comments.length - 1]?.createdAt || ''}`;
     markAdminTicketSeen(number);
     const cat = SUPPORT_CATEGORY_MAP[ticket.category ? SUPPORT_CATEGORY_BY_GH_LABEL[ticket.category] : null];
     detail.innerHTML = `
@@ -603,18 +604,40 @@ async function openSupportAdminTicket(number) {
 // action de l'utilisateur.
 const SUPPORT_POLL_INTERVAL_MS = 30000;
 
+// Signature legere d'une liste de tickets (numero+statut+updatedAt) - permet
+// de sauter le re-rendu de la liste quand rien n'a change, pour eviter un
+// clignotement visible toutes les 30s meme quand aucun ticket n'a bouge.
+function ticketListSignature(tickets) {
+  return (tickets || []).map(t => `${t.number}:${t.status}:${t.updatedAt}`).join('|');
+}
+
+// Signature d'un ticket ouvert (statut + nombre de commentaires + date du
+// dernier) - meme logique que ticketListSignature, pour le fil affiche.
+let _supportAdminOpenTicketSig = null;
+async function refreshOpenAdminTicketIfChanged(number) {
+  try {
+    const res = await fetch(`${API}/api/support/tickets/${number}`);
+    const { ticket, comments } = await res.json();
+    const sig = `${ticket.status}|${comments.length}|${comments[comments.length - 1]?.createdAt || ''}`;
+    if (sig === _supportAdminOpenTicketSig) return; // rien de neuf, on ne touche pas au DOM
+    openSupportAdminTicket(number);
+  } catch (e) { /* silencieux */ }
+}
+
 async function supportPollTick() {
   await checkSupportNotifications();
   if (!isSupportAdmin()) return;
+  const prevListSig = ticketListSignature(_supportAdminTicketsCache);
   await checkSupportAdminNotifications();
   if (document.getElementById('page-support-admin')?.classList.contains('active')) {
-    renderSupportAdminList();
+    if (ticketListSignature(_supportAdminTicketsCache) !== prevListSig) renderSupportAdminList();
     // Ne pas reconstruire le fil (et donc la zone de reponse) si l'admin est
-    // en train d'y taper - sinon le panneau clignote et le focus/texte saisi
-    // sont perdus toutes les 30s (constat utilisateur).
+    // en train d'y taper, et seulement si le ticket a reellement change -
+    // sinon le panneau clignotait toutes les 30s meme sans rien de nouveau
+    // (constat utilisateur), et le focus/texte saisi etaient perdus.
     const replyEl = document.getElementById('support-admin-reply-message');
     const isTyping = replyEl && (document.activeElement === replyEl || replyEl.value.trim() !== '');
-    if (_supportAdminOpenTicket != null && !isTyping) openSupportAdminTicket(_supportAdminOpenTicket);
+    if (_supportAdminOpenTicket != null && !isTyping) await refreshOpenAdminTicketIfChanged(_supportAdminOpenTicket);
   }
 }
 
