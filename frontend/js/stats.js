@@ -261,11 +261,11 @@ async function renderStatsAlltimeTotal() {
   const s = computeYearStats(activities, new Date().getFullYear()).totals;
   box.innerHTML = `
     <span class="stats-alltime-total-title">Total toutes années</span>
-    <div class="stats-alltime-total-item"><span class="stats-alltime-total-num">${s.activities.toLocaleString('fr-FR')}</span><span class="stats-alltime-total-lbl">Activités</span></div>
-    <div class="stats-alltime-total-item"><span class="stats-alltime-total-num">${Math.round(s.km).toLocaleString('fr-FR')}</span><span class="stats-alltime-total-lbl">Km</span></div>
-    <div class="stats-alltime-total-item"><span class="stats-alltime-total-num">${Math.round(s.elevation).toLocaleString('fr-FR')}</span><span class="stats-alltime-total-lbl">D+ (m)</span></div>
-    <div class="stats-alltime-total-item"><span class="stats-alltime-total-num">${Math.round(s.hours).toLocaleString('fr-FR')}h</span><span class="stats-alltime-total-lbl">Durée</span></div>
-    <div class="stats-alltime-total-item"><span class="stats-alltime-total-num">${Math.round(s.calories).toLocaleString('fr-FR')}</span><span class="stats-alltime-total-lbl">Calories</span></div>
+    <div class="stats-alltime-total-item stats-alltime-total-item--acts"><span class="stats-alltime-total-num">${s.activities.toLocaleString('fr-FR')}</span><span class="stats-alltime-total-lbl">Activités</span></div>
+    <div class="stats-alltime-total-item stats-alltime-total-item--km"><span class="stats-alltime-total-num">${Math.round(s.km).toLocaleString('fr-FR')}</span><span class="stats-alltime-total-lbl">Km</span></div>
+    <div class="stats-alltime-total-item stats-alltime-total-item--elev"><span class="stats-alltime-total-num">${Math.round(s.elevation).toLocaleString('fr-FR')}</span><span class="stats-alltime-total-lbl">D+ (m)</span></div>
+    <div class="stats-alltime-total-item stats-alltime-total-item--dur"><span class="stats-alltime-total-num">${Math.round(s.hours).toLocaleString('fr-FR')}h</span><span class="stats-alltime-total-lbl">Durée</span></div>
+    <div class="stats-alltime-total-item stats-alltime-total-item--cal"><span class="stats-alltime-total-num">${Math.round(s.calories).toLocaleString('fr-FR')}</span><span class="stats-alltime-total-lbl">Calories</span></div>
   `;
   box.style.display = '';
 }

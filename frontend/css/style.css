@@ -824,7 +824,12 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
 [data-theme="dark"] .stats-alltime-total{background:#12151f;}
 .stats-alltime-total-title{font-size:10.5px;font-weight:700;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.05em;font-family:var(--font-body);white-space:nowrap;}
 .stats-alltime-total-loading{font-size:12px;color:var(--text-muted);font-family:var(--font-body);}
-.stats-alltime-total-item{display:flex;flex-direction:column;align-items:center;gap:1px;}
+.stats-alltime-total-item{display:flex;flex-direction:column;align-items:center;gap:1px;flex:none;}
+.stats-alltime-total-item--acts{width:44px;}
+.stats-alltime-total-item--km{width:56px;}
+.stats-alltime-total-item--elev{width:64px;}
+.stats-alltime-total-item--dur{width:50px;}
+.stats-alltime-total-item--cal{width:82px;}
 .stats-alltime-total-num{font-size:16px;font-weight:800;color:var(--text-primary);font-family:var(--font-mono);white-space:nowrap;}
 .stats-alltime-total-lbl{font-size:9.5px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.04em;font-family:var(--font-body);white-space:nowrap;}
 .stats-compare-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:var(--accent-light);border:1px solid var(--accent);border-radius:var(--radius-md);padding:10px 14px;margin-bottom:14px;}
