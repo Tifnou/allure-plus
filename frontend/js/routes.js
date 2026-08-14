@@ -166,6 +166,29 @@ function wireRoutesAddressFields() {
   const cityInput = el('routes-input-city');
   const streetInput = el('routes-input-street');
 
+  // Reconstruit uniquement la liste "Ville" (+ etat du champ "Rue") a partir
+  // de routesState - ne touche JAMAIS a postcodeInput lui-meme. Auparavant,
+  // le handler ci-dessous appelait renderRoutesForm() (regenere TOUT le
+  // formulaire via innerHTML, y compris ce champ) des qu'une pause de frappe
+  // >=400ms survenait, meme sur une saisie encore incomplete - le navigateur
+  // recree alors un tout nouveau noeud <input>, perdant le focus/curseur en
+  // plein milieu de la frappe (retour utilisateur 14/08 : "on perd la main
+  // sur cette case, parfois impossible de taper"). Comme n'importe quel code
+  // postal complet passe forcement par son prefixe departement a 2 chiffres
+  // en cours de frappe (ex: "75" avant "75015"), ce cas se declenchait quasi
+  // systematiquement.
+  function syncCityAndStreetFields() {
+    const placeholder = routesState.selectedCommune ? '' : '<option value="" selected disabled>— Choisir —</option>';
+    cityInput.innerHTML = placeholder + routesState.communes.map(c =>
+      `<option value="${c.code}" ${routesState.selectedCommune && routesState.selectedCommune.code === c.code ? 'selected' : ''}>${c.nom}</option>`
+    ).join('');
+    cityInput.disabled = routesState.communes.length === 0;
+    streetInput.value = routesState.street;
+    streetInput.disabled = !routesState.selectedCommune;
+    el('routes-street-suggestions').style.display = 'none';
+    updateStartConfirmLine();
+  }
+
   // Accepte soit un code postal complet (5 chiffres), soit un code
   // departement seul (2 chiffres, 2A/2B, ou 971-976 outre-mer) quand le code
   // postal complet n'est pas connu — le debounce evite de declencher une
@@ -181,7 +204,7 @@ function wireRoutesAddressFields() {
     const value = routesState.postcode;
     const isPostcode = /^\d{5}$/.test(value);
     const isDepartment = !isPostcode && DEPARTMENT_CODE_RE.test(value);
-    if (!isPostcode && !isDepartment) { renderRoutesForm(); return; }
+    if (!isPostcode && !isDepartment) { syncCityAndStreetFields(); return; }
     try {
       const param = isPostcode ? `postcode=${value}` : `department=${value}`;
       const res = await fetch(`${API}/api/routes/communes?${param}`);
@@ -193,23 +216,18 @@ function wireRoutesAddressFields() {
       }
       routesState.communes = data.communes;
       routesState.selectedCommune = data.communes.length === 1 ? data.communes[0] : null;
-      renderRoutesForm();
+      syncCityAndStreetFields();
     } catch (err) {
       showToast('Erreur : ' + err.message, 'error');
     }
   }, 400);
 
-  if (routesState.communes.length) {
-    const placeholder = routesState.selectedCommune ? '' : '<option value="" selected disabled>— Choisir —</option>';
-    cityInput.innerHTML = placeholder + routesState.communes.map(c =>
-      `<option value="${c.code}" ${routesState.selectedCommune && routesState.selectedCommune.code === c.code ? 'selected' : ''}>${c.nom}</option>`
-    ).join('');
-  }
+  syncCityAndStreetFields();
   cityInput.onchange = () => {
     routesState.selectedCommune = routesState.communes.find(c => c.code === cityInput.value) || null;
     routesState.selectedStreet = null;
     routesState.street = '';
-    renderRoutesForm();
+    syncCityAndStreetFields();
   };
 
   streetInput.oninput = debounce(async (e) => {
