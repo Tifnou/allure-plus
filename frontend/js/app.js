@@ -374,9 +374,16 @@ async function handleLogout() {
   // (profil, plan, objectifs...) du compte precedent vers le nouveau via le
   // mecanisme de synchro localStorage -> /api/user-data (voir app.js,
   // syncUserDataFromServer/DURABLE_LS_KEYS). Sans danger : tout ce qui compte
-  // redescend du serveur au prochain login, les preferences UI pures
-  // (theme, groupes replies...) se re-choisissent sans consequence.
+  // redescend du serveur au prochain login.
+  // Exception explicite : le theme clair/sombre est une preference
+  // d'affichage pure (aucune donnee personnelle, aucun risque de fuite entre
+  // comptes) - conservee a travers la deconnexion pour ne pas repartir en
+  // theme clair a chaque reconnexion sur ce meme appareil (retour
+  // utilisateur 14/08 : "le theme n'est pas garde, du moins pas tout le
+  // temps" - c'etait ce clear() total qui l'effacait a chaque logout).
+  const savedTheme = localStorage.getItem('allure_theme');
   try { localStorage.clear(); } catch (e) {}
+  if (savedTheme) { try { localStorage.setItem('allure_theme', savedTheme); } catch (e) {} }
   window.location.href = '/login';
 }
 
