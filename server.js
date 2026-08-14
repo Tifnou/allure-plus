@@ -518,6 +518,28 @@ migratePaceProfileToScoped(ENV_EMAIL);
   if (changed) writeJsonSafe(PPS_FILE, all);
 })();
 
+// Nettoyage ponctuel d'un double cloisonnement herite sur weight_history.json
+// - all[email] valait { [email]: [...] } au lieu de [...] directement (origine
+// inconnue, probablement un writeScoped(WEIGHT_HISTORY_FILE, email, dejaScope)
+// quelque part avant l'ajout du cloisonnement). Reste invisible tant qu'aucune
+// reconciliation ne lit reellement ce fichier - demasque uniquement une fois
+// la synchro cross-appareils effectivement programmee pour ce compte (voir
+// ensureSyncScheduled plus haut), avec un crash silencieux en boucle («
+// .forEach is not a function ») a chaque cycle. Idempotent.
+(function unwrapDoubleNestedWeightHistory() {
+  const all = readJsonSafe(WEIGHT_HISTORY_FILE, null);
+  if (!all || typeof all !== 'object') return;
+  let changed = false;
+  Object.keys(all).forEach(email => {
+    const v = all[email];
+    if (v && typeof v === 'object' && !Array.isArray(v) && Object.prototype.hasOwnProperty.call(v, email)) {
+      all[email] = Array.isArray(v[email]) ? v[email] : [];
+      changed = true;
+    }
+  });
+  if (changed) writeJsonSafe(WEIGHT_HISTORY_FILE, all);
+})();
+
 // Avatar legacy (avatar.<ext>, sans compte) -> avatar-<slug>.<ext> pour le
 // compte d'auto-connexion de cette machine, meme logique que ci-dessus.
 (function migrateLegacyAvatar() {
@@ -1315,6 +1337,18 @@ app.post('/api/login', async (req, res) => {
 app.post('/api/logout', (req, res) => {
   const sid = req.cookies?.sid;
   if (sid) sessions.delete(sid);
+  // Si le sid deconnecte est celui de la session d'auto-login (partagee par
+  // tous les onglets/appareils qui n'ont jamais eu a se reconnecter
+  // manuellement), il faut aussi oublier envSessionId - sinon /api/status et
+  // la route / continuent de pointer dessus alors qu'elle vient d'etre
+  // supprimee de `sessions` : ni redirection propre vers /login (envSessionId
+  // reste "truthy"), ni reconnexion (sessions.has() est deja false), le
+  // dashboard se charge cote client sans session valide jusqu'au prochain
+  // redemarrage complet du serveur (bug reel constate 14/08 - "je me
+  // deconnecte, je ne peux plus me reconnecter", corrige uniquement en
+  // relancant start.bat). Un logout doit rester un vrai logout, pas un
+  // etat casse qui force un redemarrage.
+  if (sid && sid === envSessionId) envSessionId = null;
   res.clearCookie('sid');
   res.json({ success: true });
 });
