@@ -236,9 +236,17 @@ function wireEmojiPicker(idPrefix) {
     document.body.appendChild(pop);
     const rect = btn.getBoundingClientRect();
     const popW = pop.offsetWidth;
+    const popH = pop.offsetHeight;
     const left = Math.max(8, Math.min(rect.right - popW, window.innerWidth - popW - 8));
+    // S'ouvre vers le haut si pas assez de place en dessous (bouton proche du
+    // bas de l'ecran) - sinon les dernieres rangees restaient hors-viewport,
+    // inaccessibles puisque position:fixed ne suit aucun scroll (constat
+    // utilisateur, 14/08).
+    const top = (rect.bottom + 6 + popH > window.innerHeight - 8)
+      ? Math.max(8, rect.top - popH - 6)
+      : rect.bottom + 6;
     pop.style.left = left + 'px';
-    pop.style.top = (rect.bottom + 6) + 'px';
+    pop.style.top = top + 'px';
     pop.querySelectorAll('.support-emoji-opt').forEach(opt => {
       opt.onclick = (ev) => {
         ev.preventDefault();
