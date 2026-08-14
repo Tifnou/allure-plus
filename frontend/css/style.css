@@ -1148,13 +1148,13 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
 .btn-logs{display:flex;align-items:center;gap:5px;flex:1;padding:5px 8px;background:none;border:1px solid var(--border);border-radius:6px;font-family:var(--font-body);font-size:11px;color:var(--text-muted);cursor:pointer;transition:all var(--transition);}.btn-logs:hover{background:rgba(37,99,235,0.06);border-color:rgba(37,99,235,0.3);color:var(--accent);}
 /* ── Ligne condensee : icone photos de fond + voyants serveur/synchro ── */
 .sidebar-quick-row{display:flex;align-items:stretch;gap:6px;margin-bottom:8px;}
-.icon-btn-bg{display:flex;align-items:center;justify-content:center;flex-shrink:0;width:30px;background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:8px;color:var(--text-muted);cursor:pointer;transition:all var(--transition);padding:0;}
+.icon-btn-bg{display:flex;align-items:center;justify-content:center;flex:0 0 46px;width:46px;background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:8px;color:var(--text-muted);cursor:pointer;transition:all var(--transition);padding:0;}
 .icon-btn-bg svg{width:14px;height:14px;}
 .icon-btn-bg:hover{color:var(--accent-text);border-color:var(--accent);background:var(--accent-light);}
 
 .mini-status{flex:1;min-width:0;display:flex;align-items:center;justify-content:center;gap:5px;padding:8px 6px;border-radius:8px;background:rgba(255,255,255,0.03);border:1px solid var(--border);}
-.mini-status--server{flex:0 0 auto;padding:8px 10px;}
-.mini-status--sync{flex:1 1 auto;justify-content:flex-start;padding:8px 8px;}
+.mini-status--server{flex:0 0 46px;width:46px;padding:8px 6px;}
+.mini-status--sync{flex:1 1 auto;justify-content:center;padding:8px 6px;}
 .mini-status-icon{width:12px;height:12px;flex-shrink:0;color:var(--text-muted);}
 .server-led,.sync-led{width:9px;height:9px;border-radius:50%;background:#94a3b8;flex-shrink:0;transition:background 0.4s;}
 .server-led.led-ok,.sync-led.led-ok{background:#22c55e;box-shadow:0 0 6px rgba(34,197,94,0.5);}
