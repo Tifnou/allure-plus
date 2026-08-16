@@ -347,10 +347,9 @@ async function buildSessionAnalysis(session, week, activity) {
   } catch (e) { /* pas de laps -> analyse degradee sur les totaux d'activite */ }
 
   // ── Trail : pente reelle & effort (GAP) ──
-  // Les laps Garmin (km ou manuels) portent deja elevationGain/elevationLoss,
-  // distance, averageHR et avgGradeAdjustedSpeed (= le "GAP" affiche par
-  // Garmin Connect, deja "aplati" niveau effort) : pas besoin d'appeler la
-  // route GPS, tout est present dans /api/activity/:id/laps.
+  // GAP moyen : directement depuis les laps Garmin (avgGradeAdjustedSpeed) —
+  // c'est exactement le meme chiffre que la colonne "GAP moyenne" affichee
+  // par Garmin Connect sur les circuits, fiable a l'echelle du lap.
   // Pourquoi comparer le GAP a la cible NON ajustee (calcAllureRef, pas
   // calcAllureRefTrail) : la cible "ajustee" (trailRowHtml/ligne Allure) est
   // deja la cible plate majoree d'un forfait fixe (+7%/+8%, cf. trailCorr
@@ -358,56 +357,47 @@ async function buildSessionAnalysis(session, week, activity) {
   // terrain par Garmin) compare a cette cible DEJA majoree compterait
   // l'ajustement deux fois et ferait paraitre l'allure "trop rapide" a tort
   // (cas verifie avec l'utilisateur sur "Sortie Longue" du 16/08 : GAP moyen
-  // 6'53/km bien dans la cible plate 6'18-7'08, alors que l'allure brute
+  // ~7'00/km bien dans la cible plate 6'18-7'08, alors que l'allure brute
   // 7'57/km sortait de la cible ajustee 6'44-7'37 et declenchait une fausse
   // alerte). La ligne "Allure" (brute vs ajustee) reste affichee telle
   // quelle par ailleurs, mutee, pour donner une idee du temps reel passe.
   let climbAnalysis = null;
   if (isTrail && laps.length) {
-    const segs = laps
-      .map(l => ({
-        distM: l.distance || 0,
-        gainM: l.elevationGain || 0,
-        lossM: l.elevationLoss || 0,
-        durSec: l.elapsedDuration || l.movingDuration || l.duration || 0,
-        hr: l.averageHR || null,
-        gapSecKm: l.avgGradeAdjustedSpeed > 0 ? 1000 / l.avgGradeAdjustedSpeed : null,
-      }))
-      .filter(s => s.distM > 100 && s.durSec > 0)
-      .map(s => ({ ...s, gradePct: (s.gainM - s.lossM) / s.distM * 100 }));
+    const gapLaps = laps
+      .map(l => ({ durSec: l.elapsedDuration || l.movingDuration || l.duration || 0, gapSecKm: l.avgGradeAdjustedSpeed > 0 ? 1000 / l.avgGradeAdjustedSpeed : null }))
+      .filter(l => l.durSec > 0 && l.gapSecKm != null);
+    const gapTotalSec = gapLaps.reduce((s, l) => s + l.durSec, 0);
+    const gapAvgSecKm = gapTotalSec > 0 ? gapLaps.reduce((s, l) => s + l.gapSecKm * l.durSec, 0) / gapTotalSec : null;
+    const flatPaceRange = (mainZoneKey && vma) ? calcAllureRef(mainZoneKey, vma) : null;
 
-    if (segs.length) {
-      const CLIMB_GRADE_PCT = 3; // pente nette consideree "en cote" a partir de 3%
-      const climbSegs = segs.filter(s => s.gradePct >= CLIMB_GRADE_PCT);
-      const flatSegs = segs.filter(s => s.gradePct < CLIMB_GRADE_PCT);
-      const wAvg = (arr, valKey, wKey) => {
-        const tot = arr.reduce((s, x) => s + x[wKey], 0);
-        return tot > 0 ? arr.reduce((s, x) => s + x[valKey] * x[wKey], 0) / tot : null;
-      };
-      const totalDist = segs.reduce((s, x) => s + x.distM, 0);
-      const climbDist = climbSegs.reduce((s, x) => s + x.distM, 0);
-      const maxSeg = segs.reduce((best, s) => (!best || s.gradePct > best.gradePct) ? s : best, null);
-      const gapSegs = segs.filter(s => s.gapSecKm != null);
-      const gapAvgSecKm = gapSegs.length ? wAvg(gapSegs, 'gapSecKm', 'durSec') : null;
-      const flatPaceRange = (mainZoneKey && vma) ? calcAllureRef(mainZoneKey, vma) : null;
+    let gapDeviationSecKm = null, gapVerdict = null;
+    if (flatPaceRange && gapAvgSecKm != null) {
+      if (gapAvgSecKm > flatPaceRange.paceMax) gapDeviationSecKm = Math.round(gapAvgSecKm - flatPaceRange.paceMax);
+      else if (gapAvgSecKm < flatPaceRange.paceMin) gapDeviationSecKm = Math.round(gapAvgSecKm - flatPaceRange.paceMin);
+      else gapDeviationSecKm = 0;
+      gapVerdict = Math.abs(gapDeviationSecKm) <= 10 ? 'conforme' : gapDeviationSecKm < 0 ? 'rapide' : 'lente';
+    }
 
-      let gapDeviationSecKm = null, gapVerdict = null;
-      if (flatPaceRange && gapAvgSecKm != null) {
-        if (gapAvgSecKm > flatPaceRange.paceMax) gapDeviationSecKm = Math.round(gapAvgSecKm - flatPaceRange.paceMax);
-        else if (gapAvgSecKm < flatPaceRange.paceMin) gapDeviationSecKm = Math.round(gapAvgSecKm - flatPaceRange.paceMin);
-        else gapDeviationSecKm = 0;
-        gapVerdict = Math.abs(gapDeviationSecKm) <= 10 ? 'conforme' : gapDeviationSecKm < 0 ? 'rapide' : 'lente';
-      }
+    // Pente reelle / FC cote-vs-plat : PAS depuis les laps (1km, voire plus)
+    // — un lap entier dilue une cote courte et repetee (ex: 320m pour 45m de
+    // D+, ~14%) en une pente nette quasi nulle des que le reste du lap
+    // redescend ou est plat (constat utilisateur : 3.9% affiche au lieu de
+    // ~14% reel). Recalcule a partir de la trace GPS fine de l'activite
+    // (points espaces de quelques metres a quelques dizaines de metres),
+    // regroupee en tronçons de ~50m — cf. computeGradeSegments.
+    let gradeStats = null;
+    try {
+      const gpsRes = await fetch(`/api/activity/${activity.id}/gps`);
+      if (gpsRes.ok) { const { elevation } = await gpsRes.json(); gradeStats = computeGradeSegments(elevation); }
+    } catch (e) { /* pas de trace GPS -> pas de detail pente/FC cote-plat, GAP reste dispo */ }
 
-      const hrClimbSegs = climbSegs.filter(s => s.hr);
-      const hrFlatSegs = flatSegs.filter(s => s.hr);
-
+    if (gapAvgSecKm != null || gradeStats) {
       climbAnalysis = {
-        avgGradePctClimb: climbSegs.length ? Math.round(wAvg(climbSegs, 'gradePct', 'distM') * 10) / 10 : null,
-        maxGradePct: maxSeg ? Math.round(maxSeg.gradePct * 10) / 10 : null,
-        pctDistanceClimbing: totalDist > 0 ? Math.round((climbDist / totalDist) * 100) : null,
-        hrClimb: hrClimbSegs.length ? Math.round(wAvg(hrClimbSegs, 'hr', 'durSec')) : null,
-        hrFlat: hrFlatSegs.length ? Math.round(wAvg(hrFlatSegs, 'hr', 'durSec')) : null,
+        avgGradePctClimb: gradeStats?.avgGradePctClimb ?? null,
+        maxGradePct: gradeStats?.maxGradePct ?? null,
+        pctDistanceClimbing: gradeStats?.pctDistanceClimbing ?? null,
+        hrClimb: gradeStats?.hrClimb ?? null,
+        hrFlat: gradeStats?.hrFlat ?? null,
         gapAvgSecKm: gapAvgSecKm != null ? Math.round(gapAvgSecKm) : null,
         flatPaceRange, gapDeviationSecKm, gapVerdict,
       };
@@ -790,6 +780,59 @@ function detectPacingStrategy(paces) {
   if (firstRepDelta < -10) return 'went_out_fast';
   if (firstRepDelta > 10 && diff < 0) return 'cautious_start';
   return diff > 0 ? 'positive_split' : 'negative_split';
+}
+
+// Pente nette consideree "en cote" a partir de 3% (climbAnalysis, trail).
+const CLIMB_GRADE_PCT = 3;
+
+// Regroupe la trace GPS fine d'une activite (elevation: [{distKm, alt, hr}])
+// en tronçons de ~binSizeM metres et en deduit pente moyenne en cote, pente
+// la plus marquee, % de distance en cote et FC moyenne cote/plat. Beaucoup
+// plus fidele qu'un decoupage par lap Garmin (1km, voire plus) pour une cote
+// courte et repetee : sur un lap entier, une montee de quelques centaines de
+// metres peut etre noyee par le reste (plat/descente) du meme lap et donner
+// une pente nette quasi nulle alors que la pente reelle grimpe a 10-15%.
+function computeGradeSegments(elevation, binSizeM = 50) {
+  if (!Array.isArray(elevation) || elevation.length < 2) return null;
+  const bins = [];
+  let start = elevation[0], bucket = [elevation[0]];
+  for (let i = 1; i < elevation.length; i++) {
+    const pt = elevation[i];
+    bucket.push(pt);
+    const distM = (pt.distKm - start.distKm) * 1000;
+    if (distM >= binSizeM || i === elevation.length - 1) {
+      if (distM > 5) { // ignore les tronçons quasi nuls (bruit GPS/altimetrique)
+        const hrVals = bucket.map(p => p.hr).filter(h => h != null);
+        bins.push({
+          distM,
+          gradePct: ((pt.alt - start.alt) / distM) * 100,
+          hrAvg: hrVals.length ? hrVals.reduce((a, b) => a + b, 0) / hrVals.length : null,
+        });
+      }
+      start = pt; bucket = [pt];
+    }
+  }
+  if (!bins.length) return null;
+
+  const climbBins = bins.filter(b => b.gradePct >= CLIMB_GRADE_PCT);
+  const flatBins = bins.filter(b => b.gradePct < CLIMB_GRADE_PCT);
+  const wAvg = (arr, valKey) => {
+    const tot = arr.reduce((s, x) => s + x.distM, 0);
+    return tot > 0 ? arr.reduce((s, x) => s + (x[valKey] || 0) * x.distM, 0) / tot : null;
+  };
+  const totalDist = bins.reduce((s, x) => s + x.distM, 0);
+  const climbDist = climbBins.reduce((s, x) => s + x.distM, 0);
+  const maxBin = bins.reduce((best, b) => (!best || b.gradePct > best.gradePct) ? b : best, null);
+  const hrClimbBins = climbBins.filter(b => b.hrAvg != null);
+  const hrFlatBins = flatBins.filter(b => b.hrAvg != null);
+
+  return {
+    avgGradePctClimb: climbBins.length ? Math.round(wAvg(climbBins, 'gradePct') * 10) / 10 : null,
+    maxGradePct: maxBin ? Math.round(maxBin.gradePct * 10) / 10 : null,
+    pctDistanceClimbing: totalDist > 0 ? Math.round((climbDist / totalDist) * 100) : null,
+    hrClimb: hrClimbBins.length ? Math.round(wAvg(hrClimbBins, 'hrAvg')) : null,
+    hrFlat: hrFlatBins.length ? Math.round(wAvg(hrFlatBins, 'hrAvg')) : null,
+  };
 }
 
 function computeCardiacDrift(laps) {
@@ -1256,7 +1299,7 @@ function buildAnalysisModalHtml(record) {
       ${climb.pctDistanceClimbing != null ? `<div class="analysis-climb-stat"><span class="analysis-climb-stat-label">Distance en côte</span><span class="analysis-climb-stat-value">${climb.pctDistanceClimbing}%</span></div>` : ''}
       ${(climb.hrClimb != null && climb.hrFlat != null) ? `<div class="analysis-climb-stat"><span class="analysis-climb-stat-label">FC côte / plat</span><span class="analysis-climb-stat-value">${climb.hrClimb} / ${climb.hrFlat} bpm</span></div>` : ''}
     </div>
-    <div class="analysis-climb-note">Pente calculée par tronçon Garmin (km ou lap manuel) — une pente ponctuelle plus marquée peut exister à l'intérieur d'un tronçon. Le GAP neutralise l'effet de la pente pour évaluer l'effort réel : comparez-le à la cible plate (ligne "Effort (GAP)" ci-dessus), pas à la cible "Allure" qui est déjà majorée forfaitairement pour le dénivelé.</div>` : '';
+    <div class="analysis-climb-note">Pente calculée sur la trace GPS fine, par tronçons d'environ 50 m — une variation plus ponctuelle peut exister à une échelle encore plus fine. Le GAP neutralise l'effet de la pente pour évaluer l'effort réel : comparez-le à la cible plate (ligne "Effort (GAP)" ci-dessus), pas à la cible "Allure" qui est déjà majorée forfaitairement pour le dénivelé.</div>` : '';
 
   return `
     <div class="analysis-modal-header">

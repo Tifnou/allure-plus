@@ -2575,17 +2575,33 @@ app.get('/api/activity/:id/gps', requireSession, async (req, res) => {
     // Profil d'elevation : l'altitude du polyline (geoPolylineDTO) est souvent null.
     // Garmin fournit une serie temporelle separee (activityDetailMetrics) avec
     // elevation + distance cumulee deja calculees - plus fiable pour le profil.
+    // hr (directHeartRate), gapMps (directGradeAdjustedSpeed, m/s) et sec
+    // (sumDuration, cumule) : colonnes soeurs de l'elevation dans la meme
+    // serie temporelle Garmin, utilisees par l'analyse pente/effort en cote
+    // (session-analysis.js, isTrail) pour calculer une pente et une FC par
+    // tronçon de ~50m plutot que par lap Garmin (1km ou plus) - un lap entier
+    // dilue une cote courte et repetee (ex: 320m/45m D+) en une pente nette
+    // quasi nulle si le reste du lap redescend ou est plat.
     let elevation = [];
     if (Array.isArray(detail.metricDescriptors) && Array.isArray(detail.activityDetailMetrics)) {
       const keys = detail.metricDescriptors.map(m => m.key);
       const idxElev = keys.indexOf('directElevation');
       const idxDist = keys.indexOf('sumDistance');
+      const idxHR   = keys.indexOf('directHeartRate');
+      const idxGap  = keys.indexOf('directGradeAdjustedSpeed');
+      const idxSec  = keys.indexOf('sumDuration');
       if (idxElev !== -1 && idxDist !== -1) {
         const rows = detail.activityDetailMetrics;
         const elevStep = Math.max(1, Math.floor(rows.length / MAX_PTS));
         elevation = rows
           .filter((_, i) => i % elevStep === 0)
-          .map(r => ({ distKm: (r.metrics[idxDist] || 0) / 1000, alt: r.metrics[idxElev] }))
+          .map(r => ({
+            distKm: (r.metrics[idxDist] || 0) / 1000,
+            alt: r.metrics[idxElev],
+            hr: idxHR !== -1 ? r.metrics[idxHR] : null,
+            gapMps: idxGap !== -1 ? r.metrics[idxGap] : null,
+            sec: idxSec !== -1 ? r.metrics[idxSec] : null,
+          }))
           .filter(p => p.alt != null);
       }
     }
