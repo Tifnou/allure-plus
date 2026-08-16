@@ -346,6 +346,74 @@ async function buildSessionAnalysis(session, week, activity) {
     if (res.ok) { const d = await res.json(); laps = Array.isArray(d.laps) ? d.laps : []; }
   } catch (e) { /* pas de laps -> analyse degradee sur les totaux d'activite */ }
 
+  // ── Trail : pente reelle & effort (GAP) ──
+  // Les laps Garmin (km ou manuels) portent deja elevationGain/elevationLoss,
+  // distance, averageHR et avgGradeAdjustedSpeed (= le "GAP" affiche par
+  // Garmin Connect, deja "aplati" niveau effort) : pas besoin d'appeler la
+  // route GPS, tout est present dans /api/activity/:id/laps.
+  // Pourquoi comparer le GAP a la cible NON ajustee (calcAllureRef, pas
+  // calcAllureRefTrail) : la cible "ajustee" (trailRowHtml/ligne Allure) est
+  // deja la cible plate majoree d'un forfait fixe (+7%/+8%, cf. trailCorr
+  // dans campus.js) pour anticiper le terrain — un GAP (deja normalise
+  // terrain par Garmin) compare a cette cible DEJA majoree compterait
+  // l'ajustement deux fois et ferait paraitre l'allure "trop rapide" a tort
+  // (cas verifie avec l'utilisateur sur "Sortie Longue" du 16/08 : GAP moyen
+  // 6'53/km bien dans la cible plate 6'18-7'08, alors que l'allure brute
+  // 7'57/km sortait de la cible ajustee 6'44-7'37 et declenchait une fausse
+  // alerte). La ligne "Allure" (brute vs ajustee) reste affichee telle
+  // quelle par ailleurs, mutee, pour donner une idee du temps reel passe.
+  let climbAnalysis = null;
+  if (isTrail && laps.length) {
+    const segs = laps
+      .map(l => ({
+        distM: l.distance || 0,
+        gainM: l.elevationGain || 0,
+        lossM: l.elevationLoss || 0,
+        durSec: l.elapsedDuration || l.movingDuration || l.duration || 0,
+        hr: l.averageHR || null,
+        gapSecKm: l.avgGradeAdjustedSpeed > 0 ? 1000 / l.avgGradeAdjustedSpeed : null,
+      }))
+      .filter(s => s.distM > 100 && s.durSec > 0)
+      .map(s => ({ ...s, gradePct: (s.gainM - s.lossM) / s.distM * 100 }));
+
+    if (segs.length) {
+      const CLIMB_GRADE_PCT = 3; // pente nette consideree "en cote" a partir de 3%
+      const climbSegs = segs.filter(s => s.gradePct >= CLIMB_GRADE_PCT);
+      const flatSegs = segs.filter(s => s.gradePct < CLIMB_GRADE_PCT);
+      const wAvg = (arr, valKey, wKey) => {
+        const tot = arr.reduce((s, x) => s + x[wKey], 0);
+        return tot > 0 ? arr.reduce((s, x) => s + x[valKey] * x[wKey], 0) / tot : null;
+      };
+      const totalDist = segs.reduce((s, x) => s + x.distM, 0);
+      const climbDist = climbSegs.reduce((s, x) => s + x.distM, 0);
+      const maxSeg = segs.reduce((best, s) => (!best || s.gradePct > best.gradePct) ? s : best, null);
+      const gapSegs = segs.filter(s => s.gapSecKm != null);
+      const gapAvgSecKm = gapSegs.length ? wAvg(gapSegs, 'gapSecKm', 'durSec') : null;
+      const flatPaceRange = (mainZoneKey && vma) ? calcAllureRef(mainZoneKey, vma) : null;
+
+      let gapDeviationSecKm = null, gapVerdict = null;
+      if (flatPaceRange && gapAvgSecKm != null) {
+        if (gapAvgSecKm > flatPaceRange.paceMax) gapDeviationSecKm = Math.round(gapAvgSecKm - flatPaceRange.paceMax);
+        else if (gapAvgSecKm < flatPaceRange.paceMin) gapDeviationSecKm = Math.round(gapAvgSecKm - flatPaceRange.paceMin);
+        else gapDeviationSecKm = 0;
+        gapVerdict = Math.abs(gapDeviationSecKm) <= 10 ? 'conforme' : gapDeviationSecKm < 0 ? 'rapide' : 'lente';
+      }
+
+      const hrClimbSegs = climbSegs.filter(s => s.hr);
+      const hrFlatSegs = flatSegs.filter(s => s.hr);
+
+      climbAnalysis = {
+        avgGradePctClimb: climbSegs.length ? Math.round(wAvg(climbSegs, 'gradePct', 'distM') * 10) / 10 : null,
+        maxGradePct: maxSeg ? Math.round(maxSeg.gradePct * 10) / 10 : null,
+        pctDistanceClimbing: totalDist > 0 ? Math.round((climbDist / totalDist) * 100) : null,
+        hrClimb: hrClimbSegs.length ? Math.round(wAvg(hrClimbSegs, 'hr', 'durSec')) : null,
+        hrFlat: hrFlatSegs.length ? Math.round(wAvg(hrFlatSegs, 'hr', 'durSec')) : null,
+        gapAvgSecKm: gapAvgSecKm != null ? Math.round(gapAvgSecKm) : null,
+        flatPaceRange, gapDeviationSecKm, gapVerdict,
+      };
+    }
+  }
+
   const circuits = laps.length ? isKmCircuits(laps) : false;
   const useRepsPath = hasStructuredReps && !circuits && laps.length > 0;
 
@@ -437,6 +505,13 @@ async function buildSessionAnalysis(session, week, activity) {
   }
   const deviationPct = (mainPaceRange && actualPaceSecKm && deviationSecKm != null)
     ? Math.round((deviationSecKm / ((mainPaceRange.paceMin + mainPaceRange.paceMax) / 2)) * 100) : null;
+  // Ecart "effectif" utilise pour le verdict/l'anomalie/le score allure :
+  // l'ecart brut (deviationSecKm) sauf sur une seance trail avec cote/D+ reel
+  // ou le GAP (climbAnalysis.gapDeviationSecKm, deja normalise terrain) prend
+  // le relais — cf. note sur climbAnalysis plus haut. deviationSecKm reste
+  // inchange par ailleurs (ligne "Allure" mutee, purement informative).
+  const effectiveDeviationSecKm = (isTrail && climbAnalysis?.gapDeviationSecKm != null) ? climbAnalysis.gapDeviationSecKm : deviationSecKm;
+  const usingGapVerdict = isTrail && climbAnalysis?.gapDeviationSecKm != null;
   // Laps pertinents pour le temps-en-zone : meme logique — le groupe de
   // repetitions seulement si elles sont l'objectif principal, sinon TOUS les
   // laps de l'activite (une seance continue n'a pas de sous-ensemble
@@ -533,9 +608,9 @@ async function buildSessionAnalysis(session, week, activity) {
   const cardiacDrift = computeCardiacDrift(laps);
 
   // ── Coherence allure / FC ──
-  const paceVerdict = deviationSecKm == null ? null : (Math.abs(deviationSecKm) <= 10 ? 'conforme' : deviationSecKm < 0 ? 'rapide' : 'lente');
+  const paceVerdict = effectiveDeviationSecKm == null ? null : (Math.abs(effectiveDeviationSecKm) <= 10 ? 'conforme' : effectiveDeviationSecKm < 0 ? 'rapide' : 'lente');
   const hrVerdict = (hr && approxBand) ? (hr.avgHR > approxBand.high ? 'elevee' : hr.avgHR < approxBand.low ? 'basse' : 'conforme') : null;
-  const coherenceNarrative = computeCoherenceNarrative(paceVerdict, hrVerdict);
+  const coherenceNarrative = computeCoherenceNarrative(paceVerdict, hrVerdict, usingGapVerdict);
 
   // ── Temps passe plus vite / dans la cible / plus lent (bloc principal) ──
   let timeInZoneBreakdown = null;
@@ -564,6 +639,7 @@ async function buildSessionAnalysis(session, week, activity) {
       deltaPct: (plannedDPlusM && actualDPlusM) ? Math.round(((actualDPlusM - plannedDPlusM) / plannedDPlusM) * 100) : null,
       plannedDMinusM: null, actualDMinusM: null,
       vamMPerH: (actualDPlusM && movingH) ? Math.round(actualDPlusM / movingH) : null,
+      climb: climbAnalysis,
     };
   }
 
@@ -573,18 +649,23 @@ async function buildSessionAnalysis(session, week, activity) {
   if (volSeverity) anomalies.push({ code: primaryDeltaPct > 0 ? 'VOLUME_SUP' : 'VOLUME_INF', severity: volSeverity,
     message: primaryDeltaPct > 0 ? `Séance ${Math.abs(primaryDeltaPct)}% plus longue que prévu.` : `Séance ${Math.abs(primaryDeltaPct)}% plus courte que prévu.` });
 
-  const rawPaceSeverity = severityFor(deviationSecKm != null ? Math.abs(deviationSecKm) : null, PACE_SEVERITY_THRESHOLDS[sessionTypeKey]);
-  const paceLenient = isFasterButHrControlled(sessionTypeKey, deviationSecKm, hrVerdict);
+  const rawPaceSeverity = severityFor(effectiveDeviationSecKm != null ? Math.abs(effectiveDeviationSecKm) : null, PACE_SEVERITY_THRESHOLDS[sessionTypeKey]);
+  const paceLenient = isFasterButHrControlled(sessionTypeKey, effectiveDeviationSecKm, hrVerdict);
   // Cas "plus vite mais FC maitrisee" : deux crans d'attenuation, pas un
   // seul — l'objectif est de ne PAS faire apparaitre ce cas dans "a
   // ameliorer" (reserve a ATTENTION/IMPORTANT), puisqu'il n'y a justement
   // rien a ameliorer physiologiquement, seulement une info a signaler
   // (deja valorisee separement dans les points positifs).
   const paceSeverity = paceLenient ? downgradeSeverity(downgradeSeverity(rawPaceSeverity)) : rawPaceSeverity;
-  if (paceSeverity) anomalies.push({ code: deviationSecKm < 0 ? 'PACE_TROP_RAPIDE' : 'PACE_TROP_LENTE', severity: paceSeverity,
+  // usingGapVerdict (defini plus haut) : le message reference explicitement
+  // le GAP (pas "l'allure") pour ne pas contredire la ligne "Allure" mutee
+  // juste au-dessus dans la modale, basee elle sur l'allure brute vs cible ajustee.
+  if (paceSeverity) anomalies.push({ code: effectiveDeviationSecKm < 0 ? 'PACE_TROP_RAPIDE' : 'PACE_TROP_LENTE', severity: paceSeverity,
     message: paceLenient
-      ? `Allure ${Math.abs(deviationSecKm)}s/km plus rapide que la cible, mais fréquence cardiaque maîtrisée — pas d'inquiétude particulière.`
-      : `Allure moyenne ${deviationSecKm < 0 ? Math.abs(deviationSecKm) + 's/km plus rapide' : deviationSecKm + 's/km plus lente'} que la cible.` });
+      ? `${usingGapVerdict ? 'Effort (GAP)' : 'Allure'} ${Math.abs(effectiveDeviationSecKm)}s/km plus rapide que la cible, mais fréquence cardiaque maîtrisée — pas d'inquiétude particulière.`
+      : usingGapVerdict
+        ? `Effort réel (GAP, ajusté à la pente) ${effectiveDeviationSecKm < 0 ? Math.abs(effectiveDeviationSecKm) + 's/km plus rapide' : effectiveDeviationSecKm + 's/km plus lent'} que la cible.`
+        : `Allure moyenne ${effectiveDeviationSecKm < 0 ? Math.abs(effectiveDeviationSecKm) + 's/km plus rapide' : effectiveDeviationSecKm + 's/km plus lente'} que la cible.` });
 
   if (hr && approxBand) {
     const hrOver = hr.avgHR - approxBand.high;
@@ -623,7 +704,7 @@ async function buildSessionAnalysis(session, week, activity) {
   if (volume.verdict === 'conforme') positives.push('Volume prévu respecté.');
   if (hasStructuredReps && structure.actualMainReps >= plannedMainReps) positives.push(`Toutes les répétitions ont été réalisées (${structure.actualMainReps}/${plannedMainReps}).`);
   if (regularity.label && (regularity.label.includes('excellente') || regularity.label.includes('bonne'))) positives.push(`${regularity.label.charAt(0).toUpperCase() + regularity.label.slice(1)} entre les répétitions.`);
-  if (paceVerdict === 'conforme') positives.push('Allure moyenne conforme à la zone visée.');
+  if (paceVerdict === 'conforme') positives.push(usingGapVerdict ? 'Effort réel (GAP, ajusté à la pente) conforme à la zone visée.' : 'Allure moyenne conforme à la zone visée.');
   else if (paceLenient) positives.push('Vous avez couru plus vite que prévu tout en gardant une fréquence cardiaque maîtrisée — bon signe de forme.');
   if (hrVerdict === 'conforme') positives.push('Fréquence cardiaque maîtrisée, cohérente avec l\'intensité visée.');
   if (cardiacDrift && cardiacDrift.driftPct != null && Math.abs(cardiacDrift.driftPct) <= 5) positives.push('Dérive cardiaque très faible, bonne gestion de l\'effort.');
@@ -640,7 +721,7 @@ async function buildSessionAnalysis(session, week, activity) {
   // "trop vite mais FC maitrisee" (paceLenient) : le veritable objectif
   // physiologique de ces seances est respecte, un ecart d'allure brut n'y
   // represente pas la meme gravite qu'avec une FC elevee (§26).
-  const rawPaceScore = scoreFromBand(deviationSecKm, 10, 40);
+  const rawPaceScore = scoreFromBand(effectiveDeviationSecKm, 10, 40);
   const components = {
     duration: scoreFromDeltaPct(durDeltaPct, 10, 50),
     distance: scoreFromDeltaPct(distDeltaPct, 10, 50),
@@ -663,8 +744,8 @@ async function buildSessionAnalysis(session, week, activity) {
   // ── Commentaire genere ──
   const commentary = generateCommentary({
     sessionName: session.displayName || session.name, sessionTypeKey, score, verdict,
-    volume, structure, plannedMainReps: structure.plannedMainReps, paceVerdict, deviationSecKm, regularity, pacingStrategy,
-    hrVerdict, cardiacDrift, positives, improvements, paceLenient,
+    volume, structure, plannedMainReps: structure.plannedMainReps, paceVerdict, deviationSecKm: effectiveDeviationSecKm, regularity, pacingStrategy,
+    hrVerdict, cardiacDrift, positives, improvements, paceLenient, usingGapVerdict,
   });
 
   return {
@@ -735,16 +816,22 @@ function computeCardiacDrift(laps) {
   };
 }
 
-function computeCoherenceNarrative(paceVerdict, hrVerdict) {
+function computeCoherenceNarrative(paceVerdict, hrVerdict, usingGap) {
   if (!paceVerdict || !hrVerdict) return null;
-  if (paceVerdict === 'conforme' && hrVerdict === 'conforme') return 'Effort parfaitement maîtrisé : allure et fréquence cardiaque sont cohérentes avec l\'objectif de la séance.';
-  if (paceVerdict === 'conforme' && hrVerdict === 'elevee') return 'Votre allure est conforme, mais votre fréquence cardiaque est supérieure à celle attendue — l\'effort semble avoir été plus coûteux que ce que laisse penser l\'allure.';
-  if (paceVerdict === 'rapide' && hrVerdict === 'elevee') return 'Allure trop rapide et fréquence cardiaque élevée : la séance a probablement été réalisée à une intensité excessive.';
-  if (paceVerdict === 'lente' && hrVerdict === 'elevee') return 'Allure plus lente que prévu mais fréquence cardiaque élevée — fatigue possible, chaleur, dénivelé ou conditions difficiles.';
-  if (paceVerdict === 'rapide' && hrVerdict === 'conforme') return 'Votre allure est plus rapide que prévu, mais votre fréquence cardiaque reste dans la zone attendue — bon signe de forme, sans coût physiologique excessif.';
-  if (paceVerdict === 'rapide' && hrVerdict === 'basse') return 'Vous avez couru plus vite que prévu avec une fréquence cardiaque basse — très bonne gestion physiologique de l\'effort.';
-  if (paceVerdict === 'lente' && hrVerdict === 'conforme') return 'Allure plus lente que prévu mais fréquence cardiaque cohérente — rien d\'inquiétant, probablement une allure prudente.';
-  if (paceVerdict === 'lente' && hrVerdict === 'basse') return 'Allure et fréquence cardiaque toutes deux en dessous de l\'attendu — marge de progression disponible pour la prochaine séance.';
+  // Sur trail avec GAP dispo, paceVerdict reflete l'effort normalise pente
+  // (climbAnalysis.gapVerdict), pas l'allure brute — le libelle doit le dire
+  // explicitement pour ne pas laisser penser qu'il s'agit de la ligne
+  // "Allure" (mutee) affichee juste au-dessus dans la modale.
+  const term = usingGap ? 'votre effort réel (GAP, ajusté à la pente)' : 'votre allure';
+  const termCap = usingGap ? 'Votre effort réel (GAP)' : 'Votre allure';
+  if (paceVerdict === 'conforme' && hrVerdict === 'conforme') return `Effort parfaitement maîtrisé : ${term} et fréquence cardiaque sont cohérents avec l'objectif de la séance.`;
+  if (paceVerdict === 'conforme' && hrVerdict === 'elevee') return `${termCap} est conforme, mais votre fréquence cardiaque est supérieure à celle attendue — l'effort semble avoir été plus coûteux que ce que laisse penser ${term}.`;
+  if (paceVerdict === 'rapide' && hrVerdict === 'elevee') return `${usingGap ? 'Effort réel (GAP) trop rapide' : 'Allure trop rapide'} et fréquence cardiaque élevée : la séance a probablement été réalisée à une intensité excessive.`;
+  if (paceVerdict === 'lente' && hrVerdict === 'elevee') return `${termCap} plus lent(e) que prévu mais fréquence cardiaque élevée — fatigue possible, chaleur, dénivelé ou conditions difficiles.`;
+  if (paceVerdict === 'rapide' && hrVerdict === 'conforme') return `${termCap} est plus rapide que prévu, mais votre fréquence cardiaque reste dans la zone attendue — bon signe de forme, sans coût physiologique excessif.`;
+  if (paceVerdict === 'rapide' && hrVerdict === 'basse') return `Vous avez couru plus vite que prévu (${term}) avec une fréquence cardiaque basse — très bonne gestion physiologique de l'effort.`;
+  if (paceVerdict === 'lente' && hrVerdict === 'conforme') return `${termCap} plus lent(e) que prévu mais fréquence cardiaque cohérente — rien d'inquiétant, probablement une allure prudente.`;
+  if (paceVerdict === 'lente' && hrVerdict === 'basse') return `${termCap} et fréquence cardiaque toutes deux en dessous de l'attendu — marge de progression disponible pour la prochaine séance.`;
   return null;
 }
 
@@ -759,10 +846,11 @@ function generateCommentary(ctx) {
       ? `Vous avez réalisé les ${ctx.plannedMainReps} répétitions prévues.`
       : `Seulement ${ctx.structure.actualMainReps} répétition(s) sur ${ctx.plannedMainReps} prévues.`);
   }
-  if (ctx.paceVerdict === 'conforme') parts.push('L\'allure moyenne correspond à la cible.');
+  const paceTerm = ctx.usingGapVerdict ? 'L\'effort réel (GAP, ajusté à la pente)' : 'L\'allure moyenne';
+  if (ctx.paceVerdict === 'conforme') parts.push(`${paceTerm} correspond à la cible.`);
   else if (ctx.paceVerdict === 'rapide' && ctx.paceLenient) parts.push(`Vous avez couru ${Math.abs(ctx.deviationSecKm)}s/km plus vite que la cible, mais sans coût cardiaque excessif — bon signe de forme.`);
-  else if (ctx.paceVerdict === 'rapide') parts.push(`Vous êtes parti plus vite que prévu (${Math.abs(ctx.deviationSecKm)}s/km sous la cible).`);
-  else if (ctx.paceVerdict === 'lente') parts.push(`Votre allure est restée plus lente que la cible (+${ctx.deviationSecKm}s/km).`);
+  else if (ctx.paceVerdict === 'rapide') parts.push(ctx.usingGapVerdict ? `Votre effort réel (GAP) est resté plus rapide que prévu (${Math.abs(ctx.deviationSecKm)}s/km sous la cible).` : `Vous êtes parti plus vite que prévu (${Math.abs(ctx.deviationSecKm)}s/km sous la cible).`);
+  else if (ctx.paceVerdict === 'lente') parts.push(ctx.usingGapVerdict ? `Votre effort réel (GAP) est resté plus lent que prévu (+${ctx.deviationSecKm}s/km).` : `Votre allure est restée plus lente que la cible (+${ctx.deviationSecKm}s/km).`);
 
   if (ctx.pacingStrategy === 'went_out_fast') parts.push('Vous êtes parti nettement trop vite avant de ralentir sur la fin.');
   else if (ctx.pacingStrategy === 'positive_split') parts.push('Votre rythme a progressivement ralenti au fil de la séance.');
@@ -1113,6 +1201,19 @@ function buildAnalysisModalHtml(record) {
       <span class="analysis-summary-icon">${_rowIcon(record.trail.deltaPct == null || Math.abs(record.trail.deltaPct) <= 15)}</span>
     </div>` : '';
 
+  // Ligne "Effort (GAP)" : le vrai verdict conforme/pas conforme sur une
+  // seance cote/D+ (cf. climbAnalysis dans buildSessionAnalysis) — le GAP
+  // Garmin (deja normalise pente) compare a la cible PLATE (pas la cible
+  // "Allure" ci-dessus, qui elle est deja majoree forfaitairement pour le
+  // denivele : les comparer au GAP compterait le denivele deux fois).
+  const climb = record.trail?.climb || null;
+  const gapRowHtml = (isTrail && climb?.gapAvgSecKm != null && climb.flatPaceRange) ? `
+    <div class="analysis-summary-row">
+      <span class="analysis-summary-label">Effort (GAP)</span>
+      <span class="analysis-summary-values"><span class="analysis-summary-planned">${fmtPace(climb.flatPaceRange.paceMin)} – ${fmtPace(climb.flatPaceRange.paceMax)}/km</span> → <span class="analysis-summary-actual">${fmtPace(climb.gapAvgSecKm)}/km</span></span>
+      <span class="analysis-summary-icon">${_rowIcon(climb.gapVerdict == null || climb.gapVerdict === 'conforme')}</span>
+    </div>` : '';
+
   const repsTableHtml = record.reps.length ? `
     <div class="analysis-section-title">Répétitions</div>
     <table class="analysis-reps-table">
@@ -1145,13 +1246,26 @@ function buildAnalysisModalHtml(record) {
       <canvas id="analysis-elevation-chart"></canvas>
     </div>` : '';
 
+  // Détail pente/effort en côte : uniquement si des tronçons en côte ont pu
+  // être identifiés dans les laps Garmin (climb non null → cf. climbAnalysis).
+  const climbDetailHtml = (isTrail && climb && (climb.avgGradePctClimb != null || climb.pctDistanceClimbing != null)) ? `
+    <div class="analysis-section-title">Pente & effort en côte</div>
+    <div class="analysis-climb-grid">
+      ${climb.avgGradePctClimb != null ? `<div class="analysis-climb-stat"><span class="analysis-climb-stat-label">Pente moyenne en côte</span><span class="analysis-climb-stat-value">+${climb.avgGradePctClimb}%</span></div>` : ''}
+      ${climb.maxGradePct != null ? `<div class="analysis-climb-stat"><span class="analysis-climb-stat-label">Pente la plus marquée</span><span class="analysis-climb-stat-value">${climb.maxGradePct >= 0 ? '+' : ''}${climb.maxGradePct}%</span></div>` : ''}
+      ${climb.pctDistanceClimbing != null ? `<div class="analysis-climb-stat"><span class="analysis-climb-stat-label">Distance en côte</span><span class="analysis-climb-stat-value">${climb.pctDistanceClimbing}%</span></div>` : ''}
+      ${(climb.hrClimb != null && climb.hrFlat != null) ? `<div class="analysis-climb-stat"><span class="analysis-climb-stat-label">FC côte / plat</span><span class="analysis-climb-stat-value">${climb.hrClimb} / ${climb.hrFlat} bpm</span></div>` : ''}
+    </div>
+    <div class="analysis-climb-note">Pente calculée par tronçon Garmin (km ou lap manuel) — une pente ponctuelle plus marquée peut exister à l'intérieur d'un tronçon. Le GAP neutralise l'effet de la pente pour évaluer l'effort réel : comparez-le à la cible plate (ligne "Effort (GAP)" ci-dessus), pas à la cible "Allure" qui est déjà majorée forfaitairement pour le dénivelé.</div>` : '';
+
   return `
     <div class="analysis-modal-header">
       <div class="analysis-modal-title">${s.displayName}</div>
       <div class="analysis-modal-score">${record.verdict.emoji} <strong>${record.score}%</strong> — ${record.verdict.label}</div>
     </div>
-    <div class="analysis-summary-block">${summaryRowsHtml}${trailRowHtml}</div>
+    <div class="analysis-summary-block">${summaryRowsHtml}${trailRowHtml}${gapRowHtml}</div>
     ${elevationProfileHtml}
+    ${climbDetailHtml}
     ${timelineHtml}
     ${repsTableHtml}
     ${positivesHtml}

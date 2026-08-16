@@ -2199,6 +2199,17 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
   margin-top: 12px; padding: 10px 12px; background: var(--bg); border-radius: 8px; line-height: 1.6;
 }
 .analysis-commentary { color: var(--text-primary); font-style: italic; }
+.analysis-climb-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.analysis-climb-stat {
+  display: flex; flex-direction: column; gap: 2px; padding: 8px 10px;
+  background: var(--bg); border: 1px solid var(--border-light); border-radius: 8px;
+}
+.analysis-climb-stat-label { font-family: var(--font-body); font-size: 11px; color: var(--text-secondary); }
+.analysis-climb-stat-value { font-family: var(--font); font-weight: 700; font-size: 14px; color: var(--text-primary); }
+.analysis-climb-note {
+  font-family: var(--font-body); font-size: 11px; color: var(--text-muted);
+  margin-top: 8px; line-height: 1.5;
+}
 .btn-analysis-unlink, .btn-analysis-close-modal, .btn-analysis-recalc {
   flex: 1; padding: 9px; border-radius: 9px; font-size: 13px; font-weight: 600;
   cursor: pointer; font-family: var(--font-body);
