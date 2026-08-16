@@ -389,10 +389,17 @@ function setSessionMood(weekId, trainingIndex, mood) {
 // Icone visage colore (pas d'emoji Unicode natif disponible dans les 3
 // couleurs demandees) - reutilisee dans les cartes de seance (campus.js) et
 // le tableau des activites (app.js, via sessionMoodBadgeForActivity). Effet
-// "relief" (degrade radial + ombre portee CSS) plutot qu'un aplat plat, sur
-// retour utilisateur — le degrade est inline dans chaque SVG (pas de <defs>
-// partage) car ces icones sont injectees isolement a des dizaines d'endroits
-// (lignes du tableau, cartes de seance...), jamais dans un <svg> commun.
+// "relief" = degrade radial (reflet) + degrade lineaire (ombrage bas), tous
+// deux CONTENUS DANS le disque colore lui-meme plutot qu'un drop-shadow CSS
+// externe — un drop-shadow noir est quasi invisible sur le fond sombre de
+// l'appli (constate par l'utilisateur, effet reste "plat"), alors qu'un
+// ombrage interne au disque reste visible quel que soit l'arriere-plan.
+// id de degrade suffixe par un compteur : ces icones sont injectees en
+// dizaines d'exemplaires isoles (lignes du tableau, cartes de seance...),
+// un id="moodGloss" duplique dans le document cassait la resolution
+// url(#moodGloss) sur certains navigateurs (degrade invisible partout,
+// meme constat que le bug ci-dessus).
+let _moodIconSeq = 0;
 function sessionMoodIconSvg(mood, size) {
   const cfg = SESSION_MOOD_STYLES[mood];
   if (!cfg) return '';
@@ -401,14 +408,22 @@ function sessionMoodIconSvg(mood, size) {
               : mood === 'bad'  ? 'M8 17 Q12 13.5 16 17'
               : 'M8.5 15.5h7';
   const eye = mood === 'good' ? '#0c1f12' : mood === 'bad' ? '#250808' : '#1a1608';
-  return `<svg class="session-mood-icon" width="${size}" height="${size}" viewBox="0 0 24 24" title="${cfg.label}" style="filter:drop-shadow(0 1px 1.5px rgba(0,0,0,.45))">
-    <defs><radialGradient id="moodGloss" cx="35%" cy="28%" r="70%">
-      <stop offset="0%" stop-color="#fff" stop-opacity=".55"/>
-      <stop offset="55%" stop-color="#fff" stop-opacity=".08"/>
-      <stop offset="100%" stop-color="#fff" stop-opacity="0"/>
-    </radialGradient></defs>
+  const uid = 'moodIcon' + (_moodIconSeq++);
+  return `<svg class="session-mood-icon" width="${size}" height="${size}" viewBox="0 0 24 24" title="${cfg.label}">
+    <defs>
+      <radialGradient id="${uid}g" cx="34%" cy="26%" r="80%">
+        <stop offset="0%" stop-color="#fff" stop-opacity=".8"/>
+        <stop offset="45%" stop-color="#fff" stop-opacity=".18"/>
+        <stop offset="100%" stop-color="#fff" stop-opacity="0"/>
+      </radialGradient>
+      <linearGradient id="${uid}s" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="55%" stop-color="#000" stop-opacity="0"/>
+        <stop offset="100%" stop-color="#000" stop-opacity=".32"/>
+      </linearGradient>
+    </defs>
     <circle cx="12" cy="12" r="11" fill="${cfg.color}"/>
-    <circle cx="12" cy="12" r="11" fill="url(#moodGloss)"/>
+    <circle cx="12" cy="12" r="11" fill="url(#${uid}s)"/>
+    <circle cx="12" cy="12" r="11" fill="url(#${uid}g)"/>
     <circle cx="8.3" cy="10" r="1.4" fill="${eye}"/>
     <circle cx="15.7" cy="10" r="1.4" fill="${eye}"/>
     <path d="${mouth}" stroke="${eye}" stroke-width="1.7" fill="none" stroke-linecap="round"/>

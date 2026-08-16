@@ -922,7 +922,7 @@ function renderAllActivities(activities, filter = 'all', yearOverride = null) {
   }
 
   if (filtered.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="10" class="table-loading">Aucune activite trouvee pour ce filtre</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="11" class="table-loading">Aucune activite trouvee pour ce filtre</td></tr>`;
     // Mise à jour synthèse à 0
     updateActivitySummary(0, 0, 0, filter);
     return;
@@ -948,7 +948,8 @@ function renderAllActivities(activities, filter = 'all', yearOverride = null) {
       <tr class="activity-row" data-activity-id="${a.id || ''}">
         <td>${formatDateShort(a.date, true)}</td>
         <td><span class="activity-type-cell ${activityTypeClass(type)}">${icon}<span class="run-type-text">${activityTypeLabel(type)}</span>${typeof activityAnalysisBadge === 'function' ? activityAnalysisBadge(a.id) : ''}</span></td>
-        <td style="color:var(--text-primary);max-width:180px;overflow:hidden;text-overflow:ellipsis">${a.name || '\u2014'}${typeof sessionMoodBadgeForActivity === 'function' ? sessionMoodBadgeForActivity(a.id) : ''}</td>
+        <td style="color:var(--text-primary);max-width:180px;overflow:hidden;text-overflow:ellipsis">${a.name || '\u2014'}</td>
+        <td class="col-mood">${typeof sessionMoodBadgeForActivity === 'function' ? sessionMoodBadgeForActivity(a.id) : ''}</td>
         <td class="dist-value">${a.distanceKm ? a.distanceKm.toFixed(2)+' km' : '\u2014'}</td>
         <td style="color:var(--text-secondary)">${formatDuration(a.durationSec)}</td>
         <td class="pace-value">${formatPace(a.avgPaceSecPerKm)}</td>
@@ -3924,7 +3925,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   function showYearLoading(year) {
     const tbody = document.querySelector('#all-activities-tbody');
     if (!tbody) return;
-    tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;padding:48px 20px;">' +
+    tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;padding:48px 20px;">' +
       '<div style="font-size:36px;margin-bottom:14px">&#x1F4E5;</div>' +
       '<div style="font-size:16px;font-weight:700;color:var(--text-primary);margin-bottom:6px">Chargement de ' + year + '</div>' +
       '<div style="font-size:13px;color:var(--text-secondary)">Récupération de vos activités Garmin — merci de patienter...</div>' +
@@ -3947,7 +3948,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (!missing.length) return;
     const loadTbody = document.getElementById('all-activities-tbody');
     if (loadTbody) {
-      loadTbody.innerHTML = '<tr><td colspan="10" style="text-align:center;padding:48px 20px;">' +
+      loadTbody.innerHTML = '<tr><td colspan="11" style="text-align:center;padding:48px 20px;">' +
         '<div style="font-size:36px;margin-bottom:14px">&#x1F4E5;</div>' +
         '<div style="font-size:16px;font-weight:700;color:var(--text-primary);margin-bottom:6px">Chargement de l\'historique complet</div>' +
         '<div style="font-size:13px;color:var(--text-secondary)">Récupération de toutes vos années Garmin — merci de patienter...</div>' +
@@ -3971,7 +3972,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       // Afficher le chargement dans la table (ID correct)
       const loadTbody = document.getElementById('all-activities-tbody');
       if (loadTbody) {
-        loadTbody.innerHTML = '<tr><td colspan="10" style="text-align:center;padding:48px 20px;">' +
+        loadTbody.innerHTML = '<tr><td colspan="11" style="text-align:center;padding:48px 20px;">' +
           '<div style="font-size:36px;margin-bottom:14px">&#x1F4E5;</div>' +
           '<div style="font-size:16px;font-weight:700;color:var(--text-primary);margin-bottom:6px">Chargement de ' + year + '</div>' +
           '<div style="font-size:13px;color:var(--text-secondary)">Récupération de vos activités Garmin — merci de patienter...</div>' +
