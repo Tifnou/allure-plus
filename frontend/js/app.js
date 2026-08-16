@@ -4051,25 +4051,37 @@ async function loadAdminUsers() {
           </thead>
           <tbody>
             ${users.map(u => `
-              <tr class="${u.blocked ? 'admin-users-row--blocked' : ''}">
-                <td class="admin-users-email">${escapeHtml(u.email)}</td>
+              <tr class="admin-users-row-clickable ${u.blocked ? 'admin-users-row--blocked' : ''}" data-email="${escapeHtml(u.email)}">
+                <td class="admin-users-email"><span class="admin-users-chevron">&#9656;</span>${escapeHtml(u.email)}</td>
                 <td>${escapeHtml(u.displayName || '—')}</td>
                 <td>${formatDate(u.firstSeen)}</td>
                 <td>${formatDateTime(u.lastSeen)}</td>
                 <td>
-                  <label class="admin-users-checkbox">
+                  <label class="admin-users-checkbox" onclick="event.stopPropagation()">
                     <input type="checkbox" data-email="${escapeHtml(u.email)}" data-field="ticketAccess" ${u.ticketAccess !== false ? 'checked' : ''} title="Peut prendre jusqu'à 2 minutes pour s'appliquer si ce compte est déjà connecté">
                   </label>
                 </td>
                 <td>
-                  <button class="admin-users-block-btn ${u.blocked ? 'admin-users-block-btn--blocked' : ''}" data-email="${escapeHtml(u.email)}" type="button">
+                  <button class="admin-users-block-btn ${u.blocked ? 'admin-users-block-btn--blocked' : ''}" data-email="${escapeHtml(u.email)}" type="button" onclick="event.stopPropagation()">
                     ${u.blocked ? '🔒 Bloqué — débloquer' : '🔓 Bloquer'}
                   </button>
+                </td>
+              </tr>
+              <tr class="admin-users-detail-row">
+                <td colspan="6">
+                  <div class="admin-users-detail-panel"></div>
                 </td>
               </tr>`).join('')}
           </tbody>
         </table>
       </div>`;
+
+    // Depli/repli fiche detaillee (fondu, cf. .admin-users-detail-panel) -
+    // fetch paresseux au premier clic seulement (cache dans le dataset de la
+    // ligne), pas un appel par utilisateur liste des l'ouverture de la page.
+    wrap.querySelectorAll('tr.admin-users-row-clickable').forEach(row => {
+      row.addEventListener('click', () => toggleAdminUserDetail(row));
+    });
 
     wrap.querySelectorAll('input[data-field="ticketAccess"]').forEach(cb => {
       cb.onchange = async () => {
@@ -4115,6 +4127,65 @@ async function loadAdminUsers() {
   } catch (e) {
     wrap.innerHTML = '<div class="support-empty">Impossible de charger les utilisateurs.</div>';
   }
+}
+
+// Depli/repli avec fondu (voir .admin-users-detail-panel, style.css) - une
+// seule fiche ouverte a la fois (plus lisible qu'un empilement de plusieurs
+// fiches). Fetch paresseux : /api/admin/users/:email/details n'est appele
+// qu'au tout premier depli de CETTE ligne (panel.dataset.loaded), jamais au
+// chargement de la liste - decrit dans server.js (pullEnvelope sync-relay,
+// pas de Worker a redeployer, portee volontairement limitee : VO2max,
+// sexe/age, plan suivi, assiduite - rien d'autre, cf. echange utilisateur).
+async function toggleAdminUserDetail(row) {
+  const email = row.dataset.email;
+  const detailRow = row.nextElementSibling;
+  const panel = detailRow?.querySelector('.admin-users-detail-panel');
+  if (!panel) return;
+  const isOpen = panel.classList.contains('admin-users-detail-panel--open');
+
+  document.querySelectorAll('.admin-users-detail-panel--open').forEach(p => {
+    if (p !== panel) {
+      p.classList.remove('admin-users-detail-panel--open');
+      p.closest('tr').previousElementSibling?.querySelector('.admin-users-chevron')?.classList.remove('admin-users-chevron--open');
+    }
+  });
+
+  panel.classList.toggle('admin-users-detail-panel--open', !isOpen);
+  row.querySelector('.admin-users-chevron')?.classList.toggle('admin-users-chevron--open', !isOpen);
+
+  if (!isOpen && !panel.dataset.loaded) {
+    panel.dataset.loaded = '1';
+    panel.innerHTML = '<div class="admin-users-detail-loading">Chargement…</div>';
+    try {
+      const details = await fetch(`${API}/api/admin/users/${encodeURIComponent(email)}/details`).then(r => r.json());
+      panel.innerHTML = renderAdminUserDetail(details);
+    } catch (e) {
+      panel.innerHTML = '<div class="admin-users-detail-loading">Impossible de charger la fiche.</div>';
+      panel.dataset.loaded = '';
+    }
+  }
+}
+
+function renderAdminUserDetail(d) {
+  const items = [];
+  if (d.profile) {
+    items.push({ label: 'Sexe', value: d.profile.sex === 'M' ? 'Homme' : d.profile.sex === 'F' ? 'Femme' : '—' });
+    items.push({ label: 'Âge', value: d.profile.age != null ? d.profile.age + ' ans' : '—' });
+  }
+  items.push({ label: 'VO₂max', value: d.vo2max != null ? d.vo2max.toFixed(1) + ' mL/kg/min' + (d.vo2maxDate ? ` (${formatDate(d.vo2maxDate)})` : '') : '—' });
+
+  let planLabel = '—';
+  if (d.plan?.type === 'imported') planLabel = 'Plan importé — ' + ([d.plan.raceName, d.plan.label].filter(Boolean).join(' · ') || 'sans détail');
+  else if (d.plan?.type === 'free') planLabel = 'Séances libres (par défaut)';
+  else if (d.plan?.type === 'campus') planLabel = 'Plan Campus Coach';
+  items.push({ label: 'Plan suivi', value: planLabel });
+  if (d.adherence != null) items.push({ label: 'Assiduité', value: d.adherence + '%' });
+
+  return `<div class="admin-users-detail-grid">${items.map(i => `
+    <div class="admin-users-detail-item">
+      <div class="admin-users-detail-label">${i.label}</div>
+      <div class="admin-users-detail-value">${i.value}</div>
+    </div>`).join('')}</div>`;
 }
 
 const ADMIN_DPLUS_CATS = [

@@ -3232,6 +3232,33 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
 .admin-users-block-btn--blocked{ border-color:var(--red); color:var(--red); background:var(--red-bg); }
 .admin-users-block-btn--blocked:hover{ border-color:var(--green); color:var(--green); background:var(--green-bg); }
 
+/* Fiche depliante (voir toggleAdminUserDetail, app.js) */
+.admin-users-table tr.admin-users-row-clickable{ cursor:pointer; transition:background var(--transition); }
+.admin-users-table tr.admin-users-row-clickable:hover{ background:var(--bg-hover); }
+.admin-users-chevron{
+  display:inline-block; font-size:9px; color:var(--text-muted); margin-right:6px;
+  transition:transform var(--transition);
+}
+.admin-users-chevron--open{ transform:rotate(90deg); }
+.admin-users-table tr.admin-users-detail-row td{ padding:0; border-bottom:none; }
+.admin-users-table tr.admin-users-detail-row:last-child td{ border-bottom:none; }
+/* max-height+opacity (pas height:auto, non transitionable) pour le fondu -
+   valeur assez large pour ne jamais tronquer le contenu reel (court, une
+   grille de quelques items). */
+.admin-users-detail-panel{
+  max-height:0; opacity:0; overflow:hidden;
+  transition:max-height 0.35s ease, opacity 0.25s ease, padding 0.35s ease;
+  padding:0 10px;
+}
+.admin-users-detail-panel--open{ max-height:220px; opacity:1; padding:12px 10px 16px; }
+.admin-users-detail-loading{ font-size:12px; color:var(--text-muted); padding:4px 0; }
+.admin-users-detail-grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:10px; }
+.admin-users-detail-item{
+  background:var(--bg); border-radius:8px; padding:8px 10px;
+}
+.admin-users-detail-label{ font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.04em; margin-bottom:3px; }
+.admin-users-detail-value{ font-size:13px; color:var(--text-primary); font-weight:600; }
+
 .admin-logs-pre {
   background: var(--bg);
   border: 1px solid var(--border);

@@ -55,6 +55,7 @@ const { isBrouterConfigured, isTilePresent, getTileRemoteSize, downloadTile } = 
 const { geocode, getCommunesForPostcode, getCommunesForDepartment, searchStreet, getTownHall, generateRouteOptions, buildGpxXml } = require('./route_generator');
 const { getPaceProfile, refreshPaceProfile, migratePaceProfileToScoped } = require('./pace_profile');
 const { scheduleSync, runFullReconciliation, getSyncStatus, syncBinaryFile, deleteBinaryFile, syncAvatarFile } = require('./sync');
+const syncClient = require('./sync_client');
 const { buildPlanWorkbook } = require('./xlsx_export');
 const {
   campusLogin,
@@ -1056,6 +1057,92 @@ app.post('/api/admin/users/:email/ticket-access', requireAdmin, async (req, res)
   } catch (err) { handleError(res, err); }
 });
 
+// Fiche detaillee d'un utilisateur (panel Admin, cf. echange utilisateur) -
+// lit UNIQUEMENT ce qui est deja synchronise par sync-relay (types deja
+// autorises, aucun Worker a redeployer) : VO2max (health_snapshots, cf.
+// capture dans /api/dashboard) + profil/plan/assiduite (user_data). Portee
+// volontairement limitee (pas d'avatar/PPS/diplomes) : uniquement ce que
+// l'utilisateur a explicitement demande.
+app.get('/api/admin/users/:email/details', requireAdmin, async (req, res) => {
+  try {
+    const email = req.params.email.toLowerCase();
+    const [healthEnv, userDataEnv] = await Promise.all([
+      syncClient.pullEnvelope('health_snapshots', email).catch(() => null),
+      syncClient.pullEnvelope('user_data', email).catch(() => null),
+    ]);
+
+    // VO2max : entree la plus recente parmi "vo2max::<date>" - jamais
+    // reappliquee localement nulle part (cf. capture dans /api/dashboard),
+    // purement une lecture admin.
+    let vo2max = null, vo2maxDate = null;
+    if (healthEnv?.entries) {
+      Object.entries(healthEnv.entries).forEach(([key, entry]) => {
+        if (!key.startsWith('vo2max::') || entry.deletedAt) return;
+        const d = entry.value?.date;
+        const v = entry.value?.value?.vo2max;
+        if (v != null && (!vo2maxDate || d > vo2maxDate)) { vo2maxDate = d; vo2max = v; }
+      });
+    }
+
+    const ud = {};
+    if (userDataEnv?.entries) {
+      Object.entries(userDataEnv.entries).forEach(([key, entry]) => {
+        if (!entry.deletedAt) ud[key] = entry.value;
+      });
+    }
+
+    let profile = null;
+    if (ud.suivi_sport_profile) {
+      try {
+        const p = JSON.parse(ud.suivi_sport_profile);
+        let age = null;
+        if (p.birthDate) {
+          const b = new Date(p.birthDate), now = new Date();
+          age = now.getFullYear() - b.getFullYear();
+          const m = now.getMonth() - b.getMonth();
+          if (m < 0 || (m === 0 && now.getDate() < b.getDate())) age--;
+        }
+        profile = { sex: p.sex || null, age };
+      } catch (e) { /* profil illisible -> reste null */ }
+    }
+
+    // Plan suivi : "importe" (un de nos .aplus, avec libelle depuis
+    // goal.planCategory/name) prioritaire sur "libre" quand prefer_imported_plan
+    // est actif (meme regle que campus.js) ; sinon, aucune trace locale ->
+    // probablement un plan Campus Coach vivant (juste mentionne, jamais
+    // interroge - cf. echange utilisateur, hors de portee sans son propre
+    // token Campus).
+    let plan = { type: 'campus' };
+    let adherence = null;
+    if (ud.suivi_imported_plan && ud.prefer_imported_plan === 'true') {
+      try {
+        const data = JSON.parse(ud.suivi_imported_plan);
+        const goal = data.goal || {};
+        const cat = goal.planCategory;
+        const label = cat ? [cat.sportLabel, cat.distLabel, cat.dplusTier].filter(Boolean).join(' · ') : (goal.goalType || null);
+        plan = { type: 'imported', raceName: goal.name || goal.goalTitle || null, label };
+
+        // Assiduite : seances des semaines deja commencees, "done" vs total du.
+        const localDone = ud.suivi_local_done ? JSON.parse(ud.suivi_local_done) : {};
+        const now = Date.now();
+        let due = 0, done = 0;
+        (data.weeks || []).forEach(week => {
+          if (!week.weekDate || week.weekDate > now) return;
+          (week.sessions || []).forEach((sess, idx) => {
+            due++;
+            if (localDone[`${week._id}_${sess.trainingIndex ?? idx}`] === 'done') done++;
+          });
+        });
+        if (due > 0) adherence = Math.round((done / due) * 100);
+      } catch (e) { /* plan illisible -> reste "campus" par defaut */ }
+    } else if (ud.suivi_free_sessions) {
+      plan = { type: 'free' };
+    }
+
+    res.json({ vo2max, vo2maxDate, profile, plan, adherence });
+  } catch (err) { handleError(res, err); }
+});
+
 // Upload d'une image jointe a un ticket (voir support-relay/src/index.js,
 // /images) - route generique, reutilisee par la creation de ticket ET les
 // reponses (support.js envoie d'abord l'image, recupere son URL, puis
@@ -1572,6 +1659,17 @@ app.get('/api/dashboard', requireSession, async (req, res) => {
         stats.vo2MaxPrecise = last.preciseValue;
       }
     } catch(e) { /* silencieux - on garde la serie issue des activites */ }
+
+    // Instantane quotidien du VO2max, reutilisant tel quel le mecanisme deja
+    // en place pour "Statut d'entrainement" (captureHealthSnapshot, deja
+    // synchronise via health_snapshots - aucun nouveau type/Worker requis).
+    // Lu UNIQUEMENT par le panel Admin (pullEnvelope cote serveur, jamais par
+    // un client Allure+) : rien ne relit "vo2max" localement, donc rien ne
+    // peut jamais l'utiliser pour ecraser la valeur Garmin en direct
+    // affichee dans l'app - purement informatif pour l'admin.
+    if (stats.latestVO2Max) {
+      captureHealthSnapshot('vo2max', todayParisISO(), { vo2max: stats.latestVO2Max, precise: stats.vo2MaxPrecise ?? null }, req.session.email);
+    }
 
     const allActivities = activities.map(a => ({
       id:              a.activityId,
