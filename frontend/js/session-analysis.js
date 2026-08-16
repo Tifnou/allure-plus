@@ -1324,19 +1324,30 @@ function openAnalysisModal(record) {
   const modal = document.createElement('div');
   modal.id = 'session-analysis-result-modal';
   modal.style.cssText = 'position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.55);backdrop-filter:blur(4px);';
+  // Wrapper non-scrollant : porte la croix de fermeture en position absolute
+  // (jamais fixed, pas necessaire ici) pour qu'elle reste visible pendant le
+  // scroll du contenu — celui-ci vit dans .analysis-modal-scroll, seul
+  // element avec overflow-y:auto. overscroll-behavior:contain empeche le
+  // scroll de "deborder" vers la page en dessous une fois arrive en bas/haut
+  // du contenu de la modale (defilement du fond visible au scroll, signale
+  // par l'utilisateur).
   modal.innerHTML = `
-    <div style="background:var(--bg-white);border:1px solid var(--border);border-radius:16px;padding:20px 22px 18px;width:100%;max-width:640px;max-height:88vh;overflow-y:auto;box-shadow:0 24px 60px rgba(0,0,0,.25);">
-      ${buildAnalysisModalHtml(record)}
-      <div style="display:flex;gap:10px;margin-top:16px">
-        <button id="session-analysis-recalc" class="btn-analysis-recalc" title="Refaire le calcul (utile si le moteur d'analyse a evolue depuis la liaison)">🔄 Recalculer</button>
-        <button id="session-analysis-unlink" class="btn-analysis-unlink">Délier cette activité</button>
-        <button id="session-analysis-close" class="btn-analysis-close-modal">Fermer</button>
+    <div style="position:relative;width:100%;max-width:640px;max-height:88vh;">
+      <button id="session-analysis-close-x" class="analysis-modal-close-x" title="Fermer" aria-label="Fermer">&times;</button>
+      <div class="analysis-modal-scroll" style="background:var(--bg-white);border:1px solid var(--border);border-radius:16px;padding:20px 22px 18px;max-height:88vh;overflow-y:auto;overscroll-behavior:contain;box-shadow:0 24px 60px rgba(0,0,0,.25);">
+        ${buildAnalysisModalHtml(record)}
+        <div style="display:flex;gap:10px;margin-top:16px">
+          <button id="session-analysis-recalc" class="btn-analysis-recalc" title="Refaire le calcul (utile si le moteur d'analyse a evolue depuis la liaison)">🔄 Recalculer</button>
+          <button id="session-analysis-unlink" class="btn-analysis-unlink">Délier cette activité</button>
+          <button id="session-analysis-close" class="btn-analysis-close-modal">Fermer</button>
+        </div>
       </div>
     </div>`;
   document.body.appendChild(modal);
   const close = () => { modal.remove(); document.removeEventListener('keydown', escHandler); };
   function escHandler(e) { if (e.key === 'Escape') close(); }
   modal.querySelector('#session-analysis-close').addEventListener('click', close);
+  modal.querySelector('#session-analysis-close-x').addEventListener('click', close);
   modal.querySelector('#session-analysis-unlink').addEventListener('click', () => unlinkAnalysis(record.id, close));
   modal.querySelector('#session-analysis-recalc').addEventListener('click', () => recalculateAnalysis(record));
   attachBackdropClose(modal, close);

@@ -956,7 +956,7 @@ function renderAllActivities(activities, filter = 'all', yearOverride = null) {
         <td class="hr-value">${a.avgHR ? Math.round(a.avgHR)+' bpm' : '\u2014'}</td>
         <td style="color:var(--text-secondary)">${a.elevationGain ? Math.round(a.elevationGain)+' m' : '\u2014'}</td>
         <td style="color:var(--text-muted)">${a.calories ? Math.round(a.calories) : '\u2014'}</td>
-        <td><button class="btn-detail">Detail &rarr;</button></td>
+        <td class="col-chevron"><span class="row-chevron">&rsaquo;</span></td>
       </tr>`;
   }).join('');
 

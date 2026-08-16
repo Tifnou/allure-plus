@@ -589,13 +589,9 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
 .hr-value{color:#B91C1C;}
 .table-loading{text-align:center;padding:28px;color:var(--text-muted);font-size:13px;font-family:var(--font-body);}
 
-.btn-detail{
-  padding:4px 8px;font-size:11px;font-family:var(--font-body);
-  border:1px solid var(--border);border-radius:6px;
-  background:none;color:var(--text-muted);cursor:pointer;
-  transition:all var(--transition);white-space:nowrap;
-}
-.btn-detail:hover{border-color:var(--accent);color:var(--accent-text);background:var(--accent-light);}
+.col-chevron{width:20px;text-align:center;}
+.row-chevron{font-size:18px;color:var(--text-muted);transition:color var(--transition),transform var(--transition);display:inline-block;}
+.activity-row:hover .row-chevron{color:var(--accent-text);transform:translateX(2px);}
 
 /* ─── Charts ─── */
 .chart-container{position:relative;height:180px;}
@@ -2217,6 +2213,16 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
 .btn-analysis-close-modal:hover { border-color: var(--text-muted); color: var(--text-primary); }
 .btn-analysis-recalc { border: 1px solid var(--accent); background: transparent; color: var(--accent); }
 .btn-analysis-recalc:hover { background: rgba(99,102,241,.08); }
+.analysis-modal-close-x {
+  position: absolute; top: -12px; left: -12px; z-index: 2;
+  width: 30px; height: 30px; border-radius: 50%;
+  background: var(--bg-white); border: 1px solid var(--border);
+  color: var(--text-secondary); font-size: 19px; line-height: 1;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; box-shadow: 0 2px 10px rgba(0,0,0,.28);
+  transition: color var(--transition), border-color var(--transition);
+}
+.analysis-modal-close-x:hover { color: var(--text-primary); border-color: var(--text-muted); }
 
 /* ── Barre d'actions plan ── */
 .plan-actions-bar {
