@@ -542,6 +542,31 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
 .stat-tag--neutral{background:var(--bg-hover);color:var(--text-secondary);}
 .stat-tag--warn{background:var(--orange-bg);color:var(--orange);}
 
+/* ─── Répartition de la semaine (dashboard) ─── */
+.dash-week-card{padding:12px 20px;}
+.dash-week-breakdown{display:flex;align-items:center;gap:18px;}
+.dash-week-total{flex-shrink:0;min-width:92px;}
+.dash-week-total-value{font-family:var(--font);font-size:19px;font-weight:700;color:var(--text-primary);line-height:1.1;}
+.dash-week-total-label{font-family:var(--font-body);font-size:10.5px;color:var(--text-muted);margin-top:2px;}
+.dash-week-bars{flex:1;display:flex;align-items:flex-end;gap:6px;height:38px;}
+.dash-week-col{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;position:relative;}
+.dash-week-bar{width:60%;background:var(--border);border-radius:3px;transition:background var(--transition);}
+.dash-week-bar--active{background:var(--accent);}
+.dash-week-col--hoverable{cursor:pointer;}
+.dash-week-col--hoverable:hover .dash-week-bar--active{background:var(--accent-hover,var(--accent));opacity:.85;}
+.dash-week-letter{font-family:var(--font-body);font-size:9.5px;color:var(--text-muted);margin-top:5px;}
+.dash-week-letter--today{color:var(--text-primary);font-weight:700;}
+.dash-week-tooltip{
+  position:absolute;bottom:calc(100% + 8px);left:50%;transform:translateX(-50%);
+  background:var(--bg-white);border:1px solid var(--border);border-radius:8px;
+  padding:8px 10px;font-family:var(--font-body);font-size:11px;white-space:nowrap;
+  box-shadow:var(--shadow-md);z-index:5;
+}
+.dash-week-tooltip-date{font-weight:700;color:var(--text-primary);margin-bottom:4px;}
+.dash-week-tooltip-row{display:flex;align-items:center;gap:5px;color:var(--text-secondary);padding:1px 0;}
+.dash-week-tooltip-row .sport-icon{width:13px;height:13px;flex-shrink:0;}
+@media(max-width:700px){.dash-week-breakdown{flex-wrap:wrap;}.dash-week-bars{width:100%;}}
+
 /* ─── Grids ─── */
 .hero-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px;}
 .dashboard-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;}
@@ -912,9 +937,20 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
 .stats-funfact-value{font-size:26px;font-weight:700;color:var(--text-primary);font-variant-numeric:tabular-nums;}
 .stats-funfact-label{font-size:12px;font-weight:600;color:var(--text-secondary);margin-top:2px;}
 .stats-funfact-sub{font-size:11px;color:var(--text-muted);margin-top:4px;}
-#page-dashboard .wellness-indicators-5{grid-template-columns:repeat(5,1fr);}
-@media(max-width:1100px){#page-dashboard .wellness-indicators-5{grid-template-columns:repeat(3,1fr);}#page-dashboard .wellness-indicators-5 .profile-ind-card:nth-child(3){border-right:none;}}
-@media(max-width:700px){#page-dashboard .wellness-indicators-5{grid-template-columns:repeat(2,1fr);}#page-dashboard .wellness-indicators-5 .profile-ind-card:nth-child(3){border-right:1px solid var(--border);}#page-dashboard .wellness-indicators-5 .profile-ind-card:nth-child(2n){border-right:none;}}
+/* Bien-etre (dashboard) : chaque indicateur dans sa propre carte (comme les
+   4 stat-card du haut) plutot que de simples colonnes separees par un trait
+   - retour utilisateur : les infos se "perdaient" sans cadre propre.
+   align-items:center (pas text-align) car les lignes valeur+unite sont en
+   display:flex inline dans le HTML - un flex enfant ignore le text-align du
+   parent, seul align-items sur le conteneur flex-column le centre vraiment
+   (meme categorie de bug que .session-mood-icon en display:block). */
+#page-dashboard .wellness-indicators-5{grid-template-columns:repeat(5,1fr);gap:10px;padding-top:0;}
+#page-dashboard .wellness-indicators-5 .profile-ind-card{
+  background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-md);
+  padding:14px 10px;display:flex;flex-direction:column;align-items:center;text-align:center;
+}
+@media(max-width:1100px){#page-dashboard .wellness-indicators-5{grid-template-columns:repeat(3,1fr);}}
+@media(max-width:700px){#page-dashboard .wellness-indicators-5{grid-template-columns:repeat(2,1fr);}}
 
 .profile-layout{display:grid;grid-template-columns:340px 1fr;gap:12px;align-items:start;}
 .profile-form-col{display:flex;flex-direction:column;gap:12px;}
@@ -4442,6 +4478,60 @@ body { background: var(--bg) !important; }
 .act-header-center .filter-pills { justify-content: center; }
 .act-header-center .activity-time-filters { justify-content: center; }
 
+/* Bascule Liste / Vue calendrier */
+.act-view-toggle { display: flex; gap: 4px; flex-shrink: 0; background: var(--bg); border-radius: 20px; padding: 3px; }
+.act-view-btn {
+  display: flex; align-items: center; gap: 5px;
+  font-family: var(--font-body); font-size: 12px; font-weight: 600;
+  color: var(--text-secondary); background: transparent; border: none;
+  border-radius: 20px; padding: 6px 12px; cursor: pointer; transition: all var(--transition);
+  white-space: nowrap;
+}
+.act-view-btn:hover { color: var(--text-primary); }
+.act-view-btn.active { background: var(--card-bg); color: var(--text-primary); box-shadow: var(--shadow-sm); }
+
+/* ─── Vue calendrier ─── */
+.cal-header { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+.cal-nav-btn {
+  width: 28px; height: 28px; border-radius: 50%; border: 1px solid var(--border);
+  background: transparent; color: var(--text-secondary); cursor: pointer;
+  display: flex; align-items: center; justify-content: center; font-size: 11px;
+  transition: all var(--transition);
+}
+.cal-nav-btn:hover { border-color: var(--text-muted); color: var(--text-primary); }
+.cal-month-label { font-family: var(--font); font-size: 15px; font-weight: 700; color: var(--text-primary); min-width: 140px; }
+.cal-today-btn {
+  margin-left: auto; font-family: var(--font-body); font-size: 12px; font-weight: 600;
+  color: var(--accent-text); background: var(--accent-light); border: none;
+  border-radius: 20px; padding: 6px 14px; cursor: pointer; transition: all var(--transition);
+}
+.cal-today-btn:hover { opacity: .85; }
+.cal-grid { display: flex; flex-direction: column; gap: 6px; }
+.cal-weekday-row, .cal-week-row { display: grid; grid-template-columns: repeat(7, 1fr) 108px; gap: 6px; }
+.cal-weekday-row { font-family: var(--font-body); font-size: 10.5px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: .04em; text-align: center; padding-bottom: 2px; }
+.cal-day-cell { min-height: 78px; border-radius: 8px; background: var(--bg); padding: 5px; display: flex; flex-direction: column; gap: 3px; }
+.cal-day-cell--outside { opacity: .35; }
+.cal-day-cell--today { background: var(--accent-light); border: 1px solid var(--accent); }
+.cal-day-num { font-family: var(--font-body); font-size: 10.5px; color: var(--text-muted); }
+.cal-day-cell--today .cal-day-num { color: var(--accent-text); font-weight: 700; }
+.cal-chip {
+  display: flex; align-items: center; gap: 4px; border-radius: 0 5px 5px 0;
+  border-left: 2px solid var(--chip-color, var(--text-muted));
+  background: color-mix(in srgb, var(--chip-color, var(--text-muted)) 15%, transparent);
+  padding: 2px 5px; cursor: pointer;
+}
+.cal-chip .sport-icon { width: 11px; height: 11px; flex-shrink: 0; }
+.cal-chip-label { font-family: var(--font-body); font-size: 9.5px; color: var(--text-primary); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cal-chip-more { font-family: var(--font-body); font-size: 9px; color: var(--text-muted); padding: 1px 4px; }
+.cal-week-recap {
+  border-radius: 8px; background: var(--bg); padding: 8px 9px;
+  display: flex; flex-direction: column; justify-content: center; gap: 3px;
+}
+.cal-week-recap-row { font-family: var(--font-body); font-size: 9.5px; color: var(--text-muted); }
+.cal-week-recap-row strong { color: var(--text-primary); font-weight: 700; }
+.cal-week-recap--empty { color: var(--text-muted); font-size: 9.5px; display: flex; align-items: center; justify-content: center; text-align: center; }
+@media(max-width:900px){.cal-weekday-row, .cal-week-row{grid-template-columns:repeat(7,1fr);}.cal-week-recap{display:none;}}
+
 /* Colonne droite : synthèse */
 .act-header-stats {
   display: flex;
@@ -4591,6 +4681,12 @@ body { background: var(--bg) !important; }
   overflow-y: auto !important;
   overflow-x: auto !important;
 }
+/* Bascule Liste/Calendrier (showActivitiesListView/showActivitiesCalendarView,
+   app.js) : specificite ID+3 classes necessaire pour gagner sur la regle
+   "#page-activities .card.card--fullwidth{display:flex!important}" ci-dessus,
+   qui sinon reaffiche la carte tableau meme masquee en inline/classe simple. */
+#page-activities .card.card--fullwidth.act-view-hidden { display: none !important; }
+.act-view-hidden { display: none; }
 
 /* En-tête de tableau collant dans son propre conteneur */
 #page-activities .runs-table thead th {

@@ -626,6 +626,7 @@ async function loadDashboard() {
     }
 
     renderHeroStats(stats);
+    renderWeeklyBreakdown();
     renderLastRun(lastRuns);
     renderHeatmap(stats.heatmap || {});
     renderSportsChart(stats.sportBreakdown || {});
@@ -653,6 +654,74 @@ async function loadDashboard() {
   } catch(e) {
     console.error('Erreur dashboard:', e);
   }
+}
+
+// ─── Répartition de la semaine en cours (lun→dim) ────────────────────
+// Regroupe _allActivities (deja charge par loadDashboard, pas d'appel
+// reseau supplementaire) par jour de la semaine calendaire contenant
+// aujourd'hui. Barres en pur HTML/CSS (pas Chart.js) - assez simple pour
+// ne pas justifier un canvas, et l'infobulle au survol (liste d'activites
+// du jour) est plus simple a construire en DOM qu'en tooltip Chart.js.
+function renderWeeklyBreakdown() {
+  const container = el('dash-week-breakdown');
+  if (!container) return;
+
+  const today = new Date();
+  const dow = today.getDay(); // 0=dimanche..6=samedi
+  const mondayOffset = dow === 0 ? -6 : 1 - dow;
+  const monday = new Date(today.getFullYear(), today.getMonth(), today.getDate() + mondayOffset);
+  const days = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + i);
+    return { date: d, activities: [], totalSec: 0 };
+  });
+  const sunday = days[6].date;
+
+  (_allActivities || []).forEach(a => {
+    if (!a.date) return;
+    const d = new Date(a.date);
+    if (isNaN(d) || d < monday || d > new Date(sunday.getFullYear(), sunday.getMonth(), sunday.getDate(), 23, 59, 59)) return;
+    const idx = Math.round((new Date(d.getFullYear(), d.getMonth(), d.getDate()) - monday) / 86400000);
+    if (idx < 0 || idx > 6) return;
+    days[idx].activities.push(a);
+    days[idx].totalSec += (a.durationSec || 0);
+  });
+
+  const totalSec = days.reduce((s, d) => s + d.totalSec, 0);
+  const maxSec = Math.max(...days.map(d => d.totalSec), 1);
+  const dayLetters = ['L', 'M', 'M', 'J', 'V', 'S', 'D'];
+  const rangeLabel = monday.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }) + ' – ' + sunday.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
+
+  const barsHtml = days.map((d, i) => {
+    const heightPct = d.totalSec > 0 ? Math.max(10, Math.round((d.totalSec / maxSec) * 100)) : 4;
+    const isToday = d.date.toDateString() === today.toDateString();
+    return `<div class="dash-week-col" data-idx="${i}">
+      <div class="dash-week-bar${d.totalSec > 0 ? ' dash-week-bar--active' : ''}" style="height:${heightPct}%"></div>
+      <div class="dash-week-letter${isToday ? ' dash-week-letter--today' : ''}">${dayLetters[i]}</div>
+    </div>`;
+  }).join('');
+
+  container.innerHTML = `
+    <div class="dash-week-total">
+      <div class="dash-week-total-value">${formatDuration(totalSec)}</div>
+      <div class="dash-week-total-label">${rangeLabel}</div>
+    </div>
+    <div class="dash-week-bars">${barsHtml}</div>`;
+
+  container.querySelectorAll('.dash-week-col').forEach(col => {
+    const d = days[parseInt(col.dataset.idx, 10)];
+    if (!d.activities.length) return;
+    col.classList.add('dash-week-col--hoverable');
+    let tip = null;
+    col.addEventListener('mouseenter', () => {
+      const dateLbl = d.date.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
+      tip = document.createElement('div');
+      tip.className = 'dash-week-tooltip';
+      tip.innerHTML = `<div class="dash-week-tooltip-date">${dateLbl.charAt(0).toUpperCase() + dateLbl.slice(1)}</div>`
+        + d.activities.map(a => `<div class="dash-week-tooltip-row">${typeof getSportIcon === 'function' ? getSportIcon(a.activityType) : ''}<span>${a.name || 'Activité'} · ${formatDuration(a.durationSec)}</span></div>`).join('');
+      col.appendChild(tip);
+    });
+    col.addEventListener('mouseleave', () => { if (tip) { tip.remove(); tip = null; } });
+  });
 }
 
 // ─── Hero Stats ────────────────────────────────
@@ -969,6 +1038,134 @@ function renderAllActivities(activities, filter = 'all', yearOverride = null) {
     });
   });
 }
+
+// ─── Vue calendrier (page Activités) ───────────────────────────────
+// Bascule Liste/Calendrier sur la meme donnee que le tableau (_allActivities,
+// via ensureYearLoaded/stats.js pour les mois d'annees pas encore chargees) -
+// pas de route API dediee. Etat du mois affiche independant du filtre
+// annee/mois du tableau (propre navigation mois par mois, comme un vrai
+// calendrier), reinitialise sur le mois courant a chaque ouverture.
+const CAL_TYPE_COLORS = {
+  'sport-icon--running': '#3b82f6', 'sport-icon--trail': '#2dd4bf',
+  'sport-icon--cycling': '#fb923c', 'sport-icon--walking': '#a78bfa',
+  'sport-icon--cardio': '#f87171', '': '#8a8fa3',
+};
+let _calDate = new Date();
+
+function showActivitiesListView() {
+  el('activities-table-card').classList.remove('act-view-hidden');
+  el('activities-calendar-card').classList.add('act-view-hidden');
+  document.querySelectorAll('.act-view-btn').forEach(b => b.classList.toggle('active', b.dataset.view === 'list'));
+}
+function showActivitiesCalendarView() {
+  el('activities-table-card').classList.add('act-view-hidden');
+  el('activities-calendar-card').classList.remove('act-view-hidden');
+  document.querySelectorAll('.act-view-btn').forEach(b => b.classList.toggle('active', b.dataset.view === 'calendar'));
+  renderActivitiesCalendar();
+}
+
+async function calNavigate(deltaMonths) {
+  _calDate = new Date(_calDate.getFullYear(), _calDate.getMonth() + deltaMonths, 1);
+  await renderActivitiesCalendar();
+}
+async function calGoToday() {
+  _calDate = new Date();
+  await renderActivitiesCalendar();
+}
+
+async function renderActivitiesCalendar() {
+  const grid = el('cal-grid');
+  const label = el('cal-month-label');
+  if (!grid || !label) return;
+
+  const year = _calDate.getFullYear(), month = _calDate.getMonth();
+  label.textContent = _calDate.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
+  label.textContent = label.textContent.charAt(0).toUpperCase() + label.textContent.slice(1);
+
+  // Charge l'annee affichee si pas encore en memoire (mois d'une annee
+  // passee jamais visitee dans le tableau) - meme mecanisme que le filtre
+  // annee des Activites, cf. stats.js.
+  if (typeof ensureYearLoaded === 'function' && year < new Date().getFullYear()) {
+    await ensureYearLoaded(year);
+  }
+
+  const firstOfMonth = new Date(year, month, 1);
+  const firstDow = (firstOfMonth.getDay() + 6) % 7; // 0=lundi
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const gridStart = new Date(year, month, 1 - firstDow);
+
+  const today = new Date();
+  const todayKey = today.toDateString();
+
+  // Regroupe les activites par jour (cle: toDateString) pour tout
+  // l'intervalle affiche (peut deborder sur le mois precedent/suivant).
+  const totalCells = Math.ceil((firstDow + daysInMonth) / 7) * 7;
+  const gridEnd = new Date(gridStart.getFullYear(), gridStart.getMonth(), gridStart.getDate() + totalCells - 1, 23, 59, 59);
+  const byDay = {};
+  (_allActivities || []).forEach(a => {
+    if (!a.date) return;
+    const d = new Date(a.date);
+    if (isNaN(d) || d < gridStart || d > gridEnd) return;
+    const key = d.toDateString();
+    (byDay[key] = byDay[key] || []).push(a);
+  });
+
+  const weekdayRow = '<div class="cal-weekday-row"><div>Lun</div><div>Mar</div><div>Mer</div><div>Jeu</div><div>Ven</div><div>Sam</div><div>Dim</div><div></div></div>';
+
+  const weekRows = [];
+  for (let w = 0; w < totalCells / 7; w++) {
+    const cells = [];
+    let weekDist = 0, weekSec = 0, weekCal = 0, weekHasData = false;
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(gridStart.getFullYear(), gridStart.getMonth(), gridStart.getDate() + w * 7 + i);
+      const key = d.toDateString();
+      const dayActs = byDay[key] || [];
+      const isOutside = d.getMonth() !== month;
+      const isToday = key === todayKey;
+      if (!isOutside) {
+        dayActs.forEach(a => {
+          weekDist += (a.distanceKm || 0); weekSec += (a.durationSec || 0); weekCal += (a.calories || 0);
+          weekHasData = true;
+        });
+      }
+      const MAX_CHIPS = 2;
+      const chips = dayActs.slice(0, MAX_CHIPS).map(a => {
+        const cls = getSportIconClass(a.activityType);
+        const color = CAL_TYPE_COLORS[cls] || CAL_TYPE_COLORS[''];
+        const labelTxt = (dayActs.length === 1 && a.distanceKm) ? a.distanceKm.toFixed(2) + ' km' : activityTypeLabel(a.activityType);
+        return `<div class="cal-chip" style="--chip-color:${color}" onclick="event.stopPropagation();calOpenActivity('${a.id}')" title="${(a.name || '').replace(/"/g, '&quot;')}">${getSportIcon(a.activityType)}<span class="cal-chip-label">${labelTxt}</span></div>`;
+      }).join('');
+      const more = dayActs.length > MAX_CHIPS ? `<div class="cal-chip-more">+${dayActs.length - MAX_CHIPS}</div>` : '';
+      cells.push(`<div class="cal-day-cell${isOutside ? ' cal-day-cell--outside' : ''}${isToday ? ' cal-day-cell--today' : ''}">
+        <div class="cal-day-num">${d.getDate()}</div>${chips}${more}
+      </div>`);
+    }
+    const recapHtml = weekHasData
+      ? `<div class="cal-week-recap">
+          <div class="cal-week-recap-row">Dist. <strong>${weekDist.toFixed(1)} km</strong></div>
+          <div class="cal-week-recap-row">Durée <strong>${formatDuration(weekSec)}</strong></div>
+          <div class="cal-week-recap-row">Cal. <strong>${Math.round(weekCal)}</strong></div>
+        </div>`
+      : '<div class="cal-week-recap cal-week-recap--empty">—</div>';
+    weekRows.push(`<div class="cal-week-row">${cells.join('')}${recapHtml}</div>`);
+  }
+
+  grid.innerHTML = weekdayRow + weekRows.join('');
+}
+
+// Ouverture d'une activite depuis une puce du calendrier - _allActivities
+// contient deja l'annee affichee (ensureYearLoaded ci-dessus avant le
+// rendu de la grille), pas besoin du fallback reseau de openActivityFromId
+// (pensee pour Records et courses, backTo='records' non pertinent ici).
+function calOpenActivity(id) {
+  const act = (_allActivities || []).find(a => String(a.id) === String(id));
+  if (act) showActivityDetail(act, 'activities');
+  else if (typeof showToast === 'function') showToast('Activité introuvable', 'error');
+}
+
+if (el('cal-prev')) el('cal-prev').addEventListener('click', () => calNavigate(-1));
+if (el('cal-next')) el('cal-next').addEventListener('click', () => calNavigate(1));
+if (el('cal-today')) el('cal-today').addEventListener('click', calGoToday);
 
 // Ouvre le detail d'une activite (page Activites) depuis son id Garmin —
 // utilise par le lien "course -> activite" de la page Records et courses.
