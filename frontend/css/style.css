@@ -557,9 +557,10 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
 .dash-week-bars{flex:1;display:flex;align-items:flex-end;gap:10px;height:100px;}
 .dash-week-col{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;position:relative;}
 .dash-week-bar{width:60%;background:var(--border);border-radius:4px;transition:background var(--transition);}
-.dash-week-bar--active{background:var(--accent);}
+.dash-week-bar--active{background:transparent;display:flex;flex-direction:column;overflow:hidden;}
+.dash-week-bar-seg{width:100%;}
 .dash-week-col--hoverable{cursor:pointer;}
-.dash-week-col--hoverable:hover .dash-week-bar--active{background:var(--accent-hover,var(--accent));opacity:.85;}
+.dash-week-col--hoverable:hover .dash-week-bar--active{opacity:.8;}
 .dash-week-letter{font-family:var(--font-body);font-size:10.5px;color:var(--text-muted);margin-top:7px;}
 .dash-week-letter--today{color:var(--text-primary);font-weight:700;}
 .dash-week-tooltip{

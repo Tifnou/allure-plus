@@ -673,7 +673,7 @@ function renderWeeklyBreakdown() {
   const monday = new Date(today.getFullYear(), today.getMonth(), today.getDate() + mondayOffset);
   const days = Array.from({ length: 7 }, (_, i) => {
     const d = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + i);
-    return { date: d, activities: [], totalSec: 0 };
+    return { date: d, activities: [], totalSec: 0, totalDistKm: 0, typeSecs: {} };
   });
   const sunday = days[6].date;
 
@@ -683,20 +683,37 @@ function renderWeeklyBreakdown() {
     if (isNaN(d) || d < monday || d > new Date(sunday.getFullYear(), sunday.getMonth(), sunday.getDate(), 23, 59, 59)) return;
     const idx = Math.round((new Date(d.getFullYear(), d.getMonth(), d.getDate()) - monday) / 86400000);
     if (idx < 0 || idx > 6) return;
-    days[idx].activities.push(a);
-    days[idx].totalSec += (a.durationSec || 0);
+    const day = days[idx];
+    const sec = a.durationSec || 0;
+    day.activities.push(a);
+    day.totalSec += sec;
+    day.totalDistKm += (a.distanceKm || 0);
+    const cls = getSportIconClass(a.activityType);
+    day.typeSecs[cls] = (day.typeSecs[cls] || 0) + sec;
   });
 
   const totalSec = days.reduce((s, d) => s + d.totalSec, 0);
+  const totalDistKm = days.reduce((s, d) => s + d.totalDistKm, 0);
   const maxSec = Math.max(...days.map(d => d.totalSec), 1);
   const dayLetters = ['L', 'M', 'M', 'J', 'V', 'S', 'D'];
   const rangeLabel = monday.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }) + ' – ' + sunday.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
 
+  // Barre segmentee par type d'activite (hauteur totale = temps du jour vs
+  // max de la semaine, comme avant ; a l'interieur, chaque type occupe une
+  // portion proportionnelle a son temps ce jour-la - une journee course+velo
+  // affiche les 2 couleurs empilees) - meme palette CAL_TYPE_COLORS que la
+  // vue calendrier (Activites), pour rester coherent d'une vue a l'autre.
   const barsHtml = days.map((d, i) => {
     const heightPct = d.totalSec > 0 ? Math.max(10, Math.round((d.totalSec / maxSec) * 100)) : 4;
     const isToday = d.date.toDateString() === today.toDateString();
+    let barInner = '';
+    if (d.totalSec > 0) {
+      barInner = Object.entries(d.typeSecs)
+        .map(([cls, sec]) => `<div class="dash-week-bar-seg" style="flex:${sec} 0 0;background:${CAL_TYPE_COLORS[cls] || CAL_TYPE_COLORS['']}"></div>`)
+        .join('');
+    }
     return `<div class="dash-week-col" data-idx="${i}">
-      <div class="dash-week-bar${d.totalSec > 0 ? ' dash-week-bar--active' : ''}" style="height:${heightPct}%"></div>
+      <div class="dash-week-bar${d.totalSec > 0 ? ' dash-week-bar--active' : ''}" style="height:${heightPct}%">${barInner}</div>
       <div class="dash-week-letter${isToday ? ' dash-week-letter--today' : ''}">${dayLetters[i]}</div>
     </div>`;
   }).join('');
@@ -704,7 +721,7 @@ function renderWeeklyBreakdown() {
   container.innerHTML = `
     <div class="dash-week-total">
       <div class="dash-week-total-value">${formatDuration(totalSec)}</div>
-      <div class="dash-week-total-label">${rangeLabel}</div>
+      <div class="dash-week-total-label">${totalDistKm.toFixed(1)} km · ${rangeLabel}</div>
     </div>
     <div class="dash-week-bars">${barsHtml}</div>`;
 
