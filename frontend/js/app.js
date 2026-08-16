@@ -637,6 +637,7 @@ async function loadDashboard() {
     const dayStr = now.toLocaleDateString('fr-FR', { weekday:'long', day:'numeric', month:'long', year:'numeric' });
     const dayFormatted = dayStr.charAt(0).toUpperCase() + dayStr.slice(1);
     setVal('page-date', dayFormatted);
+    setVal('act-page-date', dayFormatted);
     // Injecter dans tous les page-header
     document.querySelectorAll('.page-header').forEach(header => {
       if (!header.querySelector('.page-header-date') && !header.querySelector('#page-date')) {
@@ -911,6 +912,23 @@ function wireSportFilterPills(container, onChange) {
   });
 }
 
+// Sport type filter — filter est 'all', une seule cle, ou un tableau de cles
+// cumulees (multi-selection des pastilles, cf wireSportFilterPills). Extrait
+// de renderAllActivities pour etre reutilise par la vue calendrier (chips +
+// recap hebdo/mensuel) - une seule logique de correspondance type<->filtre.
+function activityMatchesSportFilter(activityType, filter) {
+  const t = (activityType || '').toLowerCase();
+  const filters = Array.isArray(filter) ? filter : [filter];
+  return filters.includes('all') || filters.some(f => {
+    if (f === 'running') return (t === 'running' || t === 'treadmill_running' || (t.includes('run') && !t.includes('trail')));
+    if (f === 'trail')   return t.includes('trail');
+    if (f === 'cycling') return t === 'cycling' || t.includes('cycl') || t.includes('bike');
+    if (f === 'cardio')  return t.includes('cardio') || t.includes('fitness') || t.includes('indoor') || t.includes('strength') || t.includes('hiit') || t.includes('muscul');
+    if (f === 'walking') return t.includes('walk') || t === 'walking';
+    return true;
+  });
+}
+
 function renderAllActivities(activities, filter = 'all', yearOverride = null) {
 
   const tbody = el('all-activities-tbody');
@@ -927,18 +945,7 @@ function renderAllActivities(activities, filter = 'all', yearOverride = null) {
   }
 
   const filtered = (activities || []).filter(a => {
-    const t = (a.activityType || '').toLowerCase();
-    // Sport type filter — filter est 'all', une seule cle, ou un tableau de
-    // cles cumulees (multi-selection des pastilles, cf wireSportFilterPills)
-    const filters = Array.isArray(filter) ? filter : [filter];
-    let sportMatch = filters.includes('all') || filters.some(f => {
-      if (f === 'running') return (t === 'running' || t === 'treadmill_running' || (t.includes('run') && !t.includes('trail')));
-      if (f === 'trail')   return t.includes('trail');
-      if (f === 'cycling') return t === 'cycling' || t.includes('cycl') || t.includes('bike');
-      if (f === 'cardio')  return t.includes('cardio') || t.includes('fitness') || t.includes('indoor') || t.includes('strength') || t.includes('hiit') || t.includes('muscul');
-      if (f === 'walking') return t.includes('walk') || t === 'walking';
-      return true;
-    });
+    const sportMatch = activityMatchesSportFilter(a.activityType, filter);
     // Year/month filter
     const date = new Date(a.startTimeLocal || a.startTimeGMT || a.beginTimestamp || a.date);
     const yearMatch  = !yearFilter  || date.getFullYear() === yearFilter;
@@ -1051,6 +1058,7 @@ const CAL_TYPE_COLORS = {
   'sport-icon--cardio': '#f87171', '': '#8a8fa3',
 };
 let _calDate = new Date();
+let _calViewMode = 'month'; // 'month' | 'year' (cf. calSetMode)
 
 function showActivitiesListView() {
   el('activities-table-card').classList.remove('act-view-hidden');
@@ -1064,8 +1072,18 @@ function showActivitiesCalendarView() {
   renderActivitiesCalendar();
 }
 
-async function calNavigate(deltaMonths) {
-  _calDate = new Date(_calDate.getFullYear(), _calDate.getMonth() + deltaMonths, 1);
+function calSetMode(mode) {
+  _calViewMode = mode;
+  document.querySelectorAll('.cal-mode-btn').forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
+  const grid = el('cal-grid');
+  if (grid) grid.classList.toggle('cal-grid--year', mode === 'year');
+  renderActivitiesCalendar();
+}
+
+async function calNavigate(delta) {
+  _calDate = (_calViewMode === 'year')
+    ? new Date(_calDate.getFullYear() + delta, _calDate.getMonth(), 1)
+    : new Date(_calDate.getFullYear(), _calDate.getMonth() + delta, 1);
   await renderActivitiesCalendar();
 }
 async function calGoToday() {
@@ -1073,7 +1091,14 @@ async function calGoToday() {
   await renderActivitiesCalendar();
 }
 
+// Dispatcheur mois/annee - cal-prev/cal-next/cal-today/le filtre sport et
+// showActivitiesCalendarView appellent tous cette fonction sans se soucier
+// du mode courant.
 async function renderActivitiesCalendar() {
+  return _calViewMode === 'year' ? renderActivitiesCalendarYear() : renderActivitiesCalendarMonth();
+}
+
+async function renderActivitiesCalendarMonth() {
   const grid = el('cal-grid');
   const label = el('cal-month-label');
   if (!grid || !label) return;
@@ -1088,6 +1113,12 @@ async function renderActivitiesCalendar() {
   if (typeof ensureYearLoaded === 'function' && year < new Date().getFullYear()) {
     await ensureYearLoaded(year);
   }
+  const raceIds = await calGetRaceActivityIds();
+
+  // Respecte le filtre sport actif (pastilles Tout/Course/Trail/...) - meme
+  // logique que le tableau (activityMatchesSportFilter), sur puces ET totaux.
+  const currentFilter = typeof getActiveSportFilters === 'function' ? getActiveSportFilters(el('activity-filters')) : 'all';
+  const activitiesInScope = (_allActivities || []).filter(a => activityMatchesSportFilter(a.activityType, currentFilter));
 
   const firstOfMonth = new Date(year, month, 1);
   const firstDow = (firstOfMonth.getDay() + 6) % 7; // 0=lundi
@@ -1102,7 +1133,7 @@ async function renderActivitiesCalendar() {
   const totalCells = Math.ceil((firstDow + daysInMonth) / 7) * 7;
   const gridEnd = new Date(gridStart.getFullYear(), gridStart.getMonth(), gridStart.getDate() + totalCells - 1, 23, 59, 59);
   const byDay = {};
-  (_allActivities || []).forEach(a => {
+  activitiesInScope.forEach(a => {
     if (!a.date) return;
     const d = new Date(a.date);
     if (isNaN(d) || d < gridStart || d > gridEnd) return;
@@ -1112,6 +1143,8 @@ async function renderActivitiesCalendar() {
 
   const weekdayRow = '<div class="cal-weekday-row"><div>Lun</div><div>Mar</div><div>Mer</div><div>Jeu</div><div>Ven</div><div>Sam</div><div>Dim</div><div></div></div>';
 
+  const actsById = {}; // pour les tooltips au survol, attaches apres coup (voir plus bas)
+  let monthDist = 0, monthSec = 0, monthCount = 0;
   const weekRows = [];
   for (let w = 0; w < totalCells / 7; w++) {
     const cells = [];
@@ -1126,14 +1159,22 @@ async function renderActivitiesCalendar() {
         dayActs.forEach(a => {
           weekDist += (a.distanceKm || 0); weekSec += (a.durationSec || 0); weekCal += (a.calories || 0);
           weekHasData = true;
+          monthDist += (a.distanceKm || 0); monthSec += (a.durationSec || 0); monthCount++;
         });
       }
       const MAX_CHIPS = 2;
       const chips = dayActs.slice(0, MAX_CHIPS).map(a => {
+        actsById[a.id] = a;
         const cls = getSportIconClass(a.activityType);
         const color = CAL_TYPE_COLORS[cls] || CAL_TYPE_COLORS[''];
-        const labelTxt = (dayActs.length === 1 && a.distanceKm) ? a.distanceKm.toFixed(2) + ' km' : activityTypeLabel(a.activityType);
-        return `<div class="cal-chip" style="--chip-color:${color}" onclick="event.stopPropagation();calOpenActivity('${a.id}')" title="${(a.name || '').replace(/"/g, '&quot;')}">${getSportIcon(a.activityType)}<span class="cal-chip-label">${labelTxt}</span></div>`;
+        // Libelle toujours = le type (Course/Trail/Velo...), jamais la
+        // distance - retour utilisateur : l'ancien "km si seule activite du
+        // jour, sinon type" rendait les cases incoherentes d'un jour a
+        // l'autre. Le detail (distance/duree/FC) passe desormais par la
+        // vignette au survol (cf. attachCalChipTooltips ci-dessous).
+        const labelTxt = activityTypeLabel(a.activityType);
+        const star = raceIds.has(String(a.id)) ? '<span class="cal-chip-star" title="Liee a une course dans Mes courses">&#9733;</span>' : '';
+        return `<div class="cal-chip" data-actid="${a.id}" style="--chip-color:${color}" onclick="event.stopPropagation();calOpenActivity('${a.id}')">${getSportIcon(a.activityType)}<span class="cal-chip-label">${labelTxt}</span>${star}</div>`;
       }).join('');
       const more = dayActs.length > MAX_CHIPS ? `<div class="cal-chip-more">+${dayActs.length - MAX_CHIPS}</div>` : '';
       cells.push(`<div class="cal-day-cell${isOutside ? ' cal-day-cell--outside' : ''}${isToday ? ' cal-day-cell--today' : ''}">
@@ -1151,6 +1192,152 @@ async function renderActivitiesCalendar() {
   }
 
   grid.innerHTML = weekdayRow + weekRows.join('');
+
+  // Total du mois affiche, discret, a cote du libelle du mois.
+  const monthTotalEl = el('cal-month-total');
+  if (monthTotalEl) {
+    monthTotalEl.textContent = monthCount > 0
+      ? `${monthCount} activité${monthCount > 1 ? 's' : ''} · ${monthDist.toFixed(1)} km · ${formatDuration(monthSec)}`
+      : '';
+  }
+
+  attachCalChipTooltips(grid, actsById);
+}
+
+const CAL_MONTH_NAMES = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
+
+// Vue "Année" (calSetMode) : 12 mini-calendriers façon Garmin, sans en
+// reprendre le style — un trait de couleur (type de la 1ere activite du
+// jour) sous le numero plutot qu'un texte, trop de place manque a cette
+// echelle pour des puces lisibles. Detail complet dans la vignette au survol
+// (attachCalChipTooltips, reutilisee au niveau du jour entier ici).
+async function renderActivitiesCalendarYear() {
+  const grid = el('cal-grid');
+  const label = el('cal-month-label');
+  if (!grid || !label) return;
+
+  const year = _calDate.getFullYear();
+  label.textContent = String(year);
+
+  if (typeof ensureYearLoaded === 'function' && year < new Date().getFullYear()) {
+    await ensureYearLoaded(year);
+  }
+
+  const currentFilter = typeof getActiveSportFilters === 'function' ? getActiveSportFilters(el('activity-filters')) : 'all';
+  const activitiesInScope = (_allActivities || []).filter(a => activityMatchesSportFilter(a.activityType, currentFilter));
+
+  const byDay = {};
+  let yearDist = 0, yearSec = 0, yearCount = 0;
+  activitiesInScope.forEach(a => {
+    if (!a.date) return;
+    const d = new Date(a.date);
+    if (isNaN(d) || d.getFullYear() !== year) return;
+    const key = d.toDateString();
+    (byDay[key] = byDay[key] || []).push(a);
+    yearDist += (a.distanceKm || 0); yearSec += (a.durationSec || 0); yearCount++;
+  });
+
+  const today = new Date();
+  const todayKey = today.toDateString();
+  const actsById = {};
+
+  const monthsHtml = CAL_MONTH_NAMES.map((mName, m) => {
+    const firstOfMonth = new Date(year, m, 1);
+    const firstDow = (firstOfMonth.getDay() + 6) % 7;
+    const daysInMonth = new Date(year, m + 1, 0).getDate();
+    const totalCells = Math.ceil((firstDow + daysInMonth) / 7) * 7;
+    const gridStart = new Date(year, m, 1 - firstDow);
+
+    const dayCells = [];
+    for (let i = 0; i < totalCells; i++) {
+      const d = new Date(gridStart.getFullYear(), gridStart.getMonth(), gridStart.getDate() + i);
+      const key = d.toDateString();
+      const dayActs = byDay[key] || [];
+      const isOutside = d.getMonth() !== m;
+      const isToday = key === todayKey;
+      let barHtml = '';
+      if (!isOutside && dayActs.length) {
+        const cls = getSportIconClass(dayActs[0].activityType);
+        const color = CAL_TYPE_COLORS[cls] || CAL_TYPE_COLORS[''];
+        const dayId = 'calYearDay_' + key.replace(/[^a-zA-Z0-9]/g, '');
+        actsById[dayId] = dayActs;
+        barHtml = `<div class="cal-year-bar" data-dayid="${dayId}" style="--chip-color:${color}"></div>`;
+      }
+      dayCells.push(`<div class="cal-year-day${isOutside ? ' cal-year-day--outside' : ''}${isToday ? ' cal-year-day--today' : ''}">
+        <span class="cal-year-day-num">${d.getDate()}</span>${barHtml}
+      </div>`);
+    }
+
+    return `<div class="cal-year-month">
+      <div class="cal-year-month-label">${mName}</div>
+      <div class="cal-year-mini-weekdays"><div>L</div><div>M</div><div>M</div><div>J</div><div>V</div><div>S</div><div>D</div></div>
+      <div class="cal-year-mini-days">${dayCells.join('')}</div>
+    </div>`;
+  }).join('');
+
+  grid.innerHTML = `<div class="cal-year-grid">${monthsHtml}</div>`;
+
+  const totalEl = el('cal-month-total');
+  if (totalEl) {
+    totalEl.textContent = yearCount > 0
+      ? `${yearCount} activité${yearCount > 1 ? 's' : ''} · ${yearDist.toFixed(0)} km · ${formatDuration(yearSec)}`
+      : '';
+  }
+
+  // Vignette au survol d'un jour (liste des activites, meme jour peut en
+  // porter plusieurs meme si un seul trait de couleur est affiche).
+  grid.querySelectorAll('.cal-year-bar').forEach(bar => {
+    const acts = actsById[bar.dataset.dayid];
+    if (!acts || !acts.length) return;
+    const cell = bar.closest('.cal-year-day');
+    let tip = null;
+    cell.addEventListener('mouseenter', () => {
+      tip = document.createElement('div');
+      tip.className = 'cal-chip-tooltip cal-year-tooltip';
+      tip.innerHTML = acts.map(a => {
+        const rows = [a.distanceKm ? a.distanceKm.toFixed(2) + ' km' : null, a.durationSec ? formatDuration(a.durationSec) : null].filter(Boolean).join(' · ');
+        return `<div class="cal-chip-tooltip-name">${activityTypeLabel(a.activityType)}</div><div class="cal-chip-tooltip-stats">${rows}</div>`;
+      }).join('');
+      cell.appendChild(tip);
+    });
+    cell.addEventListener('mouseleave', () => { if (tip) { tip.remove(); tip = null; } });
+  });
+}
+
+// Vignette au survol d'une puce du calendrier (nom, distance, duree, FC) -
+// meme mecanisme que l'infobulle de "Votre semaine" (dashboard).
+function attachCalChipTooltips(grid, actsById) {
+  grid.querySelectorAll('.cal-chip').forEach(chip => {
+    const a = actsById[chip.dataset.actid];
+    if (!a) return;
+    let tip = null;
+    chip.addEventListener('mouseenter', () => {
+      tip = document.createElement('div');
+      tip.className = 'cal-chip-tooltip';
+      const rows = [
+        a.distanceKm ? `${a.distanceKm.toFixed(2)} km` : null,
+        a.durationSec ? formatDuration(a.durationSec) : null,
+        a.avgHR ? Math.round(a.avgHR) + ' bpm' : null,
+      ].filter(Boolean).join(' · ');
+      tip.innerHTML = `<div class="cal-chip-tooltip-name">${a.name || activityTypeLabel(a.activityType)}</div><div class="cal-chip-tooltip-stats">${rows}</div>`;
+      chip.appendChild(tip);
+    });
+    chip.addEventListener('mouseleave', () => { if (tip) { tip.remove(); tip = null; } });
+  });
+}
+
+// Recupere une seule fois (mise en cache) les activityId lies a une course
+// dans "Mes courses" (/api/races) - independant du cycle de vie de
+// records.js (_racesData n'y est peuple qu'apres visite de cette page), la
+// vue calendrier peut etre ouverte sans jamais etre passe par Records.
+let _calRaceActivityIdsCache = null;
+async function calGetRaceActivityIds() {
+  if (_calRaceActivityIdsCache) return _calRaceActivityIdsCache;
+  try {
+    const races = await fetch('/api/races').then(r => r.json());
+    _calRaceActivityIdsCache = new Set((races || []).filter(r => r.activityId).map(r => String(r.activityId)));
+  } catch (e) { _calRaceActivityIdsCache = new Set(); }
+  return _calRaceActivityIdsCache;
 }
 
 // Ouverture d'une activite depuis une puce du calendrier - _allActivities
@@ -4109,6 +4296,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Filtres page activités (sport type, multi-selection)
   wireSportFilterPills(el('activity-filters'), (filters) => {
     renderAllActivities(_allActivities, filters);
+    // La vue calendrier suit le meme filtre sport (puces + totaux semaine/mois)
+    // quand elle est active - inutile de la recalculer si elle est cachee.
+    if (typeof renderActivitiesCalendar === 'function' && el('activities-calendar-card') && !el('activities-calendar-card').classList.contains('act-view-hidden')) {
+      renderActivitiesCalendar();
+    }
   });
 
   // TASK 4 — Year/month selectors re-render with current sport filter

@@ -12,7 +12,7 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <link rel="stylesheet" href="css/style.css?v=1786892305404" />
+  <link rel="stylesheet" href="css/style.css?v=1786893813734" />
   <link rel="stylesheet" href="css/plans.css?v=1786014624239" />
   <link rel="stylesheet" href="css/routes.css?v=1786547249351" />
 </head>
@@ -431,11 +431,6 @@
         </div>
       </div>
 
-      <!-- Répartition de la semaine en cours (lun→dim), survol = activités du jour -->
-      <section class="card card--wide dash-week-card" id="section-week-breakdown" style="margin-bottom:16px">
-        <div class="dash-week-breakdown" id="dash-week-breakdown"></div>
-      </section>
-
       <!-- Bien-être (données Garmin du jour) -->
       <section class="card card--wide" id="section-wellness" style="margin-bottom:16px">
         <div class="card-header">
@@ -483,6 +478,14 @@
             <div class="profile-ind-sub" id="wellness-sleep-sub"></div>
           </div>
         </div>
+      </section>
+
+      <!-- Répartition de la semaine en cours (lun→dim), survol = activités du jour -->
+      <section class="card card--wide dash-week-card" id="section-week-breakdown" style="margin-bottom:16px">
+        <div class="card-header">
+          <h2 class="card-title"><span class="card-title-icon">&#x1F4C6;</span> Votre semaine</h2>
+        </div>
+        <div class="dash-week-breakdown" id="dash-week-breakdown"></div>
       </section>
 
       <!-- Dernière sortie -->
@@ -614,13 +617,16 @@
           </div>
         </div>
 
-        <!-- Droite : bascule liste / calendrier -->
-        <div class="act-view-toggle" id="act-view-toggle">
-          <button type="button" class="act-view-btn active" data-view="list" onclick="showActivitiesListView()">Liste</button>
-          <button type="button" class="act-view-btn" data-view="calendar" onclick="showActivitiesCalendarView()">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-            Vue calendrier
-          </button>
+        <!-- Droite : date (auto-injectee) + bascule liste / calendrier, empilees -->
+        <div class="act-header-right">
+          <span class="page-header-date" id="act-page-date"></span>
+          <div class="act-view-toggle" id="act-view-toggle">
+            <button type="button" class="act-view-btn active" data-view="list" onclick="showActivitiesListView()">Liste</button>
+            <button type="button" class="act-view-btn" data-view="calendar" onclick="showActivitiesCalendarView()">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+              Vue calendrier
+            </button>
+          </div>
         </div>
 
       </div>
@@ -638,7 +644,12 @@
           <button type="button" class="cal-nav-btn" id="cal-prev" title="Mois précédent">&#10094;</button>
           <div class="cal-month-label" id="cal-month-label"></div>
           <button type="button" class="cal-nav-btn" id="cal-next" title="Mois suivant">&#10095;</button>
+          <div class="cal-month-total" id="cal-month-total"></div>
           <button type="button" class="cal-today-btn" id="cal-today">Aujourd'hui</button>
+          <div class="cal-mode-toggle" id="cal-mode-toggle">
+            <button type="button" class="cal-mode-btn active" data-mode="month" onclick="calSetMode('month')">Mois</button>
+            <button type="button" class="cal-mode-btn" data-mode="year" onclick="calSetMode('year')">Année</button>
+          </div>
         </div>
         <div class="cal-grid" id="cal-grid"></div>
       </div>
@@ -1303,7 +1314,7 @@
     <span class="support-fab-dot" id="support-fab-dot" style="display:none"></span>
   </button>
 
-  <script src="js/app.js?v=1786892305404"></script>
+  <script src="js/app.js?v=1786893813734"></script>
   <script src="js/gear.js?v=1786459105633"></script>
   <script src="js/campus.js?v=1786891545424"></script>
   <script src="js/free_sessions.js?v=1786701705047"></script>

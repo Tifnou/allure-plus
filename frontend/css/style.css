@@ -543,18 +543,24 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
 .stat-tag--warn{background:var(--orange-bg);color:var(--orange);}
 
 /* ─── Répartition de la semaine (dashboard) ─── */
-.dash-week-card{padding:12px 20px;}
-.dash-week-breakdown{display:flex;align-items:center;gap:18px;}
-.dash-week-total{flex-shrink:0;min-width:92px;}
-.dash-week-total-value{font-family:var(--font);font-size:19px;font-weight:700;color:var(--text-primary);line-height:1.1;}
-.dash-week-total-label{font-family:var(--font-body);font-size:10.5px;color:var(--text-muted);margin-top:2px;}
-.dash-week-bars{flex:1;display:flex;align-items:flex-end;gap:6px;height:38px;}
+/* overflow:visible (override de .card{overflow:hidden}) : l'infobulle au
+   survol d'une barre courte doit pouvoir depasser le haut de la carte -
+   avec des barres hautes (90px) la plupart du temps elle tient dedans, mais
+   pas garanti pour toutes les hauteurs de barre. z-index eleve pour passer
+   au-dessus des cartes voisines (Bien-etre au-dessus, Derniere sortie en
+   dessous) plutot que de se retrouver derriere (retour utilisateur). */
+.dash-week-card{overflow:visible;position:relative;z-index:2;}
+.dash-week-breakdown{display:flex;align-items:center;gap:22px;}
+.dash-week-total{flex-shrink:0;min-width:100px;}
+.dash-week-total-value{font-family:var(--font);font-size:26px;font-weight:700;color:var(--text-primary);line-height:1.1;}
+.dash-week-total-label{font-family:var(--font-body);font-size:11px;color:var(--text-muted);margin-top:3px;}
+.dash-week-bars{flex:1;display:flex;align-items:flex-end;gap:10px;height:100px;}
 .dash-week-col{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;position:relative;}
-.dash-week-bar{width:60%;background:var(--border);border-radius:3px;transition:background var(--transition);}
+.dash-week-bar{width:60%;background:var(--border);border-radius:4px;transition:background var(--transition);}
 .dash-week-bar--active{background:var(--accent);}
 .dash-week-col--hoverable{cursor:pointer;}
 .dash-week-col--hoverable:hover .dash-week-bar--active{background:var(--accent-hover,var(--accent));opacity:.85;}
-.dash-week-letter{font-family:var(--font-body);font-size:9.5px;color:var(--text-muted);margin-top:5px;}
+.dash-week-letter{font-family:var(--font-body);font-size:10.5px;color:var(--text-muted);margin-top:7px;}
 .dash-week-letter--today{color:var(--text-primary);font-weight:700;}
 .dash-week-tooltip{
   position:absolute;bottom:calc(100% + 8px);left:50%;transform:translateX(-50%);
@@ -4478,6 +4484,12 @@ body { background: var(--bg) !important; }
 .act-header-center .filter-pills { justify-content: center; }
 .act-header-center .activity-time-filters { justify-content: center; }
 
+/* Colonne droite : date + bascule Liste/Calendrier empilees, alignees a droite
+   (retour utilisateur : la bascule doit se trouver sous la date, coin bas
+   droit du header, pas a cote des filtres). */
+.act-header-right { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; flex-shrink: 0; }
+.act-header-right .page-header-date { align-self: flex-end; }
+
 /* Bascule Liste / Vue calendrier */
 .act-view-toggle { display: flex; gap: 4px; flex-shrink: 0; background: var(--bg); border-radius: 20px; padding: 3px; }
 .act-view-btn {
@@ -4491,7 +4503,12 @@ body { background: var(--bg) !important; }
 .act-view-btn.active { background: var(--card-bg); color: var(--text-primary); box-shadow: var(--shadow-sm); }
 
 /* ─── Vue calendrier ─── */
+/* overflow:visible (override .card{overflow:hidden}) : les vignettes au
+   survol d'une puce (cal-chip-tooltip) doivent pouvoir depasser la carte,
+   meme piege que .dash-week-card plus haut. */
+#activities-calendar-card { overflow: visible; }
 .cal-header { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+.cal-month-total { font-family: var(--font-body); font-size: 11.5px; color: var(--text-muted); }
 .cal-nav-btn {
   width: 28px; height: 28px; border-radius: 50%; border: 1px solid var(--border);
   background: transparent; color: var(--text-secondary); cursor: pointer;
@@ -4518,11 +4535,20 @@ body { background: var(--bg) !important; }
   display: flex; align-items: center; gap: 4px; border-radius: 0 5px 5px 0;
   border-left: 2px solid var(--chip-color, var(--text-muted));
   background: color-mix(in srgb, var(--chip-color, var(--text-muted)) 15%, transparent);
-  padding: 2px 5px; cursor: pointer;
+  padding: 2px 5px; cursor: pointer; position: relative;
 }
 .cal-chip .sport-icon { width: 11px; height: 11px; flex-shrink: 0; }
 .cal-chip-label { font-family: var(--font-body); font-size: 9.5px; color: var(--text-primary); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cal-chip-star { font-size: 8px; color: #f59e0b; flex-shrink: 0; line-height: 1; }
 .cal-chip-more { font-family: var(--font-body); font-size: 9px; color: var(--text-muted); padding: 1px 4px; }
+.cal-chip-tooltip {
+  position: absolute; bottom: calc(100% + 6px); left: 0;
+  background: var(--bg-white); border: 1px solid var(--border); border-radius: 8px;
+  padding: 7px 9px; font-family: var(--font-body); font-size: 11px; white-space: nowrap;
+  box-shadow: var(--shadow-md); z-index: 10; cursor: default;
+}
+.cal-chip-tooltip-name { font-weight: 700; color: var(--text-primary); margin-bottom: 2px; }
+.cal-chip-tooltip-stats { color: var(--text-secondary); }
 .cal-week-recap {
   border-radius: 8px; background: var(--bg); padding: 8px 9px;
   display: flex; flex-direction: column; justify-content: center; gap: 3px;
@@ -4531,6 +4557,33 @@ body { background: var(--bg) !important; }
 .cal-week-recap-row strong { color: var(--text-primary); font-weight: 700; }
 .cal-week-recap--empty { color: var(--text-muted); font-size: 9.5px; display: flex; align-items: center; justify-content: center; text-align: center; }
 @media(max-width:900px){.cal-weekday-row, .cal-week-row{grid-template-columns:repeat(7,1fr);}.cal-week-recap{display:none;}}
+
+/* Bascule Mois / Année, dans le header calendrier (a droite du bouton
+   "Aujourd'hui" - meme composant visuel que .act-view-toggle). */
+.cal-mode-toggle { display: flex; gap: 3px; background: var(--bg); border-radius: 16px; padding: 2px; margin-left: 6px; }
+.cal-mode-btn {
+  font-family: var(--font-body); font-size: 11px; font-weight: 600; color: var(--text-secondary);
+  background: transparent; border: none; border-radius: 16px; padding: 4px 10px; cursor: pointer;
+  transition: all var(--transition);
+}
+.cal-mode-btn:hover { color: var(--text-primary); }
+.cal-mode-btn.active { background: var(--card-bg); color: var(--text-primary); box-shadow: var(--shadow-sm); }
+
+/* ─── Vue calendrier annuelle (12 mini-calendriers) ─── */
+.cal-year-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+.cal-year-month { background: var(--bg); border-radius: 10px; padding: 10px; }
+.cal-year-month-label { font-family: var(--font-body); font-size: 11.5px; font-weight: 700; color: var(--text-primary); margin-bottom: 6px; }
+.cal-year-mini-weekdays { display: grid; grid-template-columns: repeat(7, 1fr); font-family: var(--font-body); font-size: 8px; color: var(--text-muted); text-align: center; margin-bottom: 2px; }
+.cal-year-mini-days { display: grid; grid-template-columns: repeat(7, 1fr); gap: 1px; }
+.cal-year-day { position: relative; display: flex; flex-direction: column; align-items: center; padding: 2px 0 4px; border-radius: 4px; }
+.cal-year-day--outside { opacity: .3; }
+.cal-year-day--today { background: var(--accent-light); }
+.cal-year-day-num { font-family: var(--font-body); font-size: 8.5px; color: var(--text-secondary); }
+.cal-year-day--today .cal-year-day-num { color: var(--accent-text); font-weight: 700; }
+.cal-year-bar { width: 70%; height: 3px; border-radius: 2px; background: var(--chip-color, var(--accent)); margin-top: 2px; }
+.cal-year-tooltip { left: 50%; transform: translateX(-50%); }
+@media(max-width:1100px){.cal-year-grid{grid-template-columns:repeat(3,1fr);}}
+@media(max-width:760px){.cal-year-grid{grid-template-columns:repeat(2,1fr);}}
 
 /* Colonne droite : synthèse */
 .act-header-stats {
