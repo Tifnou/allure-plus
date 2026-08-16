@@ -388,7 +388,11 @@ function setSessionMood(weekId, trainingIndex, mood) {
 }
 // Icone visage colore (pas d'emoji Unicode natif disponible dans les 3
 // couleurs demandees) - reutilisee dans les cartes de seance (campus.js) et
-// le tableau des activites (app.js, via sessionMoodBadgeForActivity).
+// le tableau des activites (app.js, via sessionMoodBadgeForActivity). Effet
+// "relief" (degrade radial + ombre portee CSS) plutot qu'un aplat plat, sur
+// retour utilisateur — le degrade est inline dans chaque SVG (pas de <defs>
+// partage) car ces icones sont injectees isolement a des dizaines d'endroits
+// (lignes du tableau, cartes de seance...), jamais dans un <svg> commun.
 function sessionMoodIconSvg(mood, size) {
   const cfg = SESSION_MOOD_STYLES[mood];
   if (!cfg) return '';
@@ -396,11 +400,18 @@ function sessionMoodIconSvg(mood, size) {
   const mouth = mood === 'good' ? 'M8 14.5 Q12 18 16 14.5'
               : mood === 'bad'  ? 'M8 17 Q12 13.5 16 17'
               : 'M8.5 15.5h7';
-  return `<svg class="session-mood-icon" width="${size}" height="${size}" viewBox="0 0 24 24" title="${cfg.label}">
+  const eye = mood === 'good' ? '#0c1f12' : mood === 'bad' ? '#250808' : '#1a1608';
+  return `<svg class="session-mood-icon" width="${size}" height="${size}" viewBox="0 0 24 24" title="${cfg.label}" style="filter:drop-shadow(0 1px 1.5px rgba(0,0,0,.45))">
+    <defs><radialGradient id="moodGloss" cx="35%" cy="28%" r="70%">
+      <stop offset="0%" stop-color="#fff" stop-opacity=".55"/>
+      <stop offset="55%" stop-color="#fff" stop-opacity=".08"/>
+      <stop offset="100%" stop-color="#fff" stop-opacity="0"/>
+    </radialGradient></defs>
     <circle cx="12" cy="12" r="11" fill="${cfg.color}"/>
-    <circle cx="8.3" cy="10" r="1.4" fill="#20232b"/>
-    <circle cx="15.7" cy="10" r="1.4" fill="#20232b"/>
-    <path d="${mouth}" stroke="#20232b" stroke-width="1.7" fill="none" stroke-linecap="round"/>
+    <circle cx="12" cy="12" r="11" fill="url(#moodGloss)"/>
+    <circle cx="8.3" cy="10" r="1.4" fill="${eye}"/>
+    <circle cx="15.7" cy="10" r="1.4" fill="${eye}"/>
+    <path d="${mouth}" stroke="${eye}" stroke-width="1.7" fill="none" stroke-linecap="round"/>
   </svg>`;
 }
 // Badge affiche dans le tableau des activites (app.js, renderAllActivities)
@@ -1267,8 +1278,7 @@ function renderSessionCard(session, idx, weekIdx, weekId, isCurrentWeek) {
             const rec = _analysisIndex.bySession[(weekId + '_' + (session.trainingIndex ?? 0))];
             return rec ? `<span class="session-analysis-score-badge" title="Séance analysée">📊 ${rec.score}%</span>` : '';
           })()}
-          <span class="session-status-badge ${statusInfo.cls}">${statusInfo.label}</span>
-          ${mood ? `<span class="session-mood-badge" onclick="event.stopPropagation();promptSessionMood('${weekId}',${session.trainingIndex ?? 0})">${sessionMoodIconSvg(mood, 16)}</span>` : ''}
+          <span class="session-status-badge ${statusInfo.cls}${mood ? ' session-status-badge--mood' : ''}"${mood ? ` onclick="event.stopPropagation();promptSessionMood('${weekId}',${session.trainingIndex ?? 0})" title="Ressenti : ${SESSION_MOOD_STYLES[mood].label}"` : ''}>${mood ? sessionMoodIconSvg(mood, 14) : ''}${statusInfo.label}</span>
           <span class="session-expand-chevron">${isOpen ? '-' : '-'}</span>
         </div>
       </div>

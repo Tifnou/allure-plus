@@ -1904,18 +1904,14 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
   color: var(--text-muted);
   margin-left: 2px;
 }
-.session-mood-badge {
-  position: absolute;
-  top: 4px;
-  right: 8px;
-  display: flex;
+.session-status-badge--mood {
+  display: inline-flex;
   align-items: center;
+  gap: 4px;
   cursor: pointer;
-  line-height: 0;
   transition: transform var(--transition);
-  z-index: 1;
 }
-.session-mood-badge:hover { transform: scale(1.15); }
+.session-status-badge--mood:hover { transform: scale(1.06); }
 .session-mood-icon { display: block; }
 
 /* ── Panneau de détail d'une séance ── */
@@ -2161,7 +2157,7 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
   white-space: nowrap;
 }
 .activity-analysis-badge { font-size: 12px; cursor: pointer; }
-.activity-mood-badge { display: inline-flex; vertical-align: middle; line-height: 0; }
+.activity-mood-badge { display: inline-flex; vertical-align: middle; line-height: 0; margin-left: 6px; }
 
 .analysis-modal-header { margin-bottom: 14px; }
 .analysis-modal-title { font-family: var(--font); font-weight: 700; font-size: 16px; color: var(--text-primary); }
