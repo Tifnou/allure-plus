@@ -2694,7 +2694,10 @@ function renderGoalsAlerts(goal, weeks, stats) {
     else if (daysLeft <= 21)
       alerts.push({ cls: 'blue', icon: '⚡', title: 'Phase d’affûtage',
         msg: `J-${daysLeft} — réduisez le volume, maintenez l’intensité. Reposez-vous bien !` });
-    else if (daysLeft <= 21 * 3)
+    // "Derniere ligne droite" : uniquement les 2 dernieres semaines (14
+    // jours) - retour utilisateur, le seuil precedent (63 jours = 21*3)
+    // affichait ce message beaucoup trop tot (constate a J-62).
+    if (daysLeft > 0 && daysLeft <= 14)
       alerts.push({ cls: 'yellow', icon: '⏳', title: 'Dernière ligne droite',
         msg: `Plus que ${daysLeft} jours — concentrez-vous sur la récupération et l’alimentation.` });
   }
