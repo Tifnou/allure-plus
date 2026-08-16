@@ -1545,17 +1545,23 @@ function renderSessionDetail(session, weekId, isCurrentWeek) {
       + '</div><div class="pace-zones-list">' + zoneRows + '</div></div>';
 
     if (goalPaceInfo) {
+      // Repliee par defaut (retour utilisateur : duplique la meme liste de
+      // zones que "Zones d'allure" juste au-dessus, prend de la place pour
+      // une info secondaire) - depliable au clic sur l'en-tete, cf.
+      // .session-goal-pace-block--open (style.css).
       const infoRows = forced ? '' : zonesResolved.map((z, idx) => buildZoneRow(z, idx, goalPaceInfo.impliedVma)).join('');
       zonesHTML += '<div class="session-detail-section session-goal-pace-block">'
-        + '<div class="session-detail-section-title">&#127919;&nbsp;Allure objectif <span class="zones-source-note">'
+        + '<div class="session-detail-section-title session-goal-pace-toggle" onclick="event.stopPropagation(); this.closest(\'.session-goal-pace-block\').classList.toggle(\'session-goal-pace-block--open\')">'
+        + '<span class="session-goal-pace-chevron">&#9656;</span>&#127919;&nbsp;Allure objectif <span class="zones-source-note">'
         + goalPaceInfo.targetTime + ' &middot; ' + goalPaceInfo.zoneLabel + '</span></div>'
+        + '<div class="session-goal-pace-content">'
         + (forced
           ? '<div class="session-goal-pace-hint">Ces allures sont actuellement appliquées ci-dessus (et seront envoyées à Garmin) pour cette séance.</div>'
           : '<div class="pace-zones-list session-goal-pace-list">' + infoRows + '</div>'
             + '<div class="session-goal-pace-hint">Info uniquement : Allure+ continue par défaut de s\'appuyer sur votre VMA réelle. Forcez ces allures pour <em>cette séance</em> si vous voulez vous entraîner au niveau de votre objectif.</div>')
         + '<button type="button" class="btn-force-goal-pace' + (forced ? ' active' : '') + '" onclick="event.stopPropagation(); toggleForceGoalPace(\'' + sessionKey + '\')">'
         + (forced ? '&#10003; Revenir à ma VMA réelle' : 'Forcer les allures de l\'objectif pour cette séance')
-        + '</button></div>';
+        + '</button></div></div>';
     }
   }
   // Bouton export Garmin : toute séance course/trail (le rendu PPG a un
