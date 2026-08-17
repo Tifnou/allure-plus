@@ -2335,17 +2335,8 @@ function countQualitySessions(weeks) {
   return { done, total };
 }
 
-/** Estimation du temps de course en secondes depuis la VMA
- *  Trail : méthode km équivalents (1m D+ = 10m plat), standard trail français */
-function estimateRaceTime(vma, distKm, dplusM, isTrail) {
-  if (!vma || !distKm) return null;
-  // Pour le trail, on convertit D+ en km plats équivalents avant d'appliquer le % VMA
-  const equivKm = (isTrail && dplusM > 0) ? distKm + dplusM / 100 : distKm;
-  let pctVma = isTrail
-    ? (distKm <= 21 ? 0.70 : distKm <= 42 ? 0.65 : distKm <= 80 ? 0.58 : 0.50)
-    : (distKm <= 5  ? 0.97 : distKm <= 10 ? 0.90 : distKm <= 21.1 ? 0.83 : 0.76);
-  return Math.round((equivKm / (vma * pctVma)) * 3600);
-}
+// estimateRaceTime deplacee dans app.js (seule source de verite, reutilisee
+// par la Synthese) - app.js charge avant campus.js, donc toujours disponible.
 
 function fmtSecsToTime(s) {
   if (!s || s <= 0) return '—';

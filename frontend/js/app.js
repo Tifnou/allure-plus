@@ -747,6 +747,45 @@ function renderWeeklyBreakdown() {
   });
 }
 
+function fmtRaceTime(sec) {
+  if (!sec) return '—';
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = Math.floor(sec % 60);
+  return h > 0
+    ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+    : `${m}:${String(s).padStart(2, '0')}`;
+}
+
+// ─── Prédicteur de courses (Synthèse) ──────────────────────────────
+// Garmin propose un widget equivalent ("Race Predictor") mais l'algorithme
+// exact n'est pas documente publiquement, et la metrique n'est de toute
+// facon pas accessible depuis notre client Garmin OAuth (voir CLAUDE.md,
+// section "Page Sante/Performance" : chemin gc-api reserve a une session
+// navigateur). Calcul maison a la place, avec la MEME formule VMA/%VMA deja
+// utilisee et affichee ailleurs dans l'app (estimateRaceTime, definie plus
+// haut - projections Objectifs, allures cibles) : pas de 2e formule
+// concurrente qui donnerait des chiffres differents pour un meme VO2max
+// selon la page consultee.
+function renderRacePredictor(vo2max, sex) {
+  const container = el('dash-race-predictor');
+  if (!container) return;
+  const vma = vo2max ? calcVMA(vo2max, sex || 'M') : null;
+  if (!vma) {
+    container.innerHTML = '<div class="dash-predictor-empty">VO&#x2082;max indisponible</div>';
+    return;
+  }
+  const dists = [
+    { label: '5 km', km: 5 },
+    { label: '10 km', km: 10 },
+    { label: 'Semi', km: 21.0975 },
+    { label: 'Marathon', km: 42.195 },
+  ];
+  container.innerHTML = dists.map(d => `
+    <div class="dash-predictor-item">
+      <div class="dash-predictor-time">${fmtRaceTime(estimateRaceTime(vma, d.km, 0, false))}</div>
+      <div class="dash-predictor-label">${d.label}</div>
+    </div>`).join('');
+}
+
 // ─── Hero Stats ────────────────────────────────
 function renderHeroStats(stats) {
   setVal('stat-km-year', stats.totalKmYear);
@@ -812,8 +851,10 @@ function renderHeroStats(stats) {
         }
       }
     }
+    renderRacePredictor(vo2Display, profSex);
   } else {
     setVal('stat-vo2max', '—');
+    renderRacePredictor(null, null);
   }
 
   // Jours sans activité
@@ -2748,6 +2789,20 @@ function calcVMA(vo2max, sex) {
   if (!vo2max || vo2max <= 0) return null;
   const factor = sex === 'F' ? 0.315 : 0.313;
   return Math.round((vo2max - 3.5) * factor * 10) / 10;
+}
+
+/** Estimation du temps de course en secondes depuis la VMA (deplacee ici
+ *  depuis campus.js, seule source de verite : reutilisee par les
+ *  projections d'objectifs ET le Predicteur de courses de la Synthese,
+ *  memes chiffres partout pour un meme VO2max).
+ *  Trail : methode km equivalents (1m D+ = 10m plat), standard trail francais */
+function estimateRaceTime(vma, distKm, dplusM, isTrail) {
+  if (!vma || !distKm) return null;
+  const equivKm = (isTrail && dplusM > 0) ? distKm + dplusM / 100 : distKm;
+  let pctVma = isTrail
+    ? (distKm <= 21 ? 0.70 : distKm <= 42 ? 0.65 : distKm <= 80 ? 0.58 : 0.50)
+    : (distKm <= 5  ? 0.97 : distKm <= 10 ? 0.90 : distKm <= 21.1 ? 0.83 : 0.76);
+  return Math.round((equivKm / (vma * pctVma)) * 3600);
 }
 
 // Classe une allure (sec/km) dans une zone ALLURE_PLUS (matchZoneFromPace, campus.js)
