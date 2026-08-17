@@ -2543,6 +2543,56 @@ function renderEstimations(goal, weeks, dplusM, distKmOverride) {
 
 let _goalsChartInst = null;
 
+/** Projection théorique du plan (Bloc 4, courbe orange) : calculée UNE SEULE
+ *  fois (à la première ouverture du plan) puis figée en localStorage - elle
+ *  ne bouge plus jamais ensuite, même quand la semaine avance. Avant ce
+ *  changement, la courbe "Projection" repartait chaque semaine du point
+ *  courant de la courbe réelle et recalculait sa fin à partir du gain de VMA
+ *  RESTANT (cf. getRemainingVmaGainPct) : elle rétrécissait et se redessinait
+ *  sans cesse, rendant impossible de comparer "ce que le plan promettait" à
+ *  "ce qui se passe réellement" (retour utilisateur : la courbe réelle
+ *  "supprimait" la projection au fil des semaines). Recalculée seulement si
+ *  les paramètres qui la déterminent changent (distance/D+/durée du plan) -
+ *  voir la signature `sig` ci-dessous. */
+function getOrBuildProjectionBaseline(weeks, goal, distKm, dplusM, isTrail, weeksTotal) {
+  const planId = goal._id || goal.name || 'plan';
+  const storeKey = 'suivi_goal_projection_' + planId;
+  const planStartTs = weeks[0]?.weekDate ?? null;
+  const sig = [planStartTs, weeksTotal, distKm, dplusM || 0, isTrail ? 1 : 0].join('|');
+
+  try {
+    const stored = JSON.parse(localStorage.getItem(storeKey) || 'null');
+    if (stored && stored.sig === sig && Array.isArray(stored.values) && stored.values.length === weeksTotal) {
+      return stored.values;
+    }
+  } catch (e) { /* stockage illisible -> recalcul */ }
+
+  // VMA de départ = dernière valeur Garmin connue avant/au début du plan
+  // (historique complet, non filtré : on veut le niveau de forme "à l'entrée"
+  // du plan, même s'il date d'avant le début du suivi Allure+ du plan).
+  const vo2AtStart = planStartTs != null ? vo2ValueAtDate(buildAnchoredVo2History(), planStartTs) : null;
+  const vmaStart = vo2AtStart != null ? vo2ToVmaCalibrated(vo2AtStart) : getVmaFromState();
+  if (!vmaStart) return Array(weeksTotal).fill(null);
+
+  // Gain de VMA total attendu sur l'ensemble du plan (hypothèse "plan suivi
+  // comme prévu", contrairement au bloc Estimations qui pondère par
+  // l'assiduité réelle à date) : c'est la promesse théorique du plan, pas
+  // une prévision influencée par ce qui a déjà été fait.
+  const vmaEnd = vmaStart * (1 + getVO2maxGainPct(weeksTotal));
+
+  const startMins = Math.round((estimateRaceTime(vmaStart, distKm, dplusM, isTrail) || 0) / 60);
+  const endMins = Math.round((estimateRaceTime(vmaEnd, distKm, dplusM, isTrail) || 0) / 60);
+
+  const values = [];
+  for (let w = 1; w <= weeksTotal; w++) {
+    const f = (w - 1) / (weeksTotal - 1);
+    values.push(Math.round(startMins + (endMins - startMins) * f));
+  }
+
+  try { localStorage.setItem(storeKey, JSON.stringify({ sig, values })); } catch (e) { /* quota plein -> pas grave, recalculé au prochain rendu */ }
+  return values;
+}
+
 /** Courbe d'évolution du temps estimé (Bloc 4) */
 function renderObjectifsChart(weeks, goal, dplusM, distKmOverride) {
   const canvas = document.getElementById('goals-chart');
@@ -2556,11 +2606,6 @@ function renderObjectifsChart(weeks, goal, dplusM, distKmOverride) {
   if (!vma || !distKm || weeksTotal < 2) return;
 
   const elapsedWeeks = weeks.filter(w => startOfDay(w.weekDate + 7 * 86400000) <= startOfDay(now)).length;
-
-  // Même formule que le bloc Estimations (gain pondéré par l'assiduité réelle
-  // et le nombre de semaines restantes) pour que les deux blocs soient
-  // toujours cohérents entre eux (même valeur en fin de plan).
-  const vmaEnd = vma * (1 + getRemainingVmaGainPct(weeksTotal, weeks));
 
   // Conversion VO2max -> VMA calibrée sur la VMA actuelle réelle (voir
   // vo2ToVmaCalibrated), pour rester cohérent avec le bloc Estimations
@@ -2580,9 +2625,13 @@ function renderObjectifsChart(weeks, goal, dplusM, distKmOverride) {
   const targetMins = targetSecs ? Math.round(targetSecs / 60) : null;
 
   const currentMins = Math.round((estimateRaceTime(vma, distKm, dplusM, isTrail) || 0) / 60);
-  const endMins = Math.round((estimateRaceTime(vmaEnd, distKm, dplusM, isTrail) || 0) / 60);
 
-  const labels = [], past = [], future = [];
+  // Projection : courbe figée (voir getOrBuildProjectionBaseline), totalement
+  // indépendante de la progression réelle - une vraie 3e courbe distincte,
+  // pas un simple prolongement de la courbe bleue.
+  const projection = getOrBuildProjectionBaseline(weeks, goal, distKm, dplusM, isTrail, weeksTotal);
+
+  const labels = [], real = [];
   for (let w = 1; w <= weeksTotal; w++) {
     labels.push('S' + w);
     if (w <= elapsedWeeks) {
@@ -2593,17 +2642,14 @@ function renderObjectifsChart(weeks, goal, dplusM, distKmOverride) {
       const vo2Week = weekEndTs != null ? vo2ValueAtDate(vo2History, weekEndTs) : null;
       if (vo2Week != null) {
         const vmaWeek = vo2ToVma(vo2Week);
-        past.push(Math.round((estimateRaceTime(vmaWeek, distKm, dplusM, isTrail) || 0) / 60));
+        real.push(Math.round((estimateRaceTime(vmaWeek, distKm, dplusM, isTrail) || 0) / 60));
       } else {
-        past.push(null);
+        real.push(null);
       }
-      future.push(null);
     } else if (w === elapsedWeeks + 1) {
-      past.push(currentMins); future.push(currentMins);
+      real.push(currentMins);
     } else {
-      const f = (w - (elapsedWeeks + 1)) / (weeksTotal - (elapsedWeeks + 1));
-      const mins = Math.round(currentMins + (endMins - currentMins) * f);
-      past.push(null); future.push(mins);
+      real.push(null);
     }
   }
 
@@ -2613,10 +2659,10 @@ function renderObjectifsChart(weeks, goal, dplusM, distKmOverride) {
   const gc = dark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.06)';
 
   const datasets = [
-    { label: 'Progression réelle', data: past,   borderColor: '#3b82f6',
+    { label: 'Progression réelle', data: real,   borderColor: '#3b82f6',
       backgroundColor: 'rgba(59,130,246,0.08)', fill: true, tension: 0.4,
       pointRadius: 3, borderWidth: 2.5 },
-    { label: 'Projection', data: future, borderColor: '#f97316',
+    { label: 'Projection', data: projection, borderColor: '#f97316',
       borderDash: [5,5], fill: false, tension: 0.4, pointRadius: 2, borderWidth: 2 }
   ];
   if (targetMins) {
