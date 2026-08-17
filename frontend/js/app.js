@@ -70,7 +70,12 @@ const API = '';
 // COMBLER les cles manquantes au demarrage (jamais ecraser une valeur deja
 // presente en local) — protege contre un revert vers une copie serveur
 // perimee si un push precedent avait echoue (coupure reseau ponctuelle).
-const DURABLE_LS_KEYS = ['suivi_sport_profile', 'suivi_personal_goals', 'suivi_imported_plan', 'suivi_local_done', 'suivi_session_mood', 'prefer_imported_plan', 'suivi_forced_goal_pace', 'suivi_free_sessions'];
+// support_tickets_seen/support_admin_seen (support.js) inclus : purement
+// locaux jusqu'ici, un nettoyage du navigateur les faisait disparaitre et
+// rallumait a tort le point rouge sur TOUS les tickets deja lus (constat
+// utilisateur : la notification "reste" parfois sans raison apparente) -
+// meme categorie de bug que le profil/plan importe avant leur ajout ici.
+const DURABLE_LS_KEYS = ['suivi_sport_profile', 'suivi_personal_goals', 'suivi_imported_plan', 'suivi_local_done', 'suivi_session_mood', 'prefer_imported_plan', 'suivi_forced_goal_pace', 'suivi_free_sessions', 'support_tickets_seen', 'support_admin_seen'];
 const DURABLE_LS_PREFIXES = ['suivi_objectif_dist_', 'suivi_objectif_dplus_', 'suivi_objectif_validated_'];
 // Promesse de syncUserDataFromServer() exposee globalement (scope partage
 // entre scripts) - campus.js l'attend avant toute decision basee sur

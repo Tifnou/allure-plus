@@ -561,8 +561,13 @@ function renderSupportAdminList() {
   if (!list) return;
   const seen = loadSupportAdminSeenMap();
   let tickets = _supportAdminTicketsCache;
-  if (_supportAdminFilter !== 'all') tickets = tickets.filter(t => t.status === _supportAdminFilter);
-  if (tickets.length === 0) { list.innerHTML = '<div class="support-empty">Aucun ticket.</div>'; return; }
+  // "Tous" = tickets actifs uniquement (nouveau + en cours) - les resolus se
+  // consultent via "Archives" (meme filtre 'resolu' sous le capot, juste
+  // renomme), pour que la vue par defaut reste courte et utile au quotidien
+  // (retour utilisateur : trop de tickets resolus melanges aux actifs).
+  if (_supportAdminFilter === 'all') tickets = tickets.filter(t => t.status !== 'resolu');
+  else tickets = tickets.filter(t => t.status === _supportAdminFilter);
+  if (tickets.length === 0) { list.innerHTML = `<div class="support-empty">${_supportAdminFilter === 'resolu' ? 'Aucun ticket archivé.' : 'Aucun ticket.'}</div>`; return; }
   list.innerHTML = tickets.map(t => {
     const cat = SUPPORT_CATEGORY_MAP[t.category ? SUPPORT_CATEGORY_BY_GH_LABEL[t.category] : null];
     const status = SUPPORT_STATUS[t.status] || SUPPORT_STATUS.nouveau;
@@ -636,7 +641,14 @@ async function openSupportAdminTicket(number) {
         if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Erreur');
         showToast('Statut mis à jour', 'success');
         const t = _supportAdminTicketsCache.find(x => x.number === number);
-        if (t) t.status = status;
+        // Le changement de statut met a jour updatedAt cote GitHub (posterieur
+        // au markAdminTicketSeen fait a l'OUVERTURE du ticket, donc anterieur a
+        // cette action) - sans re-marquer vu ici, le prochain sondage (30s,
+        // supportPollTick) le voyait "non lu" a nouveau juste parce que l'admin
+        // venait lui-meme de le modifier (bug reel constate : la notification
+        // se rallumait apres avoir traite le ticket).
+        if (t) { t.status = status; t.updatedAt = new Date().toISOString(); }
+        markAdminTicketSeen(number);
         renderSupportAdminList();
       } catch (err) { showToast('Erreur : ' + err.message, 'error'); }
     };
