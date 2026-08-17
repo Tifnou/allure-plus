@@ -4363,7 +4363,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         ? await showConfirmModal({
             title: 'Quitter Allure+ ?',
             message: 'Le serveur va s\'arrêter et la fenêtre va se fermer.',
-            confirmLabel: 'Quitter', cancelLabel: 'Annuler', danger: true, icon: '🚪',
+            confirmLabel: 'Quitter', cancelLabel: 'Annuler', danger: true,
+            icon: '<img class="confirm-modal-icon-img confirm-modal-icon-img--light" src="images/picto/quit_light.png" alt="">'
+                + '<img class="confirm-modal-icon-img confirm-modal-icon-img--dark" src="images/picto/quit_dark.png" alt="">',
           })
         : confirm('Quitter Allure+ ?\nLe serveur va s\'arrêter et la fenêtre va se fermer.');
       if (!ok) return;
