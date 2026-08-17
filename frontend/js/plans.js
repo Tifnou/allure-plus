@@ -695,3 +695,131 @@ async function loadPlanFromCatalog(planId) {
     showToast('Erreur : ' + err.message, 'error');
   }
 }
+
+// ═══════════════════════════════════════════════════════
+// SUIVI DU CATALOGUE DE PLANS (Admin, compte auteur uniquement)
+// Tableau route/trail x ACTIF/PAUSE/REPRISE x 2-5j/semaine, croisant les
+// fichiers .aplus reellement presents (server.js, getAllPlanFiles/
+// parsePlanMeta) avec une case a cocher "sera propose" persistee
+// (data/plan_publish_flags.json) - purement une checklist personnelle,
+// n'affecte jamais le catalogue reellement propose aux utilisateurs.
+// Visible uniquement pour ADMIN_EMAIL (showAdminNav, app.js, bascule le
+// display de #plans-admin-tracker).
+// ═══════════════════════════════════════════════════════
+const PLANS_ADMIN_ROUTE_TARGETS = [
+  { label: '5 km',          distCats: ['5k'] },
+  { label: '10 km',         distCats: ['10k'] },
+  { label: '20 km / Semi',  distCats: ['semi', '20k'] },
+  { label: 'Marathon',      distCats: ['marathon'] },
+  { label: '50 km',         distCats: ['50k'] },
+  { label: '100 km',        distCats: ['100k'] },
+];
+const PLANS_ADMIN_NIVEAUX = [
+  { key: 'ACTIF',   label: 'Actif' },
+  { key: 'PAUSE',   label: 'Pause' },
+  { key: 'REPRISE', label: 'Reprise' },
+];
+const PLANS_ADMIN_JOURS = [2, 3, 4, 5];
+
+let _plansAdminData = null; // { slots, flags, trailCategories } - cache, un seul fetch
+
+async function togglePlansAdminTracker() {
+  const body = el('plans-admin-tracker-body');
+  if (!body) return;
+  const opening = body.style.display === 'none';
+  body.style.display = opening ? '' : 'none';
+  if (opening && !_plansAdminData) await loadPlansAdminTracker();
+}
+
+async function loadPlansAdminTracker() {
+  const body = el('plans-admin-tracker-body');
+  if (!body) return;
+  body.innerHTML = '<div class="table-loading">Chargement…</div>';
+  try {
+    const data = await fetch('/api/admin/plans-catalog').then(r => r.json());
+    _plansAdminData = data;
+    renderPlansAdminTracker(data);
+  } catch (e) {
+    body.innerHTML = '<div class="support-empty">Impossible de charger le suivi des plans.</div>';
+  }
+}
+
+// Groupe de 4 puces (2j/3j/4j/5j) pour une case distance/palier x niveau.
+// keyPrefixes : un ou plusieurs prefixes possibles (ex: "20 km / Semi" doit
+// reconnaitre aussi bien un fichier nomme distCat "semi" que "20k") - la
+// premiere convention qui a reellement un fichier fait foi pour la cle de la
+// case a cocher, sinon la premiere de la liste (rien n'existe encore).
+function plansAdminDayChips(keyPrefixes, slots, flags) {
+  const prefixes = Array.isArray(keyPrefixes) ? keyPrefixes : [keyPrefixes];
+  return `<div class="plans-admin-days">${PLANS_ADMIN_JOURS.map(j => {
+    let slot = null, matchedKey = null;
+    for (const p of prefixes) {
+      const k = `${p}|${j}`;
+      if (slots[k]) { slot = slots[k]; matchedKey = k; break; }
+    }
+    const flagKey = matchedKey || `${prefixes[0]}|${j}`;
+    const present = !!slot;
+    const checked = flagKey in flags ? !!flags[flagKey] : present;
+    const title = present ? `${slot.count} fichier(s) : ${slot.files.join(', ')}` : 'Aucun fichier pour cette case';
+    return `<label class="plans-admin-chip${present ? ' plans-admin-chip--present' : ''}" title="${escapeHtml(title)}">
+      <input type="checkbox" data-key="${escapeHtml(flagKey)}" ${checked ? 'checked' : ''} onchange="setPlanPublishFlag(this)">
+      <span>${j}j</span>
+    </label>`;
+  }).join('')}</div>`;
+}
+
+function renderPlansAdminTracker(data) {
+  const body = el('plans-admin-tracker-body');
+  if (!body) return;
+  const { slots, flags, trailCategories } = data;
+
+  const routeRows = PLANS_ADMIN_ROUTE_TARGETS.map(target => {
+    const cells = PLANS_ADMIN_NIVEAUX.map(niv => {
+      const prefixes = target.distCats.map(dc => `route|${dc}|${niv.key}`);
+      return `<td>${plansAdminDayChips(prefixes, slots, flags)}</td>`;
+    }).join('');
+    return `<tr><td class="plans-admin-row-label">${escapeHtml(target.label)}</td>${cells}</tr>`;
+  }).join('');
+
+  const routeTable = `
+    <div class="plans-admin-section-title">Route</div>
+    <table class="plans-admin-table">
+      <thead><tr><th></th>${PLANS_ADMIN_NIVEAUX.map(n => `<th>${n.label}</th>`).join('')}</tr></thead>
+      <tbody>${routeRows}</tbody>
+    </table>`;
+
+  const distCatLabel = c => c.charAt(0).toUpperCase() + c.slice(1);
+  const trailTables = (trailCategories || []).map(cat => {
+    const rows = cat.tiers.map(tier => {
+      const cells = PLANS_ADMIN_NIVEAUX.map(niv =>
+        `<td>${plansAdminDayChips(`trail|${cat.distCat}|${tier}|${niv.key}`, slots, flags)}</td>`
+      ).join('');
+      return `<tr><td class="plans-admin-row-label">${escapeHtml(tier)}</td>${cells}</tr>`;
+    }).join('');
+    return `
+      <div class="plans-admin-section-title">Trail — ${distCatLabel(cat.distCat)} <span class="plans-admin-section-sub">(${cat.distLabel})</span></div>
+      <table class="plans-admin-table">
+        <thead><tr><th></th>${PLANS_ADMIN_NIVEAUX.map(n => `<th>${n.label}</th>`).join('')}</tr></thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+  }).join('');
+
+  body.innerHTML = `
+    <div class="plans-admin-legend">Chaque case = 4 fréquences (2j / 3j / 4j / 5j par semaine). Puce colorée = fichier déjà présent sur le disque. Case cochée = « sera proposé ».</div>
+    ${routeTable}
+    ${trailTables}`;
+}
+
+async function setPlanPublishFlag(input) {
+  const key = input.dataset.key;
+  const value = input.checked;
+  if (_plansAdminData) _plansAdminData.flags[key] = value;
+  try {
+    await fetch('/api/admin/plans-catalog/flag', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key, value }),
+    });
+  } catch (e) {
+    showToast('Erreur de sauvegarde', 'error');
+  }
+}

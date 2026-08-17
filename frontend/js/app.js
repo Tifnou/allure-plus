@@ -3906,6 +3906,10 @@ function showAdminNav(userEmail) {
     navSupportAdmin.style.display = 'flex';
     if (typeof checkSupportAdminNotifications === 'function') checkSupportAdminNotifications();
   }
+  const plansTracker = document.getElementById('plans-admin-tracker');
+  if (plansTracker && userEmail && userEmail.toLowerCase() === ADMIN_EMAIL.toLowerCase()) {
+    plansTracker.style.display = '';
+  }
 }
 
 // ══════════════════════════════════════════════════════

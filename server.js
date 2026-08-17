@@ -132,6 +132,11 @@ const ACTIVITIES_CACHE_FILE   = path.join(DATA_DIR, 'activities_cache.json');
 const SESSION_ANALYSES_FILE   = path.join(DATA_DIR, 'session_analyses.json');
 const GEAR_FILE                = path.join(DATA_DIR, 'gear.json');
 const ACTIVITY_GEAR_FILE       = path.join(DATA_DIR, 'activity_gear.json');
+// Cases a cocher "sera propose" du tableau de suivi des plans (Admin, compte
+// shiznogoud@gmail.com uniquement) - global, pas scope par compte Garmin
+// (readScoped/writeScoped) : ce tableau n'a de sens que pour l'auteur des
+// plans, jamais affiche a un autre compte.
+const PLAN_PUBLISH_FLAGS_FILE  = path.join(DATA_DIR, 'plan_publish_flags.json');
 
 // Tampon "Pref 2" — case a cocher reservee a ce compte, dans Profil > Mes informations
 const PREF2_EMAIL = 'floflopavard@gmail.com';
@@ -3827,6 +3832,57 @@ app.get('/api/plans/load/:id', (req, res) => {
 
     res.json(data);
   } catch(err) { handleError(res, err); }
+});
+
+// Tableau de suivi du catalogue de plans (Admin, compte auteur uniquement) -
+// scanne les fichiers .aplus reels (getAllPlanFiles/parsePlanMeta, deja
+// utilises par le catalogue public) et regroupe leur presence par case
+// route (distance x niveau) / trail (distance x palier D+ TRAIL_DPLUS_TIERS
+// x niveau) - la grille cible (quelles distances/paliers existent en
+// theorie) est definie cote client (frontend/js/plans.js), ce endpoint se
+// contente de rapporter ce qui existe reellement sur disque, jamais une
+// liste figee qui deriverait des vrais fichiers.
+app.get('/api/admin/plans-catalog', requireAdmin, (req, res) => {
+  try {
+    const files = getAllPlanFiles(PLANS_DIR);
+    const slots = {};
+    files.forEach(f => {
+      try {
+        const meta = parsePlanMeta(f);
+        // Cle inclut les seances/semaine (meta.seances, ex: 2/3/4/5j) - une
+        // meme distance/palier/niveau peut exister en plusieurs frequences,
+        // suivies independamment (retour utilisateur).
+        const key = meta.sport === 'R'
+          ? `route|${meta.distCat}|${meta.niveau}|${meta.seances}`
+          : `trail|${meta.distCat}|${meta.dplusTier || ''}|${meta.niveau}|${meta.seances}`;
+        if (!slots[key]) slots[key] = { count: 0, files: [] };
+        slots[key].count++;
+        slots[key].files.push(meta.filename);
+      } catch (e) { /* fichier .aplus illisible/corrompu -> ignore ce fichier */ }
+    });
+    const flags = readJsonSafe(PLAN_PUBLISH_FLAGS_FILE, {});
+    // Grille cible trail : memes categories/paliers que la reference D+ Admin
+    // (TRAIL_DPLUS_TIERS), seule source de verite - jamais une copie cote
+    // client qui pourrait deriver (meme motif que le bug de zones d'allure
+    // deja constate, cf. CLAUDE.md).
+    const TRAIL_DIST_LABELS = { court: '< 21 km', moyen: '21 – 42 km', long: '42 – 80 km', ultra: '> 80 km' };
+    const trailCategories = Object.keys(TRAIL_DPLUS_TIERS).map(distCat => ({
+      distCat, distLabel: TRAIL_DIST_LABELS[distCat] || distCat,
+      tiers: TRAIL_DPLUS_TIERS[distCat].map(t => t.label),
+    }));
+    res.json({ slots, flags, trailCategories });
+  } catch (err) { handleError(res, err); }
+});
+
+app.post('/api/admin/plans-catalog/flag', requireAdmin, (req, res) => {
+  try {
+    const { key, value } = req.body || {};
+    if (!key) return res.status(400).json({ error: 'key requis' });
+    const flags = readJsonSafe(PLAN_PUBLISH_FLAGS_FILE, {});
+    flags[key] = !!value;
+    writeJsonSafe(PLAN_PUBLISH_FLAGS_FILE, flags);
+    res.json({ ok: true });
+  } catch (err) { handleError(res, err); }
 });
 
 // Demarrage avec retry sur EADDRINUSE : incident reel constate (12/08) - un

@@ -13,7 +13,7 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <link rel="stylesheet" href="css/style.css?v=1786965940036" />
-  <link rel="stylesheet" href="css/plans.css?v=1786014624239" />
+  <link rel="stylesheet" href="css/plans.css?v=1786968652544" />
   <link rel="stylesheet" href="css/routes.css?v=1786547249351" />
 </head>
 <body>
@@ -1129,6 +1129,13 @@
 
       <div id="plans-info-banner" class="plans-info-banner"></div>
 
+      <!-- Suivi du catalogue de plans (Admin, compte auteur uniquement -
+           showAdminNav bascule le display, app.js) -->
+      <div id="plans-admin-tracker" style="display:none;margin-bottom:20px;">
+        <button type="button" class="btn-plans-restart" id="plans-admin-tracker-toggle" onclick="togglePlansAdminTracker()">📋 Suivi de mon catalogue de plans</button>
+        <div id="plans-admin-tracker-body" class="plans-admin-tracker-body" style="display:none;"></div>
+      </div>
+
       <!-- WIZARD -->
       <div id="plans-wizard">
         <div id="plans-step-indicator" style="margin-bottom:16px;"></div>
@@ -1324,7 +1331,7 @@
     <span class="support-fab-dot" id="support-fab-dot" style="display:none"></span>
   </button>
 
-  <script src="js/app.js?v=1786966950464"></script>
+  <script src="js/app.js?v=1786968652544"></script>
   <script src="js/gear.js?v=1786459105633"></script>
   <script src="js/campus.js?v=1786966246054"></script>
   <script src="js/free_sessions.js?v=1786701705047"></script>
@@ -1332,7 +1339,7 @@
   <script src="js/stats.js?v=1786711188188"></script>
   <script src="js/records.js?v=1786024863614"></script>
   <script src="js/health.js?v=1786627102345"></script>
-  <script src="js/plans.js?v=1785854785389"></script>
+  <script src="js/plans.js?v=1786968652544"></script>
   <script src="js/routes.js?v=1786698449656"></script>
   <script src="js/support.js?v=1786966950464"></script>
   <!-- ... MODAL LOGS ........................... -->
