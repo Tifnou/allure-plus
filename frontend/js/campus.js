@@ -2868,9 +2868,19 @@ function renderGoalsAlerts(goal, weeks, stats) {
   const alerts = [];
 
   const cardioAlert = buildAssiduityAlert(stats.cardio, 'cardio');
-  if (cardioAlert) alerts.push(cardioAlert);
   const strengthAlert = buildAssiduityAlert(stats.strength, 'strength');
-  if (strengthAlert) alerts.push(strengthAlert);
+  // Deux alertes jaunes "bonne assiduité" juxtaposées se lisaient comme
+  // redondantes, surtout juste après le message positif "objectif
+  // atteignable" du bloc Estimations (retour critique Impeccable) - fusion
+  // uniquement dans ce cas précis ; toute autre combinaison (vert+rouge,
+  // une seule alerte, etc.) reste inchangée, ces cas-là ne sont pas redondants.
+  if (cardioAlert && strengthAlert && cardioAlert.cls === 'yellow' && strengthAlert.cls === 'yellow') {
+    alerts.push({ cls: 'yellow', icon: '🟡', title: 'Quelques séances manquées',
+      msg: `${stats.cardio.missed + stats.strength.missed} séance(s) manquée(s) cette semaine (${stats.cardio.missed} course/trail, ${stats.strength.missed} renforcement) — priorité aux séances course/trail (fractionné, sortie longue), ce sont elles qui font évoluer votre VO2max.` });
+  } else {
+    if (cardioAlert) alerts.push(cardioAlert);
+    if (strengthAlert) alerts.push(strengthAlert);
+  }
 
   if (daysLeft !== null) {
     if (daysLeft <= 0)
@@ -2997,7 +3007,8 @@ function renderObjectifsBlocks(goal, weeks) {
       dplusInput.value = (wasValidated && savedDplus) ? dplusM : '';  // vierge si pas encore validé
       dplusInput.dataset.init = '1';
       dplusInput.oninput = () => {
-        const val = parseInt(dplusInput.value) || dplusMid;
+        let val = parseInt(dplusInput.value) || dplusMid;
+        if (val > 9999) { val = 9999; dplusInput.value = val; if (typeof showToast === 'function') showToast('D+ plafonné à 9999 m', 'info'); }
         localStorage.setItem(planKey, val);
         renderEstimations(goal, weeks, val);
         renderObjectifsChart(weeks, goal, val);
@@ -3051,7 +3062,8 @@ function renderObjectifsBlocks(goal, weeks) {
     if (!pauseInput.dataset.init) {
       pauseInput.dataset.init = '1';
       pauseInput.oninput = () => {
-        const val = parseInt(pauseInput.value);
+        let val = parseInt(pauseInput.value);
+        if (val > 600) { val = 600; pauseInput.value = val; if (typeof showToast === 'function') showToast('Pauses plafonnées à 600 min', 'info'); }
         if (val > 0) localStorage.setItem(pauseKey, val);
         else localStorage.removeItem(pauseKey);
         const dplusNow = parseInt(el('goals-dplus-input')?.value) || dplusM;
@@ -3169,6 +3181,7 @@ function updateGoalsPage(goal, weeks = []) {
   el('goals-weeks-left') && (el('goals-weeks-left').textContent = left);
   el('goals-pct')        && (el('goals-pct').textContent        = Math.round(pctExact) + '%');
   el('goals-progress-fill') && (el('goals-progress-fill').style.width = pctExact + '%');
+  el('goals-progress-track') && el('goals-progress-track').setAttribute('aria-valuenow', Math.round(pctExact));
   const marker = el('goals-progress-marker');
   if (marker) { marker.style.left = pctExact + '%'; marker.textContent = personEmoji('running'); }
 

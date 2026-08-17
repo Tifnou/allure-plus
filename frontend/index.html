@@ -12,7 +12,7 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <link rel="stylesheet" href="css/style.css?v=1786896671257" />
+  <link rel="stylesheet" href="css/style.css?v=1786964735062" />
   <link rel="stylesheet" href="css/plans.css?v=1786014624239" />
   <link rel="stylesheet" href="css/routes.css?v=1786547249351" />
 </head>
@@ -951,8 +951,9 @@
                     <label class="goals-hero-input-label" for="goals-pause-input">Pauses</label>
                     <div class="goals-dplus-input-wrap">
                       <input type="number" id="goals-pause-input" class="form-input goals-hero-input-field"
-                        placeholder="0" min="0" max="600" step="1" />
+                        placeholder="0" min="0" max="600" step="1" aria-describedby="goals-pause-hint" />
                       <span class="form-unit">min</span>
+                      <span id="goals-pause-hint" class="sr-only">Temps total estimé aux ravitaillements, changements de matériel, etc. sur les efforts longs — ajouté aux estimations de temps de course.</span>
                     </div>
                   </div>
                 </div>
@@ -996,7 +997,8 @@
               </div>
             </div>
             <div class="goals-progress-weeklabels" id="goals-progress-weeklabels"></div>
-            <div class="goals-progress-track" style="margin-top:2px">
+            <div class="goals-progress-track" id="goals-progress-track" style="margin-top:2px"
+              role="progressbar" aria-label="Avancement du plan" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
               <div class="goals-progress-fill" id="goals-progress-fill" style="width:0%"></div>
               <div class="goals-progress-ticks" id="goals-progress-ticks"></div>
               <span class="goals-progress-marker" id="goals-progress-marker" style="left:0%"></span>
@@ -1059,7 +1061,7 @@
         </div>
 
         <!-- BLOC 3 : Estimations de performance -->
-        <div class="card goals-estimations-card">
+        <div class="card goals-estimations-card" aria-live="polite">
           <div class="card-header">
             <h2 class="card-title"><span class="card-title-icon">&#x23F1;</span> Estimations de performance</h2>
             <span class="goals-est-note">basé sur votre VO₂max Garmin</span>
@@ -1324,7 +1326,7 @@
 
   <script src="js/app.js?v=1786896671257"></script>
   <script src="js/gear.js?v=1786459105633"></script>
-  <script src="js/campus.js?v=1786962663928"></script>
+  <script src="js/campus.js?v=1786964735062"></script>
   <script src="js/free_sessions.js?v=1786701705047"></script>
   <script src="js/session-analysis.js?v=1786889818910"></script>
   <script src="js/stats.js?v=1786711188188"></script>
