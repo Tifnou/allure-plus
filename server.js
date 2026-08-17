@@ -1079,7 +1079,8 @@ app.get('/api/admin/users/:email/details', requireAdmin, async (req, res) => {
       Object.entries(healthEnv.entries).forEach(([key, entry]) => {
         if (!key.startsWith('vo2max::') || entry.deletedAt) return;
         const d = entry.value?.date;
-        const v = entry.value?.value?.vo2max;
+        const precise = entry.value?.value?.precise;
+        const v = (typeof precise === 'number') ? precise : entry.value?.value?.vo2max;
         if (v != null && (!vo2maxDate || d > vo2maxDate)) { vo2maxDate = d; vo2max = v; }
       });
     }
