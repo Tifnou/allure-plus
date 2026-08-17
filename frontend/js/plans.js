@@ -749,6 +749,18 @@ async function loadPlansAdminTracker() {
 // reconnaitre aussi bien un fichier nomme distCat "semi" que "20k") - la
 // premiere convention qui a reellement un fichier fait foi pour la cle de la
 // case a cocher, sinon la premiere de la liste (rien n'existe encore).
+// Tri-etat par case (retour utilisateur) :
+//  - present (fichier(s) sur le disque)  -> VERT, coche, verrouille (la
+//    presence reelle fait foi, ne se decoche pas a la main) ; l'ancien
+//    flag "exclu" reste stocke dessous mais n'est plus consulte tant que
+//    le fichier existe - s'il disparait un jour, l'exclusion manuelle
+//    refait surface telle quelle.
+//  - absent + flags[key]===true (coche a la main)  -> ROUGE, coche :
+//    "je ne ferai jamais ce plan" (ex: marathon a 2j/semaine).
+//  - absent + pas de flag -> neutre, decoche : "pas encore fait, pas
+//    tranche".
+// flags[key] ne signifie donc PAS "sera propose" mais "exclu
+// volontairement" - uniquement pertinent quand rien n'existe.
 function plansAdminDayChips(keyPrefixes, slots, flags) {
   const prefixes = Array.isArray(keyPrefixes) ? keyPrefixes : [keyPrefixes];
   return `<div class="plans-admin-days">${PLANS_ADMIN_JOURS.map(j => {
@@ -759,11 +771,22 @@ function plansAdminDayChips(keyPrefixes, slots, flags) {
     }
     const flagKey = matchedKey || `${prefixes[0]}|${j}`;
     const present = !!slot;
-    const checked = flagKey in flags ? !!flags[flagKey] : present;
-    const title = present ? `${slot.count} fichier(s) : ${slot.files.join(', ')}` : 'Aucun fichier pour cette case';
-    return `<label class="plans-admin-chip${present ? ' plans-admin-chip--present' : ''}" title="${escapeHtml(title)}">
-      <input type="checkbox" data-key="${escapeHtml(flagKey)}" ${checked ? 'checked' : ''} onchange="setPlanPublishFlag(this)">
-      <span>${j}j</span>
+    const excluded = !present && flags[flagKey] === true;
+    const checked = present || excluded;
+    const stateCls = present ? ' plans-admin-chip--present' : (excluded ? ' plans-admin-chip--excluded' : '');
+    const durCount = present && slot.durations && slot.durations.length > 1 ? `<sup>${slot.durations.length}</sup>` : '';
+    let title;
+    if (present) {
+      const durList = (slot.durations || []).join(', ');
+      title = `${slot.count} fichier(s)${durList ? ' · durée(s) : ' + durList + ' sem.' : ''} : ${slot.files.join(', ')}`;
+    } else if (excluded) {
+      title = 'Marqué comme exclu (ne sera jamais proposé) — cliquer pour annuler';
+    } else {
+      title = 'Aucun fichier — cliquer pour marquer comme volontairement exclu';
+    }
+    return `<label class="plans-admin-chip${stateCls}" title="${escapeHtml(title)}">
+      <input type="checkbox" data-key="${escapeHtml(flagKey)}" ${checked ? 'checked' : ''} ${present ? 'disabled' : ''} onchange="setPlanPublishFlag(this)">
+      <span>${j}j${durCount}</span>
     </label>`;
   }).join('')}</div>`;
 }
@@ -805,15 +828,22 @@ function renderPlansAdminTracker(data) {
   }).join('');
 
   body.innerHTML = `
-    <div class="plans-admin-legend">Chaque case = 4 fréquences (2j / 3j / 4j / 5j par semaine). Puce colorée = fichier déjà présent sur le disque. Case cochée = « sera proposé ».</div>
+    <div class="plans-admin-legend">Chaque case = 4 fréquences (2j / 3j / 4j / 5j par semaine, un petit chiffre en exposant indique plusieurs durées disponibles — détail au survol). <span class="plans-admin-legend-dot plans-admin-legend-dot--present"></span> Fichier déjà présent · <span class="plans-admin-legend-dot plans-admin-legend-dot--excluded"></span> Volontairement exclu (cliquer une case vide pour basculer) · case grise = pas encore tranché.</div>
     ${routeTable}
     ${trailTables}`;
 }
 
+// Re-rend tout le tableau apres bascule (pas juste la case cliquee) : la
+// couleur rouge/neutre d'une puce depend de flags, pas seulement de
+// checked, un simple changement natif de la checkbox ne la mettrait pas a
+// jour visuellement.
 async function setPlanPublishFlag(input) {
   const key = input.dataset.key;
   const value = input.checked;
-  if (_plansAdminData) _plansAdminData.flags[key] = value;
+  if (_plansAdminData) {
+    _plansAdminData.flags[key] = value;
+    renderPlansAdminTracker(_plansAdminData);
+  }
   try {
     await fetch('/api/admin/plans-catalog/flag', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },

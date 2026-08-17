@@ -329,4 +329,11 @@
 }
 .plans-admin-chip input { width:11px; height:11px; cursor:pointer; accent-color:var(--green); margin:0; }
 .plans-admin-chip--present { background:var(--green-bg); border-color:var(--green); color:var(--green); }
+.plans-admin-chip--present input { cursor:default; }
+.plans-admin-chip--excluded { background:var(--red-bg); border-color:var(--red); color:var(--red); }
+.plans-admin-chip--excluded input { accent-color:var(--red); }
 .plans-admin-chip:hover { border-color:var(--accent); }
+.plans-admin-chip--present:hover { border-color:var(--green); }
+.plans-admin-legend-dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin:0 2px -1px 0; }
+.plans-admin-legend-dot--present { background:var(--green); }
+.plans-admin-legend-dot--excluded { background:var(--red); }

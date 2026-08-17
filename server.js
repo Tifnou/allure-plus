@@ -3855,11 +3855,16 @@ app.get('/api/admin/plans-catalog', requireAdmin, (req, res) => {
         const key = meta.sport === 'R'
           ? `route|${meta.distCat}|${meta.niveau}|${meta.seances}`
           : `trail|${meta.distCat}|${meta.dplusTier || ''}|${meta.niveau}|${meta.seances}`;
-        if (!slots[key]) slots[key] = { count: 0, files: [] };
+        if (!slots[key]) slots[key] = { count: 0, files: [], durations: [] };
         slots[key].count++;
         slots[key].files.push(meta.filename);
+        // Duree (semaines) : dimension supplementaire non affichee comme
+        // colonne a part (le tableau serait demesure) - juste listee au
+        // survol de la case (retour utilisateur), cf. plans.js.
+        if (meta.duree && !slots[key].durations.includes(meta.duree)) slots[key].durations.push(meta.duree);
       } catch (e) { /* fichier .aplus illisible/corrompu -> ignore ce fichier */ }
     });
+    Object.values(slots).forEach(s => s.durations.sort((a, b) => a - b));
     const flags = readJsonSafe(PLAN_PUBLISH_FLAGS_FILE, {});
     // Grille cible trail : memes categories/paliers que la reference D+ Admin
     // (TRAIL_DPLUS_TIERS), seule source de verite - jamais une copie cote
