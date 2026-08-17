@@ -2543,44 +2543,26 @@ function renderEstimations(goal, weeks, dplusM, distKmOverride) {
 
 let _goalsChartInst = null;
 
-/** Projection théorique du plan (Bloc 4, courbe orange) : calculée UNE SEULE
- *  fois (à la première ouverture du plan) puis figée en localStorage - elle
- *  ne bouge plus jamais ensuite, même quand la semaine avance. Avant ce
- *  changement, la courbe "Projection" repartait chaque semaine du point
- *  courant de la courbe réelle et recalculait sa fin à partir du gain de VMA
- *  RESTANT (cf. getRemainingVmaGainPct) : elle rétrécissait et se redessinait
- *  sans cesse, rendant impossible de comparer "ce que le plan promettait" à
- *  "ce qui se passe réellement" (retour utilisateur : la courbe réelle
- *  "supprimait" la projection au fil des semaines). Recalculée seulement si
- *  les paramètres qui la déterminent changent (distance/D+/durée du plan) -
- *  voir la signature `sig` ci-dessous. */
-function getOrBuildProjectionBaseline(weeks, goal, distKm, dplusM, isTrail, weeksTotal) {
-  const planId = goal._id || goal.name || 'plan';
-  const storeKey = 'suivi_goal_projection_' + planId;
-  const planStartTs = weeks[0]?.weekDate ?? null;
-  const sig = [planStartTs, weeksTotal, distKm, dplusM || 0, isTrail ? 1 : 0].join('|');
-
-  try {
-    const stored = JSON.parse(localStorage.getItem(storeKey) || 'null');
-    if (stored && stored.sig === sig && Array.isArray(stored.values) && stored.values.length === weeksTotal) {
-      return stored.values;
-    }
-  } catch (e) { /* stockage illisible -> recalcul */ }
-
-  // VMA de départ = dernière valeur Garmin connue avant/au début du plan
-  // (historique complet, non filtré : on veut le niveau de forme "à l'entrée"
-  // du plan, même s'il date d'avant le début du suivi Allure+ du plan).
-  const vo2AtStart = planStartTs != null ? vo2ValueAtDate(buildAnchoredVo2History(), planStartTs) : null;
-  const vmaStart = vo2AtStart != null ? vo2ToVmaCalibrated(vo2AtStart) : getVmaFromState();
-  if (!vmaStart) return Array(weeksTotal).fill(null);
-
-  // Gain de VMA total attendu sur l'ensemble du plan (hypothèse "plan suivi
-  // comme prévu", contrairement au bloc Estimations qui pondère par
-  // l'assiduité réelle à date) : c'est la promesse théorique du plan, pas
-  // une prévision influencée par ce qui a déjà été fait.
-  const vmaEnd = vmaStart * (1 + getVO2maxGainPct(weeksTotal));
-
+/** Projection théorique du plan (Bloc 4, courbe orange) : une ligne droite
+ *  entre le point de départ du plan et le point d'arrivée projeté - MÊMES
+ *  calculs que les cartes "Début de plan" (getStartVo2) et "Fin de plan
+ *  (projection)" (getRemainingVmaGainPct) du bloc Estimations juste
+ *  au-dessus, pour que la courbe et ces cartes affichent toujours des
+ *  valeurs cohérentes. Le départ se fige automatiquement dès la fin de la
+ *  semaine 1 (comportement déjà intégré à getStartVo2) ; l'arrivée continue
+ *  d'évoluer avec l'avancement réel du plan (assiduité), exactement comme la
+ *  carte "Fin de plan" - c'est volontaire, seul le point de départ est un
+ *  fait figé, la projection d'arrivée reste une estimation vivante. Avant ce
+ *  changement, la courbe "Projection" ne couvrait que les semaines futures
+ *  et repartait chaque semaine du point courant de la courbe réelle : elle
+ *  rétrécissait et se redessinait sans cesse (retour utilisateur : la
+ *  courbe réelle "supprimait" la projection au fil des semaines). */
+function buildProjectionLine(weeks, goal, distKm, dplusM, isTrail, weeksTotal, vma) {
+  const vo2Start = getStartVo2(weeks, buildAnchoredVo2History());
+  const vmaStart = vo2Start != null ? vo2ToVmaCalibrated(vo2Start) : vma;
   const startMins = Math.round((estimateRaceTime(vmaStart, distKm, dplusM, isTrail) || 0) / 60);
+
+  const vmaEnd = vma * (1 + getRemainingVmaGainPct(weeksTotal, weeks));
   const endMins = Math.round((estimateRaceTime(vmaEnd, distKm, dplusM, isTrail) || 0) / 60);
 
   const values = [];
@@ -2588,8 +2570,6 @@ function getOrBuildProjectionBaseline(weeks, goal, distKm, dplusM, isTrail, week
     const f = (w - 1) / (weeksTotal - 1);
     values.push(Math.round(startMins + (endMins - startMins) * f));
   }
-
-  try { localStorage.setItem(storeKey, JSON.stringify({ sig, values })); } catch (e) { /* quota plein -> pas grave, recalculé au prochain rendu */ }
   return values;
 }
 
@@ -2626,10 +2606,10 @@ function renderObjectifsChart(weeks, goal, dplusM, distKmOverride) {
 
   const currentMins = Math.round((estimateRaceTime(vma, distKm, dplusM, isTrail) || 0) / 60);
 
-  // Projection : courbe figée (voir getOrBuildProjectionBaseline), totalement
-  // indépendante de la progression réelle - une vraie 3e courbe distincte,
-  // pas un simple prolongement de la courbe bleue.
-  const projection = getOrBuildProjectionBaseline(weeks, goal, distKm, dplusM, isTrail, weeksTotal);
+  // Projection : ligne droite début de plan → fin de plan projetée (voir
+  // buildProjectionLine), couvrant toutes les semaines - une vraie 3e
+  // courbe distincte, pas un simple prolongement de la courbe bleue.
+  const projection = buildProjectionLine(weeks, goal, distKm, dplusM, isTrail, weeksTotal, vma);
 
   const labels = [], real = [];
   for (let w = 1; w <= weeksTotal; w++) {
