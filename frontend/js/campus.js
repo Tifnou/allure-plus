@@ -1006,7 +1006,13 @@ function renderTrainingPlan(goal, weeks) {
   const typeMap  = { 'trail-v2': 'Trail', 'marathon': 'Marathon', 'semi': 'Semi', '10k': '10 km' };
   const typeLabel = typeMap[goalType] || goalType || '';
   const totalWeeks = goal?.durationInWeeks || weeks.length;
-  const elapsed = weeks.filter(w => startOfDay(w.weekDate) < startOfDay(now)).length;
+  // Derive de currentIdx (isNowInWeek, deja calcule ci-dessus et fiable -
+  // c'est lui qui met en surbrillance le bon onglet S{n}) plutot que d'un
+  // second calcul independant base sur startOfDay(weekDate) < startOfDay(now)
+  // (strict) : ce dernier ne comptait la semaine en cours comme "ecoulee"
+  // qu'a partir du mardi, le lundi (jour 1 de la semaine) affichait encore
+  // "Semaine 3/12" alors que l'onglet S4 etait deja actif - retour utilisateur.
+  const elapsed = currentIdx >= 0 ? currentIdx + 1 : weeks.filter(w => startOfDay(w.weekDate) < startOfDay(now)).length;
   const pct = totalWeeks > 0 ? Math.round((elapsed / totalWeeks) * 100) : 0;
   // Position continue (au jour pres, pas juste par semaine entiere) du petit
   // coureur + graduations par semaine - meme traitement que la barre
