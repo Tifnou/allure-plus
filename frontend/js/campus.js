@@ -2867,20 +2867,16 @@ function renderGoalsAlerts(goal, weeks, stats) {
   const daysLeft = compTs ? Math.ceil((compTs - Date.now()) / 86400000) : null;
   const alerts = [];
 
+  // Cardio et renforcement restent deux cartes distinctes (retour
+  // utilisateur) : la fusion tentee ici affichait un message errone ("X
+  // manquees CETTE SEMAINE" alors que stats.cardio.missed/strength.missed
+  // cumulent en realite les manques depuis le debut du plan, cf.
+  // computeSessionStats - pas juste la semaine en cours), en plus de melanger
+  // deux enjeux differents (VO2max vs prevention blessures) dans un seul cadre.
   const cardioAlert = buildAssiduityAlert(stats.cardio, 'cardio');
+  if (cardioAlert) alerts.push(cardioAlert);
   const strengthAlert = buildAssiduityAlert(stats.strength, 'strength');
-  // Deux alertes jaunes "bonne assiduité" juxtaposées se lisaient comme
-  // redondantes, surtout juste après le message positif "objectif
-  // atteignable" du bloc Estimations (retour critique Impeccable) - fusion
-  // uniquement dans ce cas précis ; toute autre combinaison (vert+rouge,
-  // une seule alerte, etc.) reste inchangée, ces cas-là ne sont pas redondants.
-  if (cardioAlert && strengthAlert && cardioAlert.cls === 'yellow' && strengthAlert.cls === 'yellow') {
-    alerts.push({ cls: 'yellow', icon: '🟡', title: 'Quelques séances manquées',
-      msg: `${stats.cardio.missed + stats.strength.missed} séance(s) manquée(s) cette semaine (${stats.cardio.missed} course/trail, ${stats.strength.missed} renforcement) — priorité aux séances course/trail (fractionné, sortie longue), ce sont elles qui font évoluer votre VO2max.` });
-  } else {
-    if (cardioAlert) alerts.push(cardioAlert);
-    if (strengthAlert) alerts.push(strengthAlert);
-  }
+  if (strengthAlert) alerts.push(strengthAlert);
 
   if (daysLeft !== null) {
     if (daysLeft <= 0)
