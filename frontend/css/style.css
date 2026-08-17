@@ -1693,22 +1693,40 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
 .week-tab--current:not(.week-tab--active) .week-tab-num {
   color: var(--green);
 }
-/* Semaines passées (terminées) */
+/* Semaines passées (terminées) : nuance de couleur selon la completion
+   (computeWeekCompletionStatus, campus.js) - vert si toutes les seances
+   sont faites, orange si partiellement, rouge si aucune - translucide dans
+   les 3 cas (retour utilisateur : garder le cote "passe/attenue", juste
+   distinguer la reussite). */
 .week-tab--past:not(.week-tab--active) {
-  background: var(--red-bg);
-  border-color: var(--red);
   opacity: 0.55;
-}
-.week-tab--past:not(.week-tab--active) .week-tab-num {
-  color: var(--red);
-}
-.week-tab--past:not(.week-tab--active) .week-tab-theme {
-  color: var(--red);
 }
 .week-tab--past:not(.week-tab--active):hover {
   opacity: 0.8;
-  border-color: var(--red);
+}
+.week-tab--past-complete:not(.week-tab--active) {
+  background: var(--green-bg);
+  border-color: var(--green);
+}
+.week-tab--past-complete:not(.week-tab--active) .week-tab-num,
+.week-tab--past-complete:not(.week-tab--active) .week-tab-theme {
+  color: var(--green);
+}
+.week-tab--past-partial:not(.week-tab--active) {
+  background: var(--orange-bg);
+  border-color: var(--orange);
+}
+.week-tab--past-partial:not(.week-tab--active) .week-tab-num,
+.week-tab--past-partial:not(.week-tab--active) .week-tab-theme {
+  color: var(--orange);
+}
+.week-tab--past-none:not(.week-tab--active) {
   background: var(--red-bg);
+  border-color: var(--red);
+}
+.week-tab--past-none:not(.week-tab--active) .week-tab-num,
+.week-tab--past-none:not(.week-tab--active) .week-tab-theme {
+  color: var(--red);
 }
 .week-tab-num {
   font-size: 12px;

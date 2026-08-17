@@ -1094,10 +1094,15 @@ function renderTrainingPlan(goal, weeks) {
           // les deux (ex: la semaine qui vient de se terminer hier restait
           // affichée "à venir" faute d'être strictement avant aujourd'hui).
           const isPast    = currentIdx >= 0 && i < currentIdx;
+          // Nuance de couleur des semaines passees (retour utilisateur :
+          // avant, toutes rouge translucide sans distinction) - vert si
+          // toutes les seances sont faites, orange si partiellement, rouge
+          // si aucune - cf. computeWeekCompletionStatus.
+          const pastStatus = isPast ? computeWeekCompletionStatus(w) : null;
           const rawTheme  = w.context?.cycleTheme || '';
           const theme     = rawTheme ? (THEME_LABELS[rawTheme] || rawTheme.replace(/-/g, ' ')) : '';
           return `
-            <button class="week-tab${i === campusState.selectedWeekIdx ? ' week-tab--active' : ''}${isCurrent ? ' week-tab--current' : ''}${isPast && i !== campusState.selectedWeekIdx ? ' week-tab--past' : ''}"
+            <button class="week-tab${i === campusState.selectedWeekIdx ? ' week-tab--active' : ''}${isCurrent ? ' week-tab--current' : ''}${isPast && i !== campusState.selectedWeekIdx ? ` week-tab--past week-tab--past-${pastStatus}` : ''}"
               onclick="selectWeek(${i})" id="week-tab-${i}">
               <span class="week-tab-num">${isPast ? '\u2713 ' : ''}S${i+1}</span>
               ${theme ? `<span class="week-tab-theme">${theme}</span>` : ''}
@@ -2197,6 +2202,25 @@ function computeSessionStats(weeks) {
     done: doneAll, missed: missedAll, remaining: cardio.remaining + strength.remaining,
     total: cardioStats.total + strengthStats.total, assiduity: assiduityAll,
   };
+}
+
+/** Statut d'une semaine PASSEE pour la nuance de couleur du selecteur de
+ *  semaines (week-tabs) : 'complete' (toutes les seances faites), 'none'
+ *  (aucune) ou 'partial' (au moins une faite, au moins une non faite) -
+ *  ne distingue pas "skip" de "jamais marque", les deux comptent comme
+ *  "pas faite" ici (contrairement a computeSessionStats, qui les distingue
+ *  pour l'assiduite globale). */
+function computeWeekCompletionStatus(week) {
+  const sessions = week.sessions || [];
+  if (!sessions.length) return 'none';
+  const doneMap = JSON.parse(localStorage.getItem('suivi_local_done') || '{}');
+  const doneCount = sessions.filter(session => {
+    const key = (week._id || '') + '_' + session.trainingIndex;
+    return (doneMap[key] || session.status) === 'done';
+  }).length;
+  if (doneCount === 0) return 'none';
+  if (doneCount === sessions.length) return 'complete';
+  return 'partial';
 }
 
 /** Poids d'une séance vis-à-vis du gain de VO2max attendu - heuristique (pas
