@@ -2545,9 +2545,12 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
 }
 .goals-est-time {
   font-size: 20px; font-weight: 800;
-  color: var(--text-primary); line-height: 1;
+  color: var(--text-primary); line-height: 1.2;
   font-variant-numeric: tabular-nums;
 }
+/* Fourchette (temps sans pause → avec pause estimée) : police réduite pour
+   que "5h53 → 6h08" tienne sur la largeur de la carte (240px max) */
+.goals-est-time--range { font-size: 15px; }
 .goals-est-pace {
   font-size: 10.5px; color: var(--text-muted); margin-top: 3px;
 }
@@ -3829,7 +3832,7 @@ body.plans-active {
 }
 .goals-hero-inputs-row {
   display: flex; align-items: flex-end;
-  gap: 8px; flex-wrap: nowrap;
+  gap: 8px; flex-wrap: wrap;
 }
 .goals-hero-input-item {
   display: flex; flex-direction: column; gap: 2px;
@@ -3844,6 +3847,7 @@ body.plans-active {
 .goals-hero-input-field { width: 56px !important; padding: 4px 6px !important; font-size: 12.5px !important; }
 #goals-dplus-input { width: 64px !important; }
 #goal-target-time { width: 90px !important; padding: 4px 3px !important; font-size: 11px !important; }
+#goals-pause-input { width: 50px !important; }
 .goals-dplus-input-wrap { gap: 3px !important; }
 .form-unit { font-size: 10.5px; }
 .btn-goals-valider {

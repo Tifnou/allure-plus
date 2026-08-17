@@ -2199,6 +2199,75 @@ function computeSessionStats(weeks) {
   };
 }
 
+/** Poids d'une séance vis-à-vis du gain de VO2max attendu - heuristique (pas
+ *  une valeur validée scientifiquement, juste un ordre de grandeur) : les
+ *  séances à haute intensité (VMA/seuil/fractionné) sont le principal
+ *  stimulus de l'adaptation VO2max, contrairement à l'EF/sortie longue qui
+ *  travaillent surtout l'économie de course et l'endurance sans stimuler
+ *  autant le VO2max. Une séance "qualité" manquée doit donc peser plus sur
+ *  la projection qu'une séance EF manquée - contrairement à
+ *  computeSessionStats().cardio.assiduity (compte brut à parts égales,
+ *  utilisé lui pour l'affichage "X faites / Y manquées", qui reste un
+ *  décompte simple et ne doit pas changer). */
+const VO2MAX_STIMULUS_WEIGHT = {
+  trail_vma: 1.5, trail_vma_uphill: 1.5,
+  trail_threshold: 1.4, trail_threshold_uphill: 1.4, trail_intensity: 1.4,
+  road_vma: 1.5, road_vma_intervals: 1.5,
+  road_threshold: 1.4, road_threshold_intervals: 1.4, road_intensity: 1.4, road_hill_repeats: 1.4,
+};
+function isQualitySession(session) {
+  return (VO2MAX_STIMULUS_WEIGHT[session.trainingCategory] || 1) > 1;
+}
+
+/** Assiduité cardio pondérée par le potentiel de stimulus VO2max de chaque
+ *  séance (voir VO2MAX_STIMULUS_WEIGHT) - utilisée UNIQUEMENT par
+ *  getRemainingVmaGainPct pour la projection de gain, jamais pour les
+ *  compteurs affichés (qui restent un décompte simple, voir
+ *  computeSessionStats). */
+function computeWeightedCardioAssiduity(weeks) {
+  const doneMap = JSON.parse(localStorage.getItem('suivi_local_done') || '{}');
+  const now = Date.now();
+  let doneW = 0, missedW = 0;
+  (weeks || []).forEach(week => {
+    const weekPassed = startOfDay(week.weekDate + 7 * 86400000) < startOfDay(now);
+    (week.sessions || []).forEach(session => {
+      if (isStrengthSession(session)) return;
+      const key = (week._id || '') + '_' + session.trainingIndex;
+      const status = doneMap[key] || session.status || 'todo';
+      const w = VO2MAX_STIMULUS_WEIGHT[session.trainingCategory] || 1;
+      if (status === 'done') doneW += w;
+      else if (status === 'skip') missedW += w;
+      else if (weekPassed) missedW += w;
+    });
+  });
+  return (doneW + missedW) > 0 ? Math.round(doneW / (doneW + missedW) * 100) : null;
+}
+
+/** Séances "qualité" (VMA/seuil/fractionné) faites vs DUES à ce jour (déjà
+ *  passées ou marquées) - affiché en tooltip sur la carte "Fin de plan" pour
+ *  que le calcul pondéré reste vérifiable, pas une boîte noire. Ne compte
+ *  QUE les séances déjà échues (même filtre que computeWeightedCardioAssiduity)
+ *  : sinon les séances qualité futures, pas encore tentées, gonfliraient
+ *  artificiellement le total et feraient paraître l'assiduité mauvaise en
+ *  tout début de plan. */
+function countQualitySessions(weeks) {
+  const doneMap = JSON.parse(localStorage.getItem('suivi_local_done') || '{}');
+  const now = Date.now();
+  let done = 0, total = 0;
+  (weeks || []).forEach(week => {
+    const weekPassed = startOfDay(week.weekDate + 7 * 86400000) < startOfDay(now);
+    (week.sessions || []).forEach(session => {
+      if (isStrengthSession(session) || !isQualitySession(session)) return;
+      const key = (week._id || '') + '_' + session.trainingIndex;
+      const status = doneMap[key] || session.status || 'todo';
+      if (status !== 'done' && status !== 'skip' && !weekPassed) return; // pas encore due
+      total++;
+      if (status === 'done') done++;
+    });
+  });
+  return { done, total };
+}
+
 /** Estimation du temps de course en secondes depuis la VMA
  *  Trail : méthode km équivalents (1m D+ = 10m plat), standard trail français */
 function estimateRaceTime(vma, distKm, dplusM, isTrail) {
@@ -2214,6 +2283,32 @@ function estimateRaceTime(vma, distKm, dplusM, isTrail) {
 function fmtSecsToTime(s) {
   if (!s || s <= 0) return '—';
   return Math.floor(s / 3600) + 'h' + String(Math.floor((s % 3600) / 60)).padStart(2, '0');
+}
+
+/** Temps d'arrêt estimé (ravitos, changements de matériel...) saisi par
+ *  l'utilisateur, en secondes - sur les efforts longs (trail 5h+ typiquement)
+ *  ces arrêts peuvent représenter plusieurs dizaines de minutes que le calcul
+ *  VMA/%VMA (temps de MOUVEMENT pur) ne capture pas. Ajouté au temps de
+ *  mouvement estimé pour comparer des temps totaux homogènes avec le temps
+ *  cible (qui est un chrono à l'arrivée, pauses incluses). Volontairement
+ *  saisi à la main plutôt qu'estimé automatiquement : trop dépendant du
+ *  profil de la course (nombre de ravitos, météo du jour) pour être déduit
+ *  de façon fiable d'un modèle générique. */
+function getPauseSec(goal) {
+  const planId = goal?._id || 'plan';
+  const mins = parseInt(localStorage.getItem('suivi_objectif_pause_' + planId)) || 0;
+  return mins * 60;
+}
+
+/** Affiche une fourchette "sans pause → avec pauses" plutôt qu'un temps
+ *  unique trompeusement précis (retour utilisateur : un seul chiffre qui
+ *  saute de 5h46 à 6h01 selon qu'on compte les pauses ou non ne veut rien
+ *  dire, mieux vaut montrer directement la fourchette). Se réduit à un
+ *  temps unique quand aucune pause n'est saisie (pauseSec = 0). */
+function fmtTimeRange(secsLow, pauseSec) {
+  if (secsLow == null) return '—';
+  if (!pauseSec) return fmtSecsToTime(secsLow);
+  return fmtSecsToTime(secsLow) + ' → ' + fmtSecsToTime(secsLow + pauseSec);
 }
 
 function fmtPaceFromSecs(distKm, secs) {
@@ -2282,7 +2377,10 @@ function getVO2maxGainPct(weeksTotal) {
 }
 
 /** Gain de VMA encore attendu (%) sur les semaines RESTANTES du plan,
- *  pondere par l'assiduite reelle (seances faites vs manquees). Partage
+ *  pondere par l'assiduite reelle - PONDEREE par le type de seance (voir
+ *  computeWeightedCardioAssiduity/VO2MAX_STIMULUS_WEIGHT) : une seance de
+ *  VMA/seuil manquee pese plus sur la projection qu'une sortie EF manquee,
+ *  puisque ce sont elles qui stimulent le plus l'adaptation VO2max. Partage
  *  entre le bloc Estimations et la courbe pour qu'ils restent toujours
  *  coherents entre eux (meme point d'arrivee en fin de plan).
  *  Plancher a 30% : meme avec une assiduite tres faible, un entrainement
@@ -2295,7 +2393,7 @@ function getRemainingVmaGainPct(weeksTotal, weeks) {
   // apres son debut), pas des que sa date de debut est passee - sinon la
   // semaine en cours est comptee comme deja terminee des le 2e jour.
   const elapsedWeeks = (weeks || []).filter(w => startOfDay(w.weekDate + 7 * 86400000) <= startOfDay(now)).length;
-  const cardioAssiduity = computeSessionStats(weeks).cardio.assiduity;
+  const cardioAssiduity = computeWeightedCardioAssiduity(weeks);
   const assiduityRatio = cardioAssiduity !== null ? 0.3 + 0.7 * (cardioAssiduity / 100) : 1;
   const weeksRemaining = Math.max(0, weeksTotal - elapsedWeeks);
   return getVO2maxGainPct(weeksTotal) * (weeksRemaining / weeksTotal) * assiduityRatio;
@@ -2476,23 +2574,37 @@ function renderEstimations(goal, weeks, dplusM, distKmOverride) {
   const estBlock2 = document.getElementById('goals-estimations-block');
   if (estBlock2) estBlock2.style.opacity = '1';
 
+  // Temps d'arrêt estimé (ravitos, matériel...) : affiché comme une
+  // fourchette "sans pause → avec pauses" plutôt que fondu dans un temps
+  // unique (retour utilisateur : un chiffre qui saute de 5h46 à 6h01 selon
+  // qu'on compte les pauses ou non n'est pas lisible tel quel). N'affecte
+  // JAMAIS l'allure affichée (fmtPaceFromSecs) ni le VO2max/VMA : c'est un
+  // ajustement logistique du temps de course, pas une donnée de forme.
+  const pauseSec = getPauseSec(goal);
+  const setRangeText = (elm, secsLow) => {
+    if (!elm) return;
+    elm.textContent = fmtTimeRange(secsLow, pauseSec);
+    elm.classList.toggle('goals-est-time--range', pauseSec > 0 && secsLow != null);
+  };
+
   const vo2max = parseFloat((_latestVO2Max || (vma * 1000 / 60 * 0.2 + 3.5)).toFixed(1));
   const secsNow = estimateRaceTime(vma, distKm, dplusM, isTrail);
   const vo2Color = vo2max >= 55 ? '#22c55e' : vo2max >= 45 ? '#3b82f6' : vo2max >= 35 ? '#f59e0b' : '#ef4444';
   const vo2El = el('goals-vo2-current');
   if (vo2El) { vo2El.textContent = vo2max; vo2El.style.color = vo2Color; vo2El.style.fontWeight = '700'; }
-  el('goals-time-current') && (el('goals-time-current').textContent = fmtSecsToTime(secsNow));
+  setRangeText(el('goals-time-current'), secsNow);
   el('goals-pace-current') && (el('goals-pace-current').textContent = isTrail ? '' : fmtPaceFromSecs(distKm, secsNow));
 
   // Bloc "Début de plan" : VO2max/temps estimé à la fin de la semaine 1
   // (voir getStartVo2), pour situer le point de départ réel du plan
   const vo2History = buildAnchoredVo2History();
   const vo2Start = getStartVo2(weeks, vo2History);
+  let secsStart = null;
   if (vo2Start != null && weeks.length > 0) {
     const vmaStart = vo2ToVmaCalibrated(vo2Start);
-    const secsStart = estimateRaceTime(vmaStart, distKm, dplusM, isTrail);
+    secsStart = estimateRaceTime(vmaStart, distKm, dplusM, isTrail);
     el('goals-vo2-start') && (el('goals-vo2-start').textContent = Math.round(vo2Start * 10) / 10);
-    el('goals-time-start') && (el('goals-time-start').textContent = fmtSecsToTime(secsStart));
+    setRangeText(el('goals-time-start'), secsStart);
     el('goals-start-date') && (el('goals-start-date').textContent =
       '(' + new Date(weeks[0].weekDate).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' }) + ')');
   } else {
@@ -2505,35 +2617,58 @@ function renderEstimations(goal, weeks, dplusM, distKmOverride) {
   const vmaEnd = vma * (1 + gainPct);
   const vo2maxEnd = parseFloat(vmaToVo2Calibrated(vmaEnd).toFixed(1));
   const secsEnd = estimateRaceTime(vmaEnd, distKm, dplusM, isTrail);
+  // Le delta "gain attendu" n'est pas affecté par les pauses (offset constant
+  // ajouté aux deux termes, s'annule dans la différence).
   const delta = secsNow && secsEnd ? secsNow - secsEnd : null;
 
-  el('goals-vo2-projected')  && (el('goals-vo2-projected').textContent  = vo2maxEnd);
-  el('goals-time-projected') && (el('goals-time-projected').textContent = fmtSecsToTime(secsEnd));
+  const vo2EndEl = el('goals-vo2-projected');
+  if (vo2EndEl) {
+    vo2EndEl.textContent = vo2maxEnd;
+    // Rendre la pondération vérifiable (pas une boîte noire) : combien de
+    // séances qualité (VMA/seuil, celles qui comptent le plus dans le calcul)
+    // ont réellement été faites jusqu'ici.
+    const q = countQualitySessions(weeks);
+    vo2EndEl.title = q.total > 0
+      ? `Projection pondérée par les séances à haute intensité (VMA/seuil) : ${q.done}/${q.total} réalisées à ce jour`
+      : '';
+  }
+  setRangeText(el('goals-time-projected'), secsEnd);
   if (delta && el('goals-time-delta')) {
     const dm = Math.floor(Math.abs(delta) / 60);
     el('goals-time-delta').textContent = delta > 0 ? `−${dm} min attendues` : `+${dm} min`;
     el('goals-time-delta').style.color = delta > 0 ? '#22c55e' : '#ef4444';
   }
 
-  // Comparaison avec le temps cible
+  // Comparaison avec le temps cible : le temps cible saisi est un temps
+  // total chrono, donc comparé à la fourchette [sans pause → avec pauses].
+  // Cas particulier signalé (retour utilisateur) : quand l'objectif tombe
+  // DANS la fourchette (atteignable sans pause, mais pas avec les pauses
+  // estimées), le dire explicitement plutôt que trancher arbitrairement.
   const saved = JSON.parse(localStorage.getItem('suivi_personal_goals') || '{}');
   const targetSecs = parseTargetTime(saved.targetTime);
   const targetEl = el('goals-target-compare');
   if (targetEl && targetSecs) {
-    const diffNow = secsNow ? secsNow - targetSecs : null;
-    const diffEnd = secsEnd ? secsEnd - targetSecs : null;
+    const abs = v => Math.abs(Math.round(v / 60));
     let html = `<div class="goals-target-display">⏱ Objectif : <strong>${saved.targetTime}</strong></div>`;
-    if (diffNow !== null) {
-      const abs = Math.abs(Math.round(diffNow / 60));
-      html += diffNow > 0
-        ? `<div class="goals-target-gap goals-target-gap--over">⚠ Estimation actuelle : +${abs} min au-dessus de votre objectif</div>`
-        : `<div class="goals-target-gap goals-target-gap--ok">✓ Estimation actuelle : ${abs > 0 ? abs + ' min sous' : 'pile à'} votre objectif</div>`;
+    if (secsNow != null) {
+      const diffLow = secsNow - targetSecs, diffHigh = (secsNow + pauseSec) - targetSecs;
+      if (diffHigh > 0 && pauseSec > 0 && diffLow <= 0) {
+        html += `<div class="goals-target-gap goals-target-gap--over">⚠ Estimation actuelle : atteignable sans pause (marge ${abs(diffLow)} min), mais +${abs(diffHigh)} min avec vos pauses estimées</div>`;
+      } else if (diffHigh > 0) {
+        html += `<div class="goals-target-gap goals-target-gap--over">⚠ Estimation actuelle : +${abs(diffHigh)} min au-dessus de votre objectif${pauseSec > 0 ? ' (pauses incluses)' : ''}</div>`;
+      } else {
+        html += `<div class="goals-target-gap goals-target-gap--ok">✓ Estimation actuelle : ${abs(diffHigh) > 0 ? abs(diffHigh) + ' min sous' : 'pile à'} votre objectif${pauseSec > 0 ? ' même avec vos pauses' : ''}</div>`;
+      }
     }
-    if (diffEnd !== null) {
-      const abs = Math.abs(Math.round(diffEnd / 60));
-      html += diffEnd > 0
-        ? `<div class="goals-target-gap goals-target-gap--close">&#x1F4C8; Fin de plan : encore +${abs} min à combler</div>`
-        : `<div class="goals-target-gap goals-target-gap--ok">&#x1F3C6; Fin de plan : objectif atteignable !</div>`;
+    if (secsEnd != null) {
+      const diffLow = secsEnd - targetSecs, diffHigh = (secsEnd + pauseSec) - targetSecs;
+      if (diffHigh > 0 && pauseSec > 0 && diffLow <= 0) {
+        html += `<div class="goals-target-gap goals-target-gap--close">&#x1F4C8; Fin de plan : atteignable sans pause (marge ${abs(diffLow)} min), mais encore +${abs(diffHigh)} min à combler avec vos pauses estimées</div>`;
+      } else if (diffHigh > 0) {
+        html += `<div class="goals-target-gap goals-target-gap--close">&#x1F4C8; Fin de plan : encore +${abs(diffHigh)} min à combler${pauseSec > 0 ? ' (pauses incluses)' : ''}</div>`;
+      } else {
+        html += `<div class="goals-target-gap goals-target-gap--ok">&#x1F3C6; Fin de plan : objectif atteignable${pauseSec > 0 ? ', pauses comprises' : ''} !</div>`;
+      }
     }
     targetEl.innerHTML = html;
   } else if (targetEl) {
@@ -2604,12 +2739,18 @@ function renderObjectifsChart(weeks, goal, dplusM, distKmOverride) {
   const targetSecs = parseTargetTime(saved.targetTime);
   const targetMins = targetSecs ? Math.round(targetSecs / 60) : null;
 
+  // Pauses estimées (ravitos, matériel...) : ajoutées à toutes les séries en
+  // minutes, pour que la courbe reste comparable au temps cible saisi (qui
+  // est un temps total chrono) - voir getPauseSec.
+  const pauseMins = Math.round(getPauseSec(goal) / 60);
+
   const currentMins = Math.round((estimateRaceTime(vma, distKm, dplusM, isTrail) || 0) / 60);
 
   // Projection : ligne droite début de plan → fin de plan projetée (voir
   // buildProjectionLine), couvrant toutes les semaines - une vraie 3e
   // courbe distincte, pas un simple prolongement de la courbe bleue.
   const projection = buildProjectionLine(weeks, goal, distKm, dplusM, isTrail, weeksTotal, vma);
+  const projectionHigh = projection.map(v => v + pauseMins);
 
   const labels = [], real = [];
   for (let w = 1; w <= weeksTotal; w++) {
@@ -2632,18 +2773,27 @@ function renderObjectifsChart(weeks, goal, dplusM, distKmOverride) {
       real.push(null);
     }
   }
+  const realHigh = real.map(v => v == null ? null : v + pauseMins);
 
   if (_goalsChartInst) { _goalsChartInst.destroy(); _goalsChartInst = null; }
   const dark = document.documentElement.getAttribute('data-theme') === 'dark';
   const tc = dark ? 'rgba(255,255,255,0.55)' : 'rgba(0,0,0,0.45)';
   const gc = dark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.06)';
+  const hasPause = pauseMins > 0;
 
+  // Les datasets "low" (label vide) portent la borne sans pause, invisibles
+  // en propre : elles servent uniquement de référence fill:'-1' pour la
+  // bande de la dataset "high" juste après (_pairLowIndex, lu dans le
+  // tooltip pour afficher la fourchette complète).
   const datasets = [
-    { label: 'Progression réelle', data: real,   borderColor: '#3b82f6',
-      backgroundColor: 'rgba(59,130,246,0.08)', fill: true, tension: 0.4,
-      pointRadius: 3, borderWidth: 2.5 },
-    { label: 'Projection', data: projection, borderColor: '#f97316',
-      borderDash: [5,5], fill: false, tension: 0.4, pointRadius: 2, borderWidth: 2 }
+    { label: '', data: real, borderColor: 'transparent', pointRadius: 0, borderWidth: 0, fill: false, tension: 0.4 },
+    { label: 'Progression réelle', data: realHigh, borderColor: '#3b82f6',
+      backgroundColor: 'rgba(59,130,246,0.15)', fill: hasPause ? '-1' : true, tension: 0.4,
+      pointRadius: 3, borderWidth: 2.5, _pairLowIndex: 0 },
+    { label: '', data: projection, borderColor: 'transparent', pointRadius: 0, borderWidth: 0, fill: false, tension: 0.4 },
+    { label: 'Projection', data: projectionHigh, borderColor: '#f97316',
+      borderDash: [5,5], backgroundColor: 'rgba(249,115,22,0.15)', fill: hasPause ? '-1' : false,
+      tension: 0.4, pointRadius: 2, borderWidth: 2, _pairLowIndex: 2 },
   ];
   if (targetMins) {
     datasets.push({
@@ -2659,11 +2809,20 @@ function renderObjectifsChart(weeks, goal, dplusM, distKmOverride) {
     options: {
       responsive: true, maintainAspectRatio: false,
       plugins: {
-        legend: { labels: { color: tc, font: { size: 12 }, boxWidth: 20 } },
-        tooltip: { callbacks: { label: ctx => {
-          const m = ctx.raw; if (m == null) return '';
-          return ` ${ctx.dataset.label} : ${Math.floor(m/60)}h${String(m%60).padStart(2,'0')}`;
-        }}}
+        legend: { labels: { color: tc, font: { size: 12 }, boxWidth: 20,
+          filter: item => item.text !== '' } },
+        tooltip: {
+          filter: item => item.dataset.label !== '',
+          callbacks: { label: ctx => {
+            const high = ctx.raw; if (high == null) return '';
+            const fmt = m => Math.floor(m / 60) + 'h' + String(m % 60).padStart(2, '0');
+            const pairIdx = ctx.dataset._pairLowIndex;
+            const low = pairIdx != null ? ctx.chart.data.datasets[pairIdx].data[ctx.dataIndex] : null;
+            return low != null && low !== high
+              ? ` ${ctx.dataset.label} : ${fmt(low)} → ${fmt(high)}`
+              : ` ${ctx.dataset.label} : ${fmt(high)}`;
+          } }
+        }
       },
       scales: {
         x: { grid: { color: gc }, ticks: { color: tc, maxTicksLimit: 10 } },
@@ -2879,6 +3038,28 @@ function renderObjectifsBlocks(goal, weeks) {
           renderEstimations(goal, weeks, 0, 0);  // retournera early
         }
         document.querySelector('.btn-goals-valider')?.classList.remove('btn-validated');
+      };
+    }
+  }
+
+  // ── Pauses estimées (ravitos, matériel...) ──────────────────────
+  const pauseKey = 'suivi_objectif_pause_' + (goal._id || 'plan');
+  const savedPause = localStorage.getItem(pauseKey);
+  const pauseInput = el('goals-pause-input');
+  if (pauseInput) {
+    pauseInput.value = savedPause ? parseInt(savedPause) : '';
+    if (!pauseInput.dataset.init) {
+      pauseInput.dataset.init = '1';
+      pauseInput.oninput = () => {
+        const val = parseInt(pauseInput.value);
+        if (val > 0) localStorage.setItem(pauseKey, val);
+        else localStorage.removeItem(pauseKey);
+        const dplusNow = parseInt(el('goals-dplus-input')?.value) || dplusM;
+        const distNow = parseFloat(el('goals-dist-input')?.value) || 0;
+        if (distNow > 0) {
+          renderEstimations(goal, weeks, dplusNow, distNow);
+          renderObjectifsChart(weeks, goal, dplusNow, distNow);
+        }
       };
     }
   }
@@ -3207,12 +3388,15 @@ function applyRaceInputs() {
   const el = id => document.getElementById(id);
   const dist  = parseFloat(el('goals-dist-input')?.value)  || 0;
   const dplus = parseInt(el('goals-dplus-input')?.value)   || 0;
+  const pause = parseInt(el('goals-pause-input')?.value)   || 0;
   const targetTime = (el('goal-target-time')?.value || '').trim();
   const goal = campusState.goal;
   if (!goal) return;
   const planId = goal._id || 'plan';
   if (dist)  localStorage.setItem('suivi_objectif_dist_'  + planId, dist);
   if (dplus) localStorage.setItem('suivi_objectif_dplus_' + planId, dplus);
+  if (pause) localStorage.setItem('suivi_objectif_pause_' + planId, pause);
+  else localStorage.removeItem('suivi_objectif_pause_' + planId);
   localStorage.setItem('suivi_objectif_validated_' + planId, '1');  // marquer comme validé
   const goals = JSON.parse(localStorage.getItem('suivi_personal_goals') || '{}');
   goals.targetTime = targetTime;
