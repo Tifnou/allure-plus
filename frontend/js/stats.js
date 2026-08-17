@@ -7,15 +7,8 @@
    (même cache que la page Activités).
 ═══════════════════════════════════════════════ */
 
-const STATS_SPORT_LABELS_FR = {
-  running: 'Course', trail_running: 'Trail', cycling: 'Vélo',
-  swimming: 'Natation', walking: 'Marche', hiking: 'Randonnée',
-  strength_training: 'Musculation', indoor_cardio: 'Cardio indoor',
-  treadmill_running: 'Tapis', mountain_biking: 'VTT',
-  open_water_swimming: 'Natation eau libre', yoga: 'Yoga',
-  other: 'Autre'
-};
-const STATS_SPORT_COLORS = ['#2563EB','#7C3AED','#16A34A','#D97706','#DC2626','#0891B2','#DB2777'];
+// Libelles/couleurs partages avec la Synthese : SPORT_TYPE_LABELS_FR /
+// SPORT_TYPE_COLORS (frontend/js/app.js, charge avant ce fichier).
 
 const STATS_DISTANCE_BANDS = {
   '5km':      { label: '5 km',     threshold: 4500,  max: 5500 },
@@ -49,18 +42,11 @@ let statsModalProgressionChart = null;
 // ─── Filtre par type d'activité (même logique que renderAllActivities) ──
 // filter : 'all', une seule cle, ou un tableau de cles cumulees (pastilles
 // multi-selection, cf wireSportFilterPills dans app.js)
+// statsSportMatch supprimee (doublon exact d'activityMatchesSportFilter,
+// app.js, charge avant ce fichier) - une seule logique de correspondance
+// type<->filtre pour Activites/Statistiques/calendrier.
 function statsSportMatch(activityType, filter) {
-  const filters = Array.isArray(filter) ? filter : [filter];
-  if (filters.includes('all')) return true;
-  const t = (activityType || '').toLowerCase();
-  return filters.some(f => {
-    if (f === 'running') return t === 'running' || t === 'treadmill_running' || (t.includes('run') && !t.includes('trail'));
-    if (f === 'trail')   return t.includes('trail');
-    if (f === 'cycling') return t === 'cycling' || t.includes('cycl') || t.includes('bike');
-    if (f === 'cardio')  return t.includes('cardio') || t.includes('fitness') || t.includes('indoor') || t.includes('strength') || t.includes('hiit') || t.includes('muscul');
-    if (f === 'walking') return t.includes('walk') || t === 'walking';
-    return true;
-  });
+  return activityMatchesSportFilter(activityType, filter);
 }
 
 function isRunOrTrail(a) {
@@ -166,7 +152,7 @@ function computeYearStats(activities, year) {
     totals.elevation += a.elevationGain || 0;
     if (a.vO2MaxValue > 0) { vo2Sum += a.vO2MaxValue; vo2Count++; }
 
-    const type = a.activityType || 'other';
+    const type = canonicalSportType(a.activityType);
     if (!sportBreakdown[type]) sportBreakdown[type] = { count:0, km:0, hours:0, elevation:0 };
     sportBreakdown[type].count++;
     sportBreakdown[type].km += km;
@@ -587,8 +573,8 @@ async function renderStatsRowDetail(year) {
     const sportCanvas = el('stats-row-sport-chart');
     const entries = Object.entries(stats.sportBreakdown).filter(([,v]) => v.count > 0).sort((a,b) => b[1].km - a[1].km);
     if (sportCanvas && entries.length > 0) {
-      const sportLabels = entries.map(([k]) => STATS_SPORT_LABELS_FR[k] || k.replace(/_/g,' '));
-      const colors = entries.map((_, i) => STATS_SPORT_COLORS[i % STATS_SPORT_COLORS.length]);
+      const sportLabels = entries.map(([k]) => SPORT_TYPE_LABELS_FR[k] || k.replace(/_/g,' '));
+      const colors = entries.map((_, i) => SPORT_TYPE_COLORS[i % SPORT_TYPE_COLORS.length]);
       statsRowSportChart = new Chart(sportCanvas.getContext('2d'), {
         type: 'bar',
         data: { labels: sportLabels, datasets: [{ data: entries.map(([,v]) => v.count), backgroundColor: colors, borderRadius: 3 }] },
@@ -772,7 +758,7 @@ function renderStatsCompareModalContent() {
         datasets: years.map((y, i) => ({
           label: String(y),
           data: [statsPerYear[i].totals.km, statsPerYear[i].totals.elevation / 10, statsPerYear[i].totals.activities],
-          backgroundColor: STATS_SPORT_COLORS[i % STATS_SPORT_COLORS.length],
+          backgroundColor: SPORT_TYPE_COLORS[i % SPORT_TYPE_COLORS.length],
           borderRadius: 4,
         })),
       },

@@ -140,12 +140,14 @@
 .sport-icon--cycling  { background-image: url('../images/picto/cycling_light.png'); }
 .sport-icon--walking  { background-image: url('../images/picto/walking_light.png'); }
 .sport-icon--cardio   { background-image: url('../images/picto/cardio_light.png'); }
+.sport-icon--swimming { background-image: url('../images/picto/swim_light.png'); }
 /* Mode sombre */
 [data-theme="dark"] .sport-icon--running  { background-image: url('../images/picto/running_dark.png'); }
 [data-theme="dark"] .sport-icon--trail    { background-image: url('../images/picto/trail_dark.png'); }
 [data-theme="dark"] .sport-icon--cycling  { background-image: url('../images/picto/cycling_dark.png'); }
 [data-theme="dark"] .sport-icon--walking  { background-image: url('../images/picto/walking_dark.png'); }
 [data-theme="dark"] .sport-icon--cardio   { background-image: url('../images/picto/cardio_dark.png'); }
+[data-theme="dark"] .sport-icon--swimming { background-image: url('../images/picto/swim_dark.png'); }
 /* Pill avec icône */
 .filter-pill .sport-icon { width: 18px; height: 18px; margin-right: 4px; }
 /* Cellule tableau activités */

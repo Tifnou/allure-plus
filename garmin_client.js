@@ -339,10 +339,14 @@ function computeStats(activities) {
   // Temps total entraînement (heures)
   const totalTimeHours = thisYear.reduce((sum, a) => sum + (a.duration || 0), 0) / 3600;
 
-  // Répartition par sport
+  // Répartition par sport - toutes les variantes natation (swimming,
+  // open_water_swimming...) regroupées sous une seule clé 'swimming' :
+  // miroir de canonicalSportType (frontend/js/app.js), à resynchroniser
+  // manuellement si un nouveau type Garmin apparaît un jour.
   const sportBreakdown = {};
   thisYear.forEach(a => {
-    const type = a.activityType?.typeKey || 'other';
+    const rawType = a.activityType?.typeKey || 'other';
+    const type = rawType.toLowerCase().includes('swim') ? 'swimming' : rawType;
     if (!sportBreakdown[type]) sportBreakdown[type] = { count: 0, km: 0 };
     sportBreakdown[type].count++;
     sportBreakdown[type].km += (a.distance || 0) / 1000;

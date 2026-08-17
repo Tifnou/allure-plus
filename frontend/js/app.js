@@ -910,7 +910,20 @@ function getSportIconClass(type) {
   if (t.includes('cycl') || t.includes('bike'))    return 'sport-icon--cycling';
   if (t.includes('walk') || t.includes('hik'))     return 'sport-icon--walking';
   if (t.includes('cardio') || t.includes('indoor') || t.includes('strength') || t.includes('fitness')) return 'sport-icon--cardio';
+  if (t.includes('swim'))                          return 'sport-icon--swimming';
   return '';
+}
+
+// Regroupe toutes les variantes Garmin de natation (swimming,
+// open_water_swimming, etc.) sous une seule cle 'swimming' - reutilise pour
+// les repartitions agregees (Synthese, Statistiques) ou natation/piscine/eau
+// libre doivent compter comme UNE seule categorie plutot que plusieurs
+// tranches distinctes. Miroir de la meme regle cote serveur
+// (garmin_client.js, calcul de sportBreakdown) - les deux doivent rester
+// synchronises manuellement si de nouveaux types Garmin apparaissent.
+function canonicalSportType(type) {
+  const t = (type || 'other').toLowerCase();
+  return t.includes('swim') ? 'swimming' : (type || 'other');
 }
 
 function getSportIcon(type) {
@@ -988,6 +1001,7 @@ function activityMatchesSportFilter(activityType, filter) {
     if (f === 'cycling') return t === 'cycling' || t.includes('cycl') || t.includes('bike');
     if (f === 'cardio')  return t.includes('cardio') || t.includes('fitness') || t.includes('indoor') || t.includes('strength') || t.includes('hiit') || t.includes('muscul');
     if (f === 'walking') return t.includes('walk') || t === 'walking';
+    if (f === 'swimming') return t.includes('swim');
     return true;
   });
 }
@@ -1118,8 +1132,23 @@ function renderAllActivities(activities, filter = 'all', yearOverride = null) {
 const CAL_TYPE_COLORS = {
   'sport-icon--running': '#3b82f6', 'sport-icon--trail': '#2dd4bf',
   'sport-icon--cycling': '#fb923c', 'sport-icon--walking': '#a78bfa',
-  'sport-icon--cardio': '#f87171', '': '#8a8fa3',
+  'sport-icon--cardio': '#f87171', 'sport-icon--swimming': '#06b6d4',
+  '': '#8a8fa3',
 };
+
+// Libelles/couleurs des repartitions par sport (donut Synthese, barres
+// Statistiques) - source unique, reutilisee par stats.js (charge apres,
+// scope global partage). 'swimming' regroupe deja toutes les variantes
+// natation cote serveur/agregation (voir canonicalSportType) : jamais de
+// cle 'open_water_swimming' distincte a ce stade.
+const SPORT_TYPE_LABELS_FR = {
+  running: 'Course', trail_running: 'Trail', cycling: 'Vélo',
+  swimming: 'Natation', walking: 'Marche', hiking: 'Randonnée',
+  strength_training: 'Musculation', indoor_cardio: 'Cardio indoor',
+  treadmill_running: 'Tapis', mountain_biking: 'VTT', yoga: 'Yoga',
+  other: 'Autre'
+};
+const SPORT_TYPE_COLORS = ['#2563EB','#7C3AED','#16A34A','#D97706','#DC2626','#0891B2','#DB2777'];
 let _calDate = new Date();
 let _calViewMode = 'month'; // 'month' | 'year' (cf. calSetMode)
 
@@ -2458,29 +2487,20 @@ function renderSportsChart(breakdown) {
   const legend = el('sports-legend');
   if (!canvas) return;
 
-  const LABELS_FR = {
-    running: 'Course', trail_running: 'Trail', cycling: 'Vélo',
-    swimming: 'Natation', walking: 'Marche', hiking: 'Randonnée',
-    strength_training: 'Musculation', indoor_cardio: 'Cardio indoor',
-    treadmill_running: 'Tapis', mountain_biking: 'VTT',
-    open_water_swimming: 'Natation eau libre', yoga: 'Yoga',
-    other: 'Autre'
-  };
-
   const entries = Object.entries(breakdown)
     .filter(([,v]) => v.count > 0)
     .sort((a,b) => b[1].count - a[1].count);
 
   if (entries.length === 0) return;
 
-  const COLORS = ['#2563EB','#7C3AED','#16A34A','#D97706','#DC2626','#0891B2','#DB2777'];
-  const labels = entries.map(([k]) => LABELS_FR[k] || k.replace(/_/g,' '));
+  const labels = entries.map(([k]) => SPORT_TYPE_LABELS_FR[k] || k.replace(/_/g,' '));
   const values = entries.map(([,v]) => v.count);
+  const colors = entries.map((_, i) => SPORT_TYPE_COLORS[i % SPORT_TYPE_COLORS.length]);
 
   if (sportsChart) sportsChart.destroy();
   sportsChart = new Chart(canvas.getContext('2d'), {
     type: 'doughnut',
-    data: { labels, datasets: [{ data: values, backgroundColor: COLORS, borderWidth: 0, hoverOffset: 4 }]},
+    data: { labels, datasets: [{ data: values, backgroundColor: colors, borderWidth: 0, hoverOffset: 4 }]},
     options: {
       responsive: true, maintainAspectRatio: false, cutout: '70%',
       plugins: {
@@ -2493,7 +2513,7 @@ function renderSportsChart(breakdown) {
   if (legend) {
     legend.innerHTML = entries.map(([, val], i) =>
       `<div class="legend-item">
-        <div class="legend-dot" style="background:${COLORS[i]}"></div>
+        <div class="legend-dot" style="background:${colors[i]}"></div>
         <span>${labels[i]} ${val.count}</span>
       </div>`
     ).join('');
