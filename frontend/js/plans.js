@@ -698,7 +698,7 @@ async function loadPlanFromCatalog(planId) {
 
 // ═══════════════════════════════════════════════════════
 // SUIVI DU CATALOGUE DE PLANS (Admin, compte auteur uniquement)
-// Tableau route/trail x ACTIF/PAUSE/REPRISE x 2-5j/semaine, croisant les
+// Tableau route/trail x ACTIF/PAUSE/REPRISE x 3-6j/semaine, croisant les
 // fichiers .aplus reellement presents (server.js, getAllPlanFiles/
 // parsePlanMeta) avec une case a cocher "sera propose" persistee
 // (data/plan_publish_flags.json) - purement une checklist personnelle,
@@ -719,7 +719,7 @@ const PLANS_ADMIN_NIVEAUX = [
   { key: 'PAUSE',   label: 'Pause' },
   { key: 'REPRISE', label: 'Reprise' },
 ];
-const PLANS_ADMIN_JOURS = [2, 3, 4, 5];
+const PLANS_ADMIN_JOURS = [3, 4, 5, 6];
 
 let _plansAdminData = null; // { slots, flags, trailCategories } - cache, un seul fetch
 
@@ -744,7 +744,7 @@ async function loadPlansAdminTracker() {
   }
 }
 
-// Groupe de 4 puces (2j/3j/4j/5j) pour une case distance/palier x niveau.
+// Groupe de 4 puces (3j/4j/5j/6j) pour une case distance/palier x niveau.
 // keyPrefixes : un ou plusieurs prefixes possibles (ex: "20 km / Semi" doit
 // reconnaitre aussi bien un fichier nomme distCat "semi" que "20k") - la
 // premiere convention qui a reellement un fichier fait foi pour la cle de la
@@ -756,7 +756,7 @@ async function loadPlansAdminTracker() {
 //    le fichier existe - s'il disparait un jour, l'exclusion manuelle
 //    refait surface telle quelle.
 //  - absent + flags[key]===true (coche a la main)  -> ROUGE, coche :
-//    "je ne ferai jamais ce plan" (ex: marathon a 2j/semaine).
+//    "je ne ferai jamais ce plan" (ex: marathon a 3j/semaine).
 //  - absent + pas de flag -> neutre, decoche : "pas encore fait, pas
 //    tranche".
 // flags[key] ne signifie donc PAS "sera propose" mais "exclu
@@ -828,7 +828,7 @@ function renderPlansAdminTracker(data) {
   }).join('');
 
   body.innerHTML = `
-    <div class="plans-admin-legend">Chaque case = 4 fréquences (2j / 3j / 4j / 5j par semaine, un petit chiffre en exposant indique plusieurs durées disponibles — détail au survol). <span class="plans-admin-legend-dot plans-admin-legend-dot--present"></span> Fichier déjà présent · <span class="plans-admin-legend-dot plans-admin-legend-dot--excluded"></span> Volontairement exclu (cliquer une case vide pour basculer) · case grise = pas encore tranché.</div>
+    <div class="plans-admin-legend">Chaque case = 4 fréquences (3j / 4j / 5j / 6j par semaine, un petit chiffre en exposant indique plusieurs durées disponibles — détail au survol). <span class="plans-admin-legend-dot plans-admin-legend-dot--present"></span> Fichier déjà présent · <span class="plans-admin-legend-dot plans-admin-legend-dot--excluded"></span> Volontairement exclu (cliquer une case vide pour basculer) · case grise = pas encore tranché.</div>
     ${routeTable}
     ${trailTables}`;
 }
