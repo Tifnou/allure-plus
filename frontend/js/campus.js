@@ -2914,7 +2914,7 @@ function buildTrendNote(cumulAssiduity, recentBucket) {
   if (!recentBucket || (recentBucket.done + recentBucket.missed) < 5 || recentBucket.assiduity === null) return '';
   const delta = recentBucket.assiduity - cumulAssiduity;
   if (delta >= 15) return ` Bon signe : sur vos dernières séances, votre assiduité grimpe à ${recentBucket.assiduity} % — continuez sur cette lancée.`;
-  if (delta <= -20 && cumulAssiduity >= 60) return ` Petit coup de mou sur vos dernières séances (${recentBucket.assiduity} % sur les ${recentBucket.done + recentBucket.missed} dernières) : si c'est ponctuel pas d'inquiétude, sinon veillez à ne pas laisser filer les prochaines séances clés.`;
+  if (delta <= -20 && cumulAssiduity >= 50) return ` Petit coup de mou sur vos dernières séances (${recentBucket.assiduity} % sur les ${recentBucket.done + recentBucket.missed} dernières) : si c'est ponctuel pas d'inquiétude, sinon veillez à ne pas laisser filer les prochaines séances clés.`;
   return '';
 }
 
@@ -2922,33 +2922,35 @@ function buildTrendNote(cumulAssiduity, recentBucket) {
  *  renforcement) - séparées car elles n'ont pas le même enjeu : le
  *  cardio fait progresser la VO2max/l'allure de course, le renforcement
  *  prévient les blessures et améliore l'économie de course sans se voir
- *  sur la VO2max. Seuils choisis pour que la couleur ne contredise jamais
- *  le message (retour utilisateur : une case jaune titrée "Bonne
- *  assiduité" se lit comme un avertissement malgré le texte) - le jaune
- *  n'apparaît donc plus que sur un vrai palier "à consolider", jamais sur
- *  du positif. Les messages évitent aussi toute idée de "rattraper" une
- *  séance manquée (retour utilisateur : une séance ratée ne se rattrape
- *  pas sans risque de surcharge, mieux vaut repartir frais sur les
- *  prochaines séances clés). */
+ *  sur la VO2max. Seuils (retour utilisateur) : vert a partir de 80%
+ *  (il faut au moins 4 seances sur 5 faites pour parler de "bonne"
+ *  assiduite), orange entre 50% et 80%, rouge en dessous - et choisis pour
+ *  que la couleur ne contredise jamais le message (une case jaune titree
+ *  "Bonne assiduite" se lirait comme un avertissement malgre le texte), le
+ *  jaune/orange n'apparait donc que sur un vrai palier "a consolider",
+ *  jamais sur du positif. Les messages evitent aussi toute idee de
+ *  "rattraper" une seance manquee (une seance ratee ne se rattrape pas
+ *  sans risque de surcharge, mieux vaut repartir frais sur les prochaines
+ *  seances cles). */
 function buildAssiduityAlert(bucket, kind, recentBucket) {
   if (bucket.assiduity === null || (bucket.done + bucket.missed) < 3) return null;
   const trend = buildTrendNote(bucket.assiduity, recentBucket);
   if (kind === 'cardio') {
-    if (bucket.assiduity >= 90) return { cls: 'green', icon: '🟢', title: 'Excellente régularité course/trail',
+    if (bucket.assiduity >= 95) return { cls: 'green', icon: '🟢', title: 'Excellente régularité course/trail',
       msg: `Vous êtes parfaitement dans les temps sur vos séances course/trail — ce sont elles qui font progresser votre VO2max, continuez ainsi !${trend}` };
-    if (bucket.assiduity >= 65) return { cls: 'green', icon: '🟢', title: 'Bonne assiduité course/trail',
+    if (bucket.assiduity >= 80) return { cls: 'green', icon: '🟢', title: 'Bonne assiduité course/trail',
       msg: `${bucket.missed} séance(s) course/trail manquée(s) depuis le début du plan — pas de rattrapage forcé, ça ne ferait qu'ajouter de la fatigue. Le plus efficace : ne pas sauter les prochaines séances clés (fractionné, sortie longue).${trend}` };
-    if (bucket.assiduity >= 40) return { cls: 'yellow', icon: '🟡', title: 'Assiduité à consolider',
+    if (bucket.assiduity >= 50) return { cls: 'yellow', icon: '🟡', title: 'Assiduité à consolider',
       msg: `${bucket.missed} séance(s) course/trail manquée(s). Si le temps manque, mieux vaut prioriser les séances à fort impact (fractionné, sortie longue) que courir après tout faire.${trend}` };
     return { cls: 'red', icon: '🔴', title: 'Assiduité course/trail insuffisante',
       msg: `Beaucoup de séances course/trail manquées — inutile de culpabiliser sur ce qui est passé, concentrez-vous sur les prochaines sorties longues et fractionnés, ce sont elles qui font la différence sur la VO2max.${trend}` };
   }
   // Renforcement : pas d'impact direct sur la VO2max, jamais d'alerte rouge alarmiste
-  if (bucket.assiduity >= 90) return { cls: 'green', icon: '🟢', title: 'Excellente régularité renforcement',
+  if (bucket.assiduity >= 95) return { cls: 'green', icon: '🟢', title: 'Excellente régularité renforcement',
     msg: `Vous suivez bien vos séances de renforcement — ça ne se voit pas sur la VO2max, mais ça réduit le risque de blessure et améliore votre économie de course.${trend}` };
-  if (bucket.assiduity >= 65) return { cls: 'green', icon: '🟢', title: 'Bonne assiduité renforcement',
+  if (bucket.assiduity >= 80) return { cls: 'green', icon: '🟢', title: 'Bonne assiduité renforcement',
     msg: `${bucket.missed} séance(s) de renforcement manquée(s) — moins prioritaire que les sorties course, mais utile pour la prévention des blessures.${trend}` };
-  if (bucket.assiduity >= 40) return { cls: 'yellow', icon: '🟠', title: 'Renforcement en retrait',
+  if (bucket.assiduity >= 50) return { cls: 'yellow', icon: '🟠', title: 'Renforcement en retrait',
     msg: `${bucket.missed} séance(s) de renforcement manquée(s) — pas d'impact direct sur la VO2max, mais une séance courte (15-20 min de gainage/PPG) suffit déjà à limiter le risque de blessure.${trend}` };
   return { cls: 'yellow', icon: '🟠', title: 'Renforcement à ne pas négliger',
     msg: `Peu de séances de renforcement faites — sans impact direct sur la VO2max, mais elles protègent contre les blessures à mesure que le volume de course augmente.${trend}` };
@@ -3071,7 +3073,7 @@ function renderObjectifsBlocks(goal, weeks) {
     if (aEl) {
       aEl.textContent = bucket.assiduity !== null ? bucket.assiduity + '%' : '—';
       aEl.style.color = bucket.assiduity === null ? ''
-        : bucket.assiduity >= 65 ? '#22c55e' : bucket.assiduity >= 40 ? '#f59e0b' : '#ef4444';
+        : bucket.assiduity >= 80 ? '#22c55e' : bucket.assiduity >= 50 ? '#f59e0b' : '#ef4444';
     }
   };
   fillBucket('cardio', stats.cardio);
