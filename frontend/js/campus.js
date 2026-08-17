@@ -2210,33 +2210,41 @@ function computeSessionStats(weeks) {
   };
 }
 
-/** Meme logique que computeSessionStats, restreinte aux nWeeks dernieres
- *  semaines deja commencees (semaine en cours incluse) - sert a degager une
- *  tendance recente independante de l'assiduite cumulee depuis le debut du
- *  plan (retour utilisateur : une bonne serie recente merite d'etre
- *  valorisee meme si le cumul reste moyen, et une baisse recente merite
- *  d'etre signalee meme si le cumul reste bon). */
-function computeRecentSessionStats(weeks, nWeeks) {
+/** Assiduite sur les nSessions DERNIERES seances deja tranchees (faite ou
+ *  manquee, les seances a venir sont ignorees), par categorie - sert a
+ *  degager une tendance recente independante de l'assiduite cumulee depuis
+ *  le debut du plan. Volontairement compte en nombre de seances plutot
+ *  qu'en semaines (retour utilisateur, ex. concret donne : "les 8
+ *  dernieres sorties manquees") - un compte de semaines melangerait des
+ *  semaines a 2 seances et d'autres a 5, en plus de diluer une degradation
+ *  toute recente si elle ne remonte pas jusqu'au debut de semaine civile.
+ *  Une bonne serie recente merite d'etre valorisee meme si le cumul reste
+ *  moyen (ex : gros trou en debut de plan, rien manque depuis) ; une baisse
+ *  recente merite d'etre signalee meme si le cumul reste bon (ex : tout
+ *  fait en debut de plan, dernieres seances manquees) - meme pourcentage
+ *  cumule dans les deux cas, message tres different. */
+function computeRecentSessionStats(weeks, nSessions) {
   const doneMap = JSON.parse(localStorage.getItem('suivi_local_done') || '{}');
   const now = Date.now();
-  const recentWeeks = (weeks || [])
-    .filter(w => startOfDay(w.weekDate) <= startOfDay(now))
-    .slice(-nWeeks);
-  const cardio = _emptySessionBucket();
-  const strength = _emptySessionBucket();
-  recentWeeks.forEach(week => {
+  const cardioLog = [], strengthLog = []; // ordre chronologique, seances tranchees uniquement
+  (weeks || []).forEach(week => {
     const weekPassed = startOfDay(week.weekDate + 7 * 86400000) < startOfDay(now);
     (week.sessions || []).forEach(session => {
-      const bucket = isStrengthSession(session) ? strength : cardio;
       const key = (week._id || '') + '_' + session.trainingIndex;
       const status = doneMap[key] || session.status || 'todo';
-      if (status === 'done') bucket.done++;
-      else if (status === 'skip') bucket.missed++;
-      else if (weekPassed) bucket.missed++;
-      else bucket.remaining++;
+      let resolved = null;
+      if (status === 'done') resolved = 'done';
+      else if (status === 'skip') resolved = 'missed';
+      else if (weekPassed) resolved = 'missed';
+      if (resolved) (isStrengthSession(session) ? strengthLog : cardioLog).push(resolved);
     });
   });
-  return { cardio: _finalizeSessionBucket(cardio), strength: _finalizeSessionBucket(strength) };
+  const bucketFromTail = log => {
+    const tail = log.slice(-nSessions);
+    const done = tail.filter(s => s === 'done').length;
+    return _finalizeSessionBucket({ done, missed: tail.length - done, remaining: 0 });
+  };
+  return { cardio: bucketFromTail(cardioLog), strength: bucketFromTail(strengthLog) };
 }
 
 /** Statut d'une semaine PASSEE pour la nuance de couleur du selecteur de
@@ -2892,17 +2900,21 @@ function renderObjectifsChart(weeks, goal, dplusM, distKmOverride) {
   });
 }
 
-/** Note de tendance recente, ajoutee au message si les nWeeks dernieres
- *  semaines se detachent nettement de l'assiduite cumulee depuis le debut
- *  (a la hausse comme a la baisse) - retour utilisateur : le cumul depuis
- *  le debut peut masquer une bonne dynamique recente (ou une baisse recente
- *  derriere un bon cumul). Seuils volontairement larges (+20/-25 points)
- *  pour ne parler que de vraies tendances, pas du bruit d'une semaine. */
+/** Note de tendance recente, ajoutee au message si les dernieres seances
+ *  (voir computeRecentSessionStats, nSessions) se detachent nettement de
+ *  l'assiduite cumulee depuis le debut (a la hausse comme a la baisse) -
+ *  retour utilisateur : le cumul depuis le debut peut masquer une bonne
+ *  dynamique recente (ou une baisse recente derriere un bon cumul) - deux
+ *  situations a 71% cumule, mais un message tres different selon que les
+ *  seances manquees sont au debut du plan ou toutes recentes. Seuils
+ *  (+15/-20 points, min. 5 seances tranchees) calibres pour qu'un seul
+ *  aller-retour sur une petite fenetre ne suffise pas a declencher la note
+ *  (avec 5 seances, une seule seance differente pese deja 20 points). */
 function buildTrendNote(cumulAssiduity, recentBucket) {
-  if (!recentBucket || (recentBucket.done + recentBucket.missed) < 2 || recentBucket.assiduity === null) return '';
+  if (!recentBucket || (recentBucket.done + recentBucket.missed) < 5 || recentBucket.assiduity === null) return '';
   const delta = recentBucket.assiduity - cumulAssiduity;
-  if (delta >= 20) return ` Bon signe : sur vos dernières semaines, votre assiduité grimpe à ${recentBucket.assiduity} % — continuez sur cette lancée.`;
-  if (delta <= -25 && cumulAssiduity >= 60) return ` Petit coup de mou récemment (${recentBucket.assiduity} % sur vos dernières semaines) : si c'est ponctuel pas d'inquiétude, sinon veillez à ne pas laisser filer les prochaines séances clés.`;
+  if (delta >= 15) return ` Bon signe : sur vos dernières séances, votre assiduité grimpe à ${recentBucket.assiduity} % — continuez sur cette lancée.`;
+  if (delta <= -20 && cumulAssiduity >= 60) return ` Petit coup de mou sur vos dernières séances (${recentBucket.assiduity} % sur les ${recentBucket.done + recentBucket.missed} dernières) : si c'est ponctuel pas d'inquiétude, sinon veillez à ne pas laisser filer les prochaines séances clés.`;
   return '';
 }
 
@@ -2958,7 +2970,7 @@ function renderGoalsAlerts(goal, weeks, stats) {
   // cumulent en realite les manques depuis le debut du plan, cf.
   // computeSessionStats - pas juste la semaine en cours), en plus de melanger
   // deux enjeux differents (VO2max vs prevention blessures) dans un seul cadre.
-  const recentStats = computeRecentSessionStats(weeks, 3);
+  const recentStats = computeRecentSessionStats(weeks, 8);
   const cardioAlert = buildAssiduityAlert(stats.cardio, 'cardio', recentStats.cardio);
   if (cardioAlert) alerts.push(cardioAlert);
   const strengthAlert = buildAssiduityAlert(stats.strength, 'strength', recentStats.strength);
