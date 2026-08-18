@@ -89,7 +89,7 @@ function wireNumericInput(id, onChange) {
 function renderRoutesForm() {
   const content = el('routes-form-content');
   content.innerHTML = `
-    <div class="routes-field">
+    <div class="routes-field routes-field--full">
       <div class="routes-field-label">Point de départ</div>
       <div class="routes-address-row">
         <div>
@@ -121,9 +121,10 @@ function renderRoutesForm() {
     <div class="routes-field">
       <div class="routes-field-label">Terrain</div>
       <div class="routes-toggle">
-        <button type="button" class="routes-toggle-btn ${routesState.terrain === 'trail' ? 'active' : ''}" data-terrain="trail">Trail (chemins, sentiers)</button>
-        <button type="button" class="routes-toggle-btn ${routesState.terrain === 'route' ? 'active' : ''}" data-terrain="route">Route (asphalte)</button>
+        <button type="button" class="routes-toggle-btn ${routesState.terrain === 'trail' ? 'active' : ''}" data-terrain="trail">Trail (chemins, sentiers, sous-bois)</button>
+        <button type="button" class="routes-toggle-btn ${routesState.terrain === 'route' ? 'active' : ''}" data-terrain="route">Route (asphalte, chemin)</button>
       </div>
+      ${routesState.terrain === 'route' ? `<div class="routes-hint">⚠️ Le tracé évite autant que possible les grands axes, mais peut encore emprunter une portion de route sans trottoir ni accotement séparé — vérifiez la sécurité du parcours avant de partir.</div>` : ''}
     </div>
 
     <div class="routes-field">
@@ -147,7 +148,7 @@ function renderRoutesForm() {
       </div>
     </div>
 
-    <div class="routes-field">
+    <div class="routes-field routes-field--full">
       <div class="routes-field-label">Recherche élargie</div>
       <div class="routes-hint">${routesHasAscentField()
         ? "Si le secteur ne permet pas d'atteindre le D+ (ou la distance/durée) visés sans trop s'écarter, la meilleure option trouvée sera proposée avec un message clair."
@@ -499,6 +500,10 @@ function renderRoutesResults(data) {
     <div class="routes-warning-banner routes-warning-banner--info">
       Durées estimées avec une allure générique — recalculez votre profil d'allure personnel à partir de vos dernières sorties Garmin pour des estimations plus fiables.
       <button class="btn-text-link routes-pace-profile-btn" id="routes-recalc-pace-profile" type="button">Recalculer maintenant</button>
+    </div>` : ''}
+    ${routesState.terrain === 'route' ? `
+    <div class="routes-warning-banner routes-warning-banner--info">
+      ⚠️ Le tracé évite autant que possible les grands axes, mais peut encore emprunter une portion de route sans trottoir ni accotement séparé — vérifiez la sécurité du parcours avant de partir.
     </div>` : ''}
   `;
   const recalcBtn = el('routes-recalc-pace-profile');
