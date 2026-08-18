@@ -70,6 +70,21 @@ function showRoutesView(view) {
 
 function routesHasAscentField() { return routesState.terrain === 'trail'; }
 
+// Champs numeriques du formulaire Itineraires : type="text" + inputmode="numeric"
+// plutot que type="number" (retour utilisateur 18/08 - saisie fiable via les
+// fleches natives mais chiffres perdus/tronques en tapant au clavier, ex :
+// "12" tape dans le D+ ou le rayon donnait un resultat errone au lieu de 12).
+// Filtre les caracteres non numeriques a chaque frappe plutot que de laisser
+// le navigateur (re)interpreter/coercer la valeur d'un <input type=number>.
+function wireNumericInput(id, onChange) {
+  const input = el(id);
+  input.oninput = e => {
+    const clean = e.target.value.replace(/[^\d]/g, '');
+    if (clean !== e.target.value) e.target.value = clean;
+    onChange(clean);
+  };
+}
+
 function renderRoutesForm() {
   const content = el('routes-form-content');
   content.innerHTML = `
@@ -113,7 +128,7 @@ function renderRoutesForm() {
     <div class="routes-field" id="routes-ascent-field" style="display:${routesHasAscentField() ? '' : 'none'}">
       <div class="routes-field-label">D+ visé</div>
       <div class="routes-number-row">
-        <input type="number" id="routes-input-ascent" class="routes-number-input" min="0" max="5000" step="10" value="${routesState.ascentM}"> m
+        <input type="text" inputmode="numeric" id="routes-input-ascent" class="routes-number-input" value="${routesState.ascentM}"> m
       </div>
     </div>
 
@@ -125,7 +140,7 @@ function renderRoutesForm() {
       <label class="routes-checkbox-row">
         <input type="checkbox" id="routes-input-search-wider" ${routesState.searchWider ? 'checked' : ''}>
         Chercher dans un rayon de
-        <input type="number" id="routes-input-search-radius" class="routes-number-input routes-number-input--xs" min="1" max="30" value="${routesState.searchRadiusKm}" ${routesState.searchWider ? '' : 'disabled'}> km
+        <input type="text" inputmode="numeric" id="routes-input-search-radius" class="routes-number-input routes-number-input--xs" value="${routesState.searchRadiusKm}" ${routesState.searchWider ? '' : 'disabled'}> km
         si rien n'est disponible à l'adresse demandée
       </label>
     </div>
@@ -142,21 +157,21 @@ function renderRoutesForm() {
 
   const modeInput = el('routes-mode-input');
   if (routesState.mode === 'distance') {
-    modeInput.innerHTML = `<input type="number" id="routes-input-distance" class="routes-number-input" min="1" max="60" value="${routesState.distanceKm}"> km`;
-    el('routes-input-distance').oninput = e => { routesState.distanceKm = parseFloat(e.target.value) || 0; };
+    modeInput.innerHTML = `<input type="text" inputmode="numeric" id="routes-input-distance" class="routes-number-input" value="${routesState.distanceKm}"> km`;
+    wireNumericInput('routes-input-distance', v => { routesState.distanceKm = parseFloat(v) || 0; });
   } else {
-    modeInput.innerHTML = `<input type="number" id="routes-input-duration" class="routes-number-input" min="10" max="480" value="${routesState.durationMin}"> minutes`;
-    el('routes-input-duration').oninput = e => { routesState.durationMin = parseInt(e.target.value, 10) || 0; };
+    modeInput.innerHTML = `<input type="text" inputmode="numeric" id="routes-input-duration" class="routes-number-input" value="${routesState.durationMin}"> minutes`;
+    wireNumericInput('routes-input-duration', v => { routesState.durationMin = parseInt(v, 10) || 0; });
   }
 
   if (routesHasAscentField()) {
-    el('routes-input-ascent').oninput = e => { routesState.ascentM = parseInt(e.target.value, 10) || 0; };
+    wireNumericInput('routes-input-ascent', v => { routesState.ascentM = parseInt(v, 10) || 0; });
   }
   // Recherche élargie : utile quel que soit le terrain (repli sur le D+ en
   // trail, sur la distance/durée en route) - plus conditionnée par
   // routesHasAscentField().
   el('routes-input-search-wider').onchange = e => { routesState.searchWider = e.target.checked; renderRoutesForm(); };
-  el('routes-input-search-radius').oninput = e => { routesState.searchRadiusKm = parseFloat(e.target.value) || 0; };
+  wireNumericInput('routes-input-search-radius', v => { routesState.searchRadiusKm = parseFloat(v) || 0; });
 
   updateStartConfirmLine();
 }
@@ -195,6 +210,16 @@ function wireRoutesAddressFields() {
   // recherche departement inutile pendant qu'on tape encore vers un code
   // postal complet (ex: pause sur "75" avant de continuer vers "75015").
   const DEPARTMENT_CODE_RE = /^(\d{2}|2[ab]|97[1-6])$/i;
+  // Jeton anti-desordre : un code postal (5 chiffres) et son prefixe
+  // departement (2 chiffres) declenchent chacun leur propre requete
+  // (debounce independant a chaque frappe, mais toutes deux passent par ce
+  // meme handler) - sans garde, la reponse la plus LENTE a arriver ecrasait
+  // routesState.communes meme si elle correspond a une saisie deja perimee
+  // (ex: "75" -> tous les codes postaux de Paris, resout apres "75015" ->
+  // juste Paris ville : la ville n'apparaissait alors plus dans la liste,
+  // ou une liste incoherente avec ce qui est tape). Seule la reponse a la
+  // DERNIERE requete emise est appliquee, les autres sont ignorees.
+  let communesRequestToken = 0;
   postcodeInput.oninput = debounce(async (e) => {
     routesState.postcode = e.target.value.trim();
     routesState.communes = [];
@@ -204,11 +229,13 @@ function wireRoutesAddressFields() {
     const value = routesState.postcode;
     const isPostcode = /^\d{5}$/.test(value);
     const isDepartment = !isPostcode && DEPARTMENT_CODE_RE.test(value);
+    const myToken = ++communesRequestToken;
     if (!isPostcode && !isDepartment) { syncCityAndStreetFields(); return; }
     try {
       const param = isPostcode ? `postcode=${value}` : `department=${value}`;
       const res = await fetch(`${API}/api/routes/communes?${param}`);
       const data = await res.json();
+      if (myToken !== communesRequestToken) return; // une saisie plus recente a deja pris le relais
       if (!res.ok) throw new Error(data.error || 'Code introuvable');
       if (!data.communes || data.communes.length === 0) {
         showToast(isPostcode ? 'Aucune ville trouvée pour ce code postal' : 'Aucune ville trouvée pour ce département', 'error');
@@ -218,7 +245,7 @@ function wireRoutesAddressFields() {
       routesState.selectedCommune = data.communes.length === 1 ? data.communes[0] : null;
       syncCityAndStreetFields();
     } catch (err) {
-      showToast('Erreur : ' + err.message, 'error');
+      if (myToken === communesRequestToken) showToast('Erreur : ' + err.message, 'error');
     }
   }, 400);
 
