@@ -76,7 +76,7 @@ const API = '';
 // utilisateur : la notification "reste" parfois sans raison apparente) -
 // meme categorie de bug que le profil/plan importe avant leur ajout ici.
 const DURABLE_LS_KEYS = ['suivi_sport_profile', 'suivi_personal_goals', 'suivi_imported_plan', 'suivi_local_done', 'suivi_session_mood', 'prefer_imported_plan', 'suivi_forced_goal_pace', 'suivi_free_sessions', 'support_tickets_seen', 'support_admin_seen'];
-const DURABLE_LS_PREFIXES = ['suivi_objectif_dist_', 'suivi_objectif_dplus_', 'suivi_objectif_validated_'];
+const DURABLE_LS_PREFIXES = ['suivi_objectif_dist_', 'suivi_objectif_dplus_', 'suivi_objectif_validated_', 'suivi_objectif_startvo2_'];
 // Promesse de syncUserDataFromServer() exposee globalement (scope partage
 // entre scripts) - campus.js l'attend avant toute decision basee sur
 // localStorage, voir initCampus() dans campus.js.

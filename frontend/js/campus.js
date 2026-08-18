@@ -2518,9 +2518,19 @@ function vo2HistorySincePlanStart(weeks, vo2History) {
  *  2. Pendant la semaine 1 : la valeur continue de s'ajuster en temps réel
  *     (vo2ValueAtDate remonte naturellement jusqu'à "maintenant" puisque la
  *     fin de semaine 1 est encore dans le futur).
- *  3. Après le dimanche de la semaine 1 : la valeur se fige définitivement
- *     à ce qui était connu à cette date, même si le VO2max évolue ensuite. */
-function getStartVo2(weeks, vo2History) {
+ *  3. Après le dimanche de la semaine 1 : la valeur est calculée UNE SEULE
+ *     FOIS puis persistée (suivi_objectif_startvo2_<planId>, clé "durable"
+ *     synchronisée comme le reste du profil/objectifs - voir
+ *     DURABLE_LS_PREFIXES dans app.js). Indispensable pour un vrai gel :
+ *     `vO2MaxValue` vient de Garmin et est re-téléchargé en direct à chaque
+ *     chargement (l'année en cours n'est jamais mise en cache) - Garmin
+ *     révise parfois rétroactivement cette valeur sur une vieille activité,
+ *     ce qui faisait dériver silencieusement le "Début de plan" à chaque
+ *     visite sans persistance (retour utilisateur : chiffre qui bouge de
+ *     quelques minutes d'un jour à l'autre). Ne jamais recalculer après
+ *     écriture, sous peine de perdre la seule vraie référence fixe qui
+ *     permet de mesurer la progression réelle. */
+function getStartVo2(weeks, vo2History, planId) {
   if (!weeks || weeks.length === 0) return null;
   const now = Date.now();
   if (startOfDay(weeks[0].weekDate) > startOfDay(now)) {
@@ -2528,9 +2538,19 @@ function getStartVo2(weeks, vo2History) {
     // parler, on reflète simplement l'état actuel
     return vo2History.length > 0 ? vo2History[vo2History.length - 1].value : null;
   }
-  const sincePlan = vo2HistorySincePlanStart(weeks, vo2History);
   const weekEndTs = weeks[0].weekDate + 7 * 86400000;
-  return vo2ValueAtDate(sincePlan, weekEndTs);
+  if (weekEndTs > now) {
+    // Semaine 1 en cours : encore en mouvement, pas de gel
+    const sincePlan = vo2HistorySincePlanStart(weeks, vo2History);
+    return vo2ValueAtDate(sincePlan, weekEndTs);
+  }
+  const frozenKey = 'suivi_objectif_startvo2_' + (planId || 'plan');
+  const frozen = parseFloat(localStorage.getItem(frozenKey));
+  if (!isNaN(frozen)) return frozen;
+  const sincePlan = vo2HistorySincePlanStart(weeks, vo2History);
+  const computed = vo2ValueAtDate(sincePlan, weekEndTs);
+  if (computed != null) localStorage.setItem(frozenKey, String(computed));
+  return computed;
 }
 
 /** Distance en km depuis le goal (fallback planCategory.distLabel) */
@@ -2656,7 +2676,7 @@ function renderEstimations(goal, weeks, dplusM, distKmOverride) {
   // Bloc "Début de plan" : VO2max/temps estimé à la fin de la semaine 1
   // (voir getStartVo2), pour situer le point de départ réel du plan
   const vo2History = buildAnchoredVo2History();
-  const vo2Start = getStartVo2(weeks, vo2History);
+  const vo2Start = getStartVo2(weeks, vo2History, goal._id || 'plan');
   let secsStart = null;
   if (vo2Start != null && weeks.length > 0) {
     const vmaStart = vo2ToVmaCalibrated(vo2Start);
@@ -2751,7 +2771,7 @@ let _goalsChartInst = null;
  *  rétrécissait et se redessinait sans cesse (retour utilisateur : la
  *  courbe réelle "supprimait" la projection au fil des semaines). */
 function buildProjectionLine(weeks, goal, distKm, dplusM, isTrail, weeksTotal, vma) {
-  const vo2Start = getStartVo2(weeks, buildAnchoredVo2History());
+  const vo2Start = getStartVo2(weeks, buildAnchoredVo2History(), goal._id || 'plan');
   const vmaStart = vo2Start != null ? vo2ToVmaCalibrated(vo2Start) : vma;
   const startMins = Math.round((estimateRaceTime(vmaStart, distKm, dplusM, isTrail) || 0) / 60);
 
