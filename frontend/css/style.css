@@ -151,6 +151,13 @@
 /* Pill avec icône — icône agrandie visuellement via transform (n'affecte
    pas la boite/le layout, donc la pastille elle-même ne grossit pas). */
 .filter-pill .sport-icon { width: 18px; height: 18px; margin-right: 4px; transform: scale(1.3); }
+/* Natation : dessin ~2x plus large que haut (nageur allonge + vagues) -
+   dans une boite carree comme les autres, background-size:contain le
+   "letterboxe" (bandes transparentes en haut/bas), donc sa hauteur reelle
+   affichee restait bien inferieure aux icones carrees malgre le meme
+   transform:scale - d'ou l'impression de plus petit. Boite a son ratio
+   reel (64x36) pour qu'il remplisse toute la hauteur, comme les autres. */
+.filter-pill .sport-icon--swimming { width: 32px; height: 18px; margin-right: 2px; }
 /* Cellule tableau activités */
 .activity-type-cell {
   display: inline-flex;
@@ -497,6 +504,7 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
 /* ─── Filter pills ─── */
 .filter-pills{display:flex;gap:6px;flex-wrap:wrap;}
 .filter-pill{
+  display:inline-flex;align-items:center;justify-content:center;
   padding:5px 12px;
   border-radius:20px;
   font-size:12px;font-weight:500;
@@ -509,6 +517,11 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
 }
 .filter-pill:hover{border-color:#C8C7C4;color:var(--text-primary);}
 .filter-pill.active{background:var(--text-primary);border-color:var(--text-primary);color:#fff;}
+/* Largeur uniforme (retour utilisateur) — seulement les filtres de sport
+   (Activites/Statistiques, mêmes 7 pastilles Tout/Course/.../Natation),
+   pas les onglets Sante/Performance qui partagent la même classe .filter-pill
+   mais n'ont pas vocation a s'aligner sur cette largeur. */
+#activity-filters .filter-pill, #stats-filters .filter-pill { min-width:112px; }
 
 /* ═══════════════════════════════════════════════
    CARDS & TILES
