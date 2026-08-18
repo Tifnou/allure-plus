@@ -193,8 +193,8 @@ function stepDef(step) {
       question: 'Quel type de course préparez-vous ?',
       subtitle: 'Le plan sera adapté à la spécificité de votre discipline.',
       options: [
-        { value: 'T', label: '🏔 Trail', desc: 'Course nature, montagne, sentiers' },
-        { value: 'R', label: '🏃 Route', desc: 'Course sur route, piste, asphalte' },
+        { value: 'T', icon: 'sport-icon--trail',   label: 'Trail', desc: 'Course nature, montagne, sentiers' },
+        { value: 'R', icon: 'sport-icon--running', label: 'Route', desc: 'Course sur route, piste, asphalte' },
       ].filter(o => opts.includes(o.value)),
       key: 'sport',
     },
@@ -282,11 +282,17 @@ function activeGoalBadgeHtml() {
   const goal = plansState.activeGoal;
   if (!goal) return '';
   const name = goal.name || goal.goalTitle || 'Plan en cours';
-  const detail = 'Choisir et charger un nouveau plan remplacera entièrement ce plan (séances et progression réinitialisées). Pensez à l\'exporter depuis l\'onglet Entraînements si vous voulez le reprendre plus tard.';
+  // Pastille pulsante (attire l'oeil sans etre bloquante) + info-bulle
+  // maison au survol/focus, plutot que le tooltip natif du navigateur
+  // (title) - moins soigne et non stylable.
   return `
-    <div class="plan-active-badge" title="${escapeHtml(detail)}">
+    <div class="plan-active-badge" tabindex="0">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4M12 16.5h.01M10.3 3.9 2.5 17.5a2 2 0 0 0 1.7 3h15.6a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg>
       <span>Plan en cours : <strong>${escapeHtml(name)}</strong></span>
+      <div class="plan-active-badge-tooltip">
+        <strong>${escapeHtml(name)}</strong> est en cours.
+        Choisir et charger un nouveau plan remplacera <strong>entièrement</strong> celui-ci (séances et progression réinitialisées). Pensez à l'exporter depuis l'onglet Entraînements si vous voulez le reprendre plus tard.
+      </div>
     </div>`;
 }
 
@@ -351,6 +357,7 @@ function renderStepper() {
             <div class="step-options">
               ${def.options.map(opt => `
                 <button class="step-option" onclick="plansSelectOption('${step}','${def.key}', ${typeof opt.value === 'number' ? opt.value : `'${opt.value}'`})">
+                  ${opt.icon ? `<span class="sport-icon ${opt.icon} step-option-icon"></span>` : ''}
                   <span class="step-option-label">${opt.label}</span>
                   <span class="step-option-desc">${opt.desc}</span>
                 </button>
