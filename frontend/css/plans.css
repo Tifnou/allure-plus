@@ -62,90 +62,77 @@
 .plans-active-warning-icon { font-size: 1.25rem; flex-shrink: 0; margin-top: 1px; }
 .plans-active-warning-title { display: block; margin-bottom: 3px; font-weight: 700; }
 
-/* ── Carte centrale du wizard — meme largeur que le header de la page
-   (plus de max-width fixe a 600px) ── */
-.plans-card {
+/* ── Wizard : cadre unique, les 6 (ou 5, route sans D+) etapes empilees
+   dans une seule carte (voir renderStepper, plans.js) — remplace l'ancien
+   affichage plein ecran par etape (dots + Suivant/Retour). Une etape
+   repondue se reduit en resume modifiable ; l'etape suivante ne s'active
+   (options affichees) qu'une fois toutes les precedentes repondues ; les
+   etapes plus loin restent visibles mais verrouillees (question seule). ── */
+.plans-stepper {
   background: var(--bg-white);
   border: 1px solid var(--border);
   border-radius: 16px;
-  padding: 28px 32px;
-  margin-bottom: 24px;
   box-shadow: var(--shadow-sm);
+  overflow: hidden;
 }
-
-/* ── Wizard header ── */
-.wizard-header { display:flex; align-items:center; gap:16px; margin-bottom:28px; }
-.wizard-step-dots { display:flex; gap:8px; align-items:center; }
-.wizard-dot {
-  width:10px; height:10px; border-radius:50%;
-  background:var(--border); transition:all 0.25s;
+.step-row { display:flex; gap:16px; padding:20px 24px; position:relative; }
+.step-row + .step-row { border-top:1px solid var(--border-light); }
+.step-marker { display:flex; flex-direction:column; align-items:center; flex-shrink:0; width:26px; }
+.step-num {
+  width:26px; height:26px; border-radius:50%; display:flex; align-items:center; justify-content:center;
+  font-size:12px; font-weight:700; flex-shrink:0;
+  background:var(--bg-hover); color:var(--text-muted); border:1.5px solid var(--border);
+  transition:background .2s, color .2s, border-color .2s;
 }
-.wizard-dot.active { background:var(--accent); transform:scale(1.3); }
-.wizard-dot.done { background:#10b981; }
-.wizard-step-label { font-size:13px; color:var(--text-muted); margin-left:4px; }
+.step-row.done .step-num { background:#10b981; border-color:#10b981; color:#fff; }
+.step-row.active .step-num { background:var(--accent); border-color:var(--accent); color:#fff; }
+.step-line { width:2px; flex:1; background:var(--border); margin-top:4px; min-height:16px; }
+.step-row.done .step-line { background:#10b981; }
+.step-row:last-child .step-line { display:none; }
+.step-body { flex:1; min-width:0; padding-top:2px; }
 
-/* ── Question — meme largeur que le header (plus de cap a 560px : .plans-card
-   est injecte a l'interieur de ce conteneur, donc c'est lui qui bornait
-   la largeur reelle de la carte, malgre le max-width:none sur .plans-card) ── */
-.wizard-step-content { max-width: none; }
-.wizard-question { margin-bottom:24px; }
-.wizard-q-title {
-  font-size:20px; font-weight:700;
-  color:var(--text-primary);
-  margin-bottom:6px;
-}
-.wizard-q-sub { font-size:14px; color:var(--text-muted); }
+.step-row.pending { opacity:.42; }
+.step-row.pending .step-q-title { font-size:14px; font-weight:600; color:var(--text-secondary); }
 
-/* ── Options ── */
-.wizard-options { display:flex; flex-direction:column; gap:10px; }
-.wizard-option {
-  display:flex; align-items:center; gap:14px;
-  padding:14px 18px;
+.step-row.done .step-body { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; cursor:pointer; }
+.step-done-summary { display:flex; flex-direction:column; gap:1px; }
+.step-done-q { font-size:11px; color:var(--text-muted); }
+.step-done-a { font-size:14px; font-weight:700; color:var(--text-primary); }
+.step-edit-btn { font-size:12px; font-weight:600; color:var(--accent); background:none; border:none; cursor:pointer; padding:4px 8px; border-radius:8px; flex-shrink:0; }
+.step-edit-btn:hover { background:var(--accent-light); }
+
+.step-q-title { font-size:17px; font-weight:700; color:var(--text-primary); margin:0 0 4px; }
+.step-q-sub { font-size:13.5px; color:var(--text-muted); margin:0 0 14px; }
+
+.step-options { display:flex; flex-direction:column; gap:8px; }
+.step-option {
+  display:flex; align-items:center; gap:12px;
+  padding:12px 16px;
   background:var(--bg-white);
   border:1.5px solid var(--border);
-  border-radius:12px; cursor:pointer; text-align:left; transition:all 0.18s;
+  border-radius:11px; cursor:pointer; text-align:left; transition:all 0.15s;
 }
-.wizard-option:hover {
-  border-color:var(--accent);
-  background:var(--accent-light);
-}
-.wizard-option.selected {
-  border-color:var(--accent);
-  background:var(--accent-light);
-  box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 15%,transparent);
-}
-.wizard-option-label {
-  font-size:15px; font-weight:600;
-  color:var(--text-primary); flex:1;
-}
-.wizard-option-desc { font-size:13px; color:var(--text-muted); flex:1; }
-.wizard-option-radio {
-  width:20px; height:20px; border-radius:50%;
-  border:2px solid var(--border); flex-shrink:0; transition:all 0.18s;
-}
-.wizard-option.selected .wizard-option-radio {
-  border-color:var(--accent); background:var(--accent);
-  box-shadow:inset 0 0 0 4px var(--bg-white);
-}
+.step-option:hover { border-color:var(--accent); background:var(--accent-light); }
+.step-option-label { font-size:14px; font-weight:600; color:var(--text-primary); }
+.step-option-desc { font-size:12px; color:var(--text-muted); margin-left:auto; padding-left:10px; }
 
-/* ── Navigation ── */
-.wizard-nav {
-  display:flex; gap:12px; margin-top:16px; align-items:center;
-  background: transparent;
+.stepper-done-cta {
+  padding:22px 24px; background:var(--accent-light);
+  display:flex; align-items:center; justify-content:space-between; gap:14px; flex-wrap:wrap;
 }
-.btn-wizard-back {
-  padding:10px 20px; border:1.5px solid var(--border); border-radius:10px;
-  background:var(--bg-white); color:var(--text-secondary);
-  font-size:14px; font-weight:500; cursor:pointer; transition:all 0.18s;
+.stepper-done-text { font-size:14px; color:var(--accent-text); font-weight:600; }
+.btn-see-plans {
+  padding:11px 22px; border:none; border-radius:10px;
+  background:var(--accent); color:#fff; font-size:13.5px; font-weight:700; cursor:pointer; transition:all 0.18s;
 }
-.btn-wizard-back:hover { border-color:var(--accent); color:var(--accent); }
-.btn-wizard-next {
-  padding:10px 24px; border:none; border-radius:10px;
-  background:var(--accent); color:#fff; font-size:14px; font-weight:600;
-  cursor:pointer; transition:all 0.18s;
+.btn-see-plans:hover { filter:brightness(1.08); }
+
+.plans-restart-link {
+  display:block; margin:16px auto 0; text-align:center;
+  font-size:12px; color:var(--text-muted); background:none; border:none; cursor:pointer;
+  text-decoration:underline; text-underline-offset:2px;
 }
-.btn-wizard-next:disabled { opacity:0.4; cursor:not-allowed; }
-.btn-wizard-next:not(:disabled):hover { filter:brightness(1.1); transform:translateY(-1px); }
+.plans-restart-link:hover { color:var(--accent); }
 
 /* ── États vides ── */
 .plans-no-option {

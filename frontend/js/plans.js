@@ -5,7 +5,7 @@
 const plansState = {
   allPlans: [],      // Tous les plans chargés depuis l'API
   answers: {},       // Réponses du wizard { sport, distCat, duree, seances, niveau }
-  currentStep: 0,
+  editingStep: null, // Étape rouverte pour modification (ou null)
   filtered: [],      // Plans filtrés après le wizard
   selectedPlan: null,// Plan sélectionné pour le détail
 };
@@ -41,12 +41,12 @@ async function initPlansPage() {
 
   // Réinitialiser
   plansState.answers = {};
-  plansState.currentStep = 0;
+  plansState.editingStep = null;
   plansState.filtered = [];
   plansState.selectedPlan = null;
 
   showView('wizard');
-  renderWizardStep();
+  renderStepper();
   renderPlansInfoBanner();
 }
 
@@ -82,6 +82,28 @@ async function renderPlansInfoBanner() {
   const routeDistances = orderedUnique(routePlans.map(p => p.distLabel), ROUTE_ORDER);
   const trailDistances = orderedUnique(trailPlans.map(p => p.distLabel), TRAIL_ORDER);
 
+  // Répartition par niveau de reprise et, pour le trail, par palier de D+
+  // (TRAIL_DPLUS_TIERS, server.js) — mêmes données que allPlans, aucun appel
+  // supplémentaire. Recalculé à chaque chargement de la page, donc toujours
+  // à jour avec le catalogue réel sans intervention manuelle.
+  const NIVEAU_INFO = {
+    ACTIF:   { emoji: '🟢', label: 'pour reprise active' },
+    PAUSE:   { emoji: '🟡', label: 'pour petite coupure' },
+    REPRISE: { emoji: '🔴', label: 'pour longue reprise' },
+  };
+  const niveauCounts = { ACTIF: 0, PAUSE: 0, REPRISE: 0 };
+  plans.forEach(p => { if (niveauCounts[p.niveau] !== undefined) niveauCounts[p.niveau]++; });
+  const niveauChips = Object.entries(NIVEAU_INFO)
+    .filter(([n]) => niveauCounts[n] > 0)
+    .map(([n, info]) => `<span class="plans-info-stat-chip">${info.emoji} ${niveauCounts[n]} ${info.label}</span>`)
+    .join('');
+
+  const tierCounts = {};
+  trailPlans.forEach(p => { if (p.dplusTier) tierCounts[p.dplusTier] = (tierCounts[p.dplusTier] || 0) + 1; });
+  const tierChips = Object.entries(tierCounts)
+    .map(([tier, n]) => `<span class="plans-info-stat-chip">⛰️ ${n} ${tier.toLowerCase()}</span>`)
+    .join('');
+
   const statsHtml = `
     <div class="plans-info-card">
       <div class="plans-info-card-title">📚 Ce que vous trouverez ici</div>
@@ -94,6 +116,7 @@ async function renderPlansInfoBanner() {
         ${dureeMin != null ? `<span class="plans-info-stat-chip">🗓️ ${dureeMin === dureeMax ? dureeMin : dureeMin + '–' + dureeMax} semaines</span>` : ''}
         ${seancesMin != null ? `<span class="plans-info-stat-chip">📅 ${seancesMin === seancesMax ? seancesMin : seancesMin + '–' + seancesMax} séances/semaine</span>` : ''}
       </div>
+      <div class="plans-info-stats">${niveauChips}${tierChips}</div>
     </div>
   `;
 
@@ -176,27 +199,14 @@ function getAvailableOptions(step) {
   }
 }
 
-function renderWizardStep() {
-  const el = id => document.getElementById(id);
-  const step = WIZARD_STEPS[plansState.currentStep];
-  const totalSteps = WIZARD_STEPS.length;
+// Définition d'une étape (question/sous-titre/options déjà filtrées selon
+// les réponses précédentes via getAvailableOptions) — appelable indépendamment
+// de toute étape "courante", puisque le cadre unique affiche désormais les
+// 6 étapes à la fois (voir renderStepper).
+function stepDef(step) {
   const a = plansState.answers;
-
-  // Indicateur d'étape — inline, simple
-  el('plans-step-indicator').innerHTML = `
-    <div class="wizard-header">
-      <div class="wizard-step-dots">
-        ${WIZARD_STEPS.map((s, i) => `
-          <span class="wizard-dot ${i < plansState.currentStep ? 'done' : ''} ${i === plansState.currentStep ? 'active' : ''}"></span>
-        `).join('')}
-      </div>
-      <span class="wizard-step-label">Étape ${plansState.currentStep + 1} / ${totalSteps}</span>
-    </div>
-  `;
-
   const opts = getAvailableOptions(step);
 
-  // Définition des étapes
   const stepDefs = {
     sport: {
       question: 'Quel type de course préparez-vous ?',
@@ -262,108 +272,157 @@ function renderWizardStep() {
     },
   };
 
-  const def = stepDefs[step];
-  const currentVal = a[def.key];
+  return stepDefs[step];
+}
 
-  if (def.options.length === 0) {
-    el('plans-step-content').innerHTML = `
-      <div class="plans-no-option">
-        <span style="font-size:2.5rem">😕</span>
-        <p>Aucun plan disponible pour cette épreuve.</p>
-        <button class="btn-plans-restart" onclick="plansRestart()">Recommencer</button>
+// Étapes réellement affichées : 'dplus' n'existe que pour le trail (même
+// règle que l'ancien auto-skip de wizardNext/wizardBack, mais gérée ici par
+// simple filtrage puisqu'il n'y a plus d'étape "courante" à sauter).
+function activeWizardSteps() {
+  return WIZARD_STEPS.filter(s => s !== 'dplus' || plansState.answers.sport === 'T');
+}
+
+function filterPlansByAnswers(a) {
+  return plansState.allPlans.filter(p =>
+    (!a.sport      || p.sport      === a.sport) &&
+    (!a.distCat    || p.distCat    === a.distCat) &&
+    (!a.dplusLabel || p.dplusLabel === a.dplusLabel) &&
+    (!a.duree      || p.duree      === a.duree) &&
+    (!a.seances    || p.seances    === a.seances) &&
+    (!a.niveau     || p.niveau     === a.niveau)
+  );
+}
+
+// Rend le cadre unique du wizard : les 6 (ou 5, route sans D+) étapes
+// empilées. Une étape répondue se réduit en résumé modifiable ; l'étape
+// suivante ne s'active (options affichées) qu'une fois toutes les
+// précédentes répondues ; les étapes plus loin restent visibles mais
+// verrouillées (question seule, pas d'options) — remplace l'ancien
+// affichage plein écran par étape (dots + boutons Suivant/Retour).
+function renderStepper() {
+  const el = id => document.getElementById(id);
+  const stepperEl = el('plans-stepper');
+  if (!stepperEl) return;
+  const a = plansState.answers;
+  const steps = activeWizardSteps();
+  let allDone = true;
+  let html = '';
+
+  steps.forEach((step, i) => {
+    const def = stepDef(step);
+    const answered = a[def.key] !== undefined;
+    const isEditing = plansState.editingStep === step;
+    // Une étape en cours de modification ne compte pas comme "répondue" pour
+    // ses étapes suivantes, même si elle garde encore son ancienne valeur en
+    // mémoire — sinon l'étape suivante resterait active avec des options
+    // basées sur une réponse qu'on est justement en train de changer.
+    const priorAllAnswered = steps.slice(0, i).every(s =>
+      a[stepDef(s).key] !== undefined && s !== plansState.editingStep);
+
+    let rowClass, body;
+    if (answered && !isEditing) {
+      rowClass = 'done';
+      const val = a[def.key];
+      const chosen = def.options.find(o => o.value === val);
+      const label = chosen ? chosen.label : String(val);
+      body = `
+        <div class="step-body" onclick="plansEditStep('${step}')">
+          <div class="step-done-summary">
+            <div class="step-done-q">${def.question}</div>
+            <div class="step-done-a">${label}</div>
+          </div>
+          <button class="step-edit-btn" onclick="event.stopPropagation();plansEditStep('${step}')">Modifier</button>
+        </div>`;
+    } else if (priorAllAnswered) {
+      rowClass = 'active';
+      allDone = false;
+      if (def.options.length === 0) {
+        body = `
+          <div class="step-body">
+            <h3 class="step-q-title">${def.question}</h3>
+            <div class="plans-no-option">
+              <span style="font-size:2.5rem">😕</span>
+              <p>Aucun plan disponible pour cette combinaison.</p>
+              <button class="btn-plans-restart" onclick="plansRestart()">Recommencer</button>
+            </div>
+          </div>`;
+      } else {
+        body = `
+          <div class="step-body">
+            <h3 class="step-q-title">${def.question}</h3>
+            <p class="step-q-sub">${def.subtitle}</p>
+            <div class="step-options">
+              ${def.options.map(opt => `
+                <button class="step-option" onclick="plansSelectOption('${step}','${def.key}', ${typeof opt.value === 'number' ? opt.value : `'${opt.value}'`})">
+                  <span class="step-option-label">${opt.label}</span>
+                  <span class="step-option-desc">${opt.desc}</span>
+                </button>
+              `).join('')}
+            </div>
+          </div>`;
+      }
+    } else {
+      rowClass = 'pending';
+      allDone = false;
+      body = `<div class="step-body"><h3 class="step-q-title">${def.question}</h3></div>`;
+    }
+
+    html += `
+      <div class="step-row ${rowClass}">
+        <div class="step-marker">
+          <div class="step-num">${rowClass === 'done' ? '✓' : i + 1}</div>
+          ${i < steps.length - 1 ? '<div class="step-line"></div>' : ''}
+        </div>
+        ${body}
       </div>`;
-    el('plans-nav-next').style.display = 'none';
-    el('plans-nav-back').style.display = plansState.currentStep > 0 ? '' : 'none';
-    return;
+  });
+
+  if (allDone) {
+    const count = filterPlansByAnswers(a).length;
+    html += `
+      <div class="stepper-done-cta">
+        <span class="stepper-done-text">${count} plan${count > 1 ? 's' : ''} correspond${count > 1 ? 'ent' : ''} à vos critères</span>
+        <button class="btn-see-plans" onclick="showFilteredResults()">Voir les plans →</button>
+      </div>`;
   }
 
-  el('plans-step-content').innerHTML = `
-    <div class="plans-card">
-      <div class="wizard-question">
-        <h2 class="wizard-q-title">${def.question}</h2>
-        <p class="wizard-q-sub">${def.subtitle}</p>
-      </div>
-      <div class="wizard-options">
-        ${def.options.map(opt => `
-          <button class="wizard-option ${currentVal === opt.value ? 'selected' : ''}"
-                  onclick="wizardSelect('${def.key}', ${typeof opt.value === 'number' ? opt.value : `'${opt.value}'`})"
-                  id="wopt-${opt.value}">
-            <span class="wizard-option-label">${opt.label}</span>
-            <span class="wizard-option-desc">${opt.desc}</span>
-            <span class="wizard-option-radio"></span>
-          </button>
-        `).join('')}
-      </div>
-    </div>
-  `;
-
-  // Boutons navigation
-  el('plans-nav-back').style.display = plansState.currentStep > 0 ? '' : 'none';
-  el('plans-nav-next').textContent = plansState.currentStep === totalSteps - 1 ? 'Voir les plans →' : 'Suivant →';
-  el('plans-nav-next').disabled = !currentVal;
+  stepperEl.innerHTML = html;
+  const restartLink = el('plans-restart-link');
+  if (restartLink) restartLink.style.display = Object.keys(a).length > 0 ? '' : 'none';
 }
 
-function wizardSelect(key, value) {
+function plansSelectOption(step, key, value) {
+  if (key === 'duree' || key === 'seances') value = Number(value);
   plansState.answers[key] = value;
-  // Mettre à jour visuellement
-  document.querySelectorAll('.wizard-option').forEach(btn => btn.classList.remove('selected'));
-  const btn = document.getElementById(`wopt-${value}`);
-  if (btn) btn.classList.add('selected');
-  document.getElementById('plans-nav-next').disabled = false;
+  // Choisir (ou re-choisir en cours de modification) invalide tout ce qui
+  // suit, puisque ces étapes dépendent de celle-ci.
+  const steps = activeWizardSteps();
+  const idx = steps.indexOf(step);
+  steps.slice(idx + 1).forEach(s => delete plansState.answers[stepDef(s).key]);
+  plansState.editingStep = null;
+  renderStepper();
 }
 
-function wizardNext() {
-  const step = WIZARD_STEPS[plansState.currentStep];
-  const stepKeys = { sport:'sport', dist:'distCat', dplus:'dplusLabel', duree:'duree', seances:'seances', niveau:'niveau' };
-  if (!plansState.answers[stepKeys[step] || step]) return;
-
-  if (plansState.currentStep < WIZARD_STEPS.length - 1) {
-    plansState.currentStep++;
-    // Auto-skip dplus pour la Route OU si aucun plan n'a de données D+
-    if (WIZARD_STEPS[plansState.currentStep] === 'dplus' && getAvailableOptions('dplus').length === 0) {
-      plansState.currentStep++;
-    }
-    renderWizardStep();
-  } else {
-    showFilteredResults();
-  }
-}
-
-function wizardBack() {
-  if (plansState.currentStep > 0) {
-    const stepKeys = { sport:'sport', dist:'distCat', dplus:'dplusLabel', duree:'duree', seances:'seances', niveau:'niveau' };
-    const curStepName = WIZARD_STEPS[plansState.currentStep];
-    delete plansState.answers[stepKeys[curStepName] || curStepName];
-    plansState.currentStep--;
-    // Auto-skip dplus en arrière si Route ou pas d'options
-    if (WIZARD_STEPS[plansState.currentStep] === 'dplus' && getAvailableOptions('dplus').length === 0) {
-      delete plansState.answers['dplusLabel'];
-      plansState.currentStep--;
-    }
-    renderWizardStep();
-  }
+function plansEditStep(step) {
+  const steps = activeWizardSteps();
+  const idx = steps.indexOf(step);
+  steps.slice(idx + 1).forEach(s => delete plansState.answers[stepDef(s).key]);
+  plansState.editingStep = step;
+  renderStepper();
 }
 
 function plansRestart() {
   plansState.answers = {};
-  plansState.currentStep = 0;
+  plansState.editingStep = null;
   showView('wizard');
-  renderWizardStep();
-  document.getElementById('plans-nav-next').style.display = '';
+  renderStepper();
 }
 
 // ─── RÉSULTATS ────────────────────────────────────────────────
 
 function showFilteredResults() {
   const a = plansState.answers;
-  let results = plansState.allPlans.filter(p =>
-    (!a.sport       || p.sport       === a.sport) &&
-    (!a.distCat     || p.distCat     === a.distCat) &&
-    (!a.dplusLabel  || p.dplusLabel  === a.dplusLabel) &&
-    (!a.duree       || p.duree       === a.duree) &&
-    (!a.seances     || p.seances     === a.seances) &&
-    (!a.niveau      || p.niveau      === a.niveau)
-  );
+  let results = filterPlansByAnswers(a);
 
   // Si aucun résultat exact → plan le plus proche (score de proximité)
   if (results.length === 0) {

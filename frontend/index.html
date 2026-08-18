@@ -12,8 +12,8 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <link rel="stylesheet" href="css/style.css?v=1786981930290" />
-  <link rel="stylesheet" href="css/plans.css?v=1786970138965" />
+  <link rel="stylesheet" href="css/style.css?v=1787046867910" />
+  <link rel="stylesheet" href="css/plans.css?v=1787049784982" />
   <link rel="stylesheet" href="css/routes.css?v=1786547249351" />
 </head>
 <body>
@@ -47,9 +47,15 @@
         <div class="brand-name">Allure+</div>
         <div class="brand-user" id="sidebar-username"></div>
       </div>
-      <button class="btn-theme-sidebar" id="btn-theme-toggle" title="Passer en mode sombre">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
-      </button>
+      <div class="theme-toggle" id="theme-toggle" role="group" aria-label="Thème">
+        <span class="theme-toggle-thumb" id="theme-toggle-thumb" aria-hidden="true"></span>
+        <button type="button" class="theme-toggle-btn" id="btn-theme-light" title="Thème clair" aria-label="Thème clair">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4.2"/><path d="M12 3v2M12 19v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M3 12h2M19 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4"/></svg>
+        </button>
+        <button type="button" class="theme-toggle-btn" id="btn-theme-dark" title="Thème sombre" aria-label="Thème sombre">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+        </button>
+      </div>
     </div>
 
     <nav class="sidebar-nav">
@@ -1148,14 +1154,11 @@
         <div id="plans-admin-tracker-body" class="plans-admin-tracker-body" style="display:none;"></div>
       </div>
 
-      <!-- WIZARD -->
+      <!-- WIZARD : cadre unique, les 6 etapes s'affichent empilees et
+           s'activent progressivement (voir renderStepper, plans.js) -->
       <div id="plans-wizard">
-        <div id="plans-step-indicator" style="margin-bottom:16px;"></div>
-        <div id="plans-step-content" class="wizard-step-content"></div>
-        <div class="wizard-nav">
-          <button id="plans-nav-back" class="btn-wizard-back" onclick="wizardBack()" style="display:none">← Retour</button>
-          <button id="plans-nav-next" class="btn-wizard-next" onclick="wizardNext()" disabled>Suivant →</button>
-        </div>
+        <div id="plans-stepper" class="plans-stepper"></div>
+        <button type="button" class="plans-restart-link" id="plans-restart-link" onclick="plansRestart()" style="display:none">↺ Recommencer</button>
       </div>
 
       <!-- RÉSULTATS -->
@@ -1343,7 +1346,7 @@
     <span class="support-fab-dot" id="support-fab-dot" style="display:none"></span>
   </button>
 
-  <script src="js/app.js?v=1787044068478"></script>
+  <script src="js/app.js?v=1787046867910"></script>
   <script src="js/gear.js?v=1786459105633"></script>
   <script src="js/campus.js?v=1787044068478"></script>
   <script src="js/free_sessions.js?v=1786701705047"></script>
@@ -1351,7 +1354,7 @@
   <script src="js/stats.js?v=1786981930290"></script>
   <script src="js/records.js?v=1786024863614"></script>
   <script src="js/health.js?v=1786627102345"></script>
-  <script src="js/plans.js?v=1786973172554"></script>
+  <script src="js/plans.js?v=1787049784982"></script>
   <script src="js/routes.js?v=1786698449656"></script>
   <script src="js/support.js?v=1786966950464"></script>
   <!-- ... MODAL LOGS ........................... -->

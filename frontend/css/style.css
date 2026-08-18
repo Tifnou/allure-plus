@@ -3046,28 +3046,53 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
 }
 
 /* ─── Bouton thème (dans la sidebar, remplace le badge "Version test") ─── */
-.btn-theme-sidebar {
+/* ─── Interrupteur de thème (pill clair/sombre, curseur glissant) ───
+   Remplace l'ancien bouton unique a icone basculante : les deux etats sont
+   visibles en permanence, seul le curseur (theme-toggle-thumb) glisse de
+   gauche a droite (ou l'inverse) derriere l'icone active - plus lisible
+   qu'une icone qui change brusquement, et l'animation rend le changement de
+   theme perceptible meme quand on ne regarde pas directement le bouton. */
+.theme-toggle {
   margin-left: auto;
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  flex-shrink: 0;
+  padding: 3px;
+  border-radius: 20px;
+  border: 1px solid var(--border);
+  background: var(--bg-hover);
+}
+.theme-toggle-thumb {
+  position: absolute;
+  top: 3px; left: 3px;
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  background: var(--bg-white);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.12);
+  transition: transform 0.28s cubic-bezier(.4,0,.2,1);
+  transform: translateX(0);
+}
+[data-theme="dark"] .theme-toggle-thumb { transform: translateX(24px); }
+.theme-toggle-btn {
+  position: relative;
+  z-index: 1;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 30px;
-  height: 30px;
-  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  border: none;
+  background: none;
   border-radius: 50%;
-  border: 1px solid var(--border);
-  background: var(--bg-white);
-  color: var(--text-secondary);
+  color: var(--text-muted);
   cursor: pointer;
-  transition: background var(--transition), color var(--transition),
-              border-color var(--transition), transform 0.25s;
+  transition: color var(--transition);
 }
-.btn-theme-sidebar:hover {
-  color: var(--brand-green);
-  border-color: var(--brand-green);
-  transform: rotate(20deg);
-}
-.btn-theme-sidebar svg { display: block; }
+.theme-toggle-btn svg { display: block; }
+[data-theme="light"] #btn-theme-light { color: var(--brand-green); }
+[data-theme="dark"] #btn-theme-dark { color: var(--brand-green); }
 
 /* ─── Avatar utilisateur (top-right fixe) ─── */
 .avatar-frame {
