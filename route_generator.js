@@ -67,6 +67,35 @@ function haversineDistance(a, b) {
   return 2 * R_EARTH * Math.asin(Math.sqrt(h));
 }
 
+// Inverse de destinationPoint : releve initial (bearing, 0-360°) du point a
+// vers le point b. Sert a etiqueter la direction d'une boucle alternative
+// TELLE QU'ELLE APPARAIT REELLEMENT SUR LA CARTE depuis le point demande par
+// l'utilisateur - jamais le bearing de recherche interne (qui peut avoir ete
+// calcule depuis un depart alternatif decale de plusieurs km, cf
+// generateRouteOptions/usedAlternateStart), sous peine d'un libelle du genre
+// "vers le sud-est" pour un tracé que la carte montre au sud-ouest (bug
+// reel constate : recherche elargie ayant deplace le depart, le bearing de
+// recherche restait relatif a ce depart deplace au lieu du point demande).
+// Point du tracé le plus eloigne de `from` - repere le plus parlant pour
+// dire "cette boucle va vers X" (l'apex de la boucle, a l'oppose du depart),
+// utilise par bearingBetween pour l'etiquette de direction (voir plus haut).
+function farthestPoint(points, from) {
+  let best = points[0], bestDist = -1;
+  for (const p of points) {
+    const d = haversineDistance(from, p);
+    if (d > bestDist) { bestDist = d; best = p; }
+  }
+  return best;
+}
+
+function bearingBetween(a, b) {
+  const la1 = a.lat * Math.PI / 180, la2 = b.lat * Math.PI / 180;
+  const dLon = (b.lon - a.lon) * Math.PI / 180;
+  const y = Math.sin(dLon) * Math.cos(la2);
+  const x = Math.cos(la1) * Math.sin(la2) - Math.sin(la1) * Math.cos(la2) * Math.cos(dLon);
+  return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+}
+
 function destinationPoint(lat, lon, bearingDeg, distanceM) {
   const bearing = bearingDeg * Math.PI / 180;
   const lat1 = lat * Math.PI / 180, lon1 = lon * Math.PI / 180;
@@ -343,6 +372,60 @@ function findSteepestSegment(points, opts = {}) {
   return best || null;
 }
 
+// Repete le/les passage(s) le(s) plus efficace(s) en D+ d'un tracé donne
+// jusqu'a s'approcher de targetAscentM (ou du budget distance/duree),
+// exactement la logique de repetition deja utilisee pour l'option
+// principale - extraite ici pour etre reutilisable sur les boucles
+// alternatives aussi (voir generateRouteOptions : avant ce correctif, seule
+// l'option principale recevait ce traitement, les alternatives gardaient
+// leur D+ "naturel" brut meme tres en dessous de la cible - plainte
+// utilisateur reelle, ex. 600 m vises, 154-280 m sur les alternatives).
+// Retourne null si aucun segment exploitable n'a ete trouve.
+async function boostAscentViaRepeats(basePoints, targetAscentM, profile, paceMinPerKm, targetDurationMin, targetDistanceM) {
+  const segments = findSteepestSegments(basePoints, { maxSegments: MAX_REPEAT_SEGMENTS });
+  if (segments.length === 0) return null;
+
+  const overshootBudgetMin = targetDurationMin ? targetDurationMin * MAX_OVERSHOOT_RATIO : null;
+  const overshootBudgetDistM = !targetDurationMin ? targetDistanceM * MAX_OVERSHOOT_RATIO : null;
+
+  let repeated = null;
+  let repeatedDurationMin = 0;
+  const repsBySegment = new Array(segments.length).fill(0);
+  for (let step = 0; step < MAX_REPEAT_STEPS; step++) {
+    const segIdx = step % segments.length;
+    repsBySegment[segIdx]++;
+    const segmentReps = segments.map((segment, i) => ({ segment, reps: repsBySegment[i] }));
+    let candidate;
+    try {
+      candidate = await routeThroughPoints(buildMultiRepeatedWaypoints(basePoints, segmentReps), profile, { trackname: `repeat_step${step}` });
+    } catch (err) {
+      repsBySegment[segIdx]--; // cette etape n'est pas routable - revient a l'etat precedent, garde le dernier resultat valide
+      break;
+    }
+    const candidateDurationMin = predictDurationMin(candidate.points, paceMinPerKm);
+    const overBudget = overshootBudgetMin ? candidateDurationMin > overshootBudgetMin : candidate.distanceM > overshootBudgetDistM;
+
+    repeated = candidate;
+    repeatedDurationMin = candidateDurationMin;
+    if (overBudget) break; // on garde ce dernier essai (le meilleur compromis trouve dans le budget) et on s'arrete
+    if (calibrateAscent(candidate.filteredAscendM) >= targetAscentM - ASCENT_TOLERANCE_M) break; // objectif atteint
+  }
+  if (!repeated) return null; // meme la toute premiere etape n'etait pas routable
+
+  const repeatedAscentM = calibrateAscent(repeated.filteredAscendM);
+  const repeatedSegments = segments.map((segment, i) => {
+    const zone = findRepeatedZoneIndexRange(repeated.points, segment);
+    return {
+      fromLat: segment.from.lat, fromLon: segment.from.lon, toLat: segment.to.lat, toLon: segment.to.lon, gainM: segment.gainM,
+      reps: repsBySegment[i],
+      startIdx: zone ? zone.startIdx : null,
+      endIdx: zone ? zone.endIdx : null,
+    };
+  }).filter(s => s.reps > 0); // exclut les segments jamais sollicites (objectif deja atteint avant leur tour)
+
+  return { repeated, repeatedDurationMin, repeatedAscentM, repeatedSegments };
+}
+
 // Insere, pour chaque segment, `reps` allers-retours a sa position naturelle
 // dans la sequence (pas en fin de circuit - erreur constatee et corrigee
 // pendant la session de recherche : ajouter la repetition en bout de tracé
@@ -568,19 +651,61 @@ async function generateRouteOptions({ start, targetDistanceM, targetAscentM, tar
   // Boucles alternatives : mêmes critères (distance/durée), mais dans une
   // direction suffisamment différente pour être un vrai autre choix plutôt
   // qu'une variante quasi identique - cf generateLoopWithAlternates.
-  alternates.forEach((alt, i) => {
-    const toward = towardCompassPhrase(alt.bearing);
+  // IMPORTANT (correctif) : avant, seule l'option principale recevait le
+  // traitement "répétition de côte" pour atteindre le D+ visé - les
+  // alternatives gardaient leur D+ naturel brut, souvent très en dessous
+  // de la cible (plainte utilisateur réelle : 600 m visés, 154-280 m sur
+  // les alternatives, "comme si l'appli disait j'ai au moins 1 critère donc
+  // ça va"). Chaque alternative reçoit maintenant le même boostAscentViaRepeats
+  // que l'option principale si besoin - séquentiel (pas en parallèle avec les
+  // autres alternatives) pour ne pas saturer BRouter de requêtes concurrentes.
+  for (let i = 0; i < alternates.length; i++) {
+    const alt = alternates[i];
+    // Direction telle qu'affichee sur la carte depuis le point REELLEMENT
+    // demande (start), jamais le bearing de recherche interne (alt.bearing,
+    // relatif a effectiveStart qui peut etre decale de plusieurs km) - voir
+    // le commentaire de bearingBetween plus haut.
+    const toward = towardCompassPhrase(bearingBetween(start, farthestPoint(alt.result.points, start)));
+    let altPoints = alt.result.points;
+    let altDistanceM = alt.result.distanceM;
+    let altAscentM = calibrateAscent(alt.result.filteredAscendM);
+    let altDurationMin = predictDurationMin(altPoints, paceMinPerKm);
+    let altCommentary = `Autre tracé possible, orienté ${toward} plutôt que vers le secteur retenu pour l'option principale — pour varier l'itinéraire tout en visant les mêmes critères.`;
+    let altRepeatedSegments = null;
+
+    const altNeedsMoreAscent = terrain === 'trail' && targetAscentM && altAscentM < targetAscentM - ASCENT_TOLERANCE_M;
+    if (altNeedsMoreAscent) {
+      const boost = await boostAscentViaRepeats(altPoints, targetAscentM, profile, paceMinPerKm, targetDurationMin, targetDistanceM);
+      if (boost && boost.repeatedAscentM > altAscentM) {
+        const stillShort = boost.repeatedAscentM < targetAscentM - ASCENT_TOLERANCE_M;
+        altPoints = boost.repeated.points;
+        altDistanceM = boost.repeated.distanceM;
+        altAscentM = boost.repeatedAscentM;
+        altDurationMin = boost.repeatedDurationMin;
+        altRepeatedSegments = boost.repeatedSegments;
+        altCommentary = `Autre tracé possible, orienté ${toward} — le D+ naturel de ce secteur (${calibrateAscent(alt.result.filteredAscendM)} m) était en dessous de la cible, complété par répétition d'une côte pour s'en rapprocher.`
+          + (stillShort ? ` Reste en dessous du D+ visé (${targetAscentM} m) sans dépasser largement la distance/durée demandée.` : '');
+      } else {
+        // Aucune côte exploitable trouvée pour booster cette alternative -
+        // le dire plutôt que de proposer silencieusement un D+ trop faible
+        // sans que l'utilisateur comprenne pourquoi cette option diffère
+        // tant de la cible qu'il a demandée.
+        altCommentary = `Autre tracé possible, orienté ${toward} — D+ naturel de ce secteur : ${altAscentM} m, en dessous de la cible (${targetAscentM} m) et aucune côte exploitable trouvée à répéter ici.`;
+      }
+    }
+
     options.push({
       type: 'boucle-alternative',
       label: `Boucle alternative ${i + 1} — ${toward}`,
-      points: alt.result.points,
-      distanceM: alt.result.distanceM,
-      ascentM: calibrateAscent(alt.result.filteredAscendM),
-      predictedDurationMin: predictDurationMin(alt.result.points, paceMinPerKm),
-      commentary: `Autre tracé possible, orienté ${toward} plutôt que vers le secteur retenu pour l'option principale — pour varier l'itinéraire tout en visant les mêmes critères.`,
+      points: altPoints,
+      distanceM: altDistanceM,
+      ascentM: altAscentM,
+      repeatedSegments: altRepeatedSegments,
+      predictedDurationMin: altDurationMin,
+      commentary: altCommentary,
       alternateStart: naturalOption.alternateStart,
     });
-  });
+  }
 
   let warning = null;
 
@@ -605,57 +730,15 @@ async function generateRouteOptions({ start, targetDistanceM, targetAscentM, tar
     && naturalOption.ascentM < targetAscentM - ASCENT_TOLERANCE_M;
 
   if (needsMoreAscent) {
-    const segments = findSteepestSegments(natural.points, { maxSegments: MAX_REPEAT_SEGMENTS });
-    if (segments.length === 0) {
+    // Escalade fine, UN SEUL segment incremente d'UNE seule repetition a
+    // chaque etape (tournicoti round-robin entre les segments trouves) -
+    // teste apres CHAQUE etape et s'arrete des que le D+ vise est atteint OU
+    // que le budget (duree/distance) est depasse - voir boostAscentViaRepeats.
+    const boost = await boostAscentViaRepeats(natural.points, targetAscentM, profile, paceMinPerKm, targetDurationMin, targetDistanceM);
+    if (!boost) {
       warning = `Aucune côte exploitable trouvée pour compléter le D+ dans ce secteur — seule la boucle naturelle (${naturalOption.ascentM} m) est proposée.`;
     } else {
-      // Budget a ne pas depasser en ajoutant des repetitions : la duree
-      // reelle visee si elle est connue, sinon la distance visee. Escalade
-      // fine, UN SEUL segment incremente d'UNE seule repetition a chaque
-      // etape (tournicoti round-robin entre les segments trouves) - teste
-      // apres CHAQUE etape et s'arrete des que le D+ vise est atteint OU que
-      // le budget est depasse. Un increment groupe (tous les segments +1 en
-      // meme temps) a ete teste et depassait largement la cible des le
-      // premier tour (chaque tour ajoutant d'un coup 3x plus de distance) -
-      // l'increment un par un reproduit la precision de l'ancienne version
-      // mono-segment, juste repartie sur plusieurs côtes.
-      const overshootBudgetMin = targetDurationMin ? targetDurationMin * MAX_OVERSHOOT_RATIO : null;
-      const overshootBudgetDistM = !targetDurationMin ? targetDistanceM * MAX_OVERSHOOT_RATIO : null;
-
-      let repeated = null;
-      let repeatedDurationMin = 0;
-      const repsBySegment = new Array(segments.length).fill(0);
-      for (let step = 0; step < MAX_REPEAT_STEPS; step++) {
-        const segIdx = step % segments.length;
-        repsBySegment[segIdx]++;
-        const segmentReps = segments.map((segment, i) => ({ segment, reps: repsBySegment[i] }));
-        let candidate;
-        try {
-          candidate = await routeThroughPoints(buildMultiRepeatedWaypoints(natural.points, segmentReps), profile, { trackname: `repeat_step${step}` });
-        } catch (err) {
-          repsBySegment[segIdx]--; // cette etape n'est pas routable - revient a l'etat precedent, garde le dernier resultat valide
-          break;
-        }
-        const candidateDurationMin = predictDurationMin(candidate.points, paceMinPerKm);
-        const overBudget = overshootBudgetMin ? candidateDurationMin > overshootBudgetMin : candidate.distanceM > overshootBudgetDistM;
-
-        repeated = candidate;
-        repeatedDurationMin = candidateDurationMin;
-        if (overBudget) break; // on garde ce dernier essai (le meilleur compromis trouve dans le budget) et on s'arrete
-        if (calibrateAscent(candidate.filteredAscendM) >= targetAscentM - ASCENT_TOLERANCE_M) break; // objectif atteint
-      }
-
-      const repeatedAscentM = calibrateAscent(repeated.filteredAscendM);
-      const repeatedSegments = segments.map((segment, i) => {
-        const zone = findRepeatedZoneIndexRange(repeated.points, segment);
-        return {
-          fromLat: segment.from.lat, fromLon: segment.from.lon, toLat: segment.to.lat, toLon: segment.to.lon, gainM: segment.gainM,
-          reps: repsBySegment[i],
-          startIdx: zone ? zone.startIdx : null,
-          endIdx: zone ? zone.endIdx : null,
-        };
-      }).filter(s => s.reps > 0); // exclut les segments jamais sollicites (objectif deja atteint avant leur tour)
-
+      const { repeated, repeatedDurationMin, repeatedAscentM, repeatedSegments } = boost;
       const segCount = repeatedSegments.length;
       const climbsDesc = repeatedSegments.map(s => `${Math.round(s.gainM)} m sur une côte répétée ${s.reps} fois`).join(', ');
       const totalReps = repeatedSegments.reduce((sum, s) => sum + s.reps, 0);
@@ -718,6 +801,8 @@ module.exports = {
   searchStreet,
   getTownHall,
   destinationPoint,
+  bearingBetween,
+  farthestPoint,
   haversineDistance,
   generateLoop,
   generateLoopWithAlternates,
