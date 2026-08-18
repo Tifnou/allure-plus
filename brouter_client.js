@@ -5,7 +5,13 @@
 const { ensureBrouterRunning, getPort } = require('./brouter_manager');
 
 const TRKPT_RE = /<trkpt lon="([^"]+)" lat="([^"]+)"><ele>([^<]+)<\/ele>/g;
-const HEADER_RE = /track-length\s*=\s*(\d+)\s+filtered ascend\s*=\s*(\d+)\s+plain-ascend\s*=\s*(\d+)/;
+// plain-ascend peut etre negatif (trajet point-a-point net descendant, ex :
+// l'aller d'un aller-retour qui redescend globalement) - sans le \-? sur ce
+// groupe, toute la regex echouait a matcher des qu'un "-" apparaissait dans
+// cette valeur (bug reel constate : distanceM/filteredAscendM silencieusement
+// null sur certaines directions d'aller-retour, jamais vu sur des boucles ou
+// plain-ascend est quasi toujours >=0 puisque le depart=arrivee).
+const HEADER_RE = /track-length\s*=\s*(\d+)\s+filtered ascend\s*=\s*(\d+)\s+plain-ascend\s*=\s*(-?\d+)/;
 
 function parseGpx(gpxText) {
   const points = [];
