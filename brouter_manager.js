@@ -5,7 +5,7 @@
 // Invocation reelle verifiee dans le depot BRouter (misc/scripts/standalone/server.cmd) :
 //   java -cp brouter.jar btools.server.RouteServer <segmentdir> <profiledir> <customprofiledir> <port> <maxthreads>
 
-const { spawn, execFileSync } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 const http = require('http');
 const path = require('path');
 const fs = require('fs');
@@ -41,30 +41,53 @@ function isBrouterConfigured() {
   return fs.existsSync(JAR_PATH) && fs.existsSync(SEGMENTS_DIR) && fs.existsSync(PROFILES_DIR);
 }
 
+// Version majeure Java minimale requise pour executer brouter.jar - verifie
+// en inspectant le bytecode reel du jar embarque (class file major version
+// 55 = Java 11, cf RouteServer.class). Un Java 8 (ou anterieur) demarre le
+// process sans erreur de lancement (pas d'ENOENT) mais la JVM plante aussitot
+// avec UnsupportedClassVersionError - le process s'arrete avant meme
+// d'ouvrir le port, ce qui ressemblait auparavant a un simple "BRouter n'a
+// pas repondu dans le delai imparti" (aucun message clair sur la cause).
+const MIN_JAVA_MAJOR_VERSION = 11;
+
+// Extrait la version majeure d'un executable java (gere l'ancien format
+// "1.8.0_251" -> 8 et le nouveau "11.0.2"/"21.0.1" -> 11/21). Renvoie null
+// si l'executable n'existe pas ou si la sortie n'est pas reconnue.
+function getJavaMajorVersion(javaPath) {
+  const result = spawnSync(javaPath, ['-version'], { encoding: 'utf8', timeout: 5000 });
+  if (!result || result.error) return null;
+  const text = (result.stderr || '') + (result.stdout || ''); // java ecrit "-version" sur stderr
+  const m = /version "([\d.]+)/.exec(text);
+  if (!m) return null;
+  const parts = m[1].split('.');
+  return parseInt(parts[0] === '1' ? parts[1] : parts[0], 10);
+}
+
 // Resout le chemin de l'executable java a utiliser, avec repli sur les
 // emplacements d'installation connus (les memes qu'installe install.bat :
 // winget puis, a defaut, telechargement direct du JRE Eclipse Adoptium 21)
-// si le simple nom "java" n'est pas resolu par le PATH courant.
-// Pourquoi ce repli est necessaire (constat reel, generation d'itineraire en
-// echec chez un utilisateur juste apres une installation complete) : sur une
-// install fraiche, install.bat installe Java PUIS l'utilisateur lance
-// immediatement Allure+ (case "Lancer Allure+" en fin d'installeur), dans
-// la MEME session Windows. Le PATH systeme est bien a jour dans le registre,
-// mais le processus qui vient de lancer l'app (herite de l'Explorateur) ne
-// le relit pas tant que la session n'est pas rafraichie (deconnexion ou
-// redemarrage) - Java est installe mais invisible pour CE lancement precis.
+// si le simple nom "java" n'est pas resolu par le PATH courant, OU si le
+// java resolu est trop ancien (voir MIN_JAVA_MAJOR_VERSION ci-dessus).
+// Pourquoi ce repli est necessaire (constats reels) :
+// 1. Sur une install fraiche, install.bat installe Java PUIS l'utilisateur
+//    lance immediatement Allure+ (case "Lancer Allure+" en fin d'installeur),
+//    dans la MEME session Windows. Le PATH systeme est bien a jour dans le
+//    registre, mais le processus qui vient de lancer l'app (herite de
+//    l'Explorateur) ne le relit pas tant que la session n'est pas
+//    rafraichie (deconnexion ou redemarrage) - Java est installe mais
+//    invisible pour CE lancement precis.
+// 2. install.bat ne verifie que la PRESENCE de java sur le PATH, pas sa
+//    version - sur un PC ayant deja un tres vieux Java installe (ex: Java 8
+//    pour un vieux logiciel), l'installeur considere Java "deja present" et
+//    n'installe jamais le JRE 21 requis. Meme apres redemarrage du PC, ce
+//    vieux Java reste trouve en premier sur le PATH.
 // Resultat mis en cache (le disque ne bouge pas en cours de session).
 let cachedJavaPath = null;
 function resolveJavaPath() {
   if (cachedJavaPath) return cachedJavaPath;
   if (JAVA_PATH_OVERRIDE) { cachedJavaPath = JAVA_PATH_OVERRIDE; return cachedJavaPath; }
 
-  try {
-    execFileSync('java', ['-version'], { stdio: 'ignore', timeout: 5000 });
-    cachedJavaPath = 'java';
-    return cachedJavaPath;
-  } catch (_) { /* pas resolu par le PATH courant - voir repli ci-dessous */ }
-
+  const candidates = ['java'];
   if (process.platform === 'win32') {
     const roots = [process.env['ProgramFiles'], process.env['ProgramFiles(x86)']].filter(Boolean);
     const vendors = ['Eclipse Adoptium', 'Java', 'Zulu', 'Microsoft', 'Amazon Corretto'];
@@ -75,9 +98,15 @@ function resolveJavaPath() {
         try { entries = fs.readdirSync(vendorDir); } catch (_) { continue; }
         for (const entry of entries) {
           const candidate = path.join(vendorDir, entry, 'bin', 'java.exe');
-          if (fs.existsSync(candidate)) { cachedJavaPath = candidate; return cachedJavaPath; }
+          if (fs.existsSync(candidate)) candidates.push(candidate);
         }
       }
+    }
+  }
+  for (const candidate of candidates) {
+    if (getJavaMajorVersion(candidate) >= MIN_JAVA_MAJOR_VERSION) {
+      cachedJavaPath = candidate;
+      return cachedJavaPath;
     }
   }
   return null;
@@ -89,11 +118,19 @@ function spawnBrouter(onSpawnError) {
   }
   const javaPath = resolveJavaPath();
   if (!javaPath) {
-    throw new Error(
-      "Java est introuvable - necessaire a la generation d'itineraires (BRouter). " +
-      "Si vous venez d'installer Allure+, redemarrez votre ordinateur puis reessayez " +
-      "(Java a peut-etre ete installe mais necessite un redemarrage pour etre detecte). " +
-      "Sinon, installez Java (Eclipse Temurin 21) puis relancez Allure+."
+    // "java" trouve sur le PATH mais version trop ancienne (cas reel : Java
+    // 8 preexistant sur la machine, install.bat ne verifie que la presence
+    // de java, pas sa version, et n'installe donc jamais le JRE 21 requis)
+    // vs. aucun java du tout trouve nulle part - message adapte au cas.
+    const oldJavaMajor = getJavaMajorVersion('java');
+    const message = oldJavaMajor
+      ? `Java ${oldJavaMajor} est installe mais trop ancien - BRouter necessite Java ${MIN_JAVA_MAJOR_VERSION} ou plus recent. ` +
+        "Installez Eclipse Temurin 21 (https://adoptium.net/temurin/releases/?package=jre) puis relancez Allure+."
+      : "Java est introuvable - necessaire a la generation d'itineraires (BRouter). " +
+        "Si vous venez d'installer Allure+, redemarrez votre ordinateur puis reessayez " +
+        "(Java a peut-etre ete installe mais necessite un redemarrage pour etre detecte). " +
+        "Sinon, installez Java (Eclipse Temurin 21) puis relancez Allure+.";
+    throw new Error(message
     );
   }
   const args = [

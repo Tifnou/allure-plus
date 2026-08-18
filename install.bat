@@ -131,18 +131,41 @@ for /f "tokens=*" %%v in ('node --version 2^>nul') do set NODE_VER=%%v
 echo  [OK] Node.js installe avec succes : !NODE_VER!
 
 :: ═══════════════════════════════════════════════════════════
-::  ETAPE 5 : Java deja installe ? (necessaire pour BRouter,
-::  la generation d'itineraires - voir brouter_manager.js)
+::  ETAPE 5 : Java deja installe ET compatible ? (necessaire pour
+::  BRouter, la generation d'itineraires - voir brouter_manager.js)
+::  BRouter 1.7.10 exige Java 11+ (verifie sur le bytecode du jar) -
+::  ne pas se contenter de verifier la PRESENCE de java : un vieux
+::  Java 8 preexistant (ex: pour un ancien logiciel) passait avant
+::  cette verification et empechait l'installation du JRE 21 requis -
+::  BRouter demarrait alors puis plantait aussitot (constat reel).
 :: ═══════════════════════════════════════════════════════════
 :check_java
+set "JAVA_MAJOR=0"
 where java >nul 2>&1
 if not errorlevel 1 (
     for /f "tokens=*" %%v in ('java -version 2^>^&1 ^| findstr /i "version"') do set JAVA_VER=%%v
-    echo  [OK] Java est deja installe : !JAVA_VER!
+    set "PS1_JAVAVER=%TEMP%\allureplus_javaver.ps1"
+    (
+        echo $out = ^& java -version 2^>^&1 ^| Out-String
+        echo if ^($out -match 'version "([\d.]+)'^) {
+        echo   $parts = $matches[1].Split('.'^)
+        echo   if ^($parts[0] -eq '1'^) { Write-Output $parts[1] } else { Write-Output $parts[0] }
+        echo } else { Write-Output '0' }
+    ) > "!PS1_JAVAVER!"
+    for /f "tokens=*" %%j in ('powershell -ExecutionPolicy Bypass -NoProfile -File "!PS1_JAVAVER!" 2^>nul') do set "JAVA_MAJOR=%%j"
+    del /f /q "!PS1_JAVAVER!" >nul 2>&1
+)
+
+if !JAVA_MAJOR! GEQ 11 (
+    echo  [OK] Java est deja installe et compatible : !JAVA_VER!
     goto :install_deps
 )
 
-echo  [INFO] Java non detecte (necessaire pour la generation d'itineraires BRouter). Installation automatique...
+if !JAVA_MAJOR! GTR 0 (
+    echo  [INFO] Java present mais trop ancien pour BRouter ^(!JAVA_VER!, version 11+ requise^). Installation de Java 21...
+) else (
+    echo  [INFO] Java non detecte (necessaire pour la generation d'itineraires BRouter). Installation automatique...
+)
 echo.
 
 :: ═══════════════════════════════════════════════════════════
