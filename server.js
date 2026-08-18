@@ -2171,9 +2171,19 @@ app.put('/api/session-analyses/:id', requireSession, (req, res) => {
     if (idx === -1) return res.status(404).json({ error: 'Analyse introuvable' });
     const body = req.body || {};
     const { planKey, activityId } = body;
-    if (planKey?.weekId && activityId) {
-      const conflictActivity = analyses.some(a => a.id !== req.params.id && String(a.activityId) === String(activityId));
-      const conflictSession = analyses.some(a => a.id !== req.params.id &&
+    const existing = analyses[idx];
+    // Un recalcul (bouton "Recalculer") renvoie le meme activityId/planKey
+    // que l'enregistrement existant - ce n'est pas une nouvelle liaison, donc
+    // pas besoin (et pas souhaitable) de revalider les conflits : un vieux
+    // doublon orphelin ailleurs dans le fichier ne doit jamais bloquer le
+    // recalcul d'une liaison qui, elle, ne change pas (cf. bug constate ou
+    // seul un delier/relier - qui cree un nouvel id - contournait le blocage).
+    const activityChanged = activityId && String(activityId) !== String(existing.activityId);
+    const sessionChanged = planKey?.weekId && (planKey.weekId !== existing.planKey?.weekId ||
+      String(planKey.trainingIndex) !== String(existing.planKey?.trainingIndex));
+    if (planKey?.weekId && activityId && (activityChanged || sessionChanged)) {
+      const conflictActivity = activityChanged && analyses.some(a => a.id !== req.params.id && String(a.activityId) === String(activityId));
+      const conflictSession = sessionChanged && analyses.some(a => a.id !== req.params.id &&
         a.planKey?.weekId === planKey.weekId && String(a.planKey?.trainingIndex) === String(planKey.trainingIndex));
       if (conflictActivity) return res.status(409).json({ error: 'Cette activite est deja liee a une autre seance' });
       if (conflictSession) return res.status(409).json({ error: 'Cette seance est deja liee a une autre activite' });
