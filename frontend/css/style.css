@@ -148,8 +148,9 @@
 [data-theme="dark"] .sport-icon--walking  { background-image: url('../images/picto/walking_dark.png'); }
 [data-theme="dark"] .sport-icon--cardio   { background-image: url('../images/picto/cardio_dark.png'); }
 [data-theme="dark"] .sport-icon--swimming { background-image: url('../images/picto/swim_dark.png'); }
-/* Pill avec icône */
-.filter-pill .sport-icon { width: 18px; height: 18px; margin-right: 4px; }
+/* Pill avec icône — icône agrandie visuellement via transform (n'affecte
+   pas la boite/le layout, donc la pastille elle-même ne grossit pas). */
+.filter-pill .sport-icon { width: 18px; height: 18px; margin-right: 4px; transform: scale(1.3); }
 /* Cellule tableau activités */
 .activity-type-cell {
   display: inline-flex;
