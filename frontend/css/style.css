@@ -523,6 +523,27 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
    mais n'ont pas vocation a s'aligner sur cette largeur. */
 #activity-filters .filter-pill, #stats-filters .filter-pill { min-width:84px; padding-left:9px; padding-right:9px; }
 
+/* ─── Paire de boutons "annuler / valider" — generique, partagee entre
+   plusieurs fonctionnalites sans rapport (Itineraires : Générer/
+   Réinitialiser ; modales equipement, records, course, edition de ticket
+   support) - a UNIQUEMENT vivre ici (style.css, global), jamais dans un CSS
+   de page specifique, sous peine de casser silencieusement tous les autres
+   usages (regression reelle constatee : disparue en meme temps que la refonte
+   du wizard Plans, qui les utilisait aussi mais dans son propre fichier). ── */
+.btn-wizard-back {
+  padding:10px 20px; border:1.5px solid var(--border); border-radius:10px;
+  background:var(--bg-white); color:var(--text-secondary);
+  font-size:14px; font-weight:500; cursor:pointer; transition:all 0.18s;
+}
+.btn-wizard-back:hover { border-color:var(--accent); color:var(--accent); }
+.btn-wizard-next {
+  padding:10px 24px; border:none; border-radius:10px;
+  background:var(--accent); color:#fff; font-size:14px; font-weight:600;
+  cursor:pointer; transition:all 0.18s;
+}
+.btn-wizard-next:disabled { opacity:0.4; cursor:not-allowed; }
+.btn-wizard-next:not(:disabled):hover { filter:brightness(1.1); transform:translateY(-1px); }
+
 /* ═══════════════════════════════════════════════
    CARDS & TILES
 ═══════════════════════════════════════════════ */
