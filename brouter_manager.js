@@ -5,13 +5,13 @@
 // Invocation reelle verifiee dans le depot BRouter (misc/scripts/standalone/server.cmd) :
 //   java -cp brouter.jar btools.server.RouteServer <segmentdir> <profiledir> <customprofiledir> <port> <maxthreads>
 
-const { spawn } = require('child_process');
+const { spawn, execFileSync } = require('child_process');
 const http = require('http');
 const path = require('path');
 const fs = require('fs');
 
 const BROUTER_DIR = process.env.BROUTER_DIR || path.join(__dirname, 'brouter');
-const JAVA_PATH = process.env.BROUTER_JAVA_PATH || 'java';
+const JAVA_PATH_OVERRIDE = process.env.BROUTER_JAVA_PATH || null;
 const JAR_PATH = process.env.BROUTER_JAR_PATH || path.join(BROUTER_DIR, 'brouter.jar');
 const SEGMENTS_DIR = process.env.BROUTER_SEGMENTS_DIR || path.join(BROUTER_DIR, 'segments4');
 const PROFILES_DIR = process.env.BROUTER_PROFILES_DIR || path.join(BROUTER_DIR, 'profiles2');
@@ -41,17 +41,68 @@ function isBrouterConfigured() {
   return fs.existsSync(JAR_PATH) && fs.existsSync(SEGMENTS_DIR) && fs.existsSync(PROFILES_DIR);
 }
 
-function spawnBrouter() {
+// Resout le chemin de l'executable java a utiliser, avec repli sur les
+// emplacements d'installation connus (les memes qu'installe install.bat :
+// winget puis, a defaut, telechargement direct du JRE Eclipse Adoptium 21)
+// si le simple nom "java" n'est pas resolu par le PATH courant.
+// Pourquoi ce repli est necessaire (constat reel, generation d'itineraire en
+// echec chez un utilisateur juste apres une installation complete) : sur une
+// install fraiche, install.bat installe Java PUIS l'utilisateur lance
+// immediatement Allure+ (case "Lancer Allure+" en fin d'installeur), dans
+// la MEME session Windows. Le PATH systeme est bien a jour dans le registre,
+// mais le processus qui vient de lancer l'app (herite de l'Explorateur) ne
+// le relit pas tant que la session n'est pas rafraichie (deconnexion ou
+// redemarrage) - Java est installe mais invisible pour CE lancement precis.
+// Resultat mis en cache (le disque ne bouge pas en cours de session).
+let cachedJavaPath = null;
+function resolveJavaPath() {
+  if (cachedJavaPath) return cachedJavaPath;
+  if (JAVA_PATH_OVERRIDE) { cachedJavaPath = JAVA_PATH_OVERRIDE; return cachedJavaPath; }
+
+  try {
+    execFileSync('java', ['-version'], { stdio: 'ignore', timeout: 5000 });
+    cachedJavaPath = 'java';
+    return cachedJavaPath;
+  } catch (_) { /* pas resolu par le PATH courant - voir repli ci-dessous */ }
+
+  if (process.platform === 'win32') {
+    const roots = [process.env['ProgramFiles'], process.env['ProgramFiles(x86)']].filter(Boolean);
+    const vendors = ['Eclipse Adoptium', 'Java', 'Zulu', 'Microsoft', 'Amazon Corretto'];
+    for (const root of roots) {
+      for (const vendor of vendors) {
+        const vendorDir = path.join(root, vendor);
+        let entries;
+        try { entries = fs.readdirSync(vendorDir); } catch (_) { continue; }
+        for (const entry of entries) {
+          const candidate = path.join(vendorDir, entry, 'bin', 'java.exe');
+          if (fs.existsSync(candidate)) { cachedJavaPath = candidate; return cachedJavaPath; }
+        }
+      }
+    }
+  }
+  return null;
+}
+
+function spawnBrouter(onSpawnError) {
   if (!isBrouterConfigured()) {
     throw new Error(`BRouter non configure - fichiers manquants dans ${BROUTER_DIR} (brouter.jar / segments4 / profiles2). Voir README setup.`);
+  }
+  const javaPath = resolveJavaPath();
+  if (!javaPath) {
+    throw new Error(
+      "Java est introuvable - necessaire a la generation d'itineraires (BRouter). " +
+      "Si vous venez d'installer Allure+, redemarrez votre ordinateur puis reessayez " +
+      "(Java a peut-etre ete installe mais necessite un redemarrage pour etre detecte). " +
+      "Sinon, installez Java (Eclipse Temurin 21) puis relancez Allure+."
+    );
   }
   const args = [
     '-Xmx256M', '-DmaxRunningTime=120', '-DuseRFCMimeType=false',
     '-cp', JAR_PATH, 'btools.server.RouteServer',
     SEGMENTS_DIR, PROFILES_DIR, CUSTOMPROFILES_DIR, String(PORT), '2',
   ];
-  console.log('[brouter] demarrage:', JAVA_PATH, args.join(' '));
-  const proc = spawn(JAVA_PATH, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+  console.log('[brouter] demarrage:', javaPath, args.join(' '));
+  const proc = spawn(javaPath, args, { stdio: ['ignore', 'pipe', 'pipe'] });
   proc.stdout.on('data', d => console.log('[brouter]', d.toString().trim()));
   proc.stderr.on('data', d => console.error('[brouter]', d.toString().trim()));
   proc.on('exit', (code) => {
@@ -61,6 +112,9 @@ function spawnBrouter() {
   proc.on('error', (err) => {
     console.error('[brouter] erreur de lancement:', err.message);
     if (brouterProcess === proc) { brouterProcess = null; readyPromise = null; }
+    // Signale l'echec immediatement plutot que de laisser ensureBrouterRunning
+    // patienter les 25s completes en pingant un process qui n'a jamais demarre.
+    if (onSpawnError) onSpawnError(err);
   });
   return proc;
 }
@@ -72,10 +126,14 @@ async function ensureBrouterRunning() {
   if (readyPromise) return readyPromise;
 
   readyPromise = (async () => {
-    if (!brouterProcess) brouterProcess = spawnBrouter();
+    let spawnError = null;
+    if (!brouterProcess) brouterProcess = spawnBrouter((err) => { spawnError = err; });
     const deadline = Date.now() + STARTUP_TIMEOUT_MS;
     while (Date.now() < deadline) {
       if (await pingBrouter()) return true;
+      // Le process a echoue a demarrer (ex: ENOENT) - inutile d'attendre le
+      // reste des 25s, l'erreur est deja connue et ne se resoudra pas seule.
+      if (spawnError) throw new Error(`BRouter n'a pas pu demarrer : ${spawnError.message}`);
       await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
     }
     throw new Error('BRouter n\'a pas repondu dans le delai imparti (25s).');
