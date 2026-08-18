@@ -143,6 +143,17 @@ async function ensureBrouterRunning() {
     return await readyPromise;
   } catch (err) {
     readyPromise = null;
+    // Marqueur verifie par route_generator.js : distingue "BRouter est
+    // injoignable" (aucune direction ne pourra jamais aboutir, inutile de
+    // continuer a essayer) d'un simple "cette direction precise n'est pas
+    // routable" (cas normal, une partie du scan echoue toujours). Sans ce
+    // marqueur, un BRouter completement down (Java introuvable, jar
+    // manquant...) finissait noye dans les echecs individuels de chaque
+    // direction, et l'utilisateur ne voyait que le message generique
+    // "Impossible de generer une boucle exploitable" au lieu de la vraie
+    // cause (constat reel : ami avec Java installe par notre installeur,
+    // jamais vu le message clair).
+    err.brouterUnavailable = true;
     throw err;
   }
 }

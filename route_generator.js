@@ -229,6 +229,11 @@ async function scanDirections(start, targetDistanceM, profile) {
       const result = await routeThroughPoints(loopWaypointsForBearing(start, bearing, radius), profile, { trackname: `scan_${bearing}` });
       return { bearing, result };
     } catch (err) {
+      // BRouter injoignable (Java/process down) : aucune direction ne
+      // reussira jamais, inutile d'attendre les 7 autres pour finalement
+      // afficher le message generique "boucle non trouvee" qui masquerait
+      // la vraie cause (cf brouter_manager.js, err.brouterUnavailable).
+      if (err.brouterUnavailable) throw err;
       return null; // direction non routable (hors reseau, zone isolee...)
     }
   }));
