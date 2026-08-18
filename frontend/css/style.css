@@ -157,7 +157,7 @@
    affichee restait bien inferieure aux icones carrees malgre le meme
    transform:scale - d'ou l'impression de plus petit. Boite a son ratio
    reel (64x36) pour qu'il remplisse toute la hauteur, comme les autres. */
-.filter-pill .sport-icon--swimming { width: 32px; height: 18px; margin-right: 2px; }
+.filter-pill .sport-icon--swimming { width: 26px; height: 14.5px; margin-right: 2px; }
 /* Cellule tableau activités */
 .activity-type-cell {
   display: inline-flex;
@@ -521,7 +521,7 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
    (Activites/Statistiques, mêmes 7 pastilles Tout/Course/.../Natation),
    pas les onglets Sante/Performance qui partagent la même classe .filter-pill
    mais n'ont pas vocation a s'aligner sur cette largeur. */
-#activity-filters .filter-pill, #stats-filters .filter-pill { min-width:112px; }
+#activity-filters .filter-pill, #stats-filters .filter-pill { min-width:84px; padding-left:9px; padding-right:9px; }
 
 /* ═══════════════════════════════════════════════
    CARDS & TILES
@@ -4608,13 +4608,24 @@ body { background: var(--bg) !important; }
 .act-header-center .filter-pills { justify-content: center; }
 .act-header-center .activity-time-filters { justify-content: center; }
 
-/* Colonne droite : date + bascule Liste/Calendrier empilees, alignees a droite
-   (retour utilisateur : la bascule doit se trouver sous la date, coin bas
-   droit du header, pas a cote des filtres). */
+/* Colonne droite : uniquement la date desormais (retour utilisateur : la
+   bascule prenait trop de largeur ici et poussait les pastilles a l'etroit -
+   voir .act-view-toggle plus bas, sorti du flux et ancre au coin bas droit
+   du cadre entier plutot que de cette colonne). */
 .act-header-right { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; flex-shrink: 0; }
 .act-header-right .page-header-date { align-self: flex-end; }
 
-/* Bascule Liste / Vue calendrier */
+/* Bascule Liste / Vue calendrier — sortie du flux (position:absolute) et
+   ancree au coin bas droit du cadre (#page-activities .act-header-sticky,
+   voir position:relative plus haut) plutot que dans la colonne droite :
+   elle ne "coute" alors plus de largeur a la ligne des pastilles. Offsets
+   calques sur le padding du cadre (.page-header, 10px 20px) pour affleurer
+   son coin. */
+#page-activities .act-view-toggle {
+  position: absolute;
+  bottom: 10px;
+  right: 20px;
+}
 .act-view-toggle { display: flex; gap: 4px; flex-shrink: 0; background: var(--bg); border-radius: 20px; padding: 3px; }
 .act-view-btn {
   display: flex; align-items: center; gap: 5px;
@@ -4754,7 +4765,16 @@ body { background: var(--bg) !important; }
 
 /* En-tête en flux normal : defile avec le reste de la page. */
 #page-activities .act-header-sticky {
-  position: static !important;
+  position: relative !important; /* ancre la bascule Liste/Vue calendrier
+    (position:absolute, voir .act-view-toggle plus bas). ATTENTION : passer
+    de static a relative reactive top/left/right !important d'un ancien
+    bloc (pense pour l'ex position:fixed, plus haut dans ce fichier) qui
+    restaient inertes sous static - d'ou ce reset explicite pour revenir a
+    un flux normal (constate : sans ca, le cadre entier se decalait de
+    var(--sidebar-w) vers la droite). */
+  top: auto !important;
+  left: auto !important;
+  right: auto !important;
   display: flex !important;
   align-items: flex-start !important;
   gap: 20px !important;
