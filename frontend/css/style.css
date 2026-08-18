@@ -4595,6 +4595,11 @@ body { background: var(--bg) !important; }
 /* Colonne centre */
 .act-header-center {
   flex: 1;
+  min-width: 0; /* sans ca, un flex-item ne peut jamais retrecir sous la
+    largeur "naturelle" de son contenu (defaut min-width:auto) - avec les
+    pastilles en nowrap, ca poussait la colonne droite hors du cadre du
+    header (retour utilisateur) au lieu de laisser les pastilles se
+    retrecir/scroller. */
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -4808,6 +4813,10 @@ body { background: var(--bg) !important; }
 /* 4. Colonne centre : pills sur 1 ligne + selects centrés */
 .act-header-center {
   flex: 1;
+  min-width: 0; /* laisse la colonne retrecir sous la largeur naturelle de
+    son contenu (defaut flex min-width:auto) - sans ca, les pastilles en
+    nowrap poussaient la colonne droite (date/vue) hors du cadre du header
+    des que la fenetre n'etait pas assez large (retour utilisateur). */
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -4817,11 +4826,21 @@ body { background: var(--bg) !important; }
 .act-pills-nowrap {
   flex-wrap: nowrap !important;
   justify-content: center !important;
+  max-width: 100%; /* .act-header-center a align-items:center (axe croise
+    d'un flex column) : sans borner la largeur, cet enfant s'affiche a sa
+    largeur naturelle et deborde du parent retreci au lieu d'etre contraint
+    par lui - necessaire pour qu'overflow-x ci-dessous ait un effet. */
+  overflow-x: auto; /* se retrecit avant de pousser le reste du header hors
+    cadre - defile plutot que de casser la mise en page 3 colonnes */
+  padding-bottom: 2px;
 }
 .act-time-centered {
   justify-content: center !important;
   display: flex !important;
   gap: 8px !important;
+  max-width: 100%;
+  overflow-x: auto;
+  padding-bottom: 2px;
 }
 
 
