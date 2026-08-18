@@ -252,11 +252,13 @@
   align-items: center;
   justify-content: center;
   margin-bottom: 16px;
+  transition: opacity 0.22s ease;
 }
 .routes-progress-modal .routes-progress-label {
   font-size: 12px;
   color: var(--text-muted);
   margin-bottom: 10px;
+  transition: opacity 0.22s ease;
 }
 .routes-progress-modal .routes-progress-bar {
   height: 8px;

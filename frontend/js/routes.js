@@ -405,6 +405,17 @@ const ROUTES_FUN_MESSAGES = [
   "Le meilleur tracé arrive, plus vite qu'un négatif split",
 ];
 
+// Change le texte d'un element avec un fondu (opacite 0 -> texte -> opacite
+// 1) plutot qu'un remplacement brut - retour utilisateur : les messages de
+// la modale de progression changeaient trop sec.
+function routesSetTextFaded(node, text, fadeMs = 220) {
+  node.style.opacity = '0';
+  setTimeout(() => {
+    node.textContent = text;
+    node.style.opacity = '1';
+  }, fadeMs);
+}
+
 // Pas de canal de progression reel serveur->client (un seul aller-retour
 // HTTP, la generation peut prendre 20-40s avec recherche elargie +
 // alternatives, jusqu'a 1-2 min sur les scenarios les plus exigeants) - une
@@ -433,16 +444,26 @@ function routesStartProgress() {
   label.textContent = steps[0];
   _routesProgressStepTimer = setInterval(() => {
     i = Math.min(i + 1, steps.length - 1);
-    label.textContent = steps[i];
+    routesSetTextFaded(label, steps[i]);
   }, 3500);
 
+  // Rotation lente (10-12s, aleatoire pour eviter un rythme trop mecanique)
+  // avec fondu - retour utilisateur : la rotation initiale (4.2s, sans
+  // transition) defilait trop vite pour avoir le temps de lire/apprecier
+  // chaque message. Auto-replanifiee (setTimeout en chaine) plutot qu'un
+  // setInterval fixe, pour varier legerement le tempo a chaque cycle.
   const funLabel = el('routes-progress-fun-msg');
   let funIdx = Math.floor(Math.random() * ROUTES_FUN_MESSAGES.length);
   funLabel.textContent = ROUTES_FUN_MESSAGES[funIdx];
-  _routesProgressFunTimer = setInterval(() => {
-    funIdx = (funIdx + 1) % ROUTES_FUN_MESSAGES.length;
-    funLabel.textContent = ROUTES_FUN_MESSAGES[funIdx];
-  }, 4200);
+  const scheduleNextFunMessage = () => {
+    const delay = 10000 + Math.random() * 2000;
+    _routesProgressFunTimer = setTimeout(() => {
+      funIdx = (funIdx + 1) % ROUTES_FUN_MESSAGES.length;
+      routesSetTextFaded(funLabel, ROUTES_FUN_MESSAGES[funIdx]);
+      scheduleNextFunMessage();
+    }, delay);
+  };
+  scheduleNextFunMessage();
 
   _routesProgressPct = 0;
   const fill = el('routes-progress-bar-fill');
@@ -459,7 +480,7 @@ function routesStartProgress() {
 }
 function routesStopProgress() {
   if (_routesProgressStepTimer) { clearInterval(_routesProgressStepTimer); _routesProgressStepTimer = null; }
-  if (_routesProgressFunTimer) { clearInterval(_routesProgressFunTimer); _routesProgressFunTimer = null; }
+  if (_routesProgressFunTimer) { clearTimeout(_routesProgressFunTimer); _routesProgressFunTimer = null; }
   if (_routesProgressBarTimer) { clearInterval(_routesProgressBarTimer); _routesProgressBarTimer = null; }
   // Termine proprement a 100% (transition CSS) avant de refermer, plutot
   // qu'une disparition brusque en plein milieu d'un pourcentage.
