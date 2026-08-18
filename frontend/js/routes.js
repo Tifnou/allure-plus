@@ -14,6 +14,7 @@ function routesDefaultState() {
     distanceKm: 10,
     durationMin: 60,
     terrain: 'trail',        // 'trail' | 'route'
+    routeShape: 'loop',      // 'loop' | 'outback' | 'both'
     ascentM: 300,
     searchWider: false,
     searchRadiusKm: 5,
@@ -125,6 +126,20 @@ function renderRoutesForm() {
       </div>
     </div>
 
+    <div class="routes-field">
+      <div class="routes-field-label">Forme du parcours</div>
+      <div class="routes-toggle">
+        <button type="button" class="routes-toggle-btn ${routesState.routeShape === 'loop' ? 'active' : ''}" data-shape="loop">Boucle</button>
+        <button type="button" class="routes-toggle-btn ${routesState.routeShape === 'outback' ? 'active' : ''}" data-shape="outback">Aller-retour</button>
+        <button type="button" class="routes-toggle-btn ${routesState.routeShape === 'both' ? 'active' : ''}" data-shape="both">Les deux</button>
+      </div>
+      <div class="routes-hint">${routesState.routeShape === 'outback'
+        ? "L'aller-retour reprend exactement le même tracé au retour — reste jouable même sur un sentier sans boucle naturelle (impasse, cul-de-sac)."
+        : routesState.routeShape === 'both'
+          ? 'Les deux formes sont testées, les meilleures options (boucle ou aller-retour) sont proposées ensemble.'
+          : "La boucle explore un chemin différent à l'aller et au retour."}</div>
+    </div>
+
     <div class="routes-field" id="routes-ascent-field" style="display:${routesHasAscentField() ? '' : 'none'}">
       <div class="routes-field-label">D+ visé</div>
       <div class="routes-number-row">
@@ -153,6 +168,9 @@ function renderRoutesForm() {
   });
   content.querySelectorAll('[data-terrain]').forEach(btn => {
     btn.onclick = () => { routesState.terrain = btn.dataset.terrain; renderRoutesForm(); };
+  });
+  content.querySelectorAll('[data-shape]').forEach(btn => {
+    btn.onclick = () => { routesState.routeShape = btn.dataset.shape; renderRoutesForm(); };
   });
 
   const modeInput = el('routes-mode-input');
@@ -431,6 +449,7 @@ async function routesGenerateClicked() {
       start: { lat: start.lat, lon: start.lon },
       targetAscentM: routesHasAscentField() ? routesState.ascentM : null,
       terrain: routesState.terrain,
+      routeShape: routesState.routeShape,
     };
     if (routesState.mode === 'distance') body.targetDistanceM = routesState.distanceKm * 1000;
     else body.targetDurationMin = routesState.durationMin;

@@ -1335,7 +1335,7 @@ app.post('/api/routes/tile-download', requireSession, async (req, res) => {
 
 app.post('/api/routes/generate', requireSession, async (req, res) => {
   try {
-    const { start, targetDistanceM, targetDurationMin, targetAscentM, terrain, searchRadiusKm } = req.body || {};
+    const { start, targetDistanceM, targetDurationMin, targetAscentM, terrain, searchRadiusKm, routeShape } = req.body || {};
     if (!start || typeof start.lat !== 'number' || typeof start.lon !== 'number') {
       return res.status(400).json({ error: 'Point de départ invalide (adresse non confirmée ?)' });
     }
@@ -1356,6 +1356,7 @@ app.post('/api/routes/generate', requireSession, async (req, res) => {
       terrain: terrain === 'route' ? 'route' : 'trail',
       paceMinPerKm: paceProfile.paceMinPerKm,
       searchRadiusM: (searchRadiusKm && searchRadiusKm > 0) ? searchRadiusKm * 1000 : null,
+      routeShape: ['loop', 'outback', 'both'].includes(routeShape) ? routeShape : 'loop',
     });
     res.json({ ...result, paceProfileIsGeneric: paceProfile.isGeneric });
   } catch (err) { handleError(res, err); }

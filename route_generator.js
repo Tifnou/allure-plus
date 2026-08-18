@@ -265,7 +265,11 @@ async function refineLoopFromBearing(start, bearing, initialResult, initialRadiu
       ? targetDurationMin / predictDurationMin(best.points, paceMinPerKm)
       : targetDistanceM / best.distanceM;
     if (Math.abs(ratio - 1) < 0.15) break;
-    bestRadius *= ratio;
+    // Clamp defensif : une estimation de duree bruitee sur un trace court/peu
+    // detaille peut produire un ratio extreme (constate reel sur un aller-retour
+    // court, cf generateOutAndBack) - sans plafond, une seule iteration peut
+    // faire s'effondrer ou exploser le rayon au lieu de converger doucement.
+    bestRadius *= Math.max(0.5, Math.min(2, ratio));
     try {
       best = await routeThroughPoints(loopWaypointsForBearing(start, bearing, bestRadius), profile, { trackname: `refine_${bearing}_${iter}` });
     } catch (err) {
@@ -273,6 +277,104 @@ async function refineLoopFromBearing(start, bearing, initialResult, initialRadiu
     }
   }
   return best;
+}
+
+// Recolle un aller (points du depart vers le point de demi-tour) avec son
+// retour EXACT (meme trace, sens inverse) - definition d'un aller-retour,
+// par opposition a une boucle qui cherche un chemin different au retour.
+// N'inclut pas deux fois le point de demi-tour (dernier point de `outPoints`).
+function mirrorOutAndBack(outPoints) {
+  const back = [...outPoints].slice(0, -1).reverse();
+  return [...outPoints, ...back];
+}
+
+// Construit un aller-retour le long d'un bearing donne : route reelle
+// (BRouter, point a point - pas de forme geometrique synthetique necessaire
+// contrairement a une boucle) vers un point de demi-tour, puis retour par
+// EXACTEMENT le meme trace inverse. Converge sur la distance/duree de
+// l'ALLER-RETOUR complet (meme principe iteratif que refineLoopFromBearing).
+// Interet specifique demande par l'utilisateur : reste jouable sur un
+// sentier/une cote qui ne forme aucune boucle naturelle (impasse, cul-de-sac,
+// reseau clairseme) - la ou une boucle echoue completement, l'aller-retour
+// reste possible puisqu'il n'exige jamais de chemin de retour different.
+// Plancher de rayon pour le point de demi-tour - sans ca, un ratio de
+// convergence extreme (ex: premiere estimation de duree tres eloignee de la
+// cible sur un aller court, peu de points donc estimation de pente bruitee)
+// peut faire chuter le rayon pres de 0, BRouter accrochant alors start et le
+// "demi-tour" au meme noeud du graphe et renvoyant un trace de longueur
+// quasi nulle (bug reel constate : aller-retour a 0 m affiche).
+const MIN_OUTBACK_RADIUS_M = 300;
+
+async function generateOutAndBack(start, bearing, targetDistanceM, profile, opts = {}) {
+  const maxRefineIterations = opts.maxRefineIterations ?? 2;
+  const { targetDurationMin, paceMinPerKm } = opts;
+  let radius = targetDistanceM / 2;
+  let best = null;
+  for (let iter = 0; iter <= maxRefineIterations; iter++) {
+    const turnaround = destinationPoint(start.lat, start.lon, bearing, radius);
+    let outLeg;
+    try {
+      outLeg = await routeThroughPoints([start, turnaround], profile, { trackname: `outback_${Math.round(bearing)}_${iter}` });
+    } catch (err) {
+      if (best) break;
+      throw err;
+    }
+    // Garde-fou : un aller quasi nul (rayon effondre, cf MIN_OUTBACK_RADIUS_M)
+    // n'est jamais un meilleur candidat que ce qu'on avait deja - on l'ignore
+    // plutot que d'ecraser `best` avec un resultat degenere.
+    if (outLeg.distanceM < MIN_OUTBACK_RADIUS_M) {
+      if (best) break;
+      throw new Error('Aller-retour trop court (rayon effondre) - direction non exploitable.');
+    }
+    // D+ aller-retour approxime a 2x le D+ de l'aller (l'ascension et la
+    // descente s'inversent au retour) - approximation suffisante pour
+    // converger ici ; le chiffre final vient de Geoportail sur le trace
+    // complet (cf generateRouteOptions), pas de cette estimation.
+    best = {
+      points: mirrorOutAndBack(outLeg.points),
+      distanceM: outLeg.distanceM * 2,
+      filteredAscendM: outLeg.filteredAscendM * 2,
+      outLegPoints: outLeg.points,
+    };
+    if (iter === maxRefineIterations) break;
+    const ratio = (targetDurationMin && paceMinPerKm)
+      ? targetDurationMin / predictDurationMin(best.points, paceMinPerKm)
+      : targetDistanceM / best.distanceM;
+    if (Math.abs(ratio - 1) < 0.15) break;
+    radius = Math.max(radius * Math.max(0.5, Math.min(2, ratio)), MIN_OUTBACK_RADIUS_M);
+  }
+  return best;
+}
+
+// Meme logique de repetition que boostAscentViaRepeats (cf plus bas), mais
+// appliquee UNIQUEMENT a l'aller d'un aller-retour, jamais au retour -
+// demande utilisateur explicite : "tu vas a un point A, tu la fait x fois,
+// tu vas au point B, tu fais la cote x fois, PUIS TU REVIENS... SANS REFAIRE
+// LES COTES". Les eventuelles repetitions restent donc uniquement sur le
+// trajet aller ; le retour est toujours le trace direct (mirrorOutAndBack de
+// l'aller NON boosté), jamais une deuxieme fois les detours de repetition.
+async function boostOutAndBackViaRepeats(outAndBack, targetAscentM, profile, paceMinPerKm, targetDurationMin, targetDistanceM) {
+  // Budgets divises par 2 : boostAscentViaRepeats ne voit que l'aller, dont
+  // le round-trip final doublera mecaniquement distance/duree/D+ - heuristique
+  // interne rapide comme partout ailleurs dans le fichier, le chiffre final
+  // affiche vient de Geoportail sur le trace complet.
+  const boost = await boostAscentViaRepeats(
+    outAndBack.outLegPoints, targetAscentM ? targetAscentM / 2 : null, profile, paceMinPerKm,
+    targetDurationMin ? targetDurationMin / 2 : null, targetDistanceM / 2
+  );
+  if (!boost) return null;
+  const directReturn = [...outAndBack.outLegPoints].slice(0, -1).reverse();
+  const directReturnDistanceM = outAndBack.distanceM / 2; // aller original (non booste)
+  return {
+    points: [...boost.repeated.points, ...directReturn],
+    distanceM: boost.repeated.distanceM + directReturnDistanceM,
+    // D+ retour approxime au D+ naturel de l'aller original (non booste) -
+    // la descente aller devient l'ascension retour (meme heuristique
+    // "ascension ~ descente" que generateOutAndBack) ; chiffre final corrige
+    // par Geoportail sur le trace complet, comme partout ailleurs.
+    filteredAscendM: boost.repeated.filteredAscendM + (outAndBack.filteredAscendM / 2),
+    repeatedSegments: boost.repeatedSegments,
+  };
 }
 
 // Genere une boucle passant par `start`, convergeant vers targetDistanceM.
@@ -652,40 +754,72 @@ async function findHillyCandidateCenters(start, searchRadiusM, count) {
 // utilisateur explicite : "il faut que nous trouvions les endroits... qui
 // nous donnent le meilleur terrain de jeu", "au moins 5 circuits possibles,
 // pas juste 1 ou 2 dans le meme secteur".
-async function generateOptionsAcrossSearchRadius({ start, targetDistanceM, targetAscentM, targetDurationMin, terrain, paceMinPerKm, searchRadiusM, profile }) {
-  const hotspots = await findHillyCandidateCenters(start, searchRadiusM, HOTSPOT_CANDIDATE_COUNT);
+// Construit un seul candidat (boucle OU aller-retour) pour un hotspot donne
+// - factorise la logique commune (repetition, mesure de proximite a la
+// cible) entre les deux formes, chacune ayant sa propre construction de
+// trace mais le meme traitement ensuite. Renvoie null si la zone n'est pas
+// routable dans cette forme depuis ce centre.
+async function buildZoneCandidate(shape, start, hotspot, targetDistanceM, targetAscentM, targetDurationMin, terrain, paceMinPerKm, profile) {
+  let result;
+  try {
+    result = shape === 'outback'
+      ? await generateOutAndBack(start, bearingBetween(start, hotspot), targetDistanceM, profile, { targetDurationMin, paceMinPerKm })
+      : await generateLoop(hotspot, targetDistanceM, profile, { targetDurationMin, paceMinPerKm });
+  } catch (err) {
+    return null; // zone non routable dans cette forme depuis ce centre
+  }
+  if (!result) return null;
 
-  const candidates = [];
-  for (const hotspot of hotspots) {
-    let loop;
-    try {
-      loop = await generateLoop(hotspot, targetDistanceM, profile, { targetDurationMin, paceMinPerKm });
-    } catch (err) {
-      continue; // zone non routable depuis ce centre (hors reseau, isolee...)
-    }
-    let ascentM = calibrateAscent(loop.filteredAscendM);
-    let repeatedSegments = null;
-    const needsMoreAscent = terrain === 'trail' && targetAscentM && ascentM < targetAscentM - ASCENT_TOLERANCE_M;
-    if (needsMoreAscent) {
-      // Repetition acceptee comme filet de securite (demande utilisateur
-      // explicite : "si il faut faire 5 fois la cote car ma demande est trop
-      // restrictive OK") - mais seulement APRES avoir cherche une zone
-      // naturellement riche, jamais comme premier reflexe.
-      const boost = await boostAscentViaRepeats(loop.points, targetAscentM, profile, paceMinPerKm, targetDurationMin, targetDistanceM);
-      if (boost && boost.repeatedAscentM > ascentM) {
-        loop = boost.repeated;
-        ascentM = boost.repeatedAscentM;
+  let ascentM = calibrateAscent(result.filteredAscendM);
+  let repeatedSegments = null;
+  const needsMoreAscent = terrain === 'trail' && targetAscentM && ascentM < targetAscentM - ASCENT_TOLERANCE_M;
+  if (needsMoreAscent) {
+    // Repetition acceptee comme filet de securite (demande utilisateur
+    // explicite : "si il faut faire 5 fois la cote car ma demande est trop
+    // restrictive OK") - mais seulement APRES avoir cherche une zone
+    // naturellement riche, jamais comme premier reflexe. En aller-retour,
+    // les repetitions ne portent que sur l'aller (cf boostOutAndBackViaRepeats)
+    // - le retour reste toujours le trace direct, sans repeter les cotes.
+    const boost = shape === 'outback'
+      ? await boostOutAndBackViaRepeats(result, targetAscentM, profile, paceMinPerKm, targetDurationMin, targetDistanceM)
+      : await boostAscentViaRepeats(result.points, targetAscentM, profile, paceMinPerKm, targetDurationMin, targetDistanceM);
+    if (boost) {
+      const boostedAscentM = calibrateAscent(boost.repeated ? boost.repeated.filteredAscendM : boost.filteredAscendM);
+      if (boostedAscentM > ascentM) {
+        result = shape === 'outback' ? boost : boost.repeated;
+        ascentM = boostedAscentM;
         repeatedSegments = boost.repeatedSegments;
       }
     }
-    candidates.push({
-      hotspot, loop, ascentM, repeatedSegments,
-      closeness: goalCloseness(loop, targetDistanceM, targetDurationMin, paceMinPerKm),
-    });
+  }
+
+  return {
+    shape, hotspot, result, ascentM, repeatedSegments,
+    closeness: goalCloseness(result, targetDistanceM, targetDurationMin, paceMinPerKm),
+  };
+}
+
+// Recherche elargie : repere les zones vallonnees (findHillyCandidateCenters,
+// cout Geoportail negligeable) puis construit, pour chacune, une boucle
+// et/ou un aller-retour selon routeShape ('loop' | 'outback' | 'both') -
+// demande utilisateur explicite ("il faut donc proposer boucle, A/R ou les
+// deux") : un aller-retour reste jouable meme sur un sentier qui ne forme
+// aucune boucle naturelle (impasse, cul-de-sac), la ou une boucle echoue
+// completement - les deux formes sont donc complementaires, pas redondantes.
+async function generateOptionsAcrossSearchRadius({ start, targetDistanceM, targetAscentM, targetDurationMin, terrain, paceMinPerKm, searchRadiusM, profile, routeShape = 'loop' }) {
+  const hotspots = await findHillyCandidateCenters(start, searchRadiusM, HOTSPOT_CANDIDATE_COUNT);
+  const shapes = routeShape === 'both' ? ['loop', 'outback'] : [routeShape];
+
+  const candidates = [];
+  for (const hotspot of hotspots) {
+    for (const shape of shapes) {
+      const candidate = await buildZoneCandidate(shape, start, hotspot, targetDistanceM, targetAscentM, targetDurationMin, terrain, paceMinPerKm, profile);
+      if (candidate) candidates.push(candidate);
+    }
   }
 
   if (candidates.length === 0) {
-    throw new Error('Impossible de generer une boucle exploitable dans ce rayon de recherche.');
+    throw new Error('Impossible de generer un circuit exploitable dans ce rayon de recherche.');
   }
 
   // En trail avec D+ vise, la richesse en denivele prime (c'est l'objet meme
@@ -696,24 +830,31 @@ async function generateOptionsAcrossSearchRadius({ start, targetDistanceM, targe
   const kept = candidates.slice(0, MIN_SEARCH_OPTIONS);
 
   const options = kept.map((c, i) => {
-    const points = reorientLoopToClosestPoint(c.loop.points, start);
+    const points = c.shape === 'outback' ? c.result.points : reorientLoopToClosestPoint(c.result.points, start);
     const toward = towardCompassPhrase(bearingBetween(start, farthestPoint(points, start)));
     const distFromStartM = haversineDistance(start, c.hotspot);
     const isAtRequestedStart = distFromStartM < 50;
+    const shapeLabel = c.shape === 'outback' ? 'Aller-retour' : 'Boucle';
     const label = isAtRequestedStart
-      ? 'Boucle au départ demandé'
-      : `Circuit ${i + 1} — ${toward}${c.repeatedSegments ? ' (avec répétitions)' : ''}`;
+      ? `${shapeLabel} au départ demandé`
+      : `${shapeLabel} ${i + 1} — ${toward}${c.repeatedSegments ? ' (avec répétitions)' : ''}`;
     let commentary = isAtRequestedStart
-      ? `Boucle construite directement au départ demandé, sans se déplacer.`
+      ? `${shapeLabel} construite directement au départ demandé, sans se déplacer.`
       : `Zone plus vallonnée repérée à ${(distFromStartM / 1000).toFixed(1)} km ${toward} du départ, dans le rayon de recherche — à rejoindre avant de courir.`;
+    if (c.shape === 'outback') {
+      commentary += ` Aller-retour : le retour emprunte exactement le même tracé que l'aller.`;
+    }
     if (c.repeatedSegments) {
-      commentary += ` Le D+ naturel de ce secteur ne suffisait pas seul, complété par répétition d'une côte.`;
+      commentary += c.shape === 'outback'
+        ? ` Le D+ naturel de ce secteur ne suffisait pas seul — une ou plusieurs côtes sont répétées à l'aller uniquement, le retour reste direct.`
+        : ` Le D+ naturel de ce secteur ne suffisait pas seul, complété par répétition d'une côte.`;
     }
     return {
-      type: c.repeatedSegments ? 'boucle-repetitions' : 'boucle-naturelle',
+      type: c.shape === 'outback' ? 'aller-retour' : (c.repeatedSegments ? 'boucle-repetitions' : 'boucle-naturelle'),
+      shape: c.shape,
       label,
       points,
-      distanceM: c.loop.distanceM,
+      distanceM: c.result.distanceM,
       ascentM: c.ascentM,
       repeatedSegments: c.repeatedSegments,
       predictedDurationMin: predictDurationMin(points, paceMinPerKm),
@@ -727,18 +868,19 @@ async function generateOptionsAcrossSearchRadius({ start, targetDistanceM, targe
   if (terrain === 'trail' && targetAscentM && best.ascentM < targetAscentM - ASCENT_TOLERANCE_M) {
     warning = `Le rayon de recherche exploré (${(searchRadiusM / 1000).toFixed(0)} km, ${hotspots.length} zones testées) ne permet pas d'atteindre ${targetAscentM} m de D+ sans dépasser largement ce qui a été demandé — meilleure option trouvée : ${best.ascentM} m de D+.`;
   } else if (candidates.length < MIN_SEARCH_OPTIONS) {
-    warning = `Seules ${candidates.length} zone(s) routable(s) trouvée(s) dans ce rayon (sur ${hotspots.length} testées) — essayez un rayon plus large pour plus de choix.`;
+    warning = `Seules ${candidates.length} option(s) routable(s) trouvée(s) dans ce rayon (sur ${hotspots.length * shapes.length} tentées) — essayez un rayon plus large pour plus de choix.`;
   }
 
   return { options, warning };
 }
 
-// Recherche a un seul point de depart (pas de recherche elargie) : boucle
-// naturelle + jusqu'a 2 alternatives (cf generateLoopWithAlternates), avec
-// repetition de cote si le D+ naturel ne suffit pas. Utilise quand
-// searchRadiusM n'est pas fourni - voir generateOptionsAcrossSearchRadius
-// pour le cas "recherche elargie" (plusieurs zones distinctes proposees).
-async function generateOptionsAtSinglePoint({ start, targetDistanceM, targetAscentM, targetDurationMin, terrain, paceMinPerKm, profile }) {
+// Recherche a un seul point de depart (pas de recherche elargie), boucles
+// uniquement : boucle naturelle + jusqu'a 2 alternatives (cf
+// generateLoopWithAlternates), avec repetition de cote si le D+ naturel ne
+// suffit pas. Utilise pour la forme 'loop' - voir generateOptionsAtSinglePoint
+// pour le dispatcher qui gere aussi 'outback'/'both', et
+// generateOptionsAcrossSearchRadius pour la recherche elargie.
+async function buildLoopOptionsAtSinglePoint({ start, targetDistanceM, targetAscentM, targetDurationMin, terrain, paceMinPerKm, profile }) {
   let { best: natural, alternates } = await generateLoopWithAlternates(start, targetDistanceM, profile, { targetDurationMin, paceMinPerKm });
   let naturalAscentM = calibrateAscent(natural.filteredAscendM);
   const initialNeedsMoreAscent = terrain === 'trail' && targetAscentM
@@ -753,6 +895,7 @@ async function generateOptionsAtSinglePoint({ start, targetDistanceM, targetAsce
 
   const naturalOption = {
     type: 'boucle-naturelle',
+    shape: 'loop',
     label: 'Boucle sans répétition',
     points: natural.points,
     distanceM: natural.distanceM,
@@ -813,6 +956,7 @@ async function generateOptionsAtSinglePoint({ start, targetDistanceM, targetAsce
 
     options.push({
       type: 'boucle-alternative',
+      shape: 'loop',
       label: `Boucle alternative ${i + 1} — ${toward}`,
       points: altPoints,
       distanceM: altDistanceM,
@@ -865,6 +1009,7 @@ async function generateOptionsAtSinglePoint({ start, targetDistanceM, targetAsce
 
       options.push({
         type: 'boucle-repetitions',
+        shape: 'loop',
         label,
         points: repeated.points,
         distanceM: repeated.distanceM,
@@ -886,13 +1031,121 @@ async function generateOptionsAtSinglePoint({ start, targetDistanceM, targetAsce
   return { options, warning };
 }
 
+// Meme scan de directions que buildLoopOptionsAtSinglePoint (reutilise le
+// classement par D+ naturel deja calcule par scanDirections - une direction
+// vallonnee pour une boucle l'est generalement aussi pour un aller-retour,
+// inutile de rescanner), mais construit un aller-retour le long de chaque
+// bearing retenu plutot qu'une boucle. Utilise pour la forme 'outback' - cf
+// generateOptionsAtSinglePoint (dispatcher) et generateOutAndBack.
+async function buildOutAndBackOptionsAtSinglePoint({ start, targetDistanceM, targetAscentM, targetDurationMin, terrain, paceMinPerKm, profile }) {
+  const { candidates } = await scanDirections(start, targetDistanceM, profile);
+  if (candidates.length === 0) {
+    throw new Error('Impossible de generer un aller-retour exploitable autour de ce depart.');
+  }
+
+  const primary = candidates[0];
+  const chosenBearings = [primary.bearing];
+  const altPicks = [];
+  for (const c of candidates.slice(1)) {
+    if (altPicks.length >= MAX_ALT_DIRECTIONS) break;
+    if (chosenBearings.every(b => bearingDiff(b, c.bearing) >= ALT_DIRECTION_MIN_BEARING_DIFF)) {
+      altPicks.push(c);
+      chosenBearings.push(c.bearing);
+    }
+  }
+  const bearings = [primary.bearing, ...altPicks.map(p => p.bearing)];
+
+  const options = [];
+  let warning = null;
+  for (let i = 0; i < bearings.length; i++) {
+    const bearing = bearings[i];
+    let result;
+    try {
+      result = await generateOutAndBack(start, bearing, targetDistanceM, profile, { targetDurationMin, paceMinPerKm });
+    } catch (err) {
+      continue; // direction non routable en aller-retour, on garde les autres
+    }
+    let ascentM = calibrateAscent(result.filteredAscendM);
+    let repeatedSegments = null;
+    const needsMoreAscent = terrain === 'trail' && targetAscentM && ascentM < targetAscentM - ASCENT_TOLERANCE_M;
+    if (needsMoreAscent) {
+      const boost = await boostOutAndBackViaRepeats(result, targetAscentM, profile, paceMinPerKm, targetDurationMin, targetDistanceM);
+      if (boost) {
+        const boostedAscentM = calibrateAscent(boost.filteredAscendM);
+        if (boostedAscentM > ascentM) {
+          result = boost;
+          ascentM = boostedAscentM;
+          repeatedSegments = boost.repeatedSegments;
+        }
+      }
+      if (!repeatedSegments && i === 0) {
+        warning = `Aucune côte exploitable trouvée pour compléter le D+ en aller-retour dans ce secteur — seul le tracé naturel (${ascentM} m) est proposé.`;
+      }
+    }
+
+    const toward = towardCompassPhrase(bearing);
+    options.push({
+      type: repeatedSegments ? 'aller-retour-repetitions' : 'aller-retour',
+      shape: 'outback',
+      label: i === 0
+        ? `Aller-retour ${toward}${repeatedSegments ? ' (avec répétitions)' : ''}`
+        : `Aller-retour alternatif ${i} — ${toward}${repeatedSegments ? ' (avec répétitions)' : ''}`,
+      points: result.points,
+      distanceM: result.distanceM,
+      ascentM,
+      repeatedSegments,
+      predictedDurationMin: predictDurationMin(result.points, paceMinPerKm),
+      commentary: `Aller-retour ${toward} : le retour emprunte exactement le même tracé que l'aller.`
+        + (repeatedSegments ? ` Le D+ naturel ne suffisait pas seul — une ou plusieurs côtes sont répétées à l'aller uniquement, le retour reste direct.` : ''),
+      alternateStart: null,
+    });
+  }
+
+  if (options.length === 0) {
+    throw new Error('Impossible de generer un aller-retour exploitable autour de ce depart.');
+  }
+
+  return { options, warning };
+}
+
+// Dispatcher pour la recherche a un seul point de depart (pas de recherche
+// elargie) : construit des boucles et/ou des aller-retours selon routeShape
+// ('loop' | 'outback' | 'both') - demande utilisateur explicite ("il faut
+// donc proposer boucle, A/R ou les deux"). Voir generateOptionsAcrossSearchRadius
+// pour le cas "recherche elargie" (plusieurs zones distinctes).
+async function generateOptionsAtSinglePoint({ start, targetDistanceM, targetAscentM, targetDurationMin, terrain, paceMinPerKm, profile, routeShape = 'loop' }) {
+  const options = [];
+  let warning = null;
+
+  if (routeShape === 'loop' || routeShape === 'both') {
+    const loopResult = await buildLoopOptionsAtSinglePoint({ start, targetDistanceM, targetAscentM, targetDurationMin, terrain, paceMinPerKm, profile });
+    options.push(...loopResult.options);
+    warning = loopResult.warning;
+  }
+
+  if (routeShape === 'outback' || routeShape === 'both') {
+    try {
+      const outbackResult = await buildOutAndBackOptionsAtSinglePoint({ start, targetDistanceM, targetAscentM, targetDurationMin, terrain, paceMinPerKm, profile });
+      options.push(...outbackResult.options);
+      if (!warning) warning = outbackResult.warning;
+    } catch (err) {
+      // Si 'both' et que seule la forme boucle a reussi, ne pas faire
+      // echouer toute la generation pour autant - l'utilisateur a deja au
+      // moins une option valable.
+      if (routeShape === 'outback' || options.length === 0) throw err;
+    }
+  }
+
+  return { options, warning };
+}
+
 // Point d'entree public : verifie l'infrastructure, delegue a
 // generateOptionsAcrossSearchRadius (searchRadiusM fourni - plusieurs zones
 // distinctes explorees via Geoportail) ou generateOptionsAtSinglePoint
 // (recherche simple au point demande), puis applique la correction finale de
 // D+ via l'API Altimetrie IGN a toutes les options obtenues, quel que soit
 // le chemin emprunte.
-async function generateRouteOptions({ start, targetDistanceM, targetAscentM, targetDurationMin, terrain = 'trail', paceMinPerKm, searchRadiusM }) {
+async function generateRouteOptions({ start, targetDistanceM, targetAscentM, targetDurationMin, terrain = 'trail', paceMinPerKm, searchRadiusM, routeShape = 'loop' }) {
   // Verifie l'infrastructure avant toute tentative de routage : sans ca, les
   // echecs de generateLoop (qui retente avec un rayon reduit, pensant a un
   // probleme de terrain) masqueraient un message clair du type "BRouter non
@@ -903,8 +1156,8 @@ async function generateRouteOptions({ start, targetDistanceM, targetAscentM, tar
 
   const profile = TERRAIN_PROFILES[terrain] || TERRAIN_PROFILES.trail;
   const { options, warning } = searchRadiusM
-    ? await generateOptionsAcrossSearchRadius({ start, targetDistanceM, targetAscentM, targetDurationMin, terrain, paceMinPerKm, searchRadiusM, profile })
-    : await generateOptionsAtSinglePoint({ start, targetDistanceM, targetAscentM, targetDurationMin, terrain, paceMinPerKm, profile });
+    ? await generateOptionsAcrossSearchRadius({ start, targetDistanceM, targetAscentM, targetDurationMin, terrain, paceMinPerKm, searchRadiusM, profile, routeShape })
+    : await generateOptionsAtSinglePoint({ start, targetDistanceM, targetAscentM, targetDurationMin, terrain, paceMinPerKm, profile, routeShape });
 
   // Correction finale du D+ affiche via l'API Altimetrie IGN (donnees RGE
   // ALTI, precision LIDAR) - remplace le D+ estime par BRouter (MNT
@@ -958,6 +1211,8 @@ module.exports = {
   haversineDistance,
   generateLoop,
   generateLoopWithAlternates,
+  generateOutAndBack,
+  mirrorOutAndBack,
   bearingToCompassLabel,
   towardCompassPhrase,
   reorientLoopToClosestPoint,
