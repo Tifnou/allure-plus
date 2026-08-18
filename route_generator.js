@@ -18,6 +18,7 @@
 const { routeThroughPoints: routeThroughPointsRaw } = require('./brouter_client');
 const { isBrouterConfigured } = require('./brouter_manager');
 const { bucketForGrade } = require('./pace_profile');
+const { getRouteAscent } = require('./geoportail_client');
 
 // Le profil 'trekking' (mode "route") est en réalité un profil vélo
 // générique (validForBikes=true dans trekking.brf) : il exclut bien les
@@ -245,11 +246,24 @@ async function scanDirections(start, targetDistanceM, profile) {
 // Affine iterativement le rayon d'une boucle dans une direction fixee pour
 // converger vers targetDistanceM (le scan initial, a rayon uniforme pour
 // toutes les directions, tombe rarement pile sur la distance visee).
-async function refineLoopFromBearing(start, bearing, initialResult, initialRadius, targetDistanceM, profile, maxRefineIterations) {
+// Si l'utilisateur a vise une DUREE (opts.targetDurationMin + opts.paceMinPerKm
+// fournis), converge sur la duree PREDITE (predictDurationMin, deja calculee
+// par tranche de pente/pente reelle du trace) plutot que sur la distance -
+// correctif d'un ecart systematique constate (ex: 2h48 obtenu pour 2h
+// demandees) : la distance visee initiale (server.js) est deduite de la
+// duree via l'allure A PLAT uniquement, qui ignore que du D+ ralentit
+// fortement une boucle trail reelle. Sans cette convergence sur la duree
+// reelle, l'algorithme grossissait la boucle jusqu'a cette distance trop
+// genereuse, sans jamais se rendre compte que le terrain la rendait plus
+// lente que prevu.
+async function refineLoopFromBearing(start, bearing, initialResult, initialRadius, targetDistanceM, profile, maxRefineIterations, opts = {}) {
+  const { targetDurationMin, paceMinPerKm } = opts;
   let best = initialResult;
   let bestRadius = initialRadius;
   for (let iter = 0; iter < maxRefineIterations; iter++) {
-    const ratio = targetDistanceM / best.distanceM;
+    const ratio = (targetDurationMin && paceMinPerKm)
+      ? targetDurationMin / predictDurationMin(best.points, paceMinPerKm)
+      : targetDistanceM / best.distanceM;
     if (Math.abs(ratio - 1) < 0.15) break;
     bestRadius *= ratio;
     try {
@@ -276,7 +290,7 @@ async function generateLoop(start, targetDistanceM, profile, opts = {}) {
     throw new Error('Impossible de generer une boucle exploitable autour de ce depart.');
   }
   const top = candidates[0];
-  return refineLoopFromBearing(start, top.bearing, top.result, radius, targetDistanceM, profile, maxRefineIterations);
+  return refineLoopFromBearing(start, top.bearing, top.result, radius, targetDistanceM, profile, maxRefineIterations, opts);
 }
 
 const MAX_ALT_DIRECTIONS = 2;
@@ -313,7 +327,7 @@ async function generateLoopWithAlternates(start, targetDistanceM, profile, opts 
   }
 
   const primary = candidates[0];
-  const best = await refineLoopFromBearing(start, primary.bearing, primary.result, radius, targetDistanceM, profile, maxRefineIterations);
+  const best = await refineLoopFromBearing(start, primary.bearing, primary.result, radius, targetDistanceM, profile, maxRefineIterations, opts);
 
   const chosenBearings = [primary.bearing];
   const altPicks = [];
@@ -328,7 +342,7 @@ async function generateLoopWithAlternates(start, targetDistanceM, profile, opts 
   const alternates = [];
   for (const pick of altPicks) {
     try {
-      const refined = await refineLoopFromBearing(start, pick.bearing, pick.result, radius, targetDistanceM, profile, maxRefineIterations);
+      const refined = await refineLoopFromBearing(start, pick.bearing, pick.result, radius, targetDistanceM, profile, maxRefineIterations, opts);
       alternates.push({ bearing: pick.bearing, result: refined });
     } catch (err) { /* direction devenue non routable en affinant - on garde les autres */ }
   }
@@ -546,6 +560,22 @@ function distanceCloseness(distanceM, targetM) {
   return 1 - Math.abs(distanceM / targetM - 1);
 }
 
+// Meme mesure de proximite que distanceCloseness (formule unite-agnostique),
+// mais sur la duree REELLE predite (predictDurationMin, deja calculee par
+// tranche de pente) quand un objectif de duree est fourni - evite qu'un
+// avertissement "distance non atteinte" se declenche a tort une fois que
+// refineLoopFromBearing converge correctement sur la duree plutot que sur
+// targetDistanceM (qui reste une simple estimation de depart, deduite de
+// l'allure a plat, cf server.js) : une boucle plus courte que cette
+// estimation peut tres bien coller pile a la duree visee si elle est plus
+// vallonnee/lente que prevu, et inversement.
+function goalCloseness(loop, targetDistanceM, targetDurationMin, paceMinPerKm) {
+  if (targetDurationMin && paceMinPerKm) {
+    return distanceCloseness(predictDurationMin(loop.points, paceMinPerKm), targetDurationMin);
+  }
+  return distanceCloseness(loop.distanceM, targetDistanceM);
+}
+
 // Orchestration : construit une ou deux options selon que la boucle
 // naturelle suffit ou non a atteindre le D+ vise. Si searchRadiusM est
 // fourni et que le depart exact ne suffit pas, teste aussi quelques points
@@ -562,7 +592,7 @@ async function generateRouteOptions({ start, targetDistanceM, targetAscentM, tar
 
   const profile = TERRAIN_PROFILES[terrain] || TERRAIN_PROFILES.trail;
   let effectiveStart = start;
-  let { best: natural, alternates } = await generateLoopWithAlternates(start, targetDistanceM, profile);
+  let { best: natural, alternates } = await generateLoopWithAlternates(start, targetDistanceM, profile, { targetDurationMin, paceMinPerKm });
   let naturalAscentM = calibrateAscent(natural.filteredAscendM);
 
   const initialNeedsMoreAscent = terrain === 'trail' && targetAscentM
@@ -572,7 +602,7 @@ async function generateRouteOptions({ start, targetDistanceM, targetAscentM, tar
   // reste prioritaire quand il est vise, c'est lui qui pilote alors la
   // recherche elargie (comportement inchange).
   const initialDistanceShortfall = !initialNeedsMoreAscent
-    && distanceCloseness(natural.distanceM, targetDistanceM) < (1 - DISTANCE_SHORTFALL_TOLERANCE);
+    && goalCloseness(natural, targetDistanceM, targetDurationMin, paceMinPerKm) < (1 - DISTANCE_SHORTFALL_TOLERANCE);
 
   let usedAlternateStart = false;
   let altStartReason = null; // 'ascent' | 'distance'
@@ -592,7 +622,7 @@ async function generateRouteOptions({ start, targetDistanceM, targetAscentM, tar
         try {
           const loop = await generateLoop(altStart, targetDistanceM, profile, { maxRefineIterations: 0 });
           const ascentM = calibrateAscent(loop.filteredAscendM);
-          const closeness = distanceCloseness(loop.distanceM, targetDistanceM);
+          const closeness = goalCloseness(loop, targetDistanceM, targetDurationMin, paceMinPerKm);
           const isBetter = byAscent ? (!best || ascentM > best.ascentM) : (!best || closeness > best.closeness);
           if (isBetter) best = { altStart, loop, ascentM, closeness };
         } catch (err) { /* point non routable, on ignore */ }
@@ -602,7 +632,7 @@ async function generateRouteOptions({ start, targetDistanceM, targetAscentM, tar
         : (best && best.closeness >= (1 - DISTANCE_SHORTFALL_TOLERANCE));
       if (goalReached) break;
     }
-    const naturalCloseness = distanceCloseness(natural.distanceM, targetDistanceM);
+    const naturalCloseness = goalCloseness(natural, targetDistanceM, targetDurationMin, paceMinPerKm);
     const isActuallyBetter = byAscent ? (best && best.ascentM > naturalAscentM) : (best && best.closeness > naturalCloseness);
     if (isActuallyBetter) {
       effectiveStart = best.altStart;
@@ -615,7 +645,7 @@ async function generateRouteOptions({ start, targetDistanceM, targetAscentM, tar
       // maxRefineIterations:0 pour ne pas ralentir le balayage des
       // candidats de depart).
       try {
-        const refined = await generateLoopWithAlternates(effectiveStart, targetDistanceM, profile);
+        const refined = await generateLoopWithAlternates(effectiveStart, targetDistanceM, profile, { targetDurationMin, paceMinPerKm });
         natural = refined.best;
         naturalAscentM = calibrateAscent(natural.filteredAscendM);
         alternates = refined.alternates;
@@ -721,7 +751,7 @@ async function generateRouteOptions({ start, targetDistanceM, targetAscentM, tar
   // specifique au D+ trail. Ne se declenche pas si c'est le D+ qui pilotait
   // la recherche (deja couvert par son propre warning plus bas le cas echeant).
   const finalDistanceShortfall = !initialNeedsMoreAscent
-    && distanceCloseness(natural.distanceM, targetDistanceM) < (1 - DISTANCE_SHORTFALL_TOLERANCE);
+    && goalCloseness(natural, targetDistanceM, targetDurationMin, paceMinPerKm) < (1 - DISTANCE_SHORTFALL_TOLERANCE);
   if (finalDistanceShortfall) {
     const gotLabel = targetDurationMin ? `${Math.round(naturalOption.predictedDurationMin)} min` : `${(natural.distanceM / 1000).toFixed(1)} km`;
     const targetLabel = targetDurationMin ? `${targetDurationMin} min` : `${(targetDistanceM / 1000).toFixed(1)} km`;
@@ -775,6 +805,28 @@ async function generateRouteOptions({ start, targetDistanceM, targetAscentM, tar
         warning = `Le secteur ne permet pas d'atteindre ${targetAscentM} m de D+ sans dépasser largement ce qui a été demandé${radiusNote} — meilleure option trouvée : ${repeatedAscentM} m de D+ (${repLabel}, ${budgetLabel}).`;
       }
     }
+  }
+
+  // Correction finale du D+ affiche via l'API Altimetrie IGN (donnees RGE
+  // ALTI, precision LIDAR) - remplace le D+ estime par BRouter (MNT
+  // grossier + facteur correctif approximatif, source des ecarts constates,
+  // ex: 500 m vises, 19 m obtenus reellement). Volontairement fait ICI,
+  // une seule fois par option finale (2 a 4 appels), plutot qu'a chaque
+  // etape de la recherche/l'affinage plus haut : ces etapes internes
+  // (scanDirections, refineLoopFromBearing, boostAscentViaRepeats...)
+  // pilotent leurs propres decisions (quelle direction garder, quand
+  // arreter de repeter une cote) sur l'estimation BRouter rapide - la
+  // refaire a chaque etape multiplierait les appels IGN par dizaines,
+  // inutile et hors du quota de 5 req/s. Le texte des messages
+  // d'avertissement ci-dessus reste donc base sur l'estimation BRouter
+  // (generalement proche, cf test empirique dans geoportail_client.js) -
+  // seul le chiffre de D+ affiche sur chaque carte d'option est corrige.
+  // Repli silencieux sur l'estimation BRouter si l'appel echoue (zone hors
+  // couverture RGE ALTI, service indisponible...) - fonctionnalite
+  // d'appoint, jamais bloquante pour la generation.
+  for (const opt of options) {
+    const measured = await getRouteAscent(opt.points);
+    if (measured) opt.ascentM = measured.ascentM;
   }
 
   // requestedStart (toujours le point litteralement demande, jamais
