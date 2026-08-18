@@ -5,16 +5,17 @@
   display: flex;
   align-items: flex-start;
   gap: 10px;
-  /* Fond quasi-opaque (comme les autres cartes) : la page a un
-     diaporama-photo derriere, un simple tint a 6% d'opacite y devenait
-     illisible quelle que soit la photo/le theme. */
-  background: var(--card-bg);
+  /* Fond quasi-opaque et legerement rougi (pas juste un tint a faible
+     opacite - illisible sur le diaporama-photo derriere, cf constat
+     precedent) : ce message est important, le fond doit le signaler au
+     premier coup d'oeil sans attendre de lire le texte. */
+  background: #FDECEC;
   border: 1px solid var(--border);
   border-left: 3px solid var(--red);
   border-radius: var(--radius-md);
   padding: 12px 14px;
   margin-bottom: 18px;
-  max-width: 560px;
+  width: 100%;
   font-size: 12.5px;
   line-height: 1.5;
   color: var(--text-secondary);
@@ -22,11 +23,16 @@
 }
 .routes-beta-banner strong { color: var(--text-primary); display: block; margin-bottom: 2px; }
 .routes-beta-banner-icon { font-size: 16px; flex-shrink: 0; line-height: 1.4; }
+[data-theme="dark"] .routes-beta-banner {
+  background: rgba(64, 24, 24, 0.92);
+  border-color: rgba(248, 113, 113, 0.22);
+}
 
-/* Format paysage (large plutot que haut) : les champs se repartissent sur 2
-   colonnes plutot qu'un seul long empilement vertical - "Point de depart" et
-   "Recherche elargie" (contenu plus large/texte d'aide) gardent toute la
-   largeur via .routes-field--full, le reste se met naturellement en paires. */
+/* Format paysage (large plutot que haut), meme largeur que le page-header -
+   les champs se repartissent sur 2 colonnes plutot qu'un seul long
+   empilement vertical - "Point de depart" et "Recherche elargie" (contenu
+   plus large/texte d'aide) gardent toute la largeur via .routes-field--full,
+   le reste se met naturellement en paires. */
 .routes-form-card {
   background: var(--bg-white);
   border: 1px solid var(--border);
@@ -36,7 +42,7 @@
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 18px 24px;
-  max-width: 920px;
+  width: 100%;
   margin-bottom: 16px;
 }
 .routes-field--full { grid-column: 1 / -1; }
@@ -162,40 +168,120 @@
   gap: 6px;
 }
 
-/* ---------- boutons générer / réinitialiser ---------- */
-/* Réinitialiser pousse a l'extremite opposee du cadre (justify-content:
-   space-between) pour eviter un clic accidentel dessus en visant Générer
-   juste a cote. */
-.routes-form-actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; max-width: 480px; }
-#routes-generate-btn { font-size: 13.5px; padding: 9px 20px; }
+/* ---------- réinitialiser (integre au coin du cadre de recherche) ---------- */
+/* Rangee dediee, premiere du grid, alignee a droite - place le bouton
+   visuellement "dans" le cadre sans chevaucher le contenu de Point de depart
+   (qui occupe toute la largeur juste en dessous). Discret (ghost button) :
+   c'est une action secondaire, pas la priorite visuelle de la carte. */
+.routes-reset-row { display: flex; justify-content: flex-end; margin-bottom: -10px; }
+.routes-reset-corner-btn {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 5px 10px;
+  border-radius: var(--radius-sm);
+  transition: all 0.15s;
+}
+.routes-reset-corner-btn:hover { background: var(--bg-hover); color: var(--text-primary); border-color: var(--accent); }
 
-/* ---------- progression pendant la génération ---------- */
+/* ---------- bouton générer (pleine largeur du cadre) ---------- */
+.routes-generate-btn-wide {
+  display: block;
+  width: 100%;
+  margin-top: 14px;
+  padding: 15px 24px;
+  font-family: var(--font);
+  font-size: 15px;
+  font-weight: 700;
+  color: #fff;
+  background: var(--accent);
+  border: none;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  box-shadow: 0 4px 16px rgba(59, 130, 246, 0.32);
+  transition: all 0.18s;
+}
+.routes-generate-btn-wide:hover:not(:disabled) {
+  filter: brightness(1.08);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 22px rgba(59, 130, 246, 0.4);
+}
+.routes-generate-btn-wide:active:not(:disabled) { transform: translateY(0); }
+.routes-generate-btn-wide:disabled { opacity: 0.55; cursor: not-allowed; box-shadow: none; }
+
+/* ---------- modale de progression pendant la génération ---------- */
 /* Pas de vraie progression serveur->client (un seul aller-retour HTTP) :
-   barre indeterminee + messages d'etape qui tournent, pour que l'attente
-   (peut depasser 30s avec recherche elargie + alternatives) ne donne jamais
-   l'impression que rien ne se passe. */
-.routes-progress { max-width: 480px; margin-top: 10px; }
-.routes-progress-bar {
-  height: 5px;
-  border-radius: 3px;
+   barre qui converge vers 90% sans jamais l'atteindre pile (avance de plus
+   en plus lente, cf routesStartProgress) + messages d'etape technique qui
+   tournent + messages "fun" separes pour faire patienter - la generation
+   peut depasser 1 a 2 min avec recherche elargie, jamais laisser l'attente
+   donner l'impression que rien ne se passe. */
+.routes-progress-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  background: rgba(5, 7, 15, 0.65);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: fadeIn 0.18s ease;
+}
+.routes-progress-modal {
+  background: var(--bg-white);
+  border-radius: 18px;
+  padding: 32px 30px 26px;
+  width: min(440px, 90vw);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.35);
+  animation: slideUp 0.22s ease;
+  text-align: center;
+}
+.routes-progress-fun-msg {
+  font-family: var(--font);
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1.4;
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 16px;
+}
+.routes-progress-modal .routes-progress-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 10px;
+}
+.routes-progress-modal .routes-progress-bar {
+  height: 8px;
+  border-radius: 4px;
   background: var(--bg-hover);
   overflow: hidden;
 }
-.routes-progress-bar-fill {
+/* scaleX plutot que width : anime transform (compositing GPU) au lieu d'une
+   propriete de layout, evite le layout thrash sur des ticks frequents
+   (toutes les 300ms pendant potentiellement 1-2 min). */
+.routes-progress-modal .routes-progress-bar-fill {
   height: 100%;
-  width: 40%;
-  border-radius: 3px;
+  width: 100%;
+  transform: scaleX(0);
+  transform-origin: left;
+  border-radius: 4px;
   background: var(--accent);
-  animation: routes-progress-slide 1.3s ease-in-out infinite;
+  transition: transform 0.3s ease;
 }
-@keyframes routes-progress-slide {
-  0%   { transform: translateX(-100%); }
-  100% { transform: translateX(350%); }
-}
-.routes-progress-label {
-  margin-top: 6px;
-  font-size: 11.5px;
+.routes-progress-percent {
+  margin-top: 8px;
+  font-size: 12px;
+  font-weight: 700;
   color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
 }
 
 /* ---------- résultats : cartes compactes repliables ---------- */

@@ -14,7 +14,7 @@
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <link rel="stylesheet" href="css/style.css?v=1787052762028" />
   <link rel="stylesheet" href="css/plans.css?v=1787050930665" />
-  <link rel="stylesheet" href="css/routes.css?v=1786721000000" />
+  <link rel="stylesheet" href="css/routes.css?v=1786731000000" />
 </head>
 <body>
 <!-- ✨ SPLASH SCREEN ✨ -->
@@ -1202,13 +1202,16 @@
       <!-- FORMULAIRE (un seul écran, tous les critères) -->
       <div id="routes-form">
         <div id="routes-form-content" class="routes-form-card"></div>
-        <div class="routes-form-actions">
-          <button id="routes-generate-btn" class="btn-wizard-next" onclick="routesGenerateClicked()">Générer →</button>
-          <button type="button" class="btn-wizard-back" onclick="routesResetForm()">↺ Réinitialiser</button>
-        </div>
-        <div id="routes-progress" class="routes-progress" style="display:none">
-          <div class="routes-progress-bar"><div class="routes-progress-bar-fill"></div></div>
-          <div class="routes-progress-label" id="routes-progress-label">Recherche de directions autour du départ…</div>
+        <button id="routes-generate-btn" class="routes-generate-btn-wide" onclick="routesGenerateClicked()">Générer →</button>
+      </div>
+
+      <!-- MODALE DE PROGRESSION (generation en cours) -->
+      <div id="routes-progress-modal" class="routes-progress-modal-backdrop" style="display:none">
+        <div class="routes-progress-modal">
+          <div class="routes-progress-fun-msg" id="routes-progress-fun-msg"></div>
+          <div class="routes-progress-label" id="routes-progress-label"></div>
+          <div class="routes-progress-bar"><div class="routes-progress-bar-fill" id="routes-progress-bar-fill"></div></div>
+          <div class="routes-progress-percent" id="routes-progress-percent">0 %</div>
         </div>
       </div>
 
@@ -1355,7 +1358,7 @@
   <script src="js/records.js?v=1786024863614"></script>
   <script src="js/health.js?v=1786627102345"></script>
   <script src="js/plans.js?v=1787050930665"></script>
-  <script src="js/routes.js?v=1786722000000"></script>
+  <script src="js/routes.js?v=1786731000000"></script>
   <script src="js/support.js?v=1786966950464"></script>
   <!-- ... MODAL LOGS ........................... -->
   <div id="logs-modal" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.55);backdrop-filter:blur(4px);" onclick="if(event.target===this)closeLogsModal()">

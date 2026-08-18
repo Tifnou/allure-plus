@@ -89,6 +89,10 @@ function wireNumericInput(id, onChange) {
 function renderRoutesForm() {
   const content = el('routes-form-content');
   content.innerHTML = `
+    <div class="routes-field--full routes-reset-row">
+      <button type="button" class="routes-reset-corner-btn" onclick="routesResetForm()">↺ Réinitialiser</button>
+    </div>
+
     <div class="routes-field routes-field--full">
       <div class="routes-field-label">Point de départ</div>
       <div class="routes-address-row">
@@ -379,13 +383,40 @@ async function routesEnsureTileAvailable(start, btn) {
   return true;
 }
 
+// Messages "fun" pour faire patienter (rotation independante des etapes
+// techniques ci-dessous) - demande utilisateur explicite, la generation
+// peut depasser 1-2 min avec recherche elargie et personne n'aime fixer une
+// barre muette aussi longtemps.
+const ROUTES_FUN_MESSAGES = [
+  "Ne t'inquiète pas, ça sera moins long que ta prochaine sortie 🏃",
+  'On explore les sentiers du coin comme si on y était déjà',
+  "Chaque bonne côte se mérite, même pour l'algorithme",
+  "On évite les impasses pour toi, ça prend un peu de temps",
+  'Les meilleurs single-tracks ne se trouvent pas en un clic',
+  "On compare les options comme le ferait un vrai coach",
+  'Petit échauffement pendant que ça calcule',
+  'On négocie avec les cartes pour te trouver le meilleur tracé',
+  'Patience, comme dans les 500 derniers mètres d\'une course',
+  "On vérifie qu'il n'y a pas de sanglier sur le parcours (enfin, on essaie)",
+  'Ça mouline, mais dans le bon sens — comme tes jambes en montée',
+  'On teste plusieurs directions pour ne rien te faire rater',
+  'Presque prêt, encore un petit effort',
+  'On chausse nos baskets virtuelles pour explorer le secteur',
+  "Le meilleur tracé arrive, plus vite qu'un négatif split",
+];
+
 // Pas de canal de progression reel serveur->client (un seul aller-retour
 // HTTP, la generation peut prendre 20-40s avec recherche elargie +
-// alternatives) - une barre indeterminee + des messages qui tournent au
-// fil des etapes reelles connues (scan des directions, alternatives,
-// recherche elargie si activee, recherche de repetitions si D+ vise) evite
-// que l'attente donne l'impression que rien ne se passe.
-let _routesProgressTimer = null;
+// alternatives, jusqu'a 1-2 min sur les scenarios les plus exigeants) - une
+// vraie barre 0-100% est donc simulee (converge vers 90% sans jamais
+// l'atteindre pile, avance de plus en plus lente - snap a 100% seulement
+// quand la reponse arrive reellement, cf routesStopProgress) plutot qu'une
+// barre indeterminee statique. Les messages d'etape technique (existant)
+// tournent independamment des messages "fun" ci-dessus.
+let _routesProgressStepTimer = null;
+let _routesProgressFunTimer = null;
+let _routesProgressBarTimer = null;
+let _routesProgressPct = 0;
 function routesStartProgress() {
   const steps = ['Recherche de directions autour du départ…', 'Analyse du relief du secteur…', 'Construction du tracé…', 'Recherche de tracés alternatifs…'];
   if (routesHasAscentField() && routesState.ascentM) {
@@ -400,15 +431,43 @@ function routesStartProgress() {
   const label = el('routes-progress-label');
   let i = 0;
   label.textContent = steps[0];
-  el('routes-progress').style.display = '';
-  _routesProgressTimer = setInterval(() => {
+  _routesProgressStepTimer = setInterval(() => {
     i = Math.min(i + 1, steps.length - 1);
     label.textContent = steps[i];
   }, 3500);
+
+  const funLabel = el('routes-progress-fun-msg');
+  let funIdx = Math.floor(Math.random() * ROUTES_FUN_MESSAGES.length);
+  funLabel.textContent = ROUTES_FUN_MESSAGES[funIdx];
+  _routesProgressFunTimer = setInterval(() => {
+    funIdx = (funIdx + 1) % ROUTES_FUN_MESSAGES.length;
+    funLabel.textContent = ROUTES_FUN_MESSAGES[funIdx];
+  }, 4200);
+
+  _routesProgressPct = 0;
+  const fill = el('routes-progress-bar-fill');
+  const pctLabel = el('routes-progress-percent');
+  fill.style.transform = 'scaleX(0)';
+  pctLabel.textContent = '0 %';
+  _routesProgressBarTimer = setInterval(() => {
+    _routesProgressPct += (90 - _routesProgressPct) * 0.04;
+    fill.style.transform = `scaleX(${(_routesProgressPct / 100).toFixed(3)})`;
+    pctLabel.textContent = Math.round(_routesProgressPct) + ' %';
+  }, 300);
+
+  el('routes-progress-modal').style.display = 'flex';
 }
 function routesStopProgress() {
-  if (_routesProgressTimer) { clearInterval(_routesProgressTimer); _routesProgressTimer = null; }
-  el('routes-progress').style.display = 'none';
+  if (_routesProgressStepTimer) { clearInterval(_routesProgressStepTimer); _routesProgressStepTimer = null; }
+  if (_routesProgressFunTimer) { clearInterval(_routesProgressFunTimer); _routesProgressFunTimer = null; }
+  if (_routesProgressBarTimer) { clearInterval(_routesProgressBarTimer); _routesProgressBarTimer = null; }
+  // Termine proprement a 100% (transition CSS) avant de refermer, plutot
+  // qu'une disparition brusque en plein milieu d'un pourcentage.
+  const fill = el('routes-progress-bar-fill');
+  const pctLabel = el('routes-progress-percent');
+  if (fill) fill.style.transform = 'scaleX(1)';
+  if (pctLabel) pctLabel.textContent = '100 %';
+  setTimeout(() => { const m = el('routes-progress-modal'); if (m) m.style.display = 'none'; }, 350);
 }
 
 // Recalcule le profil d'allure perso (par pente) a partir des dernieres
