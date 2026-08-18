@@ -20,6 +20,17 @@ const RESOURCE = 'ign_rge_alti_wld';
 // fonctionne sans probleme - marge prise volontairement large).
 const CHUNK_SIZE = 150;
 
+// Le repérage de zones vallonnées (findHillyCandidateCenters, route_generator.js)
+// declenche potentiellement des dizaines d'appels - un timeout evite qu'un
+// service IGN lent/indisponible ne bloque toute une generation d'itineraire
+// (fonctionnalite d'appoint, jamais bloquante).
+const FETCH_TIMEOUT_MS = 8000;
+function fetchWithTimeout(url) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  return fetch(url, { signal: controller.signal }).finally(() => clearTimeout(timer));
+}
+
 function chunk(arr, size) {
   const out = [];
   for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
@@ -52,7 +63,7 @@ async function getRouteAscent(points) {
       const lon = c.map(p => p.lon).join('|');
       const lat = c.map(p => p.lat).join('|');
       const params = new URLSearchParams({ lon, lat, resource: RESOURCE, profile_mode: 'accurate' });
-      const res = await fetch(`${BASE_URL}/elevationLine.json?${params.toString()}`);
+      const res = await fetchWithTimeout(`${BASE_URL}/elevationLine.json?${params.toString()}`);
       if (!res.ok) return null;
       const data = await res.json();
       if (data.error || !data.height_differences) return null;
@@ -65,4 +76,35 @@ async function getRouteAscent(points) {
   return { ascentM: Math.round(positive), descentM: Math.round(negative) };
 }
 
-module.exports = { getRouteAscent };
+// points: [{lat, lon}, ...] SANS ordre/continuite particuliere (contrairement
+// a getRouteAscent) - simple altitude a chaque point isole (route `elevation`,
+// pas `elevationLine` : pas d'interpolation de terrain entre les points, donc
+// nettement plus rapide/leger). Utilise pour le reperage de zones vallonnees
+// AVANT de lancer les appels BRouter, couteux (cf findHillyCandidateCenters,
+// route_generator.js) : quelques dizaines/centaines de points isoles suffisent
+// a estimer le relief local d'un secteur sans avoir a router quoi que ce soit.
+// Renvoie un tableau de m (meme longueur/ordre que `points`) ou null si
+// l'appel echoue - a chaque valeur peut aussi valoir null (point hors
+// couverture RGE ALTI).
+async function getElevations(points) {
+  if (!Array.isArray(points) || points.length === 0) return null;
+  const chunks = chunk(points, CHUNK_SIZE);
+  const out = [];
+  try {
+    for (const c of chunks) {
+      const lon = c.map(p => p.lon).join('|');
+      const lat = c.map(p => p.lat).join('|');
+      const params = new URLSearchParams({ lon, lat, resource: RESOURCE });
+      const res = await fetchWithTimeout(`${BASE_URL}/elevation.json?${params.toString()}`);
+      if (!res.ok) return null;
+      const data = await res.json();
+      if (data.error || !data.elevations) return null;
+      data.elevations.forEach(e => out.push(typeof e.z === 'number' && e.z > -9000 ? e.z : null));
+    }
+  } catch (err) {
+    return null;
+  }
+  return out;
+}
+
+module.exports = { getRouteAscent, getElevations };

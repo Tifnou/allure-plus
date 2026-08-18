@@ -18,7 +18,7 @@
 const { routeThroughPoints: routeThroughPointsRaw } = require('./brouter_client');
 const { isBrouterConfigured } = require('./brouter_manager');
 const { bucketForGrade } = require('./pace_profile');
-const { getRouteAscent } = require('./geoportail_client');
+const { getRouteAscent, getElevations } = require('./geoportail_client');
 
 // Le profil 'trekking' (mode "route") est en réalité un profil vélo
 // générique (validForBikes=true dans trekking.brf) : il exclut bien les
@@ -73,7 +73,7 @@ function haversineDistance(a, b) {
 // TELLE QU'ELLE APPARAIT REELLEMENT SUR LA CARTE depuis le point demande par
 // l'utilisateur - jamais le bearing de recherche interne (qui peut avoir ete
 // calcule depuis un depart alternatif decale de plusieurs km, cf
-// generateRouteOptions/usedAlternateStart), sous peine d'un libelle du genre
+// generateOptionsAcrossSearchRadius), sous peine d'un libelle du genre
 // "vers le sud-est" pour un tracé que la carte montre au sud-ouest (bug
 // reel constate : recherche elargie ayant deplace le depart, le bearing de
 // recherche restait relatif a ce depart deplace au lieu du point demande).
@@ -532,19 +532,38 @@ const MIN_VIABLE_SEGMENT_GAIN_M = 8;
 // des repetitions pour chercher le D+ a tout prix).
 const MAX_OVERSHOOT_RATIO = 1.3;
 
-// Nombre de points de depart alternatifs testes quand la recherche elargie
-// est activee, et rayon d'echantillonnage angulaire (4 points cardinaux
-// suffisent : chaque point relance deja sa propre recherche a 8 directions,
-// inutile de multiplier les angles en plus).
-const ALT_START_BEARINGS = [0, 90, 180, 270];
-
-// Paliers de distance testes pour un depart alternatif, en fraction du rayon
-// demande par l'utilisateur - du plus proche au plus loin. Sans ca, le point
-// de depart alternatif sautait directement a la distance MAXIMALE du rayon
-// (ex: rayon 5 km -> toujours a 5 km pile, jamais a 1-2 km meme quand un
-// point proche suffisait deja) : personne n'a envie de faire 15 km en
-// voiture pour un depart si un point a 3-4 km fait tout aussi bien l'affaire.
-const ALT_START_RADIUS_FRACTIONS = [1 / 3, 2 / 3, 1];
+// Quadrillage bearing x rayon utilise par findHillyCandidateCenters pour
+// reperer les zones vallonnees dans le rayon de recherche elargie, cote
+// Geoportail (rapide) AVANT de lancer le moindre appel BRouter (couteux).
+// Remplace l'ancien mecanisme (4 points cardinaux x 3 rayons, aveugle au
+// relief reel - ratait systematiquement les secteurs situes entre deux
+// points cardinaux, ex: Bois de Verrieres/Bures-sur-Yvette a 190-242° depuis
+// Saclay, entre les sondes sud/ouest). 12 directions (tous les 30°, plus fin
+// que les 8 de scanDirections) x 4 rayons = 48 centres + le point demande.
+const HOTSPOT_BEARINGS = 12;
+const HOTSPOT_RADIUS_FRACTIONS = [0.25, 0.5, 0.75, 1.0];
+// Rayon du petit "plus" (nord/est/sud/ouest) echantillonne autour de chaque
+// centre candidat - le relief local (ecart max-min d'altitude sur ces 5
+// points) sert de proxy rapide pour "ce secteur est-il vallonne", sans
+// router quoi que ce soit.
+const HOTSPOT_SAMPLE_OFFSET_M = 400;
+// Nombre de zones reellement testees via BRouter (les mieux notees en
+// relief) - chacune coute un scanDirections complet (8 appels), a garder
+// raisonnable. Doit rester >= MIN_SEARCH_OPTIONS pour pouvoir en proposer
+// autant meme si quelques-unes s'averent non routables.
+const HOTSPOT_CANDIDATE_COUNT = 7;
+// Nombre minimal de circuits distincts proposes quand une recherche elargie
+// est demandee (retour utilisateur : "si l'utilisateur demande de chercher
+// dans un rayon, on lui propose au moins 5 circuits possibles, pas juste 1
+// ou 2 dans le meme secteur").
+const MIN_SEARCH_OPTIONS = 5;
+// Ecart geographique minimal entre deux centres retenus, en fraction du
+// rayon de recherche (avec un plancher absolu) - sans ca, les meilleurs
+// scores de relief se regroupent souvent sur le meme versant (5 centres
+// quasi identiques a quelques centaines de metres les uns des autres), pas
+// des zones vraiment distinctes a proposer.
+const HOTSPOT_MIN_SEPARATION_FRACTION = 0.2;
+const HOTSPOT_MIN_SEPARATION_FLOOR_M = 800;
 
 // Ecart de distance tolere avant de considerer qu'une boucle est "trop
 // courte" (secteur mal connecté : impasse, reseau clairsemé...) - meme
@@ -576,86 +595,154 @@ function goalCloseness(loop, targetDistanceM, targetDurationMin, paceMinPerKm) {
   return distanceCloseness(loop.distanceM, targetDistanceM);
 }
 
-// Orchestration : construit une ou deux options selon que la boucle
-// naturelle suffit ou non a atteindre le D+ vise. Si searchRadiusM est
-// fourni et que le depart exact ne suffit pas, teste aussi quelques points
-// de depart alternatifs dans ce rayon (l'utilisateur accepte alors de
-// rejoindre un point de depart different, ex. en voiture, avant de courir).
-async function generateRouteOptions({ start, targetDistanceM, targetAscentM, targetDurationMin, terrain = 'trail', paceMinPerKm, searchRadiusM }) {
-  // Verifie l'infrastructure avant toute tentative de routage : sans ca, les
-  // echecs de generateLoop (qui retente avec un rayon reduit, pensant a un
-  // probleme de terrain) masqueraient un message clair du type "BRouter non
-  // configure" derriere un message generique trompeur ("secteur non routable").
-  if (!isBrouterConfigured()) {
-    throw new Error('BRouter n\'est pas configuré sur ce serveur (fichiers manquants dans le dossier brouter/) — voir le setup dans le README avant de générer un itinéraire.');
+// Repere les zones les plus vallonnees dans searchRadiusM autour de `start`,
+// via un quadrillage bearing x rayon echantillonne cote Geoportail - AUCUN
+// appel BRouter ici, juste des lectures d'altitude en points isoles
+// (getElevations), donc rapide (quelques centaines de points en 1-2 appels
+// chunkes) malgre le nombre de centres testes. Renvoie jusqu'a `count`
+// centres, toujours en incluant le point demande en premier (l'utilisateur
+// doit toujours voir ce qui est possible sans se deplacer), tries par relief
+// decroissant sinon, avec un ecart geographique minimal entre eux pour
+// couvrir vraiment le rayon plutot que de proposer 5 fois le meme versant.
+async function findHillyCandidateCenters(start, searchRadiusM, count) {
+  const centers = [{ lat: start.lat, lon: start.lon }];
+  for (const frac of HOTSPOT_RADIUS_FRACTIONS) {
+    const radiusM = searchRadiusM * frac;
+    for (let i = 0; i < HOTSPOT_BEARINGS; i++) {
+      centers.push(destinationPoint(start.lat, start.lon, (360 / HOTSPOT_BEARINGS) * i, radiusM));
+    }
   }
 
-  const profile = TERRAIN_PROFILES[terrain] || TERRAIN_PROFILES.trail;
-  let effectiveStart = start;
+  const samplePoints = [];
+  const sampleStartIdx = [];
+  centers.forEach(c => {
+    sampleStartIdx.push(samplePoints.length);
+    samplePoints.push(c);
+    [0, 90, 180, 270].forEach(b => samplePoints.push(destinationPoint(c.lat, c.lon, b, HOTSPOT_SAMPLE_OFFSET_M)));
+  });
+
+  const elevations = await getElevations(samplePoints);
+  // Geoportail indisponible : repli sur le seul point demande - pas de
+  // degradation par rapport a avant l'existence de ce mecanisme, juste pas
+  // d'aide au reperage pour cette generation.
+  if (!elevations) return [{ lat: start.lat, lon: start.lon }];
+
+  const scored = centers.map((c, idx) => {
+    const zs = elevations.slice(sampleStartIdx[idx], sampleStartIdx[idx] + 5).filter(z => z != null);
+    const relief = zs.length >= 2 ? Math.max(...zs) - Math.min(...zs) : 0;
+    return { ...c, relief };
+  });
+
+  const startEntry = scored[0]; // centers[0] est toujours `start`
+  const minSepM = Math.max(searchRadiusM * HOTSPOT_MIN_SEPARATION_FRACTION, HOTSPOT_MIN_SEPARATION_FLOOR_M);
+  const picked = [startEntry];
+  for (const cand of [...scored].sort((a, b) => b.relief - a.relief)) {
+    if (picked.length >= count) break;
+    if (haversineDistance(cand, start) < 1) continue; // deja inclus (= start)
+    if (picked.every(p => haversineDistance(p, cand) >= minSepM)) picked.push(cand);
+  }
+  return picked;
+}
+
+// Meme esprit que generateOptionsAtSinglePoint (voir plus bas), mais pour le
+// cas "recherche elargie" : plutot qu'une seule zone (le point demande, ou
+// UN point alternatif choisi a l'aveugle), genere un candidat par zone
+// vallonnee reperee par findHillyCandidateCenters et retourne les
+// MIN_SEARCH_OPTIONS meilleures comme options DISTINCTES - retour
+// utilisateur explicite : "il faut que nous trouvions les endroits... qui
+// nous donnent le meilleur terrain de jeu", "au moins 5 circuits possibles,
+// pas juste 1 ou 2 dans le meme secteur".
+async function generateOptionsAcrossSearchRadius({ start, targetDistanceM, targetAscentM, targetDurationMin, terrain, paceMinPerKm, searchRadiusM, profile }) {
+  const hotspots = await findHillyCandidateCenters(start, searchRadiusM, HOTSPOT_CANDIDATE_COUNT);
+
+  const candidates = [];
+  for (const hotspot of hotspots) {
+    let loop;
+    try {
+      loop = await generateLoop(hotspot, targetDistanceM, profile, { targetDurationMin, paceMinPerKm });
+    } catch (err) {
+      continue; // zone non routable depuis ce centre (hors reseau, isolee...)
+    }
+    let ascentM = calibrateAscent(loop.filteredAscendM);
+    let repeatedSegments = null;
+    const needsMoreAscent = terrain === 'trail' && targetAscentM && ascentM < targetAscentM - ASCENT_TOLERANCE_M;
+    if (needsMoreAscent) {
+      // Repetition acceptee comme filet de securite (demande utilisateur
+      // explicite : "si il faut faire 5 fois la cote car ma demande est trop
+      // restrictive OK") - mais seulement APRES avoir cherche une zone
+      // naturellement riche, jamais comme premier reflexe.
+      const boost = await boostAscentViaRepeats(loop.points, targetAscentM, profile, paceMinPerKm, targetDurationMin, targetDistanceM);
+      if (boost && boost.repeatedAscentM > ascentM) {
+        loop = boost.repeated;
+        ascentM = boost.repeatedAscentM;
+        repeatedSegments = boost.repeatedSegments;
+      }
+    }
+    candidates.push({
+      hotspot, loop, ascentM, repeatedSegments,
+      closeness: goalCloseness(loop, targetDistanceM, targetDurationMin, paceMinPerKm),
+    });
+  }
+
+  if (candidates.length === 0) {
+    throw new Error('Impossible de generer une boucle exploitable dans ce rayon de recherche.');
+  }
+
+  // En trail avec D+ vise, la richesse en denivele prime (c'est l'objet meme
+  // d'une recherche elargie en trail) ; sinon, la proximite a la
+  // distance/duree visee.
+  const rankByAscent = terrain === 'trail' && !!targetAscentM;
+  candidates.sort((a, b) => rankByAscent ? (b.ascentM - a.ascentM) : (b.closeness - a.closeness));
+  const kept = candidates.slice(0, MIN_SEARCH_OPTIONS);
+
+  const options = kept.map((c, i) => {
+    const points = reorientLoopToClosestPoint(c.loop.points, start);
+    const toward = towardCompassPhrase(bearingBetween(start, farthestPoint(points, start)));
+    const distFromStartM = haversineDistance(start, c.hotspot);
+    const isAtRequestedStart = distFromStartM < 50;
+    const label = isAtRequestedStart
+      ? 'Boucle au départ demandé'
+      : `Circuit ${i + 1} — ${toward}${c.repeatedSegments ? ' (avec répétitions)' : ''}`;
+    let commentary = isAtRequestedStart
+      ? `Boucle construite directement au départ demandé, sans se déplacer.`
+      : `Zone plus vallonnée repérée à ${(distFromStartM / 1000).toFixed(1)} km ${toward} du départ, dans le rayon de recherche — à rejoindre avant de courir.`;
+    if (c.repeatedSegments) {
+      commentary += ` Le D+ naturel de ce secteur ne suffisait pas seul, complété par répétition d'une côte.`;
+    }
+    return {
+      type: c.repeatedSegments ? 'boucle-repetitions' : 'boucle-naturelle',
+      label,
+      points,
+      distanceM: c.loop.distanceM,
+      ascentM: c.ascentM,
+      repeatedSegments: c.repeatedSegments,
+      predictedDurationMin: predictDurationMin(points, paceMinPerKm),
+      commentary,
+      alternateStart: isAtRequestedStart ? null : { lat: c.hotspot.lat, lon: c.hotspot.lon, distanceFromRequestedM: distFromStartM },
+    };
+  });
+
+  let warning = null;
+  const best = kept[0];
+  if (terrain === 'trail' && targetAscentM && best.ascentM < targetAscentM - ASCENT_TOLERANCE_M) {
+    warning = `Le rayon de recherche exploré (${(searchRadiusM / 1000).toFixed(0)} km, ${hotspots.length} zones testées) ne permet pas d'atteindre ${targetAscentM} m de D+ sans dépasser largement ce qui a été demandé — meilleure option trouvée : ${best.ascentM} m de D+.`;
+  } else if (candidates.length < MIN_SEARCH_OPTIONS) {
+    warning = `Seules ${candidates.length} zone(s) routable(s) trouvée(s) dans ce rayon (sur ${hotspots.length} testées) — essayez un rayon plus large pour plus de choix.`;
+  }
+
+  return { options, warning };
+}
+
+// Recherche a un seul point de depart (pas de recherche elargie) : boucle
+// naturelle + jusqu'a 2 alternatives (cf generateLoopWithAlternates), avec
+// repetition de cote si le D+ naturel ne suffit pas. Utilise quand
+// searchRadiusM n'est pas fourni - voir generateOptionsAcrossSearchRadius
+// pour le cas "recherche elargie" (plusieurs zones distinctes proposees).
+async function generateOptionsAtSinglePoint({ start, targetDistanceM, targetAscentM, targetDurationMin, terrain, paceMinPerKm, profile }) {
   let { best: natural, alternates } = await generateLoopWithAlternates(start, targetDistanceM, profile, { targetDurationMin, paceMinPerKm });
   let naturalAscentM = calibrateAscent(natural.filteredAscendM);
-
   const initialNeedsMoreAscent = terrain === 'trail' && targetAscentM
     && naturalAscentM < targetAscentM - ASCENT_TOLERANCE_M;
-  // Repli sur la distance/duree quand ce n'est PAS le D+ qui motive la
-  // recherche (mode route, ou trail sans D+ vise/deja atteint) - le D+
-  // reste prioritaire quand il est vise, c'est lui qui pilote alors la
-  // recherche elargie (comportement inchange).
-  const initialDistanceShortfall = !initialNeedsMoreAscent
-    && goalCloseness(natural, targetDistanceM, targetDurationMin, paceMinPerKm) < (1 - DISTANCE_SHORTFALL_TOLERANCE);
-
-  let usedAlternateStart = false;
-  let altStartReason = null; // 'ascent' | 'distance'
-  if ((initialNeedsMoreAscent || initialDistanceShortfall) && searchRadiusM) {
-    const byAscent = initialNeedsMoreAscent;
-    // Recherche sequentielle (pas tout en parallele - chaque candidat lance
-    // deja 8 appels BRouter en interne, inutile de saturer le process local).
-    // Paliers du plus proche au plus loin (ALT_START_RADIUS_FRACTIONS) : on
-    // s'arrete au premier palier qui atteint deja la cible (D+ ou distance
-    // selon le cas), pour ne jamais s'eloigner plus que necessaire du
-    // depart demande.
-    let best = null;
-    for (const frac of ALT_START_RADIUS_FRACTIONS) {
-      const radiusM = searchRadiusM * frac;
-      for (const bearing of ALT_START_BEARINGS) {
-        const altStart = destinationPoint(start.lat, start.lon, bearing, radiusM);
-        try {
-          const loop = await generateLoop(altStart, targetDistanceM, profile, { maxRefineIterations: 0 });
-          const ascentM = calibrateAscent(loop.filteredAscendM);
-          const closeness = goalCloseness(loop, targetDistanceM, targetDurationMin, paceMinPerKm);
-          const isBetter = byAscent ? (!best || ascentM > best.ascentM) : (!best || closeness > best.closeness);
-          if (isBetter) best = { altStart, loop, ascentM, closeness };
-        } catch (err) { /* point non routable, on ignore */ }
-      }
-      const goalReached = byAscent
-        ? (best && targetAscentM && best.ascentM >= targetAscentM - ASCENT_TOLERANCE_M)
-        : (best && best.closeness >= (1 - DISTANCE_SHORTFALL_TOLERANCE));
-      if (goalReached) break;
-    }
-    const naturalCloseness = goalCloseness(natural, targetDistanceM, targetDurationMin, paceMinPerKm);
-    const isActuallyBetter = byAscent ? (best && best.ascentM > naturalAscentM) : (best && best.closeness > naturalCloseness);
-    if (isActuallyBetter) {
-      effectiveStart = best.altStart;
-      usedAlternateStart = true;
-      altStartReason = byAscent ? 'ascent' : 'distance';
-      // Le depart a change : les alternatives calculees depuis l'ancien
-      // depart ne sont plus coherentes geographiquement - on les recalcule
-      // (au passage, `refined.best` est affine sur la distance visee,
-      // contrairement a `best.loop` qui vient d'une recherche a
-      // maxRefineIterations:0 pour ne pas ralentir le balayage des
-      // candidats de depart).
-      try {
-        const refined = await generateLoopWithAlternates(effectiveStart, targetDistanceM, profile, { targetDurationMin, paceMinPerKm });
-        natural = refined.best;
-        naturalAscentM = calibrateAscent(natural.filteredAscendM);
-        alternates = refined.alternates;
-      } catch (err) {
-        natural = best.loop;
-        naturalAscentM = best.ascentM;
-        alternates = [];
-      }
-    }
-  }
 
   // Reoriente chaque boucle (naturelle + alternatives) pour qu'elle
   // commence/finisse au point de son propre tracé le plus proche du point
@@ -671,14 +758,10 @@ async function generateRouteOptions({ start, targetDistanceM, targetAscentM, tar
     distanceM: natural.distanceM,
     ascentM: naturalAscentM,
     predictedDurationMin: predictDurationMin(natural.points, paceMinPerKm),
-    commentary: usedAlternateStart
-      ? (altStartReason === 'ascent'
-          ? `Le D+ visé n'était pas atteignable depuis l'adresse demandée — ce départ est décalé d'environ ${(haversineDistance(start, effectiveStart) / 1000).toFixed(1)} km (à rejoindre avant de courir) pour trouver un secteur plus vallonné. Boucle construite en explorant ${SEARCH_DIRECTIONS} directions autour de ce nouveau départ.`
-          : `La distance/durée visée n'était pas atteignable depuis l'adresse demandée (secteur mal connecté : impasse, réseau clairsemé…) — ce départ est décalé d'environ ${(haversineDistance(start, effectiveStart) / 1000).toFixed(1)} km (à rejoindre avant de partir) pour trouver un secteur mieux desservi. Boucle construite en explorant ${SEARCH_DIRECTIONS} directions autour de ce nouveau départ.`)
-      : (terrain === 'trail'
-          ? `Boucle construite en explorant ${SEARCH_DIRECTIONS} directions autour du départ pour trouver le meilleur dénivelé naturel du secteur, sans répétition de côte.`
-          : `Boucle construite en explorant ${SEARCH_DIRECTIONS} directions autour du départ pour coller au mieux à la distance/durée visée.`),
-    alternateStart: usedAlternateStart ? { lat: effectiveStart.lat, lon: effectiveStart.lon, distanceFromRequestedM: haversineDistance(start, effectiveStart) } : null,
+    commentary: terrain === 'trail'
+      ? `Boucle construite en explorant ${SEARCH_DIRECTIONS} directions autour du départ pour trouver le meilleur dénivelé naturel du secteur, sans répétition de côte.`
+      : `Boucle construite en explorant ${SEARCH_DIRECTIONS} directions autour du départ pour coller au mieux à la distance/durée visée.`,
+    alternateStart: null,
   };
 
   const options = [naturalOption];
@@ -697,9 +780,8 @@ async function generateRouteOptions({ start, targetDistanceM, targetAscentM, tar
   for (let i = 0; i < alternates.length; i++) {
     const alt = alternates[i];
     // Direction telle qu'affichee sur la carte depuis le point REELLEMENT
-    // demande (start), jamais le bearing de recherche interne (alt.bearing,
-    // relatif a effectiveStart qui peut etre decale de plusieurs km) - voir
-    // le commentaire de bearingBetween plus haut.
+    // demande (start), jamais le bearing de recherche interne (alt.bearing)
+    // - voir le commentaire de bearingBetween plus haut.
     const toward = towardCompassPhrase(bearingBetween(start, farthestPoint(alt.result.points, start)));
     let altPoints = alt.result.points;
     let altDistanceM = alt.result.distanceM;
@@ -755,10 +837,7 @@ async function generateRouteOptions({ start, targetDistanceM, targetAscentM, tar
   if (finalDistanceShortfall) {
     const gotLabel = targetDurationMin ? `${Math.round(naturalOption.predictedDurationMin)} min` : `${(natural.distanceM / 1000).toFixed(1)} km`;
     const targetLabel = targetDurationMin ? `${targetDurationMin} min` : `${(targetDistanceM / 1000).toFixed(1)} km`;
-    const radiusNote = searchRadiusM
-      ? (usedAlternateStart ? ` (recherche élargie à ${(searchRadiusM / 1000).toFixed(0)} km déjà essayée)` : ' (recherche élargie essayée, aucun point alentour ne fait mieux)')
-      : ' — essayez la recherche élargie pour explorer plus loin';
-    warning = `Le secteur ne permet pas d'atteindre ${targetLabel} sans trop s'écarter${radiusNote} — meilleure option trouvée : ${gotLabel}.`;
+    warning = `Le secteur ne permet pas d'atteindre ${targetLabel} sans trop s'écarter — essayez la recherche élargie pour explorer plus loin — meilleure option trouvée : ${gotLabel}.`;
   }
 
   const needsMoreAscent = terrain === 'trail' && targetAscentM
@@ -798,42 +877,58 @@ async function generateRouteOptions({ start, targetDistanceM, targetAscentM, tar
 
       if (repeatedAscentM < targetAscentM - ASCENT_TOLERANCE_M) {
         const budgetLabel = targetDurationMin ? `${Math.round(repeatedDurationMin)} min` : `${(repeated.distanceM / 1000).toFixed(1)} km`;
-        const radiusNote = searchRadiusM
-          ? (usedAlternateStart ? ` (recherche élargie à ${(searchRadiusM / 1000).toFixed(0)} km déjà essayée)` : ' (recherche élargie essayée, aucun point alentour ne fait mieux)')
-          : ' — essayez la recherche élargie pour explorer plus loin';
         const repLabel = segCount > 1 ? `${segCount} côtes, ${totalReps} répétitions au total` : `${totalReps} répétition${totalReps > 1 ? 's' : ''}`;
-        warning = `Le secteur ne permet pas d'atteindre ${targetAscentM} m de D+ sans dépasser largement ce qui a été demandé${radiusNote} — meilleure option trouvée : ${repeatedAscentM} m de D+ (${repLabel}, ${budgetLabel}).`;
+        warning = `Le secteur ne permet pas d'atteindre ${targetAscentM} m de D+ sans dépasser largement ce qui a été demandé — essayez la recherche élargie pour explorer plus loin — meilleure option trouvée : ${repeatedAscentM} m de D+ (${repLabel}, ${budgetLabel}).`;
       }
     }
   }
 
+  return { options, warning };
+}
+
+// Point d'entree public : verifie l'infrastructure, delegue a
+// generateOptionsAcrossSearchRadius (searchRadiusM fourni - plusieurs zones
+// distinctes explorees via Geoportail) ou generateOptionsAtSinglePoint
+// (recherche simple au point demande), puis applique la correction finale de
+// D+ via l'API Altimetrie IGN a toutes les options obtenues, quel que soit
+// le chemin emprunte.
+async function generateRouteOptions({ start, targetDistanceM, targetAscentM, targetDurationMin, terrain = 'trail', paceMinPerKm, searchRadiusM }) {
+  // Verifie l'infrastructure avant toute tentative de routage : sans ca, les
+  // echecs de generateLoop (qui retente avec un rayon reduit, pensant a un
+  // probleme de terrain) masqueraient un message clair du type "BRouter non
+  // configure" derriere un message generique trompeur ("secteur non routable").
+  if (!isBrouterConfigured()) {
+    throw new Error('BRouter n\'est pas configuré sur ce serveur (fichiers manquants dans le dossier brouter/) — voir le setup dans le README avant de générer un itinéraire.');
+  }
+
+  const profile = TERRAIN_PROFILES[terrain] || TERRAIN_PROFILES.trail;
+  const { options, warning } = searchRadiusM
+    ? await generateOptionsAcrossSearchRadius({ start, targetDistanceM, targetAscentM, targetDurationMin, terrain, paceMinPerKm, searchRadiusM, profile })
+    : await generateOptionsAtSinglePoint({ start, targetDistanceM, targetAscentM, targetDurationMin, terrain, paceMinPerKm, profile });
+
   // Correction finale du D+ affiche via l'API Altimetrie IGN (donnees RGE
   // ALTI, precision LIDAR) - remplace le D+ estime par BRouter (MNT
   // grossier + facteur correctif approximatif, source des ecarts constates,
-  // ex: 500 m vises, 19 m obtenus reellement). Volontairement fait ICI,
-  // une seule fois par option finale (2 a 4 appels), plutot qu'a chaque
-  // etape de la recherche/l'affinage plus haut : ces etapes internes
-  // (scanDirections, refineLoopFromBearing, boostAscentViaRepeats...)
-  // pilotent leurs propres decisions (quelle direction garder, quand
-  // arreter de repeter une cote) sur l'estimation BRouter rapide - la
-  // refaire a chaque etape multiplierait les appels IGN par dizaines,
-  // inutile et hors du quota de 5 req/s. Le texte des messages
-  // d'avertissement ci-dessus reste donc base sur l'estimation BRouter
-  // (generalement proche, cf test empirique dans geoportail_client.js) -
-  // seul le chiffre de D+ affiche sur chaque carte d'option est corrige.
-  // Repli silencieux sur l'estimation BRouter si l'appel echoue (zone hors
-  // couverture RGE ALTI, service indisponible...) - fonctionnalite
-  // d'appoint, jamais bloquante pour la generation.
+  // ex: 500 m vises, 19 m obtenus reellement). Volontairement fait ICI, une
+  // seule fois par option finale, plutot qu'a chaque etape de la
+  // recherche/l'affinage plus haut : ces etapes internes pilotent leurs
+  // propres decisions sur l'estimation BRouter rapide - la refaire a chaque
+  // etape multiplierait les appels IGN par dizaines, inutile et hors du
+  // quota de 5 req/s. Le texte des messages d'avertissement ci-dessus reste
+  // donc base sur l'estimation BRouter (generalement proche, cf test
+  // empirique dans geoportail_client.js) - seul le chiffre de D+ affiche sur
+  // chaque carte d'option est corrige. Repli silencieux sur l'estimation
+  // BRouter si l'appel echoue (zone hors couverture RGE ALTI, service
+  // indisponible...) - fonctionnalite d'appoint, jamais bloquante.
   for (const opt of options) {
     const measured = await getRouteAscent(opt.points);
     if (measured) opt.ascentM = measured.ascentM;
   }
 
-  // requestedStart (toujours le point litteralement demande, jamais
-  // effectiveStart) + searchRadiusM (si la recherche elargie etait active)
-  // - transmis pour que l'UI affiche ce point et le rayon sur la carte,
-  // sans que l'utilisateur ait a deviner pourquoi le départ affiché n'est
-  // pas exactement l'adresse saisie.
+  // requestedStart (toujours le point litteralement demande) + searchRadiusM
+  // (si la recherche elargie etait active) - transmis pour que l'UI affiche
+  // ce point et le rayon sur la carte, sans que l'utilisateur ait a deviner
+  // pourquoi le départ affiché n'est pas exactement l'adresse saisie.
   return { options, warning, requestedStart: { lat: start.lat, lon: start.lon }, searchRadiusM: searchRadiusM || null };
 }
 
@@ -873,6 +968,7 @@ module.exports = {
   buildMultiRepeatedWaypoints,
   calibrateAscent,
   predictDurationMin,
+  findHillyCandidateCenters,
   generateRouteOptions,
   buildGpxXml,
   TERRAIN_PROFILES,
