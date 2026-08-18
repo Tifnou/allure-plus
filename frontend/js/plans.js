@@ -6,6 +6,7 @@ const plansState = {
   allPlans: [],      // Tous les plans chargés depuis l'API
   answers: {},       // Réponses du wizard { sport, distCat, duree, seances, niveau }
   editingStep: null, // Étape rouverte pour modification (ou null)
+  activeGoal: null,  // Plan en cours (campusState.goal), affiché dans l'étape 1
   filtered: [],      // Plans filtrés après le wizard
   selectedPlan: null,// Plan sélectionné pour le détail
 };
@@ -45,6 +46,14 @@ async function initPlansPage() {
   plansState.filtered = [];
   plansState.selectedPlan = null;
 
+  // S'assure que campusState.goal (plan actif) est chargé, même si on arrive
+  // directement sur cette page sans être passé par Entraînements/Objectifs -
+  // avant renderStepper, qui affiche l'alerte "plan en cours" dans l'étape 1.
+  if (typeof preloadPlanState === 'function') {
+    try { await preloadPlanState(); } catch (_) { /* silencieux */ }
+  }
+  plansState.activeGoal = (typeof campusState !== 'undefined') ? campusState.goal : null;
+
   showView('wizard');
   renderStepper();
   renderPlansInfoBanner();
@@ -52,8 +61,16 @@ async function initPlansPage() {
 
 function showPlansLoading(show) { /* no-op — spinner supprimé */ }
 
-// ─── Bandeau d'info : catalogue de plans + alerte plan actif ────
-async function renderPlansInfoBanner() {
+// Icone sobre (catalogue) utilisee dans l'en-tete de la carte info, a la
+// place d'un emoji.
+const PLANS_INFO_ICON = '<svg class="plans-info-card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4" width="17" height="16" rx="2.5"/><path d="M7.5 9h9M7.5 12.5h9M7.5 16h6"/></svg>';
+
+// ─── Bandeau d'info : catalogue de plans ────
+// Repartition par distance/categorie avec la duree min-max disponible pour
+// chacune ("X plans · 5 km · 4-12 semaines") plutot qu'un simple total ou
+// une repartition par niveau - plus concret pour se projeter, et recalcule
+// a chaque chargement depuis le catalogue reel (allPlans), jamais fige.
+function renderPlansInfoBanner() {
   const el = id => document.getElementById(id);
   const banner = el('plans-info-banner');
   if (!banner) return;
@@ -63,85 +80,49 @@ async function renderPlansInfoBanner() {
   const routePlans = plans.filter(p => p.sport === 'R');
   const trailPlans = plans.filter(p => p.sport === 'T');
 
-  const durees = plans.map(p => p.duree).filter(Boolean);
-  const seancesArr = plans.map(p => p.seances).filter(Boolean);
-  const dureeMin = durees.length ? Math.min(...durees) : null;
-  const dureeMax = durees.length ? Math.max(...durees) : null;
-  const seancesMin = seancesArr.length ? Math.min(...seancesArr) : null;
-  const seancesMax = seancesArr.length ? Math.max(...seancesArr) : null;
-
   // Ordre "naturel" des distances plutôt qu'alphabétique
   const ROUTE_ORDER = ['5 km', '10 km', '20 km', 'Semi-marathon', 'Marathon'];
   const TRAIL_ORDER = ['Court (< 21 km)', 'Moyen (21–42 km)', 'Long (42–80 km)', 'Ultra (> 80 km)'];
-  const orderedUnique = (labels, order) => {
-    const set = new Set(labels.filter(Boolean));
-    const known = order.filter(l => set.has(l));
-    const rest = [...set].filter(l => !order.includes(l));
-    return [...known, ...rest];
-  };
-  const routeDistances = orderedUnique(routePlans.map(p => p.distLabel), ROUTE_ORDER);
-  const trailDistances = orderedUnique(trailPlans.map(p => p.distLabel), TRAIL_ORDER);
 
-  // Répartition par niveau de reprise et, pour le trail, par palier de D+
-  // (TRAIL_DPLUS_TIERS, server.js) — mêmes données que allPlans, aucun appel
-  // supplémentaire. Recalculé à chaque chargement de la page, donc toujours
-  // à jour avec le catalogue réel sans intervention manuelle.
-  const NIVEAU_INFO = {
-    ACTIF:   { emoji: '🟢', label: 'pour reprise active' },
-    PAUSE:   { emoji: '🟡', label: 'pour petite coupure' },
-    REPRISE: { emoji: '🔴', label: 'pour longue reprise' },
-  };
-  const niveauCounts = { ACTIF: 0, PAUSE: 0, REPRISE: 0 };
-  plans.forEach(p => { if (niveauCounts[p.niveau] !== undefined) niveauCounts[p.niveau]++; });
-  const niveauChips = Object.entries(NIVEAU_INFO)
-    .filter(([n]) => niveauCounts[n] > 0)
-    .map(([n, info]) => `<span class="plans-info-stat-chip">${info.emoji} ${niveauCounts[n]} ${info.label}</span>`)
-    .join('');
+  function groupByDistance(list, order) {
+    const map = new Map();
+    list.forEach(p => {
+      if (!p.distLabel) return;
+      if (!map.has(p.distLabel)) map.set(p.distLabel, []);
+      map.get(p.distLabel).push(p);
+    });
+    const known = order.filter(l => map.has(l));
+    const rest = [...map.keys()].filter(l => !order.includes(l));
+    return [...known, ...rest].map(label => {
+      const group = map.get(label);
+      const durees = group.map(p => p.duree).filter(Boolean);
+      const min = durees.length ? Math.min(...durees) : null;
+      const max = durees.length ? Math.max(...durees) : null;
+      return { label, count: group.length, min, max };
+    });
+  }
 
-  const tierCounts = {};
-  trailPlans.forEach(p => { if (p.dplusTier) tierCounts[p.dplusTier] = (tierCounts[p.dplusTier] || 0) + 1; });
-  const tierChips = Object.entries(tierCounts)
-    .map(([tier, n]) => `<span class="plans-info-stat-chip">⛰️ ${n} ${tier.toLowerCase()}</span>`)
-    .join('');
+  const rowsHtml = (groups) => groups.map(g => `
+    <span class="plans-info-stat-chip">${g.count} plan${g.count > 1 ? 's' : ''} · ${g.label}${g.min != null ? ' · ' + (g.min === g.max ? g.min : g.min + '–' + g.max) + ' sem.' : ''}</span>
+  `).join('');
+
+  const sectionHtml = (label, iconClass, groups) => groups.length ? `
+    <div class="plans-info-section">
+      <div class="plans-info-section-head"><span class="sport-icon ${iconClass} plans-info-sport-icon"></span> ${label}</div>
+      <div class="plans-info-stats">${rowsHtml(groups)}</div>
+    </div>
+  ` : '';
 
   const statsHtml = `
     <div class="plans-info-card">
-      <div class="plans-info-card-title">📚 Ce que vous trouverez ici</div>
-      <div class="plans-info-card-text">Un catalogue de ${total} plans d'entraînement prêts à l'emploi, adaptés à votre niveau de reprise (régulier, petite pause ou longue coupure).</div>
-      <div class="plans-info-stats">
-        <span class="plans-info-stat-chip">🏃 ${routePlans.length} plans Route${routeDistances.length ? ' · ' + routeDistances.join(', ') : ''}</span>
-        <span class="plans-info-stat-chip">⛰️ ${trailPlans.length} plans Trail${trailDistances.length ? ' · ' + trailDistances.join(', ') : ''}</span>
-      </div>
-      <div class="plans-info-stats">
-        ${dureeMin != null ? `<span class="plans-info-stat-chip">🗓️ ${dureeMin === dureeMax ? dureeMin : dureeMin + '–' + dureeMax} semaines</span>` : ''}
-        ${seancesMin != null ? `<span class="plans-info-stat-chip">📅 ${seancesMin === seancesMax ? seancesMin : seancesMin + '–' + seancesMax} séances/semaine</span>` : ''}
-      </div>
-      <div class="plans-info-stats">${niveauChips}${tierChips}</div>
+      <div class="plans-info-card-title">${PLANS_INFO_ICON} Ce que vous trouverez ici</div>
+      <div class="plans-info-card-text">Un catalogue de ${total} plans d'entraînement prêts à l'emploi.</div>
+      ${sectionHtml('Route', 'sport-icon--running', groupByDistance(routePlans, ROUTE_ORDER))}
+      ${sectionHtml('Trail', 'sport-icon--trail', groupByDistance(trailPlans, TRAIL_ORDER))}
     </div>
   `;
 
-  // S'assure que campusState.goal (plan actif) est chargé, même si on arrive
-  // directement sur cette page sans être passé par Entraînements/Objectifs.
-  if (typeof preloadPlanState === 'function') {
-    try { await preloadPlanState(); } catch (_) { /* silencieux */ }
-  }
-  const activeGoal = (typeof campusState !== 'undefined') ? campusState.goal : null;
-
-  let warningHtml = '';
-  if (activeGoal) {
-    const name = activeGoal.name || activeGoal.goalTitle || 'Plan en cours';
-    warningHtml = `
-      <div class="plans-active-warning">
-        <span class="plans-active-warning-icon">⚠️</span>
-        <div>
-          <span class="plans-active-warning-title">Un plan est déjà en cours : « ${name} »</span>
-          Choisir et charger un nouveau plan ci-dessous <strong>remplacera entièrement</strong> ce plan (séances et progression réinitialisées). Pensez à l'exporter depuis l'onglet Entraînements si vous voulez le reprendre plus tard.
-        </div>
-      </div>
-    `;
-  }
-
-  banner.innerHTML = statsHtml + warningHtml;
+  banner.innerHTML = statsHtml;
 }
 
 function showView(view) {
@@ -293,6 +274,22 @@ function filterPlansByAnswers(a) {
   );
 }
 
+// Alerte "plan en cours" (plansState.activeGoal) — affichée dans le coin de
+// l'étape 1 tant qu'elle n'est pas répondue, plutôt qu'en encart séparé à
+// côté de la carte catalogue (retour utilisateur : trop de cadres pour une
+// info qui ne concerne que le moment où on choisit un nouveau plan).
+function activeGoalBadgeHtml() {
+  const goal = plansState.activeGoal;
+  if (!goal) return '';
+  const name = goal.name || goal.goalTitle || 'Plan en cours';
+  const detail = 'Choisir et charger un nouveau plan remplacera entièrement ce plan (séances et progression réinitialisées). Pensez à l\'exporter depuis l\'onglet Entraînements si vous voulez le reprendre plus tard.';
+  return `
+    <div class="plan-active-badge" title="${escapeHtml(detail)}">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4M12 16.5h.01M10.3 3.9 2.5 17.5a2 2 0 0 0 1.7 3h15.6a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg>
+      <span>Plan en cours : <strong>${escapeHtml(name)}</strong></span>
+    </div>`;
+}
+
 // Rend le cadre unique du wizard : les 6 (ou 5, route sans D+) étapes
 // empilées. Une étape répondue se réduit en résumé modifiable ; l'étape
 // suivante ne s'active (options affichées) qu'une fois toutes les
@@ -374,6 +371,7 @@ function renderStepper() {
           ${i < steps.length - 1 ? '<div class="step-line"></div>' : ''}
         </div>
         ${body}
+        ${i === 0 && rowClass !== 'done' ? activeGoalBadgeHtml() : ''}
       </div>`;
   });
 

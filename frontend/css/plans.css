@@ -14,18 +14,12 @@
   background: transparent;
 }
 
-/* ── Bandeau d'info : catalogue + plan actif, cote a cote (meme hauteur,
-   largeur proportionnelle) plutot qu'empiles — occupe toute la largeur de
-   page (comme le header) au lieu d'un bandeau etroit fixe a 600px. ── */
-.plans-info-banner {
-  display: flex;
-  align-items: stretch;
-  gap: 16px;
-  margin-bottom: 20px;
-}
+/* ── Bandeau d'info : catalogue de plans — occupe toute la largeur de page
+   (comme le header) au lieu d'un bandeau etroit fixe a 600px. L'alerte "plan
+   deja en cours" ne vit plus ici (encart separe juge redondant) : elle
+   s'affiche desormais dans l'etape 1 du wizard, voir .plan-active-badge. ── */
+.plans-info-banner { margin-bottom: 20px; }
 .plans-info-card {
-  flex: 2;
-  min-width: 0;
   background: var(--bg-white);
   border: 1px solid var(--border);
   border-radius: 14px;
@@ -37,30 +31,25 @@
   display: flex; align-items: center; gap: 8px;
   margin-bottom: 6px;
 }
+.plans-info-card-icon { width: 17px; height: 17px; color: var(--text-secondary); flex-shrink: 0; }
 .plans-info-card-text {
   color: var(--text-secondary); font-size: 13.5px; line-height: 1.5;
-  margin-bottom: 12px;
+  margin-bottom: 14px;
 }
+.plans-info-section + .plans-info-section { margin-top: 12px; }
+.plans-info-section-head {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 12.5px; font-weight: 700; color: var(--text-primary);
+  margin-bottom: 7px;
+}
+.plans-info-sport-icon { width: 16px; height: 16px; }
 .plans-info-stats { display: flex; flex-wrap: wrap; gap: 8px; }
-.plans-info-stats + .plans-info-stats { margin-top: 8px; }
 .plans-info-stat-chip {
   background: var(--bg-secondary, rgba(148,163,184,0.12));
   border-radius: 20px; padding: 6px 12px;
   font-size: 12.5px; font-weight: 600;
   white-space: nowrap;
 }
-.plans-active-warning {
-  flex: 1;
-  min-width: 0;
-  display: flex; align-items: flex-start; gap: 12px;
-  background: #fffbeb; color: #92400e;
-  border: 1px solid rgba(245,158,11,0.35);
-  border-radius: 12px; padding: 14px 18px;
-  font-size: 0.88rem; line-height: 1.5;
-}
-[data-theme="dark"] .plans-active-warning { background: #2a1f08; color: #fde68a; border-color: rgba(245,158,11,0.35); }
-.plans-active-warning-icon { font-size: 1.25rem; flex-shrink: 0; margin-top: 1px; }
-.plans-active-warning-title { display: block; margin-bottom: 3px; font-weight: 700; }
 
 /* ── Wizard : cadre unique, les 6 (ou 5, route sans D+) etapes empilees
    dans une seule carte (voir renderStepper, plans.js) — remplace l'ancien
@@ -103,6 +92,20 @@
 
 .step-q-title { font-size:17px; font-weight:700; color:var(--text-primary); margin:0 0 4px; }
 .step-q-sub { font-size:13.5px; color:var(--text-muted); margin:0 0 14px; }
+
+/* ── Alerte "plan en cours" — coin de l'etape 1, remplace l'ancien encart
+   separe a cote de la carte catalogue (voir activeGoalBadgeHtml, plans.js) ── */
+.plan-active-badge {
+  position: absolute; top: 20px; right: 24px; max-width: 45%;
+  display: flex; align-items: center; gap: 6px;
+  background: #fffbeb; color: #92400e; border: 1px solid rgba(245,158,11,0.35);
+  border-radius: 20px; padding: 5px 12px 5px 10px;
+  font-size: 11.5px; font-weight: 600; cursor: default;
+}
+.plan-active-badge svg { width: 14px; height: 14px; flex-shrink: 0; }
+.plan-active-badge span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+[data-theme="dark"] .plan-active-badge { background: #2a1f08; color: #fde68a; border-color: rgba(245,158,11,0.35); }
+@media (max-width: 700px) { .plan-active-badge { position: static; max-width: none; margin-top: 10px; } }
 
 .step-options { display:flex; flex-direction:column; gap:8px; }
 .step-option {
