@@ -4749,6 +4749,7 @@ body { background: var(--bg) !important; }
   display: flex; align-items: center; justify-content: center;
   padding: 24px;
   animation: fadeIn 0.2s ease;
+  overscroll-behavior: contain;
 }
 .globe-modal {
   width: min(1000px, 95vw); height: min(720px, 88vh);
@@ -4767,6 +4768,11 @@ body { background: var(--bg) !important; }
 }
 .globe-modal-title { font-family: var(--font); font-size: 15px; font-weight: 600; color: var(--text-primary); }
 .globe-modal-subtitle { font-size: 11px; color: var(--text-secondary); margin-top: 2px; font-family: var(--font-body); }
+.globe-modal-hint {
+  flex: 1; text-align: center; padding: 0 16px;
+  font-size: 11px; color: var(--text-muted); font-family: var(--font-body);
+  line-height: 1.4;
+}
 .globe-modal-close {
   width: 30px; height: 30px; border-radius: 50%; border: none;
   background: var(--bg-hover); color: var(--text-secondary); font-size: 18px;

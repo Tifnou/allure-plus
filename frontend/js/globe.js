@@ -100,6 +100,7 @@ function _ensureGlobeModal() {
           <div class="globe-modal-title">&#127760; Mes zones de course</div>
           <div class="globe-modal-subtitle" id="globe-modal-count"></div>
         </div>
+        <div class="globe-modal-hint">Les zones affichées suivent les filtres actifs sur la page Activités (sport, année, mois, recherche)</div>
         <button type="button" class="globe-modal-close" id="globe-modal-close-btn">&times;</button>
       </div>
       <div class="globe-modal-body">
@@ -122,6 +123,14 @@ function _ensureGlobeModal() {
   const close = () => closeActivityGlobe();
   bd.querySelector('#globe-modal-close-btn').onclick = close;
   attachBackdropClose(bd, close);
+  // overscroll-behavior (CSS) ne suffit pas seul : molette au-dessus de
+  // l'entete/legende (zones sans contenu scrollable) faisait tout de meme
+  // defiler la page Activites derriere la modale (scroll chaining) et lui
+  // volait le focus. On bloque explicitement la molette hors du conteneur
+  // Cesium, qui gere deja lui-meme sa molette pour le zoom.
+  bd.addEventListener('wheel', (e) => {
+    if (!e.target.closest('#globe-container')) e.preventDefault();
+  }, { passive: false });
   _globeModalEl = bd;
   return bd;
 }
