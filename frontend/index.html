@@ -12,7 +12,7 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <link rel="stylesheet" href="css/style.css?v=1787052762028" />
+  <link rel="stylesheet" href="css/style.css?v=1787127864683" />
   <link rel="stylesheet" href="css/plans.css?v=1787050930665" />
   <link rel="stylesheet" href="css/routes.css?v=1786732000000" />
 </head>
@@ -700,39 +700,45 @@
           Retour aux activités
         </button>
       </div>
-      <div class="activity-detail-layout">
-        <div id="activity-detail-content"><!-- rempli dynamiquement --></div>
-        <div class="activity-detail-map-col">
-          <div class="route-view-stack" id="route-view-stack">
-            <button class="route-view-toggle" id="route-view-toggle" title="Voir le profil de la course" type="button">
-              <span id="route-view-toggle-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m8 3 4 8 5-5 5 15H2L8 3z"/></svg></span>
-            </button>
-            <div class="route-canvas-wrapper" id="route-canvas-wrapper">
-              <div class="route-canvas-loading" id="route-loading">
-                <div class="route-loading-spinner"></div>
-                <div>Chargement du trace...</div>
+      <div class="activity-detail-frame">
+        <div class="activity-detail-layout">
+          <div id="activity-detail-content"><!-- rempli dynamiquement --></div>
+          <div class="activity-detail-map-col">
+            <div class="route-view-stack" id="route-view-stack">
+              <button class="route-view-toggle" id="route-view-toggle" title="Voir le profil de la course" type="button">
+                <span id="route-view-toggle-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m8 3 4 8 5-5 5 15H2L8 3z"/></svg></span>
+              </button>
+              <div class="route-canvas-wrapper" id="route-canvas-wrapper">
+                <div class="route-canvas-loading" id="route-loading">
+                  <div class="route-loading-spinner"></div>
+                  <div>Chargement du trace...</div>
+                </div>
+                <div id="route-map"></div>
+                <canvas id="route-canvas" class="route-canvas"></canvas>
+                <div class="route-canvas-badge" id="route-badge" style="display:none">
+                  <span id="route-badge-dist"></span>
+                  <span class="route-badge-sep">&middot;</span>
+                  <span id="route-badge-time"></span>
+                </div>
               </div>
-              <div id="route-map"></div>
-              <canvas id="route-canvas" class="route-canvas"></canvas>
-              <div class="route-canvas-badge" id="route-badge" style="display:none">
-                <span id="route-badge-dist"></span>
-                <span class="route-badge-sep">&middot;</span>
-                <span id="route-badge-time"></span>
+              <div class="route-elevation-wrapper route-view-hidden" id="route-elevation-wrapper">
+                <div class="route-elevation-title">Profil de la course</div>
+                <canvas id="route-elevation-chart"></canvas>
               </div>
-            </div>
-            <div class="route-elevation-wrapper route-view-hidden" id="route-elevation-wrapper">
-              <div class="route-elevation-title">Profil de la course</div>
-              <canvas id="route-elevation-chart"></canvas>
             </div>
           </div>
-        </div>
-        <div id="activity-analysis-panel" class="activity-analysis-panel activity-laps-panel" style="display:none">
-          <div class="analysis-section-title">&#x23F1;&#xFE0F; Intervalles</div>
-          <div id="activity-laps-table" class="activity-laps-scroll"></div>
-        </div>
-        <div id="activity-analysis-card" class="activity-analysis-panel" style="display:none">
-          <div class="analysis-section-title">&#x1F4CA; Analyse</div>
-          <div id="activity-analysis-text"></div>
+          <div id="activity-analysis-panel" class="activity-analysis-panel activity-laps-panel" style="display:none">
+            <div class="analysis-section-title">&#x23F1;&#xFE0F; Intervalles</div>
+            <div id="activity-laps-table" class="activity-laps-scroll"></div>
+          </div>
+          <div id="activity-hr-zones-panel" class="activity-analysis-panel activity-laps-panel" style="display:none">
+            <div class="analysis-section-title">&#x2764;&#xFE0F; Temps par zone FC <span id="activity-hr-zones-method" class="hr-zones-method"></span></div>
+            <div id="activity-hr-zones-content" class="activity-laps-scroll"></div>
+          </div>
+          <div id="activity-analysis-card" class="activity-analysis-panel activity-analysis-summary" style="display:none">
+            <div class="analysis-section-title">&#x1F4CA; Analyse</div>
+            <div id="activity-analysis-text"></div>
+          </div>
         </div>
       </div>
     </div>
@@ -1349,7 +1355,7 @@
     <span class="support-fab-dot" id="support-fab-dot" style="display:none"></span>
   </button>
 
-  <script src="js/app.js?v=1787046867910"></script>
+  <script src="js/app.js?v=1787127864683"></script>
   <script src="js/gear.js?v=1786459105633"></script>
   <script src="js/campus.js?v=1787044068478"></script>
   <script src="js/free_sessions.js?v=1786701705047"></script>

@@ -1563,6 +1563,10 @@ function showActivityDetail(activity, backTo = 'activities') {
   if (routeLoading) { routeLoading.style.display = ''; routeLoading.innerHTML = '<div class="route-loading-spinner"></div><div>Chargement du trace...</div>'; }
   if (routeBadge)   { routeBadge.style.display = 'none'; }
   if (routeCanvas)  { const ctx = routeCanvas.getContext('2d'); if (ctx) ctx.clearRect(0, 0, routeCanvas.width, routeCanvas.height); }
+  const hrZonesPanel = el('activity-hr-zones-panel');
+  const hrZonesContent = el('activity-hr-zones-content');
+  if (hrZonesPanel) hrZonesPanel.style.display = 'none';
+  if (hrZonesContent) hrZonesContent.innerHTML = '';
 
   // Reinitialise la bascule carte / profil d'elevation sur la vue "carte"
   _lastRoutePoints = null;
@@ -1693,7 +1697,85 @@ async function loadAndDrawRoute(activityId, distLabel, durLabel) {
     drawRouteTrace(canvas, points);
   } catch(e) {
     if (loading) loading.innerHTML = '<div style="color:rgba(255,255,255,0.4);font-size:13px">Tracé non disponible</div>';
+  } finally {
+    renderActivityHRZonesCard();
   }
+}
+
+// ─── Temps passé dans chaque zone FC (Karvonen) sur la trace GPS ────
+// Reutilise _lastRouteElevation (deja recupere pour le profil d'elevation
+// et le GAP, cf. /api/activity/:id/gps cote serveur) — pas d'appel Garmin
+// supplementaire. Zones = memes bornes que la page Profil (calcHRZones),
+// jamais les zones Garmin, pour rester coherent avec le reste de l'app.
+function computeCurrentUserHRZones() {
+  const p = loadProfileData();
+  const birthDate = p.birthDate || null;
+  const age = birthDate ? (() => {
+    const b = new Date(birthDate);
+    const now = new Date();
+    let a = now.getFullYear() - b.getFullYear();
+    const m = now.getMonth() - b.getMonth();
+    if (m < 0 || (m === 0 && now.getDate() < b.getDate())) a--;
+    return a;
+  })() : (p.age || null);
+  const hrMax = calcHRMax(age, p.hrmax || null);
+  if (!hrMax) return null;
+  const hrRest = _avgRestingHR ? Math.round(_avgRestingHR) : null;
+  return { zones: calcHRZones(hrMax, hrRest), useKarvonen: !!hrRest };
+}
+
+function computeHRZoneTimes(elevation, zones) {
+  const times = zones.map(() => 0);
+  for (let i = 1; i < elevation.length; i++) {
+    const prev = elevation[i - 1], cur = elevation[i];
+    if (prev.sec == null || cur.sec == null || !cur.hr) continue;
+    const dt = cur.sec - prev.sec;
+    if (dt <= 0) continue;
+    let idx = zones.findIndex((z, zi) => cur.hr >= z.low && (cur.hr < z.high || zi === zones.length - 1));
+    if (idx === -1) idx = cur.hr < zones[0].low ? 0 : zones.length - 1;
+    times[idx] += dt;
+  }
+  return times;
+}
+
+function renderActivityHRZonesCard() {
+  const panel = el('activity-hr-zones-panel');
+  const content = el('activity-hr-zones-content');
+  const methodEl = el('activity-hr-zones-method');
+  if (!panel || !content) return;
+  panel.style.display = '';
+
+  const computed = computeCurrentUserHRZones();
+  const elevation = _lastRouteElevation;
+  if (!computed) {
+    if (methodEl) methodEl.textContent = '';
+    content.innerHTML = '<p class="no-data">Renseignez votre profil (âge, FC max) pour voir vos zones</p>';
+    return;
+  }
+  if (methodEl) methodEl.textContent = computed.useKarvonen ? '(Karvonen)' : '(% FC max)';
+  if (!elevation || elevation.length < 2 || !elevation.some(pt => pt.hr)) {
+    content.innerHTML = '<p class="no-data">Pas de données FC disponibles pour cette activité</p>';
+    return;
+  }
+
+  const { zones } = computed;
+  const times = computeHRZoneTimes(elevation, zones);
+  const total = times.reduce((a, b) => a + b, 0);
+  if (total <= 0) {
+    content.innerHTML = '<p class="no-data">Pas de données FC disponibles pour cette activité</p>';
+    return;
+  }
+  content.innerHTML = zones.map((z, i) => {
+    const t = times[i];
+    const pct = t / total * 100;
+    return `<div class="hr-zone-row">
+      <div class="hr-zone-row-top">
+        <span><span class="hr-zone-name">${z.name}</span><span class="hr-zone-range">${z.low}-${z.high} bpm</span></span>
+        <span class="hr-zone-stats">${formatDuration(Math.round(t))} · ${Math.round(pct)}%</span>
+      </div>
+      <div class="hr-zone-track"><div class="hr-zone-fill" style="width:${pct.toFixed(1)}%;background:${z.color}"></div></div>
+    </div>`;
+  }).reverse().join('');
 }
 
 /** Lisse un tracé GPS (moyenne glissante sur lat/lon) pour atténuer le bruit

@@ -2944,16 +2944,32 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
 
 
 
-/* ─── Activity detail : grille 2 colonnes x 2 lignes ──── */
-/* Ligne 1 : cadre Course | Carte (meme hauteur, stretch)   */
-/* Ligne 2 : Intervalles (hauteur fixe + scroll) | Analyse  */
+/* ─── Activity detail : un grand cadre englobant, grille interne 2x3 ──── */
+/* Ligne 1 : cadre Course | Carte (meme hauteur, stretch)         */
+/* Ligne 2 : Intervalles (hauteur fixe + scroll) | Zones FC       */
+/* Ligne 3 : Analyse (bandeau pleine largeur)                     */
+.activity-detail-frame {
+  background: rgba(255,255,255,0.45);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 20px;
+  box-shadow: var(--shadow-sm);
+}
 .activity-detail-layout {
   display: grid;
   grid-template-columns: minmax(0,1fr) 440px;
+  grid-template-areas:
+    "course map"
+    "laps   zones"
+    "summary summary";
   gap: 16px 20px;
   align-items: start;
 }
-.activity-detail-map-col { align-self: stretch; min-width: 0; }
+#activity-detail-content { grid-area: course; }
+.activity-detail-map-col { grid-area: map; align-self: stretch; min-width: 0; }
+#activity-analysis-panel { grid-area: laps; }
+#activity-hr-zones-panel { grid-area: zones; }
+.activity-analysis-summary { grid-area: summary; }
 .activity-analysis-panel {
   background: rgba(255,255,255,0.88);
   backdrop-filter: blur(14px);
@@ -2970,6 +2986,14 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
 }
 .activity-laps-panel .analysis-section-title { flex-shrink: 0; }
 .activity-laps-scroll { flex: 1; overflow-y: auto; min-height: 0; }
+.hr-zones-method { font-size: 10px; font-weight: 400; text-transform: none; letter-spacing: normal; color: var(--text-muted); margin-left: 4px; }
+.hr-zone-row { display: flex; flex-direction: column; gap: 5px; padding: 7px 0; }
+.hr-zone-row-top { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.hr-zone-name { font-size: 12.5px; font-weight: 600; color: var(--text-primary); }
+.hr-zone-range { font-size: 11px; color: var(--text-muted); margin-left: 6px; }
+.hr-zone-stats { font-size: 11.5px; color: var(--text-secondary); white-space: nowrap; font-family: var(--font-body); }
+.hr-zone-track { height: 8px; border-radius: 4px; background: var(--bg); overflow: hidden; }
+.hr-zone-fill { height: 100%; border-radius: 4px; transition: width 0.4s ease; }
 .analysis-section-title {
   font-size: 11px;
   font-weight: 700;
@@ -2997,7 +3021,15 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
 .analysis-item:last-child { border:none; }
 .no-data { font-size:12px; color:var(--text-muted); font-style:italic; }
 @media(max-width:900px) {
-  .activity-detail-layout { grid-template-columns:1fr; }
+  .activity-detail-layout {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "course"
+      "map"
+      "laps"
+      "zones"
+      "summary";
+  }
   .activity-detail-map-col .route-canvas-wrapper { min-height:280px; }
 }
 
@@ -3592,6 +3624,10 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
 /* 1. Card Intervalles / Analyse (activity detail — côté droit) */
 [data-theme="dark"] .activity-analysis-panel {
   background: rgba(18,21,31,0.92) !important;
+  border-color: var(--border) !important;
+}
+[data-theme="dark"] .activity-detail-frame {
+  background: rgba(11,13,20,0.35) !important;
   border-color: var(--border) !important;
 }
 [data-theme="dark"] .laps-table td {
