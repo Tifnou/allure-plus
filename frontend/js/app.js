@@ -1557,6 +1557,7 @@ function showActivityDetail(activity, backTo = 'activities') {
   if (sendBtn) sendBtn.onclick = () => sendActivityToRaces(activity);
   if (typeof wireActivityAnalysisButtons === 'function') wireActivityAnalysisButtons(activity);
   if (typeof mountActivityGearField === 'function') mountActivityGearField(activity);
+  if (typeof wireActivityMoodStat === 'function') wireActivityMoodStat();
 
   // Reinitialise la carte GPS (elements statiques, reutilises a chaque activite)
   const routeLoading = el('route-loading');

@@ -1184,6 +1184,9 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
 .activity-stat{text-align:center;padding:5px 5px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);}
 .activity-stat-value{font-size:15px;font-weight:500;color:var(--text-primary);letter-spacing:-0.02em;white-space:nowrap;}
 .activity-stat-label{font-size:9px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.04em;font-family:var(--font-body);margin-top:1px;white-space:nowrap;}
+.activity-stat--clickable{cursor:pointer;transition:border-color var(--transition);}
+.activity-stat--clickable:hover{border-color:var(--accent);}
+.activity-mood-empty{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;border:1.5px dashed var(--text-muted);color:var(--text-muted);font-size:14px;line-height:1;}
 .activity-link{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-family:var(--font-body);color:var(--accent-text);border:1px solid #BFDBFE;background:var(--accent-light);padding:6px 12px;border-radius:20px;text-decoration:none;margin-top:10px;transition:all var(--transition);}
 .activity-detail-actions{display:flex;flex-direction:column;gap:8px;margin-top:10px;}
 .activity-detail-actions-row{display:flex;gap:8px;}
@@ -2032,6 +2035,23 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
 }
 .session-status-badge--mood:hover { transform: scale(1.06); }
 .session-mood-icon { display: inline-block; vertical-align: middle; }
+.session-print-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 0;
+  color: var(--text-muted);
+  transition: all var(--transition);
+}
+.session-print-btn:hover { border-color: var(--text-muted); color: var(--text-primary); }
 
 /* ── Panneau de détail d'une séance ── */
 .session-detail-panel {

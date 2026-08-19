@@ -440,21 +440,48 @@ function sessionMoodBadgeForActivity(activityId) {
 }
 // Case "Ressenti" dans le detail d'une activite (app.js, showActivityDetail),
 // meme grille que Distance/Duree/... - uniquement si l'activite est liee a
-// une seance de plan avec un ressenti enregistre.
+// une seance de plan (le ressenti est stocke par seance, pas par activite -
+// cf SESSION_MOOD_KEY). Cliquable : ouvre le meme selecteur que cote
+// Entrainements, meme si aucun ressenti n'est encore enregistre - modifier
+// depuis l'un ou l'autre cote met a jour la meme cle, donc les deux
+// affichages restent automatiquement synchronises (wireActivityMoodStat,
+// app.js showActivityDetail).
 function activityMoodStatHtml(activityId) {
   if (typeof _analysisIndex === 'undefined') return '';
   const rec = _analysisIndex.byActivity[String(activityId)];
   if (!rec?.planKey?.weekId) return '';
   const mood = getSessionMood(rec.planKey.weekId, rec.planKey.trainingIndex);
-  if (!mood) return '';
-  return `<div class="activity-stat"><div class="activity-stat-value">${sessionMoodIconSvg(mood, 24)}</div><div class="activity-stat-label">Ressenti</div></div>`;
+  const icon = mood ? sessionMoodIconSvg(mood, 24) : '<span class="activity-mood-empty">+</span>';
+  return `<div class="activity-stat activity-stat--clickable" id="activity-mood-stat"
+      data-week-id="${rec.planKey.weekId}" data-training-index="${rec.planKey.trainingIndex}"
+      title="${mood ? 'Modifier le ressenti' : 'Ajouter un ressenti'}">
+      <div class="activity-stat-value" id="activity-mood-value">${icon}</div>
+      <div class="activity-stat-label">Ressenti</div>
+    </div>`;
+}
+
+// Branche le clic sur la case "Ressenti" du detail d'activite (appele depuis
+// showActivityDetail, app.js, apres insertion du HTML de la carte Course).
+function wireActivityMoodStat() {
+  const statEl = document.getElementById('activity-mood-stat');
+  if (!statEl) return;
+  statEl.onclick = () => {
+    promptSessionMood(statEl.dataset.weekId, statEl.dataset.trainingIndex, (mood) => {
+      const valueEl = document.getElementById('activity-mood-value');
+      if (valueEl) valueEl.innerHTML = mood ? sessionMoodIconSvg(mood, 24) : '<span class="activity-mood-empty">+</span>';
+      statEl.title = mood ? 'Modifier le ressenti' : 'Ajouter un ressenti';
+    });
+  };
 }
 
 // Petite modale "Comment s'est passee la seance ?" proposee juste apres
 // avoir marque une seance comme faite - 3 choix (facile a saisir, pas de
 // texte libre pour rester rapide). Ne bloque rien si l'utilisateur ferme
-// sans repondre (le ressenti reste simplement non renseigne).
-function promptSessionMood(weekId, trainingIndex) {
+// sans repondre (le ressenti reste simplement non renseigne). onDone
+// (optionnel) est rappele avec le mood choisi (ou undefined si fermeture
+// sans choix) - utilise par wireActivityMoodStat pour rafraichir la case
+// Ressenti du detail d'activite sans reconstruire toute la page.
+function promptSessionMood(weekId, trainingIndex, onDone) {
   if (document.getElementById('session-mood-modal-backdrop')) return;
   const bd = document.createElement('div');
   bd.className = 'confirm-modal-backdrop';
@@ -476,7 +503,8 @@ function promptSessionMood(weekId, trainingIndex) {
     btn.onclick = () => {
       setSessionMood(weekId, trainingIndex, btn.dataset.mood);
       close();
-      renderSessionList(campusState.selectedWeekIdx);
+      if (campusState.weeks && campusState.weeks.length) renderSessionList(campusState.selectedWeekIdx);
+      if (typeof onDone === 'function') onDone(btn.dataset.mood);
     };
   });
   attachBackdropClose(bd, close);
@@ -1225,6 +1253,7 @@ function renderSessionCard(session, idx, weekIdx, weekId, isCurrentWeek) {
   }
   const mood = weekId ? getSessionMood(weekId, session.trainingIndex) : null;
   const sport    = session.sport === 'ppg' ? 'PPG' : session.sport === 'trailV2' ? 'Trail' : '';
+  const isPPG = session.sport === 'ppg' || session.trainingCategory === 'gpp';
 
   const statusMap = {
     'done': { label: '\u2713 Fait',    cls: 'status--done'   },
@@ -1298,6 +1327,7 @@ function renderSessionCard(session, idx, weekIdx, weekId, isCurrentWeek) {
           </div>
         </div>
         <div class="session-card-right">
+          ${isPPG ? `<button type="button" class="session-print-btn" onclick="event.stopPropagation();printPPGSession('${weekId || ''}',${session.trainingIndex ?? 0})" title="Imprimer la séance">&#128424;</button>` : ''}
           <div class="session-difficulty">${diffDots}</div>
           ${(() => {
             if (!weekId || typeof _analysisIndex === 'undefined') return '';
@@ -1394,6 +1424,101 @@ function formatPPGBlocksHtml(blocks) {
       <div class="session-detail-section-title">Exercices</div>
       ${blocksHtml}
     </div>`;
+}
+
+// "?"? Impression d'une seance de renforcement (PPG) "?"?"?"?"?"?"?"?"?"?"?"?"?
+// Fiche imprimable independante (fenetre separee) - recap propre des blocs
+// d'exercices avec case a cocher, repetitions/duree et niveau d'effort,
+// pensee pour etre imprimee et cochee a la main pendant la seance.
+function buildPPGPrintHtml(session) {
+  const blocks = session.exercisesBlocks || [];
+  const blocksHtml = blocks.map((block, bi) => {
+    const all = block.exercises || block || [];
+    const recovery = all.find(e => e.exerciseType === 'recuperation');
+    const exercises = all.filter(e => e.exerciseType !== 'recuperation' && e.name);
+    if (exercises.length === 0) return '';
+    const rows = exercises.map(ex => {
+      const meta = formatPPGExerciseMeta(ex);
+      const effort = ex.difficulty && ex.difficulty !== 'recovery' ? (PPG_DIFFICULTY_FR[ex.difficulty] || ex.difficulty) : '';
+      return `<tr>
+        <td class="print-ex-check"><span class="print-checkbox"></span></td>
+        <td class="print-ex-name">${ex.name}</td>
+        <td class="print-ex-meta">${meta || ''}</td>
+        <td class="print-ex-effort">${effort || ''}</td>
+      </tr>`;
+    }).join('');
+    const repeatLabel = block.repeat > 1 ? ` &times; ${block.repeat} séries` : '';
+    const recoveryLabel = recovery ? `Récupération entre séries : ${formatPPGExerciseMeta(recovery)}` : '';
+    return `
+      <div class="print-block">
+        <div class="print-block-title">Bloc ${bi + 1}${repeatLabel}</div>
+        <table class="print-ex-table">
+          <thead><tr><th></th><th>Exercice</th><th>Répétitions / Durée</th><th>Effort</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+        ${recoveryLabel ? `<div class="print-block-recovery">${recoveryLabel}</div>` : ''}
+      </div>`;
+  }).join('');
+
+  const duration = session.stats?.expectedDuration;
+  const metaParts = [
+    session.sport === 'ppg' ? 'PPG' : '',
+    duration ? fmtDuration(duration) : '',
+  ].filter(Boolean);
+
+  return `<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<title>${session.displayName || session.name || 'Séance'} — Allure+</title>
+<style>
+  @page { margin: 18mm 16mm; }
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, "Segoe UI", Arial, sans-serif; color: #111; margin: 0; padding: 0 0 24px; }
+  .print-header { border-bottom: 2px solid #111; padding-bottom: 12px; margin-bottom: 20px; }
+  .print-brand { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: #666; margin-bottom: 4px; }
+  .print-title { font-size: 24px; font-weight: 700; margin: 0; }
+  .print-meta { font-size: 13px; color: #444; margin-top: 6px; }
+  .print-desc { font-size: 13px; line-height: 1.5; color: #222; margin-bottom: 16px; }
+  .print-coach { font-size: 12.5px; line-height: 1.5; color: #333; background: #f4f4f4; border-left: 3px solid #999; padding: 10px 14px; margin-bottom: 20px; font-style: italic; }
+  .print-block { margin-bottom: 22px; break-inside: avoid; }
+  .print-block-title { font-size: 15px; font-weight: 700; margin-bottom: 8px; }
+  .print-ex-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .print-ex-table th { text-align: left; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.04em; color: #666; border-bottom: 1px solid #ccc; padding: 4px 8px; }
+  .print-ex-table td { padding: 7px 8px; border-bottom: 1px solid #eee; vertical-align: middle; }
+  .print-checkbox { display: inline-block; width: 13px; height: 13px; border: 1.5px solid #999; border-radius: 3px; }
+  .print-ex-name { font-weight: 600; }
+  .print-ex-meta, .print-ex-effort { color: #444; white-space: nowrap; }
+  .print-block-recovery { font-size: 12px; color: #666; font-style: italic; margin-top: 6px; }
+</style>
+</head>
+<body>
+  <div class="print-header">
+    <div class="print-brand">Allure+ — Fiche séance</div>
+    <h1 class="print-title">${session.displayName || session.name || 'Séance de renforcement'}</h1>
+    ${metaParts.length ? `<div class="print-meta">${metaParts.join(' &middot; ')}</div>` : ''}
+  </div>
+  ${session.description ? `<div class="print-desc">${mdBold(sanitizeCoachText(session.description))}</div>` : ''}
+  ${session.coachAdvice ? `<div class="print-coach">\u{1F4A1} ${sanitizeCoachText(session.coachAdvice)}</div>` : ''}
+  ${blocksHtml}
+</body></html>`;
+}
+
+function printPPGSession(weekId, trainingIndex) {
+  const week = (campusState.weeks || []).find(w => w._id === weekId);
+  const session = week?.sessions?.find(s => (s.trainingIndex ?? 0) === Number(trainingIndex));
+  if (!session) {
+    if (typeof showToast === 'function') showToast('Séance introuvable', 'error');
+    return;
+  }
+  const win = window.open('', '_blank', 'width=820,height=1040');
+  if (!win) {
+    if (typeof showToast === 'function') showToast("Impossible d'ouvrir la fenêtre d'impression (bloqueur de popup ?)", 'error');
+    return;
+  }
+  win.document.open();
+  win.document.write(buildPPGPrintHtml(session));
+  win.document.close();
+  win.focus();
+  win.addEventListener('load', () => win.print());
 }
 
 // "?"? Panneau de détail d'une séance "?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?
