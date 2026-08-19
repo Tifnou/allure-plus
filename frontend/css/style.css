@@ -4756,34 +4756,6 @@ body { background: var(--bg) !important; }
   cursor: pointer; transition: all var(--transition);
 }
 .act-globe-icon-btn:hover { border-color: var(--accent); color: var(--accent); }
-/* Icone globe animee (logo/globe.jfif) : sprite 4 frames en silhouette
-   blanche/alpha (fond d'origine remplace par de la transparence a partir
-   de la luminance), utilisee en mask-image plutot qu'en simple image pour
-   que sa couleur suive currentColor (gris au repos, bleu au survol) comme
-   l'ancienne icone SVG - le fichier source ne porte que la forme, jamais
-   la couleur. mask-position en pixels (pas %) : avec des pourcentages,
-   steps(4) atterrit sur des positions de 25% en 25% qui ne correspondent
-   pas aux 4 cadres reels du sprite (0/33.3/66.6/100%) et desynchronise
-   l'animation - un pas fixe de 18px (largeur du cadre affiche) par cran
-   reste toujours cale exactement sur un cadre. */
-.globe-icon-anim {
-  display: inline-block;
-  width: 18px; height: 20px;
-  background-color: var(--text-secondary);
-  -webkit-mask-image: url('../images/globe-icon-sprite.png');
-  mask-image: url('../images/globe-icon-sprite.png');
-  -webkit-mask-size: 400% 100%;
-  mask-size: 400% 100%;
-  -webkit-mask-repeat: no-repeat;
-  mask-repeat: no-repeat;
-  animation: globe-icon-spin 1.6s steps(4) infinite;
-  transition: background-color var(--transition);
-}
-.act-globe-icon-btn:hover .globe-icon-anim { background-color: var(--accent); }
-@keyframes globe-icon-spin {
-  from { -webkit-mask-position: 0 0; mask-position: 0 0; }
-  to   { -webkit-mask-position: -54px 0; mask-position: -54px 0; }
-}
 
 /* ─── Globe des activites (modale) ─── */
 .globe-modal-backdrop {
