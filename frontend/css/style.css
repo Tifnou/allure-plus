@@ -68,7 +68,7 @@
   --purple:         #C084FC;
   --text-primary:   #E8EAF2;
   --text-secondary: #8B93B0;
-  --text-muted:     #4B5278;
+  --text-muted:     #7A82AC;
   --nav-text:       #D0D8F0;
   --shadow-sm:      0 1px 4px rgba(0,0,0,0.35);
   --shadow-md:      0 4px 20px rgba(0,0,0,0.50);
@@ -1185,6 +1185,9 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
 .activity-stat-value{font-size:15px;font-weight:500;color:var(--text-primary);letter-spacing:-0.02em;white-space:nowrap;}
 .activity-stat-label{font-size:9px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.04em;font-family:var(--font-body);margin-top:1px;white-space:nowrap;}
 .activity-link{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-family:var(--font-body);color:var(--accent-text);border:1px solid #BFDBFE;background:var(--accent-light);padding:6px 12px;border-radius:20px;text-decoration:none;margin-top:10px;transition:all var(--transition);}
+.activity-detail-actions{display:flex;flex-direction:column;gap:8px;margin-top:10px;}
+.activity-detail-actions-row{display:flex;gap:8px;}
+.activity-detail-actions-row .activity-link{flex:1;justify-content:center;margin-top:0;white-space:nowrap;}
 .activity-link:hover{background:#DBEAFE;}
 
 /* Pile carte / profil d'elevation avec transition croisee */
@@ -2979,13 +2982,29 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
   border: 1px solid rgba(0,0,0,0.06);
 }
 .activity-laps-panel {
-  height: 230px;
+  height: 300px;
   display: flex;
   flex-direction: column;
   overflow: hidden;
 }
-.activity-laps-panel .analysis-section-title { flex-shrink: 0; }
+.activity-laps-panel .analysis-section-title { flex-shrink: 0; margin-bottom: 0; }
 .activity-laps-scroll { flex: 1; overflow-y: auto; min-height: 0; }
+.analysis-panel-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-shrink: 0; margin-bottom: 10px; }
+.laps-filter-row { display: flex; gap: 6px; }
+.laps-filter-btn {
+  width: 32px; height: 22px;
+  border-radius: 6px; border: 1px solid var(--border);
+  font-size: 9px; font-weight: 700; letter-spacing: 0.02em;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--bg); color: var(--text-secondary);
+  transition: all var(--transition);
+}
+.laps-filter-btn:hover { color: var(--text-primary); }
+.laps-filter-btn.active { color: #fff; border-color: transparent; }
+.laps-filter-btn[data-type="warmup"].active { background: #16A34A; }
+.laps-filter-btn[data-type="effort"].active { background: #2563EB; }
+.laps-filter-btn[data-type="rest"].active { background: #7C3AED; }
 #activity-hr-zones-content { display: flex; flex-direction: column; justify-content: center; overflow: hidden; }
 .hr-zones-method { font-size: 10px; font-weight: 400; text-transform: none; letter-spacing: normal; color: var(--text-muted); margin-left: 4px; }
 .hr-zone-row { display: flex; align-items: center; gap: 10px; padding: 4px 0; }

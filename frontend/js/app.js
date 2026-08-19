@@ -1544,10 +1544,12 @@ function showActivityDetail(activity, backTo = 'activities') {
         ${(type.toLowerCase().includes('run') || type.toLowerCase().includes('trail')) ? `<div class="activity-stat"><div class="activity-stat-value" id="activity-gear-value">\u2014</div><div class="activity-stat-label">Chaussures</div></div>` : ''}
         ${typeof activityMoodStatHtml === 'function' ? activityMoodStatHtml(activity.id) : ''}
       </div>
-      <div style="display:flex;gap:10px;flex-wrap:wrap">
-        ${activity.id ? `<a href="https://connect.garmin.com/modern/activity/${activity.id}" target="_blank" class="activity-link">Voir sur Garmin Connect</a>` : ''}
-        ${isRaceEligibleActivity(activity) ? `<button type="button" class="activity-link" id="btn-send-to-races" style="cursor:pointer">🏅 Envoyer vers Courses</button>` : ''}
-        ${typeof renderActivityAnalysisButtons === 'function' ? renderActivityAnalysisButtons(activity) : ''}
+      <div class="activity-detail-actions">
+        <div class="activity-detail-actions-row">
+          ${activity.id ? `<a href="https://connect.garmin.com/modern/activity/${activity.id}" target="_blank" class="activity-link">Voir sur Garmin Connect</a>` : ''}
+          ${isRaceEligibleActivity(activity) ? `<button type="button" class="activity-link" id="btn-send-to-races" style="cursor:pointer">🏅 Envoyer vers Courses</button>` : ''}
+        </div>
+        ${(() => { const a = typeof renderActivityAnalysisButtons === 'function' ? renderActivityAnalysisButtons(activity) : ''; return a ? `<div class="activity-detail-actions-row">${a}</div>` : ''; })()}
       </div>
     </div>`;
 
@@ -2047,9 +2049,11 @@ async function loadActivityAnalysis(activity) {
   const analysisCard = el('activity-analysis-card');
   const lapsEl = el('activity-laps-table');
   const analysisEl = el('activity-analysis-text');
+  const lapsFilterEl = el('activity-laps-filter');
   if (!panel || !activity?.id) return;
   panel.style.display = '';
   if (analysisCard) analysisCard.style.display = '';
+  if (lapsFilterEl) lapsFilterEl.innerHTML = '';
 
   // Contexte pour la classification en zone (VMA du coureur + trail ou route)
   const activityTypeLower = (activity.activityType || '').toLowerCase();
@@ -2259,6 +2263,33 @@ async function loadActivityAnalysis(activity) {
               </tr>`;
             }).join('')}</tbody>
           </table>`;
+
+        // Filtre par type de lap (petites vignettes colorees, meme teinte que
+        // le fond des lignes .lap-warmup/.lap-effort/.lap-rest) - un seul type
+        // affiche a la fois, re-cliquer sur le meme bouton revient a tout afficher.
+        if (lapsFilterEl) {
+          const filterBtns = [
+            warmupLaps.length > 0 ? { type: 'warmup', label: 'ÉCH', title: 'Échauffement' } : null,
+            effortEntries.length > 0 ? { type: 'effort', label: 'EFF', title: 'Effort' } : null,
+            restLaps.length > 0 ? { type: 'rest', label: 'RÉC', title: 'Récupération' } : null,
+          ].filter(Boolean);
+          lapsFilterEl.innerHTML = filterBtns.map(b =>
+            `<button type="button" class="laps-filter-btn" data-type="${b.type}" title="${b.title}">${b.label}</button>`
+          ).join('');
+          lapsFilterEl.querySelectorAll('.laps-filter-btn').forEach(btn => {
+            btn.onclick = () => {
+              const wasActive = btn.classList.contains('active');
+              lapsFilterEl.querySelectorAll('.laps-filter-btn').forEach(b => b.classList.remove('active'));
+              const rows = lapsEl.querySelectorAll('tbody tr');
+              if (wasActive) {
+                rows.forEach(r => { r.style.display = ''; });
+              } else {
+                btn.classList.add('active');
+                rows.forEach(r => { r.style.display = r.classList.contains('lap-' + btn.dataset.type) ? '' : 'none'; });
+              }
+            };
+          });
+        }
 
         const insights = [];
 
