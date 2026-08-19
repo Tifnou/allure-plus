@@ -4775,12 +4775,14 @@ body { background: var(--bg) !important; }
 }
 .globe-modal-close:hover { background: var(--border); color: var(--text-primary); }
 .globe-modal-body { flex: 1; position: relative; min-height: 0; }
-.globe-container { width: 100%; height: 100%; }
+.globe-container { width: 100%; height: 100%; position: relative; overflow: hidden; }
+.globe-spots-layer { position: absolute; inset: 0; pointer-events: none; overflow: hidden; z-index: 2; }
 .globe-loading, .globe-empty-state {
   position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
   flex-direction: column; gap: 10px;
   color: rgba(255,255,255,0.55); font-size: 13px; font-family: var(--font-body); text-align: center;
   pointer-events: none;
+  z-index: 3;
 }
 .globe-legend {
   position: absolute; bottom: 16px; left: 20px;
@@ -4788,9 +4790,14 @@ body { background: var(--bg) !important; }
   font-size: 10.5px; color: rgba(255,255,255,0.6); font-family: var(--font-body);
   background: rgba(0,0,0,0.4); backdrop-filter: blur(6px);
   padding: 6px 12px; border-radius: 20px;
+  z-index: 3;
 }
 .globe-legend-gradient { width: 70px; height: 6px; border-radius: 3px; background: linear-gradient(90deg,#3B82F6,#FACC15,#F87171); }
-.globe-spot { border-radius: 50%; cursor: pointer; transition: filter 0.15s; }
+.globe-spot {
+  position: absolute; transform: translate(-50%, -50%);
+  border-radius: 50%; cursor: pointer; transition: filter 0.15s;
+  pointer-events: auto;
+}
 .globe-spot:hover { filter: brightness(1.25); }
 
 /* ─── Vue calendrier ─── */

@@ -12,8 +12,10 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script src="https://unpkg.com/globe.gl@2.46.1/dist/globe.gl.min.js"></script>
-  <link rel="stylesheet" href="css/style.css?v=1787143551986" />
+  <script>window.CESIUM_BASE_URL = 'https://cdn.jsdelivr.net/npm/cesium@1.120.0/Build/Cesium/';</script>
+  <script src="https://cdn.jsdelivr.net/npm/cesium@1.120.0/Build/Cesium/Cesium.js"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cesium@1.120.0/Build/Cesium/Widgets/widgets.css" />
+  <link rel="stylesheet" href="css/style.css?v=1787145335943" />
   <link rel="stylesheet" href="css/plans.css?v=1787132767394" />
   <link rel="stylesheet" href="css/routes.css?v=1787132767394" />
 </head>
@@ -1374,7 +1376,7 @@
   <script src="js/plans.js?v=1787050930665"></script>
   <script src="js/routes.js?v=1786732000000"></script>
   <script src="js/support.js?v=1786966950464"></script>
-  <script src="js/globe.js?v=1787144650943"></script>
+  <script src="js/globe.js?v=1787145422821"></script>
   <!-- ... MODAL LOGS ........................... -->
   <div id="logs-modal" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.55);backdrop-filter:blur(4px);" onclick="if(event.target===this)closeLogsModal()">
     <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:min(700px,95vw);max-height:80vh;background:#0f1117;border:1px solid #2a2a3a;border-radius:14px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 24px 64px rgba(0,0,0,0.6);">
