@@ -1696,6 +1696,8 @@ app.get('/api/dashboard', requireSession, async (req, res) => {
       trainingEffectLabel:        a.trainingEffectLabel,
       aerobicTrainingEffectMessage:   a.aerobicTrainingEffectMessage,
       anaerobicTrainingEffectMessage: a.anaerobicTrainingEffectMessage,
+      startLat:        a.startLatitude,
+      startLon:        a.startLongitude,
     }));
     res.json({ stats, lastRuns, allActivities, records, lastUpdated: new Date().toISOString() });
   } catch (err) { handleError(res, err); }
@@ -1719,7 +1721,13 @@ app.get('/api/activities/year/:year', requireSession, async (req, res) => {
     const isPastYear = year < currentYear;
     if (isPastYear) {
       const cached = readScoped(ACTIVITIES_CACHE_FILE, req.session.email, {})[year];
-      if (cached) return res.json({ year, activities: cached, count: cached.length, cached: true });
+      // cached[0].startLat === undefined : cache ecrit avant l'ajout des
+      // coordonnees de depart (globe des activites) - on l'ignore une fois
+      // pour forcer un refetch qui le repeuplera avec le champ manquant,
+      // plutot que de laisser ces annees sans points sur le globe indefiniment.
+      if (cached && (cached.length === 0 || cached[0].startLat !== undefined)) {
+        return res.json({ year, activities: cached, count: cached.length, cached: true });
+      }
     }
     const { getActivitiesForYear } = req.session.fns;
     if (!getActivitiesForYear) return res.status(501).json({ error: 'Non supporte' });
@@ -1742,6 +1750,8 @@ app.get('/api/activities/year/:year', requireSession, async (req, res) => {
       trainingEffectLabel:        a.trainingEffectLabel,
       aerobicTrainingEffectMessage:   a.aerobicTrainingEffectMessage,
       anaerobicTrainingEffectMessage: a.anaerobicTrainingEffectMessage,
+      startLat:        a.startLatitude,
+      startLon:        a.startLongitude,
     }));
     if (isPastYear) {
       const cache = readScoped(ACTIVITIES_CACHE_FILE, req.session.email, {});

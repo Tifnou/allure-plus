@@ -2,6 +2,7 @@
 
 // Variables globales module
 let _avgRestingHR = 0;  // FC repos moyenne (calculée depuis les données HR)
+let _lastFilteredActivities = [];  // Dernier jeu filtre de la page Activites (globe.js)
 
 // ═══════════════════════════════════════════════════════
 // Fermeture d'une modale au clic sur le fond (backdrop)
@@ -1037,6 +1038,12 @@ function renderAllActivities(activities, filter = 'all', yearOverride = null) {
   // lots (chargement initial + chargements par année à la demande) qui ne
   // sont pas forcément concaténés dans le bon ordre global.
   filtered.sort((a, b) => new Date(b.date || b.startTimeLocal || b.startTimeGMT || 0) - new Date(a.date || a.startTimeLocal || a.startTimeGMT || 0));
+
+  // Expose le meme jeu filtre au globe des activites (globe.js) - reutilise
+  // tel quel (sport + annee + mois + recherche), pas de logique dupliquee.
+  // refreshActivityGlobe() est un no-op si la modale n'est pas ouverte.
+  _lastFilteredActivities = filtered;
+  if (typeof refreshActivityGlobe === 'function') refreshActivityGlobe();
 
   // Avertir si une recherche texte porte sur "Toutes les années" alors que
   // certaines années n'ont aucune activité chargée en mémoire (chargement à
