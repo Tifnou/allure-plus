@@ -1775,13 +1775,13 @@ function renderActivityHRZonesCard() {
     const t = times[i];
     const pct = t / total * 100;
     const barPct = t / maxTime * 100;
-    return `<div class="hr-zone-row">
-      <div class="hr-zone-label">
-        <span class="hr-zone-name">${z.name}</span>
-        <span class="hr-zone-range">${z.low}-${z.high} bpm</span>
+    return `<div class="hrz-row">
+      <div class="hrz-label">
+        <span class="hrz-name">${z.name}</span>
+        <span class="hrz-range">${z.low}-${z.high} bpm</span>
       </div>
-      <div class="hr-zone-bar-wrap"><div class="hr-zone-track"><div class="hr-zone-fill" style="width:${barPct.toFixed(1)}%;background:${z.color}"></div></div></div>
-      <div class="hr-zone-stats">${formatDuration(Math.round(t))} · ${Math.round(pct)}%</div>
+      <div class="hrz-bar-wrap"><div class="hrz-track"><div class="hrz-fill" style="width:${barPct.toFixed(1)}%;background:${z.color}"></div></div></div>
+      <div class="hrz-stats">${formatDuration(Math.round(t))} · ${Math.round(pct)}%</div>
     </div>`;
   }).reverse().join('');
 }
