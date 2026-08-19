@@ -1190,6 +1190,24 @@ async function calGoToday() {
   await renderActivitiesCalendar();
 }
 
+// Les selecteurs Annee/Mois du haut de page ne pilotaient que la vue Liste -
+// la vue Calendrier restait bloquee sur le mois courant, quel que soit le
+// filtre choisi (retour utilisateur). Appele par les handlers filterYear/
+// filterMonth (app.js) : aligne _calDate sur le filtre (annee choisie ou
+// annee deja affichee si "Toutes les annees", meme logique pour le mois),
+// puis ne recalcule que si la vue Calendrier est actuellement visible -
+// meme garde que le filtre sport un peu plus haut.
+function _calSyncFromActivityFilters() {
+  const yearVal = parseInt(el('filter-year')?.value) || 0;
+  const monthVal = parseInt(el('filter-month')?.value) || 0;
+  const newYear = yearVal || _calDate.getFullYear();
+  const newMonth = monthVal ? (monthVal - 1) : _calDate.getMonth();
+  _calDate = new Date(newYear, newMonth, 1);
+  if (typeof renderActivitiesCalendar === 'function' && el('activities-calendar-card') && !el('activities-calendar-card').classList.contains('act-view-hidden')) {
+    renderActivitiesCalendar();
+  }
+}
+
 // Dispatcheur mois/annee - cal-prev/cal-next/cal-today/le filtre sport et
 // showActivitiesCalendarView appellent tous cette fonction sans se soucier
 // du mode courant.
@@ -4693,8 +4711,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
     // Toujours mettre à jour l'affichage avec l'année sélectionnée
     renderAllActivities(_allActivities, getCurrentSportFilter(), year || null);
+    _calSyncFromActivityFilters();
   });
-  if (filterMonth) filterMonth.addEventListener('change', () => renderAllActivities(_allActivities, getCurrentSportFilter()));
+  if (filterMonth) filterMonth.addEventListener('change', () => {
+    renderAllActivities(_allActivities, getCurrentSportFilter());
+    _calSyncFromActivityFilters();
+  });
   const filterSearch = el('filter-search');
   if (filterSearch) filterSearch.addEventListener('input', () => renderAllActivities(_allActivities, getCurrentSportFilter()));
   // Status + chargement initial

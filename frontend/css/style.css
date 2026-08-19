@@ -4720,16 +4720,23 @@ body { background: var(--bg) !important; }
 .act-header-right { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; flex-shrink: 0; }
 .act-header-right .page-header-date { align-self: flex-end; }
 
-/* Bascule Liste / Vue calendrier — sortie du flux (position:absolute) et
-   ancree au coin bas droit du cadre (#page-activities .act-header-sticky,
-   voir position:relative plus haut) plutot que dans la colonne droite :
-   elle ne "coute" alors plus de largeur a la ligne des pastilles. Offsets
-   calques sur le padding du cadre (.page-header, 10px 20px) pour affleurer
-   son coin. */
-#page-activities .act-view-toggle {
+/* Bascule Liste / Vue calendrier + bouton Globe — sortie du flux
+   (position:absolute) et ancrees au coin bas droit du cadre
+   (#page-activites .act-header-sticky, voir position:relative plus haut)
+   plutot que dans la colonne droite : elles ne "coutent" alors plus de
+   largeur a la ligne des pastilles. Offsets calques sur le padding du
+   cadre (.page-header, 10px 20px) pour affleurer son coin. Le bouton
+   Globe est un icone rond independant, detache de la paire Liste/Calendrier
+   (retour utilisateur : ce n'est pas un mode d'affichage du meme groupe,
+   il ouvre une modale) mais reste cote a cote dans le meme conteneur pour
+   partager le seul point d'ancrage absolu. */
+#page-activities .act-view-row {
   position: absolute;
   bottom: 10px;
   right: 20px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 .act-view-toggle { display: flex; gap: 4px; flex-shrink: 0; background: var(--bg); border-radius: 20px; padding: 3px; }
 .act-view-btn {
@@ -4741,6 +4748,14 @@ body { background: var(--bg) !important; }
 }
 .act-view-btn:hover { color: var(--text-primary); }
 .act-view-btn.active { background: var(--card-bg); color: var(--text-primary); box-shadow: var(--shadow-sm); }
+.act-globe-icon-btn {
+  width: 34px; height: 34px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 50%; border: 1px solid var(--border);
+  background: var(--card-bg); color: var(--text-secondary);
+  cursor: pointer; transition: all var(--transition);
+}
+.act-globe-icon-btn:hover { border-color: var(--accent); color: var(--accent); }
 
 /* ─── Globe des activites (modale) ─── */
 .globe-modal-backdrop {
