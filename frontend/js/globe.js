@@ -198,6 +198,23 @@ function _initGlobeInstance() {
   _globeSpotsLayerEl.className = 'globe-spots-layer';
   container.appendChild(_globeSpotsLayerEl);
 
+  // Les cercles (.globe-spot) sont des elements DOM au-dessus du canvas
+  // Cesium (pour garder le halo en CSS), pas des descendants du canvas -
+  // un survol dessus intercepte donc la molette AVANT qu'elle atteigne le
+  // gestionnaire de zoom de Cesium (qui n'ecoute que sur son canvas), et
+  // sans action par defaut ici la molette ne fait plus rien d'utile ->
+  // le navigateur retombe sur le defilement de la page. On reconstruit
+  // l'evenement sur le canvas pour que Cesium zoome comme si la molette
+  // avait ete actionnee directement dessus.
+  _globeSpotsLayerEl.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    _globeAutoRotate = false;
+    _cesiumViewer.canvas.dispatchEvent(new WheelEvent('wheel', {
+      deltaY: e.deltaY, deltaX: e.deltaX, deltaMode: e.deltaMode,
+      clientX: e.clientX, clientY: e.clientY, bubbles: true, cancelable: true,
+    }));
+  }, { passive: false });
+
   scene.postRender.addEventListener(_updateSpotPositions);
   scene.postRender.addEventListener(_autoRotateTick);
   scene.postRender.addEventListener(_updateGlobeLayerByZoom);
