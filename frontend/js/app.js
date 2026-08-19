@@ -1532,7 +1532,7 @@ function showActivityDetail(activity, backTo = 'activities') {
         <span style="color:var(--text-muted);font-size:12px;font-family:var(--font-body)">${formatDate(activity.date)}</span>
       </div>
       <div class="activity-detail-title">${activity.name || 'Activite'}</div>
-      <div class="activity-stats-grid" style="margin-top:14px">
+      <div class="activity-stats-grid" style="margin-top:8px">
         <div class="activity-stat"><div class="activity-stat-value">${dist}</div><div class="activity-stat-label">Distance</div></div>
         <div class="activity-stat"><div class="activity-stat-value">${dur}</div><div class="activity-stat-label">Duree</div></div>
         <div class="activity-stat"><div class="activity-stat-value">${pace}</div><div class="activity-stat-label">Allure moy.</div></div>
@@ -1765,15 +1765,21 @@ function renderActivityHRZonesCard() {
     content.innerHTML = '<p class="no-data">Pas de données FC disponibles pour cette activité</p>';
     return;
   }
+  // Barres a l'echelle de la zone dominante (histogramme comparatif) - le %
+  // affiche a droite reste lui la part reelle du temps total, seul l'ecart
+  // visuel des barres est relatif au max pour mieux distinguer les zones.
+  const maxTime = Math.max(...times, 1);
   content.innerHTML = zones.map((z, i) => {
     const t = times[i];
     const pct = t / total * 100;
+    const barPct = t / maxTime * 100;
     return `<div class="hr-zone-row">
-      <div class="hr-zone-row-top">
-        <span><span class="hr-zone-name">${z.name}</span><span class="hr-zone-range">${z.low}-${z.high} bpm</span></span>
-        <span class="hr-zone-stats">${formatDuration(Math.round(t))} · ${Math.round(pct)}%</span>
+      <div class="hr-zone-label">
+        <span class="hr-zone-name">${z.name}</span>
+        <span class="hr-zone-range">${z.low}-${z.high} bpm</span>
       </div>
-      <div class="hr-zone-track"><div class="hr-zone-fill" style="width:${pct.toFixed(1)}%;background:${z.color}"></div></div>
+      <div class="hr-zone-bar-wrap"><div class="hr-zone-track"><div class="hr-zone-fill" style="width:${barPct.toFixed(1)}%;background:${z.color}"></div></div></div>
+      <div class="hr-zone-stats">${formatDuration(Math.round(t))} · ${Math.round(pct)}%</div>
     </div>`;
   }).reverse().join('');
 }
