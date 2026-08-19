@@ -1185,8 +1185,20 @@ async function calNavigate(delta) {
     : new Date(_calDate.getFullYear(), _calDate.getMonth() + delta, 1);
   await renderActivitiesCalendar();
 }
+// "Aujourd'hui" ramenait le calendrier au mois courant sans toucher aux
+// selecteurs Annee/Mois du haut de page, qui restaient donc sur un filtre
+// perime (ex: "2024 / Fevrier" affiche alors que le calendrier montre deja
+// "Aout 2026") - on les remet a la date du jour puis on delegue leurs
+// handlers `change` deja en place (chargement de l'annee si besoin, refresh
+// liste, ET synchro calendrier via _calSyncFromActivityFilters) plutot que
+// dupliquer cette logique ici.
 async function calGoToday() {
-  _calDate = new Date();
+  const today = new Date();
+  const yearSel = el('filter-year');
+  const monthSel = el('filter-month');
+  if (yearSel) { yearSel.value = String(today.getFullYear()); yearSel.dispatchEvent(new Event('change')); }
+  if (monthSel) { monthSel.value = String(today.getMonth() + 1); monthSel.dispatchEvent(new Event('change')); }
+  _calDate = today;
   await renderActivitiesCalendar();
 }
 
