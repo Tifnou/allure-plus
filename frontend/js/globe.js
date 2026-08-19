@@ -25,6 +25,10 @@ let _globeRefreshTimer = null;
 let _globeSpotsLayerEl = null;
 let _globeSpots = []; // { el, cartesian, cluster }
 let _globeAutoRotate = true;
+let _globeFarLayer = null;
+let _globeCloseLayer = null;
+let _globeIsClose = false;
+const GLOBE_ZOOM_SWITCH_METERS = 20000;
 const _globeTileSubdomains = ['a', 'b', 'c', 'd'];
 
 function _globeGeoPoints() {
@@ -141,8 +145,13 @@ function _initGlobeInstance() {
     infoBox: false,
     selectionIndicator: false,
     terrainProvider: new Cesium.EllipsoidTerrainProvider(),
+    // "_nolabels" sur les deux couches : les libelles CARTO (pays, regions -
+    // "NORMANDY", "BURGUNDY-FREE COUNTY"...) sont figes en anglais, pas de
+    // parametre de langue disponible sur ces tuiles raster hebergees -
+    // plutot que d'afficher du texte dans la mauvaise langue, on les
+    // retire simplement des deux styles.
     baseLayer: new Cesium.ImageryLayer(new Cesium.UrlTemplateImageryProvider({
-      url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+      url: 'https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png',
       subdomains: _globeTileSubdomains,
       credit: '© OpenStreetMap contributors © CARTO',
       maximumLevel: 19,
@@ -161,12 +170,28 @@ function _initGlobeInstance() {
   scene.screenSpaceCameraController.minimumZoomDistance = 50;
   _cesiumViewer.cesiumWidget.creditContainer.style.display = 'none';
 
+  // Style sombre CARTO illisible de pres (rues a peine visibles sur fond
+  // quasi noir, constate par l'utilisateur) - deuxieme couche claire
+  // (meme "positron" que la version routiere legere de CARTO, jamais
+  // utilisee ailleurs dans l'app mais meme famille), affichee seulement
+  // sous GLOBE_ZOOM_SWITCH_METERS d'altitude camera pour garder le globe
+  // sombre et epure vu de loin, tout en restant lisible une fois zoome.
+  _globeFarLayer = _cesiumViewer.imageryLayers.get(0);
+  _globeCloseLayer = _cesiumViewer.imageryLayers.addImageryProvider(new Cesium.UrlTemplateImageryProvider({
+    url: 'https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png',
+    subdomains: _globeTileSubdomains,
+    credit: '© OpenStreetMap contributors © CARTO',
+    maximumLevel: 19,
+  }));
+  _globeCloseLayer.show = false;
+
   _globeSpotsLayerEl = document.createElement('div');
   _globeSpotsLayerEl.className = 'globe-spots-layer';
   container.appendChild(_globeSpotsLayerEl);
 
   scene.postRender.addEventListener(_updateSpotPositions);
   scene.postRender.addEventListener(_autoRotateTick);
+  scene.postRender.addEventListener(_updateGlobeLayerByZoom);
 
   const stopAutoRotate = () => { _globeAutoRotate = false; };
   container.addEventListener('mousedown', stopAutoRotate, { once: true });
@@ -183,6 +208,16 @@ function _autoRotateTick() {
   const dt = _globeLastTickTime ? (now - _globeLastTickTime) : 16;
   _globeLastTickTime = now;
   _cesiumViewer.scene.camera.rotate(Cesium.Cartesian3.UNIT_Z, -0.00003 * dt);
+}
+
+function _updateGlobeLayerByZoom() {
+  if (!_cesiumViewer || !_globeFarLayer || !_globeCloseLayer) return;
+  const height = Cesium.Cartographic.fromCartesian(_cesiumViewer.scene.camera.positionWC).height;
+  const close = height < GLOBE_ZOOM_SWITCH_METERS;
+  if (close === _globeIsClose) return;
+  _globeIsClose = close;
+  _globeFarLayer.show = !close;
+  _globeCloseLayer.show = close;
 }
 
 function _updateSpotPositions() {
