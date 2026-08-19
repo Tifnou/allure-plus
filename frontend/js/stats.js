@@ -64,7 +64,15 @@ const YEAR_CACHE_PREFIX = 'allure_year_cache_v1_';
 function loadYearFromCache(year) {
   try {
     const raw = localStorage.getItem(YEAR_CACHE_PREFIX + year);
-    return raw ? JSON.parse(raw) : null;
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    // Cache ecrit avant l'ajout de startLat/startLon (globe des activites,
+    // globe.js) - l'ignorer pour forcer un refetch qui le repeuplera avec le
+    // champ manquant, plutot que de laisser ces annees sans points sur le
+    // globe indefiniment. Meme logique que la migration cote serveur
+    // (server.js, /api/activities/year/:year).
+    if (Array.isArray(parsed) && parsed.length > 0 && parsed[0].startLat === undefined) return null;
+    return parsed;
   } catch (e) { return null; }
 }
 

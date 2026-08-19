@@ -111,7 +111,7 @@ function _initGlobeInstance() {
 
   _globeInstance = Globe()(container)
     .backgroundColor('rgba(0,0,0,0)')
-    .globeImageUrl('images/globe-earth.jpg')
+    .globeImageUrl('images/globe-earth.jpg?v=1787144650943')
     .backgroundImageUrl('https://unpkg.com/three-globe/example/img/night-sky.png')
     .showAtmosphere(true)
     .atmosphereColor('#3B82F6')
