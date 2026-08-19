@@ -44,6 +44,10 @@ function loadCampusTokenFromFile() {
 const cookie   = require('cookie-parser');
 const { v4: uuidv4 } = require('uuid');
 const { GarminConnect } = require('garmin-connect');
+// Monkeypatch : ajoute le support MFA (code SMS) manquant dans garmin-connect
+// 1.6.2 - voir garmin_mfa_patch.js pour le detail. Doit etre require avant
+// toute connexion Garmin (charge une seule fois, patch le prototype partage).
+const { GarminMfaRequiredError } = require('./garmin_mfa_patch');
 const {
   computeStats,
   getRecentActivities,
@@ -362,6 +366,14 @@ app.get('/bg-thumbs/:filename', async (req, res) => {
 const sessions = new Map();   // sessionId f¢â, â," { gc, email, fns, lastAccess }
 const SESSION_TTL = 12 * 60 * 60 * 1000; // 12h
 
+// Connexions Garmin en attente d'un code MFA (SMS) - mfaToken -> { gc, email,
+// kind: 'setup'|'login', setupFields, createdAt }. gc est l'instance en
+// cours (cookies + etat MFA), a reprendre via gc.client.resumeWithMfa() une
+// fois le code saisi (/api/login/mfa) - jamais recreee. Duree de vie courte :
+// le temps de recevoir le SMS et de le saisir, pas une vraie session.
+const pendingMfaLogins = new Map();
+const MFA_PENDING_TTL_MS = 5 * 60 * 1000; // 5 min
+
 // Nettoyage p©riodique des sessions expir©es
 setInterval(() => {
   const now = Date.now();
@@ -456,11 +468,14 @@ function computeDisplayName(profile) {
   return null;
 }
 
-async function createGarminSession(email, password) {
-  const gc = new GarminConnect({ username: email, password });
-  await gc.login();
+// Suite commune a une connexion reussie, que ce soit directement (pas de
+// MFA) ou apres resumeWithMfa() (voir /api/login/mfa) - gc est deja
+// authentifie dans les deux cas, cette fonction ne fait plus aucun appel
+// SSO.
+async function finalizeGarminSession(gc, email) {
   // Sauvegarder les tokens OAuth sur disque (par compte, cf garminTokenDirFor)
-  // pour eviter le login SSO aux prochains demarrages.
+  // pour eviter le login SSO (et donc une nouvelle demande MFA) aux
+  // prochains demarrages.
   try { gc.exportTokenToFile(garminTokenDirFor(email)); } catch(_) {}
   const fns = buildGarminFunctions(gc);
 
@@ -477,6 +492,22 @@ async function createGarminSession(email, password) {
   const { ticketAccess } = await checkUserDirectory(email, displayName);
 
   return { gc, email, displayName, fns, lastAccess: Date.now(), ticketAccess };
+}
+
+async function createGarminSession(email, password) {
+  const gc = new GarminConnect({ username: email, password });
+  try {
+    await gc.login();
+  } catch (err) {
+    // Garmin demande une confirmation MFA (code SMS) : gc reste attache a
+    // l'erreur pour que l'appelant (/api/setup, /api/login) puisse la
+    // mettre en attente (pendingMfaLogins) et la reprendre plus tard avec
+    // resumeWithMfa() - jamais recreer une instance fraiche pour ça, l'etat
+    // de connexion en cours (cookies, _mfaLoginState) vit sur celle-ci.
+    if (err && err.mfaRequired) { err.gc = gc; err.email = email; }
+    throw err;
+  }
+  return finalizeGarminSession(gc, email);
 }
 
 // f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬f¢â,â?s¬
@@ -1458,12 +1489,88 @@ app.get('/api/admin-info', (req, res) => {
 });
 
 // Setup (1er lancement / reconfiguration) - sans authentification requise
+// Suite de /api/setup une fois la connexion Garmin etablie (avec ou sans
+// MFA entre-temps - voir /api/login/mfa) : credentials .env, Campus Coach,
+// synchro cross-appareils. Extrait de /api/setup pour etre rejoue a
+// l'identique depuis /api/login/mfa quand la connexion initiale demandait
+// un code MFA.
+async function finishSetup(res, sessionData, fields) {
+  const {
+    garminEmail, rememberGarmin,
+    campusEnabled: campusEnabledReq, campusEmail, campusPassword, rememberCampus
+  } = fields;
+
+  const sid = uuidv4();
+  sessions.set(sid, sessionData);
+  res.cookie('sid', sid, { httpOnly: true, sameSite: 'lax' });
+
+  // Lire .env existant
+  const envPath = path.join(__dirname, '.env');
+  let envContent = fs.existsSync(envPath) ? fs.readFileSync(envPath, 'utf8') : '';
+  const setEnvVar = (content, key, value) => {
+    const regex = new RegExp(`^${key}=.*$`, 'm');
+    const line  = `${key}=${value}`;
+    return regex.test(content) ? content.replace(regex, line) : content + (content.endsWith('\n') || !content ? '' : '\n') + line + '\n';
+  };
+  const delEnvVar = (content, key) => content.replace(new RegExp(`^${key}=.*\n?`, 'm'), '');
+
+  // Sauvegarder credentials Garmin si demande
+  if (rememberGarmin) {
+    envContent = setEnvVar(envContent, 'GARMIN_EMAIL', garminEmail);
+    envContent = setEnvVar(envContent, 'GARMIN_PASSWORD', fields.garminPassword);
+  }
+
+  // Preference Campus Coach
+  CAMPUS_ENABLED = !!campusEnabledReq;
+  envContent = setEnvVar(envContent, 'CAMPUS_ENABLED', CAMPUS_ENABLED ? 'true' : 'false');
+
+  // Campus Coach credentials si active
+  if (CAMPUS_ENABLED && campusEmail && campusPassword) {
+    try {
+      const camp = await campusLogin(campusEmail, campusPassword);
+      _envCampusTokenCache = camp.token;
+      saveCampusTokenToFile(camp.token);
+      const s = sessions.get(sid);
+      if (s) { s.campusToken = camp.token; s.campusEmail = campusEmail; }
+      if (rememberCampus) {
+        envContent = setEnvVar(envContent, 'CAMPUS_EMAIL', campusEmail);
+        envContent = setEnvVar(envContent, 'CAMPUS_PASSWORD', campusPassword);
+      }
+      console.log('Setup : Campus Coach connecte :', campusEmail);
+    } catch(e) {
+      console.warn('Setup : Campus Coach echec :', e.message);
+      // Ne pas bloquer - la connexion Garmin est OK
+    }
+  } else {
+    // Pas de Campus : nettoyer TOUT l'etat Campus
+    envContent = delEnvVar(envContent, 'CAMPUS_EMAIL');
+    envContent = delEnvVar(envContent, 'CAMPUS_PASSWORD');
+    _envCampusTokenCache = null;
+    saveCampusTokenToFile('');  // Efface .campus_token
+    const sClean = sessions.get(sid);
+    if (sClean) { sClean.campusToken = null; sClean.campusEmail = null; }
+  }
+
+  // Ecrire le .env mis a jour
+  fs.writeFileSync(envPath, envContent.trimStart(), 'utf8');
+
+  // Synchro cross-appareils - CETTE route est la toute premiere connexion
+  // sur une machine neuve (login.html: "setup-card", jamais /api/login) et
+  // n'appelait jusqu'ici jamais ensureSyncScheduled : un compte deja
+  // utilise sur un autre appareil (profil, objectifs, plan importe, PPS,
+  // avatar...) demarrait ici sur une config entierement vierge, sans
+  // jamais rapatrier ses donnees existantes (constat reel 14/08 - femme de
+  // l'utilisateur sur un PC neuf). Attendu avant de repondre au client,
+  // pour la meme raison que /api/login.
+  await ensureSyncScheduled(garminEmail);
+
+  console.log('Setup : configuration sauvegardee. Campus enabled:', CAMPUS_ENABLED);
+  res.json({ success: true, campusEnabled: CAMPUS_ENABLED });
+}
+
 app.post('/api/setup', async (req, res) => {
   try {
-    const {
-      garminEmail, garminPassword, rememberGarmin,
-      campusEnabled: campusEnabledReq, campusEmail, campusPassword, rememberCampus
-    } = req.body;
+    const { garminEmail, garminPassword } = req.body;
 
     if (!garminEmail || !garminPassword) {
       return res.status(400).json({ error: 'E-mail et mot de passe Garmin requis.' });
@@ -1472,74 +1579,21 @@ app.post('/api/setup', async (req, res) => {
     // 1) Connexion Garmin
     console.log('Setup : connexion Garmin pour', garminEmail);
     const sessionData = await createGarminSession(garminEmail, garminPassword);
-    const sid = uuidv4();
-    sessions.set(sid, sessionData);
-    res.cookie('sid', sid, { httpOnly: true, sameSite: 'lax' });
-
-    // 2) Lire .env existant
-    const envPath = path.join(__dirname, '.env');
-    let envContent = fs.existsSync(envPath) ? fs.readFileSync(envPath, 'utf8') : '';
-    const setEnvVar = (content, key, value) => {
-      const regex = new RegExp(`^${key}=.*$`, 'm');
-      const line  = `${key}=${value}`;
-      return regex.test(content) ? content.replace(regex, line) : content + (content.endsWith('\n') || !content ? '' : '\n') + line + '\n';
-    };
-    const delEnvVar = (content, key) => content.replace(new RegExp(`^${key}=.*\n?`, 'm'), '');
-
-    // 3) Sauvegarder credentials Garmin si demande
-    if (rememberGarmin) {
-      envContent = setEnvVar(envContent, 'GARMIN_EMAIL', garminEmail);
-      envContent = setEnvVar(envContent, 'GARMIN_PASSWORD', garminPassword);
-    }
-
-    // 4) Preference Campus Coach
-    CAMPUS_ENABLED = !!campusEnabledReq;
-    envContent = setEnvVar(envContent, 'CAMPUS_ENABLED', CAMPUS_ENABLED ? 'true' : 'false');
-
-    // 5) Campus Coach credentials si active
-    if (CAMPUS_ENABLED && campusEmail && campusPassword) {
-      try {
-        const camp = await campusLogin(campusEmail, campusPassword);
-        _envCampusTokenCache = camp.token;
-        saveCampusTokenToFile(camp.token);
-        const s = sessions.get(sid);
-        if (s) { s.campusToken = camp.token; s.campusEmail = campusEmail; }
-        if (rememberCampus) {
-          envContent = setEnvVar(envContent, 'CAMPUS_EMAIL', campusEmail);
-          envContent = setEnvVar(envContent, 'CAMPUS_PASSWORD', campusPassword);
-        }
-        console.log('Setup : Campus Coach connecte :', campusEmail);
-      } catch(e) {
-        console.warn('Setup : Campus Coach echec :', e.message);
-        // Ne pas bloquer - la connexion Garmin est OK
-      }
-    } else {
-      // Pas de Campus : nettoyer TOUT l'etat Campus
-      envContent = delEnvVar(envContent, 'CAMPUS_EMAIL');
-      envContent = delEnvVar(envContent, 'CAMPUS_PASSWORD');
-      _envCampusTokenCache = null;
-      saveCampusTokenToFile('');  // Efface .campus_token
-      const sClean = sessions.get(sid);
-      if (sClean) { sClean.campusToken = null; sClean.campusEmail = null; }
-    }
-
-    // 6) Ecrire le .env mis a jour
-    fs.writeFileSync(envPath, envContent.trimStart(), 'utf8');
-
-    // 7) Synchro cross-appareils - CETTE route est la toute premiere
-    // connexion sur une machine neuve (login.html: "setup-card", jamais
-    // /api/login) et n'appelait jusqu'ici jamais ensureSyncScheduled : un
-    // compte deja utilise sur un autre appareil (profil, objectifs, plan
-    // importe, PPS, avatar...) demarrait ici sur une config entierement
-    // vierge, sans jamais rapatrier ses donnees existantes (constat reel
-    // 14/08 - femme de l'utilisateur sur un PC neuf). Attendu avant de
-    // repondre au client, pour la meme raison que /api/login.
-    await ensureSyncScheduled(garminEmail);
-
-    console.log('Setup : configuration sauvegardee. Campus enabled:', CAMPUS_ENABLED);
-    res.json({ success: true, campusEnabled: CAMPUS_ENABLED });
+    // 2-7) .env, Campus Coach, synchro - voir finishSetup()
+    await finishSetup(res, sessionData, req.body);
 
   } catch(err) {
+    // Garmin demande un code de verification (SMS) - suite en attente,
+    // reprise via /api/login/mfa avec le meme corps de requete (fields)
+    // que celui-ci pour ne rien perdre du formulaire deja rempli.
+    if (err && err.mfaRequired) {
+      const mfaToken = uuidv4();
+      pendingMfaLogins.set(mfaToken, {
+        gc: err.gc, email: err.email, kind: 'setup',
+        setupFields: req.body, createdAt: Date.now(),
+      });
+      return res.json({ mfaRequired: true, mfaToken });
+    }
     console.error('Setup error:', err.message);
     // err.blocked verifie EN PREMIER, avant toute recherche de sous-chaine :
     // le message de blocage ("...administrateur.") contient lui-meme la
@@ -1602,6 +1656,15 @@ app.post('/api/login', async (req, res) => {
     res.json({ success: true, user: email });
 
   } catch (err) {
+    // Garmin demande un code de verification (SMS) - suite en attente,
+    // reprise via /api/login/mfa (meme mecanisme que /api/setup ci-dessus).
+    if (err && err.mfaRequired) {
+      const mfaToken = uuidv4();
+      pendingMfaLogins.set(mfaToken, {
+        gc: err.gc, email: err.email, kind: 'login', createdAt: Date.now(),
+      });
+      return res.json({ mfaRequired: true, mfaToken });
+    }
     console.error('Login error:', err.message);
     // err.blocked verifie EN PREMIER - voir le meme correctif sur /api/setup
     // juste au-dessus (le message de blocage contient "rate" via
@@ -1613,6 +1676,48 @@ app.post('/api/login', async (req, res) => {
         ? 'Trop de tentatives de connexion. Garmin a temporairement bloqué l\'accès. Attendez 2-3 minutes et réessayez.'
         : 'Identifiants Garmin incorrects. Vérifiez votre e-mail et mot de passe.');
     res.status(err.blocked ? 403 : (is429 ? 429 : 401)).json({ error: msg, retryable: is429 });
+  }
+});
+
+// Reprise d'une connexion Garmin apres saisie du code MFA (SMS) - voir
+// garmin_mfa_patch.js et pendingMfaLogins. Fonctionne pour /api/setup et
+// /api/login, distingues via pending.kind (le corps de formulaire complet
+// de /api/setup est conserve dans pending.setupFields pour ne rien perdre
+// du formulaire deja rempli).
+app.post('/api/login/mfa', async (req, res) => {
+  try {
+    const { mfaToken, code } = req.body;
+    if (!mfaToken || !code) {
+      return res.status(400).json({ error: 'Code de vérification requis.' });
+    }
+    const pending = pendingMfaLogins.get(mfaToken);
+    if (!pending || (Date.now() - pending.createdAt) > MFA_PENDING_TTL_MS) {
+      pendingMfaLogins.delete(mfaToken);
+      return res.status(400).json({ error: 'Session de connexion expirée. Veuillez recommencer.' });
+    }
+
+    // Ne retire pending QU'EN CAS DE SUCCES : un code errone laisse
+    // _mfaLoginState intact sur gc.client (voir garmin_mfa_patch.js), un
+    // nouvel essai avec le bon code doit rester possible sans tout
+    // redemarrer depuis le formulaire email/mot de passe.
+    await pending.gc.resumeWithMfa(String(code).trim());
+    pendingMfaLogins.delete(mfaToken);
+    const sessionData = await finalizeGarminSession(pending.gc, pending.email);
+
+    if (pending.kind === 'setup') {
+      await finishSetup(res, sessionData, pending.setupFields);
+      return;
+    }
+
+    const sid = uuidv4();
+    sessions.set(sid, sessionData);
+    res.cookie('sid', sid, { httpOnly: true, sameSite: 'lax' });
+    await ensureSyncScheduled(pending.email);
+    console.log('[OK] Session creee (apres MFA) pour:', pending.email);
+    res.json({ success: true, user: pending.email });
+  } catch (err) {
+    console.error('MFA resume error:', err.message);
+    res.status(401).json({ error: 'Code de vérification incorrect ou expiré. Veuillez réessayer.' });
   }
 });
 

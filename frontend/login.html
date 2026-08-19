@@ -572,6 +572,35 @@
 
       </div><!-- /setup-card -->
 
+      <!-- .. MODE MFA (Garmin demande un code de verification par SMS) ..
+           Affichee a la place de reconnect-card/setup-card quand /api/setup
+           ou /api/login renvoie mfaRequired:true (voir server.js,
+           garmin_mfa_patch.js) - Garmin sert cette page seulement pour une
+           partie des comptes (2FA active cote Garmin), jamais visible pour
+           les autres. -->
+      <div id="mfa-card" style="display:none">
+        <div class="section-title">Vérification en deux étapes</div>
+        <div class="reconnect-banner">
+          <div class="reconnect-avatar">&#x1F4F1;</div>
+          <div class="reconnect-info">
+            <div class="reconnect-label">Garmin a envoyé un code par SMS</div>
+            <div class="reconnect-email">Saisissez-le ci-dessous pour continuer</div>
+          </div>
+        </div>
+        <div class="field">
+          <label>Code de vérification (6 chiffres)</label>
+          <input type="text" id="mfa-code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="123456" style="letter-spacing:0.3em;text-align:center;font-size:20px" onkeydown="if(event.key==='Enter')submitMfaCode()">
+        </div>
+        <button class="btn-cta" id="btn-mfa-submit" onclick="submitMfaCode()">
+          Valider le code
+        </button>
+        <button class="link-reconfig" onclick="cancelMfa()">Annuler et recommencer</button>
+        <div class="error-box" id="mfa-error">
+          <span>&#x2699;&#xFE0F;</span>
+          <span id="mfa-error-msg"></span>
+        </div>
+      </div><!-- /mfa-card -->
+
     </div><!-- /card -->
 
     <div class="footer-note">
@@ -688,6 +717,10 @@
         const d = await r.json();
         if (d.success) {
           window.location.href = '/';
+        } else if (d.mfaRequired) {
+          showMfaCard(d.mfaToken, 'reconnect-card');
+          btn.disabled = false;
+          btn.textContent = '✓ Continuer';
         } else if (r.status === 429 || d.retryable) {
           showErr('reconnect', d.error || 'Trop de tentatives. Attendez avant de réessayer.');
           startLoginCooldown(btn, 180); // 3 minutes
@@ -700,6 +733,62 @@
         showErr('reconnect', 'Impossible de contacter le serveur.');
         btn.disabled = false;
         btn.textContent = '✓ Continuer';
+      }
+    }
+
+    // "?"? Verification en deux etapes (Garmin envoie un code par SMS) "?"?
+    // Declenchee depuis doAutoLogin()/doSetup() quand /api/login ou
+    // /api/setup renvoie mfaRequired:true (voir server.js, garmin_mfa_patch.js).
+    let _mfaToken = null;
+    let _mfaReturnCardId = null;
+    function showMfaCard(mfaToken, returnCardId) {
+      _mfaToken = mfaToken;
+      _mfaReturnCardId = returnCardId;
+      document.getElementById('reconnect-card').style.display = 'none';
+      document.getElementById('setup-card').style.display = 'none';
+      document.getElementById('mfa-card').style.display = 'block';
+      const input = document.getElementById('mfa-code');
+      input.value = '';
+      setTimeout(() => input.focus(), 50);
+    }
+    function cancelMfa() {
+      _mfaToken = null;
+      document.getElementById('mfa-card').style.display = 'none';
+      if (_mfaReturnCardId) document.getElementById(_mfaReturnCardId).style.display = 'block';
+      _mfaReturnCardId = null;
+    }
+    async function submitMfaCode() {
+      const btn = document.getElementById('btn-mfa-submit');
+      const code = document.getElementById('mfa-code').value.trim();
+      if (!/^\d{6}$/.test(code)) {
+        showErr('mfa', 'Saisissez le code à 6 chiffres reçu par SMS.');
+        return;
+      }
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner"></span> Vérification...';
+      try {
+        const r = await fetch('/api/login/mfa', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mfaToken: _mfaToken, code })
+        });
+        const d = await r.json();
+        if (d.success) {
+          window.location.href = '/';
+        } else {
+          // Le code reste utilisable pour un nouvel essai (pas de reset
+          // cote serveur sur un code errone, voir /api/login/mfa) - on
+          // laisse l'utilisateur reessayer sans tout recommencer.
+          showErr('mfa', d.error || 'Code incorrect. Réessayez.');
+          btn.disabled = false;
+          btn.textContent = 'Valider le code';
+          document.getElementById('mfa-code').value = '';
+          document.getElementById('mfa-code').focus();
+        }
+      } catch(e) {
+        showErr('mfa', 'Impossible de contacter le serveur.');
+        btn.disabled = false;
+        btn.textContent = 'Valider le code';
       }
     }
 
@@ -749,6 +838,10 @@
         const d = await r.json();
         if (d.success) {
           window.location.href = '/';
+        } else if (d.mfaRequired) {
+          showMfaCard(d.mfaToken, 'setup-card');
+          btn.disabled = false;
+          btn.textContent = 'Commencer';
         } else {
           showErr('setup', d.error || 'Identifiants incorrects. Vérifiez vos informations.');
           btn.disabled = false;
