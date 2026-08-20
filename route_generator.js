@@ -611,27 +611,31 @@ function calibrateAscent(filteredAscendM) {
   return Math.round(filteredAscendM * ASCENT_CALIBRATION_FACTOR);
 }
 
-// Niveau de traileur -> vitesse (km/h) sur la "distance equivalente plat"
-// (voir equivalentFlatKm juste en dessous) - table fournie par l'utilisateur
-// (20/08), UNIQUEMENT pour la prediction de duree en trail dans le calcul
-// d'itineraires (rien d'autre dans l'app n'est concerne). Remplace le
-// decoupage par tranche de pente (GRADIENT_BUCKETS, pace_profile.js, calibre
-// sur les sorties Garmin reelles de l'utilisateur) pour ce cas precis : ce
-// decoupage n'a que 4 tranches, dont "steep" (>8%) qui regroupe
-// INDIFFEREMMENT un faux plat a 9% et un mur a 35% avec la MEME allure -
-// bug reel constate : 3657 m D+ / 22,8 km estime a 3h19 par ce modele, la ou
-// meme un excellent traileur mettrait plus de 3h30 (cf table fournie), les
-// sorties reelles de l'utilisateur ne couvrant jamais un terrain aussi
-// extreme pour calibrer correctement la tranche "steep".
+// Niveau de traileur -> vitesse A PLAT (km/h), appliquee a la "distance
+// equivalente plat" (voir equivalentFlatKm juste en dessous) - table
+// fournie par l'utilisateur (20/08, corrigee le 20/08 - une 1ere version
+// donnait des vitesses bien trop lentes pour representer une allure a
+// plat, ex: "Bon traileur" a 4.1-4.8 km/h, alors que ce sont des allures de
+// COURSE reelles typiques 6.0-8.0 km/h), UNIQUEMENT pour la prediction de
+// duree en trail dans le calcul d'itineraires (rien d'autre dans l'app
+// n'est concerne). Remplace le decoupage par tranche de pente
+// (GRADIENT_BUCKETS, pace_profile.js, calibre sur les sorties Garmin
+// reelles de l'utilisateur) pour ce cas precis : ce decoupage n'a que 4
+// tranches, dont "steep" (>8%) qui regroupe INDIFFEREMMENT un faux plat a
+// 9% et un mur a 35% avec la MEME allure - bug reel constate : 3657 m D+ /
+// 22,8 km estime a 3h19 par ce modele, la ou meme un excellent traileur
+// mettrait plus de 3h30, les sorties reelles de l'utilisateur ne couvrant
+// jamais un terrain aussi extreme pour calibrer correctement la tranche
+// "steep".
 const TRAIL_LEVELS = {
-  elite:      { label: 'Élite / international', minKmh: 6.5, maxKmh: 7.5 },
-  excellent:  { label: 'Excellent traileur',     minKmh: 5.5, maxKmh: 6.5 },
-  tresbon:    { label: 'Très bon traileur',      minKmh: 4.8, maxKmh: 5.5 },
-  bon:        { label: 'Bon traileur',           minKmh: 4.1, maxKmh: 4.8 },
-  moyenplus:  { label: 'Moyen +',                minKmh: 3.5, maxKmh: 4.1 },
-  moyen:      { label: 'Moyen',                  minKmh: 3.0, maxKmh: 3.5 },
-  moyenmoins: { label: 'Moyen -',                minKmh: 2.5, maxKmh: 3.0 },
-  debutant:   { label: 'Débutant',               minKmh: 2.0, maxKmh: 2.5 },
+  elite:      { label: 'Élite / international', minKmh: 9.0,  maxKmh: 13.0 },
+  excellent:  { label: 'Excellent traileur',     minKmh: 8.0,  maxKmh: 10.0 },
+  tresbon:    { label: 'Très bon traileur',      minKmh: 7.0,  maxKmh: 9.0 },
+  bon:        { label: 'Bon traileur',           minKmh: 6.0,  maxKmh: 8.0 },
+  moyenplus:  { label: 'Moyen +',                minKmh: 5.5,  maxKmh: 7.0 },
+  moyen:      { label: 'Moyen',                  minKmh: 4.5,  maxKmh: 6.0 },
+  moyenmoins: { label: 'Moyen -',                minKmh: 3.5,  maxKmh: 5.0 },
+  debutant:   { label: 'Débutant',               minKmh: 2.5,  maxKmh: 4.0 },
 };
 
 // "Distance equivalente plat" = distance reelle (km) + D+ (m) / 100 -

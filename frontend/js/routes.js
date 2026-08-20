@@ -26,22 +26,24 @@ function routesDefaultState() {
 
 const routesState = routesDefaultState();
 
-// Niveau de traileur -> vitesse (km/h) sur la distance equivalente plat
-// (distance + D+/100, cf equivalentFlatKm) - table fournie par l'utilisateur
-// (20/08). MIROIR EXACT de TRAIL_LEVELS (route_generator.js, cote serveur) :
-// garder les deux synchronises manuellement si les valeurs changent un jour
-// (meme motif que ALLURE_PLUS_ZONES, cf CLAUDE.md) - utilisee ici uniquement
-// pour l'apercu affiche AVANT de lancer la recherche (routesConfirmCriteria),
-// le calcul qui compte reellement est refait cote serveur avec la meme table.
+// Niveau de traileur -> vitesse A PLAT (km/h), appliquee a la distance
+// equivalente plat (distance + D+/100, cf equivalentFlatKm) - table fournie
+// par l'utilisateur (20/08, corrigee le 20/08 - une 1ere version donnait des
+// vitesses bien trop lentes pour representer une allure a plat). MIROIR
+// EXACT de TRAIL_LEVELS (route_generator.js, cote serveur) : garder les deux
+// synchronises manuellement si les valeurs changent un jour (meme motif que
+// ALLURE_PLUS_ZONES, cf CLAUDE.md) - utilisee ici uniquement pour l'apercu
+// affiche AVANT de lancer la recherche (routesBuildLevelConfirmation), le
+// calcul qui compte reellement est refait cote serveur avec la meme table.
 const ROUTES_TRAIL_LEVELS = {
-  elite:      { label: 'Élite / international', minKmh: 6.5, maxKmh: 7.5 },
-  excellent:  { label: 'Excellent traileur',     minKmh: 5.5, maxKmh: 6.5 },
-  tresbon:    { label: 'Très bon traileur',      minKmh: 4.8, maxKmh: 5.5 },
-  bon:        { label: 'Bon traileur',           minKmh: 4.1, maxKmh: 4.8 },
-  moyenplus:  { label: 'Moyen +',                minKmh: 3.5, maxKmh: 4.1 },
-  moyen:      { label: 'Moyen',                  minKmh: 3.0, maxKmh: 3.5 },
-  moyenmoins: { label: 'Moyen -',                minKmh: 2.5, maxKmh: 3.0 },
-  debutant:   { label: 'Débutant',               minKmh: 2.0, maxKmh: 2.5 },
+  elite:      { label: 'Élite / international', minKmh: 9.0,  maxKmh: 13.0 },
+  excellent:  { label: 'Excellent traileur',     minKmh: 8.0,  maxKmh: 10.0 },
+  tresbon:    { label: 'Très bon traileur',      minKmh: 7.0,  maxKmh: 9.0 },
+  bon:        { label: 'Bon traileur',           minKmh: 6.0,  maxKmh: 8.0 },
+  moyenplus:  { label: 'Moyen +',                minKmh: 5.5,  maxKmh: 7.0 },
+  moyen:      { label: 'Moyen',                  minKmh: 4.5,  maxKmh: 6.0 },
+  moyenmoins: { label: 'Moyen -',                minKmh: 3.5,  maxKmh: 5.0 },
+  debutant:   { label: 'Débutant',               minKmh: 2.5,  maxKmh: 4.0 },
 };
 
 function routesTrailLevelMidKmh(level) {
