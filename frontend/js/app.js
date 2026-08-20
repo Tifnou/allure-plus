@@ -539,51 +539,126 @@ function renderChangelogHtml(md) {
   return html;
 }
 
+// Mise a jour en 3 etapes (20/08) : jusqu'ici "Telecharger" declenchait un
+// <a download> classique vers l'asset GitHub - invisible dans cette fenetre
+// --app= sans barre de telechargement, et sans suite (l'utilisateur devait
+// retrouver puis lancer le .exe lui-meme). Allure+ a son propre serveur
+// local : le telechargement se fait desormais cote serveur (voir
+// /api/update/download*, server.js), suivi ici via polling pour une vraie
+// barre de progression, puis "Installer maintenant" lance directement
+// l'installeur telecharge (/api/update/install).
+let _updatePollTimer = null;
+
 function showUpdateModal() {
   if (!_updateInfo || !_updateInfo.updateAvailable) return;
   const bd = document.createElement('div');
   bd.className = 'confirm-modal-backdrop';
-  bd.innerHTML = `
-    <div class="confirm-modal update-modal">
-      <div class="confirm-modal-icon">🚀</div>
-      <div class="confirm-modal-title">Nouvelle version disponible</div>
-      <div class="update-modal-versions">v${_updateInfo.currentVersion} → v${_updateInfo.latestVersion}</div>
-      <div class="update-modal-changelog">${renderChangelogHtml(_updateInfo.releaseNotes) || '<p>Voir la page de la release pour le détail.</p>'}</div>
-      <div class="update-modal-smartscreen-note">
-        ⚠️ Windows peut afficher un écran bleu <strong>« Windows a protégé votre ordinateur »</strong> au lancement de l'installeur téléchargé — c'est normal, l'appli n'est pas signée numériquement (pas de risque, c'est bien Allure+). Cliquez sur <strong>« Informations complémentaires »</strong> puis <strong>« Exécuter quand même »</strong>.
-      </div>
-      <div class="confirm-modal-actions">
-        <button class="confirm-modal-btn confirm-modal-btn--cancel" id="upd-later">Plus tard</button>
-        <button class="confirm-modal-btn confirm-modal-btn--confirm" id="upd-download">Télécharger</button>
-      </div>
-    </div>`;
+  bd.innerHTML = `<div class="confirm-modal update-modal" id="upd-modal-body"></div>`;
   document.body.appendChild(bd);
-  const close = () => bd.remove();
-  bd.querySelector('#upd-later').onclick = close;
-  bd.querySelector('#upd-download').onclick = () => {
-    // Un <a download> declenche le telechargement sans ouvrir un nouvel
-    // onglet vide (contrairement a window.open, qui laissait une page
-    // blanche derriere le telechargement — constat utilisateur). Le
-    // telechargement demarre bien silencieusement (verifie 13/08), mais
-    // l'appli tourne dans une fenetre Chrome/Edge "--app=" sans barre de
-    // telechargement visible (pas de chrome de navigateur classique) - sans
-    // ce toast, rien ne confirme a l'utilisateur que le clic a eu un effet.
-    const a = document.createElement('a');
-    a.href = _updateInfo.downloadUrl;
-    a.download = '';
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    close();
-    // Pas de 3e argument (duree) : campus.js redefinit showToast (charge
-    // apres app.js, ecrase cette fonction) avec une signature a 2 parametres
-    // seulement (msg, type) et une duree fixe de 4s cote-a-cote - un 3e
-    // argument ici serait silencieusement ignore.
-    if (typeof showToast === 'function') {
-      showToast('Téléchargement lancé — vérifiez votre dossier Téléchargements pour installer la mise à jour', 'success');
+  const close = () => { if (_updatePollTimer) clearInterval(_updatePollTimer); bd.remove(); };
+  attachBackdropClose(bd, close);
+  renderUpdateStepChangelog(bd, close);
+}
+
+function renderUpdateStepChangelog(bd, close) {
+  const body = bd.querySelector('#upd-modal-body');
+  body.innerHTML = `
+    <div class="confirm-modal-icon">🚀</div>
+    <div class="confirm-modal-title">Nouvelle version disponible</div>
+    <div class="update-modal-versions">v${_updateInfo.currentVersion} → v${_updateInfo.latestVersion}</div>
+    <div class="update-modal-changelog">${renderChangelogHtml(_updateInfo.releaseNotes) || '<p>Voir la page de la release pour le détail.</p>'}</div>
+    <div class="update-modal-smartscreen-note">
+      ⚠️ Windows peut afficher un écran bleu <strong>« Windows a protégé votre ordinateur »</strong> au lancement de l'installeur téléchargé — c'est normal, l'appli n'est pas signée numériquement (pas de risque, c'est bien Allure+). Cliquez sur <strong>« Informations complémentaires »</strong> puis <strong>« Exécuter quand même »</strong>.
+    </div>
+    <div class="confirm-modal-actions">
+      <button class="confirm-modal-btn confirm-modal-btn--cancel" id="upd-later">Plus tard</button>
+      <button class="confirm-modal-btn confirm-modal-btn--confirm" id="upd-download">Télécharger</button>
+    </div>`;
+  body.querySelector('#upd-later').onclick = close;
+  body.querySelector('#upd-download').onclick = () => startUpdateDownload(bd, close);
+}
+
+function renderUpdateStepError(bd, close, message) {
+  const body = bd.querySelector('#upd-modal-body');
+  body.innerHTML = `
+    <div class="confirm-modal-icon">⚠️</div>
+    <div class="confirm-modal-title">Échec du téléchargement</div>
+    <div class="update-modal-changelog"><p>${message || 'Erreur inconnue.'}</p></div>
+    <div class="confirm-modal-actions">
+      <button class="confirm-modal-btn confirm-modal-btn--confirm" id="upd-close-err">Fermer</button>
+    </div>`;
+  body.querySelector('#upd-close-err').onclick = close;
+}
+
+async function startUpdateDownload(bd, close) {
+  const body = bd.querySelector('#upd-modal-body');
+  body.innerHTML = `
+    <div class="confirm-modal-icon">⬇️</div>
+    <div class="confirm-modal-title">Téléchargement en cours…</div>
+    <div class="update-modal-progress-bar"><div class="update-modal-progress-fill" id="upd-progress-fill"></div></div>
+    <div class="update-modal-progress-label" id="upd-progress-label">Démarrage…</div>`;
+
+  try {
+    const res = await fetch(`${API}/api/update/download`, { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok || (!data.started && data.reason !== 'already-downloading')) {
+      throw new Error(data.error || 'Échec du téléchargement.');
+    }
+  } catch (e) {
+    renderUpdateStepError(bd, close, e.message);
+    return;
+  }
+
+  _updatePollTimer = setInterval(async () => {
+    let data;
+    try {
+      const res = await fetch(`${API}/api/update/download-progress`);
+      data = await res.json();
+    } catch (e) { return; } // coupure ponctuelle - le prochain tick reessaiera
+
+    if (data.status === 'downloading') {
+      const pct = data.totalBytes > 0 ? Math.round((data.downloadedBytes / data.totalBytes) * 100) : 0;
+      const fill = el('upd-progress-fill'), label = el('upd-progress-label');
+      if (fill) fill.style.width = pct + '%';
+      if (label) label.textContent = data.totalBytes > 0
+        ? `${pct} % — ${(data.downloadedBytes / 1048576).toFixed(1)} / ${(data.totalBytes / 1048576).toFixed(1)} Mo`
+        : `${(data.downloadedBytes / 1048576).toFixed(1)} Mo téléchargés…`;
+    } else if (data.status === 'done') {
+      clearInterval(_updatePollTimer);
+      renderUpdateStepInstallPrompt(bd, close);
+    } else if (data.status === 'error') {
+      clearInterval(_updatePollTimer);
+      renderUpdateStepError(bd, close, data.error);
+    }
+  }, 400);
+}
+
+function renderUpdateStepInstallPrompt(bd, close) {
+  const body = bd.querySelector('#upd-modal-body');
+  body.innerHTML = `
+    <div class="confirm-modal-icon">✅</div>
+    <div class="confirm-modal-title">Téléchargement terminé</div>
+    <div class="update-modal-smartscreen-note">
+      ⚠️ Windows peut afficher un écran bleu <strong>« Windows a protégé votre ordinateur »</strong> au lancement — c'est normal, l'appli n'est pas signée numériquement. Cliquez sur <strong>« Informations complémentaires »</strong> puis <strong>« Exécuter quand même »</strong>.
+    </div>
+    <div class="confirm-modal-actions">
+      <button class="confirm-modal-btn confirm-modal-btn--cancel" id="upd-install-later">Plus tard</button>
+      <button class="confirm-modal-btn confirm-modal-btn--confirm" id="upd-install-now">Installer maintenant</button>
+    </div>`;
+  body.querySelector('#upd-install-later').onclick = close;
+  body.querySelector('#upd-install-now').onclick = async () => {
+    try {
+      const res = await fetch(`${API}/api/update/install`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok || !data.launched) throw new Error(data.error || "Impossible de lancer l'installeur.");
+      close();
+      if (typeof showToast === 'function') {
+        showToast('Installeur lancé — suivez les instructions à l’écran.', 'success');
+      }
+    } catch (e) {
+      if (typeof showToast === 'function') showToast(e.message || "Impossible de lancer l'installeur.", 'error');
     }
   };
-  attachBackdropClose(bd, close);
 }
 
 // ═══════════════════════════════════════════════
@@ -1590,6 +1665,15 @@ function showActivityDetail(activity, backTo = 'activities') {
   const maxHR = activity.maxHR ? Math.round(activity.maxHR) + ' bpm' : '\u2014';
   const elev  = activity.elevationGain ? Math.round(activity.elevationGain) + ' m' : '\u2014';
   const cal   = activity.calories ? Math.round(activity.calories) : '\u2014';
+  // vO2MaxValue (par activite, cote Garmin) est un entier arrondi ; l'historique
+  // quotidien officiel (_vo2maxSeries, deja charge pour la page Sante) porte la
+  // valeur precise (preciseValue) pour le meme jour calendaire - preferee ici
+  // pour l'affichage en decimales (demande utilisateur), simple confort visuel.
+  const vo2Series = (typeof _vo2maxSeries !== 'undefined' ? _vo2maxSeries : []);
+  const vo2Day = (activity.date || '').slice(0, 10);
+  const vo2Match = vo2Series.find(p => (p.date || '').slice(0, 10) === vo2Day);
+  const vo2 = activity.vO2MaxValue == null ? '\u2014'
+    : (typeof vo2Match?.preciseValue === 'number' ? vo2Match.preciseValue.toFixed(1) : activity.vO2MaxValue);
 
   const detailEl = el('activity-detail-content');
   if (!detailEl) return;
@@ -1610,7 +1694,7 @@ function showActivityDetail(activity, backTo = 'activities') {
         <div class="activity-stat"><div class="activity-stat-value">${maxHR}</div><div class="activity-stat-label">FC max</div></div>
         <div class="activity-stat"><div class="activity-stat-value">${elev}</div><div class="activity-stat-label">Denivele +</div></div>
         <div class="activity-stat"><div class="activity-stat-value">${cal}</div><div class="activity-stat-label">Calories</div></div>
-        <div class="activity-stat"><div class="activity-stat-value">${activity.vO2MaxValue || '\u2014'}</div><div class="activity-stat-label">VO2max estimee</div></div>
+        <div class="activity-stat"><div class="activity-stat-value">${vo2}</div><div class="activity-stat-label">VO2max estimee</div></div>
         ${(type.toLowerCase().includes('run') || type.toLowerCase().includes('trail')) ? `<div class="activity-stat"><div class="activity-stat-value" id="activity-gear-value">\u2014</div><div class="activity-stat-label">Chaussures</div></div>` : ''}
         ${typeof activityMoodStatHtml === 'function' ? activityMoodStatHtml(activity.id) : ''}
       </div>
@@ -4697,13 +4781,24 @@ document.addEventListener('DOMContentLoaded', async () => {
       '</td></tr>';
     }
     showToast('⏳ Chargement de l\'historique complet…', 'loading', 0);
+    let stillMissing = [];
     try {
-      await Promise.all(missing.map(y => ensureYearLoaded(y).catch(() => {})));
+      // loadYearsWithRetry (stats.js, deja confirmee disponible par la garde
+      // en tete de fonction) retente jusqu'a 2 fois les annees en echec
+      // avant d'abandonner - un hoquet reseau/Garmin transitoire ne doit pas
+      // laisser une annee durablement manquante pour le reste de la session
+      // (bug reel constate : historique parfois incomplet, seul un
+      // relancement complet de l'appli reglait le probleme).
+      stillMissing = await loadYearsWithRetry(missing);
     } finally {
       const lt = document.getElementById('app-toast-loading');
       if (lt) { lt.style.opacity = '0'; setTimeout(() => lt.remove(), 300); }
     }
-    showToast('✓ Historique complet chargé', 'success', 4000);
+    if (stillMissing.length) {
+      showToast(`⚠ Certaines années n'ont pas pu être chargées (${stillMissing.join(', ')})`, 'error', 6000);
+    } else {
+      showToast('✓ Historique complet chargé', 'success', 4000);
+    }
   }
 
   if (filterYear) filterYear.addEventListener('change', async () => {

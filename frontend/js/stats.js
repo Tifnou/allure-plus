@@ -123,6 +123,25 @@ async function ensureYearLoaded(year) {
   if (isPastYear) saveYearToCache(year, activities);
 }
 
+// Charge une liste d'annees (ensureYearLoaded), avec jusqu'a 2 tentatives
+// supplementaires pour celles qui echouent au premier passage - un hoquet
+// reseau/Garmin transitoire ne doit pas laisser une annee durablement
+// manquante pour le reste de la session (bug reel constate : stats/
+// activites parfois incompletes, seul un relancement complet de l'appli
+// reglait le probleme - ce qui marchait justement parce que ca redeclenchait
+// un tout nouvel essai). Utilisee par renderStatsYearsList et
+// renderStatsAlltimeTotal. Retourne les annees encore manquantes apres
+// tentatives, pour que l'appelant puisse avertir l'utilisateur au lieu de
+// silencieusement afficher des donnees incompletes.
+async function loadYearsWithRetry(years) {
+  let missing = years.filter(y => !_fullyLoadedYears.has(y));
+  for (let attempt = 0; missing.length && attempt < 2; attempt++) {
+    await Promise.all(missing.map(y => ensureYearLoaded(y).catch(() => {})));
+    missing = years.filter(y => !_fullyLoadedYears.has(y));
+  }
+  return missing;
+}
+
 function getActivitiesForYearLocal(year, filter) {
   return _allActivities.filter(a => {
     const d = new Date(a.date || a.startTimeLocal || a.startTimeGMT || '');
@@ -248,7 +267,10 @@ async function renderStatsAlltimeTotal() {
   if (missing.length) {
     box.style.display = '';
     box.innerHTML = `<span class="stats-alltime-total-title">Total toutes années</span><span class="stats-alltime-total-loading">Chargement…</span>`;
-    await Promise.all(missing.map(y => ensureYearLoaded(y).catch(() => {})));
+    const stillMissing = await loadYearsWithRetry(missing);
+    if (stillMissing.length && typeof showToast === 'function') {
+      showToast(`Certaines années n'ont pas pu être chargées (${stillMissing.join(', ')}) — le total peut être incomplet.`, 'error');
+    }
   }
 
   const activities = _allActivities.filter(a => statsSportMatch(a.activityType, _statsSportFilter));
@@ -360,10 +382,13 @@ async function renderStatsYearsList() {
 
   await renderStatsYearsRows(years, hasOlder, allYears);
 
-  const missing = years.filter(y => !_fullyLoadedYears.has(y));
+  let missing = years.filter(y => !_fullyLoadedYears.has(y));
   if (missing.length) {
-    await Promise.all(missing.map(y => ensureYearLoaded(y).catch(() => {})));
+    missing = await loadYearsWithRetry(missing);
     await renderStatsYearsRows(years, hasOlder, allYears);
+    if (missing.length && typeof showToast === 'function') {
+      showToast(`Certaines années n'ont pas pu être chargées (${missing.join(', ')}).`, 'error');
+    }
   }
 }
 
