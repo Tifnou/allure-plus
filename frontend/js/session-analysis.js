@@ -181,48 +181,60 @@ function computePairingKey(session) {
   return 'eff_' + (Math.round(effortSec / 30) * 30);
 }
 
-// VO2max GARMIN tel qu'il etait a une date donnee (pas le VO2max actuel) —
-// repli utilise seulement quand l'activite elle-meme n'a pas de vO2MaxValue
-// propre (voir getCorrectVma). Cherche dans l'historique (_vo2maxSeries,
-// ~400 jours, trie chronologique) la derniere valeur connue A ou AVANT
-// cette date.
+// VO2max GARMIN tel qu'il etait AVANT une date donnee (jamais le VO2max
+// actuel, ni celui du jour meme — voir getCorrectVma pour le pourquoi).
+// _vo2maxSeries vient de l'historique quotidien officiel Garmin (un point
+// par JOUR calendaire, deja trie croissant par date — cf. loadDashboard/
+// server.js /api/dashboard), donc l'entree du jour J peut deja integrer le
+// recalcul declenche PAR une activite de ce meme jour J. On exclut donc
+// deliberement le jour de l'activite elle-meme et on ne garde que la
+// derniere valeur connue d'un jour STRICTEMENT anterieur.
 function getHistoricalVo2Max(dateStr) {
   if (typeof _vo2maxSeries === 'undefined' || !_vo2maxSeries.length) return null;
-  const targetTime = new Date(dateStr).getTime();
+  const activityDay = String(dateStr).slice(0, 10); // 'YYYY-MM-DD' depuis 'YYYY-MM-DDTHH:mm:ss...'
   let best = null;
   for (const entry of _vo2maxSeries) {
-    if (new Date(entry.date).getTime() <= targetTime) best = entry;
-    else break; // serie triee croissant par date (cf. loadDashboard)
+    if (entry.date < activityDay) best = entry;
+    else break; // serie triee croissant par date
   }
-  // Activite plus ancienne que tout l'historique connu : repli sur le plus
-  // ancien point disponible plutot que de ne rien avoir du tout.
-  if (!best) best = _vo2maxSeries[0];
   return best ? best.value : null;
 }
 
-// VMA calibree utilisateur A LA DATE DE L'ACTIVITE analysee. Essentiel pour
-// l'analyse seance prevue/realisee : la seance doit etre jugee avec la forme
-// du coureur AU MOMENT de la course, jamais avec sa forme actuelle — sinon
-// rouvrir ou recalculer une vieille analyse des mois plus tard changerait
-// silencieusement les allures cibles en fonction des progres (ou regressions)
-// faits entre-temps.
+// VMA calibree utilisateur AU DEBUT DE L'ACTIVITE analysee (pas apres, pas
+// la VMA actuelle). Essentiel pour l'analyse seance prevue/realisee : la
+// seance doit etre jugee avec la forme du coureur AU MOMENT ou elle a
+// commence, jamais avec sa forme actuelle — sinon rouvrir ou recalculer une
+// vieille analyse des mois plus tard changerait silencieusement les allures
+// cibles en fonction des progres (ou regressions) faits entre-temps.
 //
-// Priorite : 1) activity.vO2MaxValue — l'estimation Garmin attachee A CETTE
-// activite precise (deja stockee sur l'objet activite renvoye par
-// /api/dashboard et /api/activities/year/:annee, donc gratuite, fiable a
-// ~93% des activites de course, et immuable une fois l'activite creee) ;
-// 2) a defaut, recherche dans l'historique VO2max par date (activites plus
-// anciennes que la couverture Garmin, ou type d'activite sans estimation) ;
-// 3) a defaut, VO2max actuel. Meme priorite Garmin-d'abord que
-// renderSessionDetail (campus.js) — NE PAS reutiliser getVmaFromState()
-// (campus.js) ici : cette fonction partagee inverse la priorite (Campus
-// d'abord) pour ses propres besoins (estimation fin de plan), ce qui
-// donnerait ici une allure cible incoherente avec celle deja affichee sur
-// la fiche de seance — exactement l'erreur que CLAUDE.md interdit ("ne
-// jamais utiliser les allures historiques de Campus").
+// Priorite : 1) l'historique VO2max officiel Garmin (getHistoricalVo2Max) A
+// LA VEILLE de l'activite (jour STRICTEMENT anterieur, jamais le jour meme —
+// voir sa doc) ; 2) a defaut (aucun historique ne couvre encore cette
+// periode — activite trop ancienne, ou tout premier jour suivi), repli sur
+// activity.vO2MaxValue ; 3) a defaut, VO2max actuel.
+//
+// NE PAS remonter la priorite de activity.vO2MaxValue au-dessus de
+// l'historique : ce champ est l'estimation Garmin issue du RECALCUL fait a
+// partir de cette activite meme (le \"jour ou l'activite a declenche une
+// mise a jour\"), donc il reflete l'etat APRES la seance, pas celui prevu au
+// depart — bug reel constate (compte de l'epouse, seance cote S04-03 Free
+// Solo) : VO2max 45.9 avant la seance -> allures cibles S60 annoncees pour
+// 45.9 (5'30-5'42/km), puis 45.8 juste apres synchro (le S60 recalcule sur
+// 45.8 aurait alors ete compare a tort, 5'33-5'45/km ajuste trail). Le
+// meme biais explique pourquoi /api/dashboard (server.js) a deja bascule sa
+// propre courbe VO2max sur cet historique officiel plutot que sur le champ
+// par-activite (\"une sortie donnee n'est pas forcement celle qui declenche
+// le recalcul Garmin d'un jour donne\") — ici on applique la meme logique,
+// en plus du decalage temporel (veille, pas jour meme).
+// NE PAS reutiliser getVmaFromState() (campus.js) ici : cette fonction
+// partagee inverse la priorite (Campus d'abord) pour ses propres besoins
+// (estimation fin de plan), ce qui donnerait ici une allure cible
+// incoherente avec celle deja affichee sur la fiche de seance — exactement
+// l'erreur que CLAUDE.md interdit ("ne jamais utiliser les allures
+// historiques de Campus").
 function getCorrectVma(activity) {
-  const vo2 = activity?.vO2MaxValue
-    || (activity?.date ? getHistoricalVo2Max(activity.date) : null)
+  const vo2 = (activity?.date ? getHistoricalVo2Max(activity.date) : null)
+    || activity?.vO2MaxValue
     || (typeof _latestVO2Max !== 'undefined' ? _latestVO2Max : null);
   if (vo2 && vo2 > 3.5) {
     const profile = loadProfileData();
@@ -346,6 +358,13 @@ async function buildSessionAnalysis(session, week, activity) {
     if (res.ok) { const d = await res.json(); laps = Array.isArray(d.laps) ? d.laps : []; }
   } catch (e) { /* pas de laps -> analyse degradee sur les totaux d'activite */ }
 
+  // Classification effort/repos/echauffement par lap (Garmin intensityType en
+  // priorite, sinon heuristiques position/vitesse) — calculee ici (avant le
+  // bloc trail/GAP juste en dessous) car les deux en ont besoin : le trail
+  // pour isoler les laps d'effort du GAP moyen (voir plus bas), le chemin
+  // repetitions plus loin pour les tableaux effort/recup.
+  const types = laps.length ? classifyLaps(laps) : [];
+
   // ── Trail : pente reelle & effort (GAP) ──
   // GAP moyen : directement depuis les laps Garmin (avgGradeAdjustedSpeed) —
   // c'est exactement le meme chiffre que la colonne "GAP moyenne" affichee
@@ -363,9 +382,18 @@ async function buildSessionAnalysis(session, week, activity) {
   // quelle par ailleurs, mutee, pour donner une idee du temps reel passe.
   let climbAnalysis = null;
   if (isTrail && laps.length) {
+    // Sur une seance a repetitions (ex: 3x6' en cote), moyenner le GAP sur
+    // TOUS les laps dilue l'effort reel avec les footings de recuperation
+    // entre repetitions (souvent 2 a 3x plus lents) — constat reel : 3
+    // repetitions a GAP ~5'05/km chacune, mais une moyenne globale annoncee a
+    // 6'09/km a cause des laps de recup inclus dedans. Restreindre aux laps
+    // classes 'effort' (types, calcule juste au-dessus) dans ce cas. Sur une
+    // seance continue (sortie longue en D+, pas de repetitions), tous les
+    // laps SONT l'effort (pas de recup a exclure) — garder la moyenne sur
+    // l'ensemble, comportement deja valide avec l'utilisateur (cas du 16/08).
     const gapLaps = laps
-      .map(l => ({ durSec: l.elapsedDuration || l.movingDuration || l.duration || 0, gapSecKm: l.avgGradeAdjustedSpeed > 0 ? 1000 / l.avgGradeAdjustedSpeed : null }))
-      .filter(l => l.durSec > 0 && l.gapSecKm != null);
+      .map((l, idx) => ({ durSec: l.elapsedDuration || l.movingDuration || l.duration || 0, gapSecKm: l.avgGradeAdjustedSpeed > 0 ? 1000 / l.avgGradeAdjustedSpeed : null, isEffort: types[idx] === 'effort' }))
+      .filter(l => l.durSec > 0 && l.gapSecKm != null && (!hasStructuredReps || l.isEffort));
     const gapTotalSec = gapLaps.reduce((s, l) => s + l.durSec, 0);
     const gapAvgSecKm = gapTotalSec > 0 ? gapLaps.reduce((s, l) => s + l.gapSecKm * l.durSec, 0) / gapTotalSec : null;
     const flatPaceRange = (mainZoneKey && vma) ? calcAllureRef(mainZoneKey, vma) : null;
@@ -407,7 +435,6 @@ async function buildSessionAnalysis(session, week, activity) {
   const circuits = laps.length ? isKmCircuits(laps) : false;
   const useRepsPath = hasStructuredReps && !circuits && laps.length > 0;
 
-  const types = laps.length ? classifyLaps(laps) : [];
   const effortEntries = laps.reduce((acc, lap, idx) => { if (types[idx] === 'effort') acc.push({ lap, idx }); return acc; }, []);
   const restLaps   = laps.filter((_, i) => types[i] === 'rest');
   const warmupLaps = laps.filter((_, i) => types[i] === 'warmup');
