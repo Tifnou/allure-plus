@@ -15,7 +15,7 @@
   <script>window.CESIUM_BASE_URL = 'https://cdn.jsdelivr.net/npm/cesium@1.120.0/Build/Cesium/';</script>
   <script src="https://cdn.jsdelivr.net/npm/cesium@1.120.0/Build/Cesium/Cesium.js"></script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cesium@1.120.0/Build/Cesium/Widgets/widgets.css" />
-  <link rel="stylesheet" href="css/style.css?v=1787231562110" />
+  <link rel="stylesheet" href="css/style.css?v=1787234763459" />
   <link rel="stylesheet" href="css/plans.css?v=1787132767394" />
   <link rel="stylesheet" href="css/routes.css?v=1787132767394" />
 </head>
@@ -1317,12 +1317,15 @@
       <!-- Utilisateurs : ecran principal de la page Admin. Repertoire des
            comptes ayant deja lance Allure+ (seule visibilite possible sur
            une appli distribuee en .exe) - voir server.js checkUserDirectory/
-           support-relay routes /users/*. -->
+           support-relay routes /users/*. Replie par defaut (demande
+           utilisateur 20/08), meme mecanisme que "Diagnostics" plus haut -
+           les donnees continuent de se charger en arriere-plan meme repliees. -->
       <section class="card admin-users-card">
-        <div class="card-header">
+        <div class="card-header" id="admin-users-header" style="cursor:pointer">
           <h2 class="card-title"><span class="card-title-icon">&#x1F465;</span> Utilisateurs</h2>
+          <span id="admin-users-chevron" style="color:var(--text-secondary)">▾</span>
         </div>
-        <div class="card-body">
+        <div class="card-body" id="admin-users-body" style="display:none">
           <div id="admin-users-table">
             <div class="table-loading">Chargement…</div>
           </div>
@@ -1366,7 +1369,7 @@
     <span class="support-fab-dot" id="support-fab-dot" style="display:none"></span>
   </button>
 
-  <script src="js/app.js?v=1787231562110"></script>
+  <script src="js/app.js?v=1787234763459"></script>
   <script src="js/gear.js?v=1786459105633"></script>
   <script src="js/campus.js?v=1787232833223"></script>
   <script src="js/free_sessions.js?v=1786701705047"></script>

@@ -4306,6 +4306,23 @@ function wireAdminDiagToggle() {
   };
 }
 
+// Meme mecanisme que wireAdminDiagToggle ci-dessus, pour le repli/depli du
+// tableau Utilisateurs (replie par defaut, demande utilisateur 20/08) - le
+// chargement des donnees (loadAdminUsers) reste independant de la visibilite.
+function wireAdminUsersToggle() {
+  const header = document.getElementById('admin-users-header');
+  if (!header || header.dataset.wired) return;
+  header.dataset.wired = '1';
+  const chevron = document.getElementById('admin-users-chevron');
+  header.onclick = () => {
+    const body = document.getElementById('admin-users-body');
+    if (!body) return;
+    const open = body.style.display === 'none';
+    body.style.display = open ? '' : 'none';
+    if (chevron) chevron.textContent = open ? '▴' : '▾';
+  };
+}
+
 async function loadAdminInfo() {
   wireAdminDiagToggle();
   try {
@@ -4374,6 +4391,7 @@ async function loadAdminInfo() {
 // Repertoire des utilisateurs (voir server.js /api/admin/users, relais
 // support-relay routes /users/*) - ecran principal de la page Admin.
 async function loadAdminUsers() {
+  wireAdminUsersToggle();
   const wrap = document.getElementById('admin-users-table');
   if (!wrap) return;
   wrap.innerHTML = '<div class="table-loading">Chargement…</div>';

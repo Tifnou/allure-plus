@@ -3332,6 +3332,7 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
   grid-template-columns: repeat(2, minmax(220px, 340px));
   gap: 12px;
   padding: 0;
+  margin-bottom: 20px;
   justify-content: start;
 }
 #page-admin .admin-logs-card { grid-column: 1 / -1; }
