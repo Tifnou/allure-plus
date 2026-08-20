@@ -1911,8 +1911,22 @@ app.get('/api/dashboard', requireSession, async (req, res) => {
       trainingEffectLabel:        a.trainingEffectLabel,
       aerobicTrainingEffectMessage:   a.aerobicTrainingEffectMessage,
       anaerobicTrainingEffectMessage: a.anaerobicTrainingEffectMessage,
-      startLat:        a.startLatitude,
-      startLon:        a.startLongitude,
+      // ?? null (jamais laisser `undefined`) : JSON.stringify supprime
+      // silencieusement une cle a `undefined` a l'ecriture du cache
+      // (writeScoped/ACTIVITIES_CACHE_FILE plus bas) - une activite SANS
+      // GPS (ex: cardio en salle) produit alors un objet sans la cle
+      // "startLat" du tout. Si CETTE activite precise se retrouve en
+      // position 0 du tableau mis en cache (la plus recente de l'annee),
+      // le controle de fraicheur du cache (cached[0].startLat !== undefined,
+      // route /api/activities/year/:year plus bas) la prend a tort pour un
+      // cache pre-migration entier et refait un aller-retour Garmin complet
+      // a CHAQUE chargement de cette annee, indefiniment (bug reel constate :
+      // 2024 systematiquement plus lente que les autres annees a la page
+      // Statistiques, a cause d'une seance de cardio en salle du 30/12/2024
+      // sans coordonnees). `null` survit lui a la serialisation JSON, donc
+      // la cle reste presente meme pour une activite sans GPS.
+      startLat:        a.startLatitude ?? null,
+      startLon:        a.startLongitude ?? null,
     }));
     res.json({ stats, lastRuns, allActivities, records, lastUpdated: new Date().toISOString() });
   } catch (err) { handleError(res, err); }
@@ -1965,8 +1979,22 @@ app.get('/api/activities/year/:year', requireSession, async (req, res) => {
       trainingEffectLabel:        a.trainingEffectLabel,
       aerobicTrainingEffectMessage:   a.aerobicTrainingEffectMessage,
       anaerobicTrainingEffectMessage: a.anaerobicTrainingEffectMessage,
-      startLat:        a.startLatitude,
-      startLon:        a.startLongitude,
+      // ?? null (jamais laisser `undefined`) : JSON.stringify supprime
+      // silencieusement une cle a `undefined` a l'ecriture du cache
+      // (writeScoped/ACTIVITIES_CACHE_FILE plus bas) - une activite SANS
+      // GPS (ex: cardio en salle) produit alors un objet sans la cle
+      // "startLat" du tout. Si CETTE activite precise se retrouve en
+      // position 0 du tableau mis en cache (la plus recente de l'annee),
+      // le controle de fraicheur du cache (cached[0].startLat !== undefined,
+      // route /api/activities/year/:year plus bas) la prend a tort pour un
+      // cache pre-migration entier et refait un aller-retour Garmin complet
+      // a CHAQUE chargement de cette annee, indefiniment (bug reel constate :
+      // 2024 systematiquement plus lente que les autres annees a la page
+      // Statistiques, a cause d'une seance de cardio en salle du 30/12/2024
+      // sans coordonnees). `null` survit lui a la serialisation JSON, donc
+      // la cle reste presente meme pour une activite sans GPS.
+      startLat:        a.startLatitude ?? null,
+      startLon:        a.startLongitude ?? null,
     }));
     if (isPastYear) {
       const cache = readScoped(ACTIVITIES_CACHE_FILE, req.session.email, {});
