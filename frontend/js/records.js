@@ -324,13 +324,16 @@ function computeRaceBadges(race) {
 }
 
 // ─── Tableau des courses (un cadre repliable par nom de course) ───────
-const RACE_COLLAPSED_KEY = 'races_collapsed_groups';
-let _collapsedRaceGroups = new Set();
-try { _collapsedRaceGroups = new Set(JSON.parse(localStorage.getItem(RACE_COLLAPSED_KEY) || '[]')); }
-catch (e) { _collapsedRaceGroups = new Set(); }
+// Retient les groupes DEPLIES (pas l'inverse) : repli par defaut au demarrage
+// de l'appli (demande explicite utilisateur, 20/08) - seuls les groupes que
+// l'utilisateur a lui-meme deplies restent ouverts d'une session a l'autre.
+const RACE_EXPANDED_KEY = 'races_expanded_groups';
+let _expandedRaceGroups = new Set();
+try { _expandedRaceGroups = new Set(JSON.parse(localStorage.getItem(RACE_EXPANDED_KEY) || '[]')); }
+catch (e) { _expandedRaceGroups = new Set(); }
 
-function saveCollapsedRaceGroups() {
-  try { localStorage.setItem(RACE_COLLAPSED_KEY, JSON.stringify([..._collapsedRaceGroups])); }
+function saveExpandedRaceGroups() {
+  try { localStorage.setItem(RACE_EXPANDED_KEY, JSON.stringify([..._expandedRaceGroups])); }
   catch (e) { /* silencieux */ }
 }
 
@@ -371,14 +374,14 @@ function renderRacesTable() {
 }
 
 function toggleRaceGroup(key) {
-  if (_collapsedRaceGroups.has(key)) _collapsedRaceGroups.delete(key);
-  else _collapsedRaceGroups.add(key);
-  saveCollapsedRaceGroups();
+  if (_expandedRaceGroups.has(key)) _expandedRaceGroups.delete(key);
+  else _expandedRaceGroups.add(key);
+  saveExpandedRaceGroups();
   renderRacesTable();
 }
 
 function renderRaceGroupCard(g) {
-  const collapsed = _collapsedRaceGroups.has(g.key);
+  const collapsed = !_expandedRaceGroups.has(g.key);
   const editionsLabel = g.list.length + (g.list.length > 1 ? ' éditions' : ' édition');
   const bestLabel = g.bestDur != null ? `🏆 ${formatTime(g.bestDur)}` : '';
   const groupAttr = escapeHtml(g.key).replace(/"/g, '&quot;');
