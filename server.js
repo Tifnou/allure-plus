@@ -1738,19 +1738,29 @@ app.post('/api/login/mfa', async (req, res) => {
 // Logout
 app.post('/api/logout', (req, res) => {
   const sid = req.cookies?.sid;
+  // Ce que CETTE requete voit reellement comme "connecte", en reutilisant la
+  // meme resolution que le reste de l'appli (getSession, comparaison par
+  // reference a sessions.get(envSessionId)) - jamais une simple comparaison
+  // de sid. Depuis l'ajout du repli transparent de getSession() (14/08,
+  // Campus Coach faussement "deconnecte" apres redemarrage), TOUTES les
+  // routes protegees (dont /api/status, appelee par login.html) retombent
+  // silencieusement sur envSessionId des que le cookie sid est absent/perime
+  // - SANS jamais poser ce cookie cote navigateur (seul l'ancien bloc de
+  // secours de /api/status le faisait, devenu mort puisque getSession()
+  // resout deja le repli en amont). Consequence : le navigateur n'a alors
+  // JAMAIS de cookie sid egal a envSessionId, donc l'ancienne comparaison
+  // `sid === envSessionId` ci-dessous ne matchait plus jamais - envSessionId
+  // ne s'effacait jamais, et la requete /api/status suivante (sur /login)
+  // retombait dessus et reconnectait instantanement (bug reel constate
+  // 21/08 : "je clique sur deconnexion, ca se reconnecte aussitot").
+  const effective = getSession(req);
+  // Capture la reference AVANT le sessions.delete(sid) qui suit : si sid
+  // est directement egal a envSessionId, delete() supprimerait cette meme
+  // entree en premier, et sessions.get(envSessionId) ne renverrait plus
+  // qu'undefined juste apres - faussant la comparaison par reference.
+  const envSession = envSessionId ? sessions.get(envSessionId) : null;
   if (sid) sessions.delete(sid);
-  // Si le sid deconnecte est celui de la session d'auto-login (partagee par
-  // tous les onglets/appareils qui n'ont jamais eu a se reconnecter
-  // manuellement), il faut aussi oublier envSessionId - sinon /api/status et
-  // la route / continuent de pointer dessus alors qu'elle vient d'etre
-  // supprimee de `sessions` : ni redirection propre vers /login (envSessionId
-  // reste "truthy"), ni reconnexion (sessions.has() est deja false), le
-  // dashboard se charge cote client sans session valide jusqu'au prochain
-  // redemarrage complet du serveur (bug reel constate 14/08 - "je me
-  // deconnecte, je ne peux plus me reconnecter", corrige uniquement en
-  // relancant start.bat). Un logout doit rester un vrai logout, pas un
-  // etat casse qui force un redemarrage.
-  if (sid && sid === envSessionId) envSessionId = null;
+  if (envSessionId && effective === envSession) envSessionId = null;
   res.clearCookie('sid');
   res.json({ success: true });
 });
