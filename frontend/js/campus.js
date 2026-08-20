@@ -3137,6 +3137,10 @@ function renderGoalsAlerts(goal, weeks, stats) {
   ).join('');
 }
 
+// Vu le premier rendu de la page Objectifs cette session (voir garde
+// _objectifsBlocksRenderedOnce dans renderObjectifsBlocks ci-dessous).
+let _objectifsBlocksRenderedOnce = false;
+
 /** Orchestre tous les nouveaux blocs (appelé par updateGoalsPage) */
 function renderObjectifsBlocks(goal, weeks) {
   const el = id => document.getElementById(id);
@@ -3152,15 +3156,30 @@ function renderObjectifsBlocks(goal, weeks) {
   const distInputEl  = document.getElementById('goals-dist-input');
   const dplusInputEl = document.getElementById('goals-dplus-input');
   const prevPlanUid  = distInputEl?.dataset.planId || null;
-  if (distInputEl  && prevPlanUid !== planUid) { delete distInputEl.dataset.init;  distInputEl.dataset.planId  = planUid; }
-  if (dplusInputEl && prevPlanUid !== planUid) { delete dplusInputEl.dataset.init; dplusInputEl.dataset.planId = planUid; }
+  const isPlanChange = !!distInputEl && prevPlanUid !== planUid;
+  if (distInputEl  && isPlanChange) { delete distInputEl.dataset.init;  distInputEl.dataset.planId  = planUid; }
+  if (dplusInputEl && isPlanChange) { delete dplusInputEl.dataset.init; dplusInputEl.dataset.planId = planUid; }
   // ──────────────────────────────────────────────────────────────────
   // ── Nettoyage si jamais validé ──────────────────────────────────
   // Si l'utilisateur n'a jamais cliqué "Valider", on efface les valeurs
-  // auto-sauvegardées ET les champs pour repartir sur une ardoise vierge
+  // auto-sauvegardées ET les champs pour repartir sur une ardoise vierge.
+  // JAMAIS sur le tout premier rendu de la session (_objectifsBlocksRenderedOnce) :
+  // cette fonction peut s'executer avant que suivi_objectif_validated_* (cle
+  // "durable" restauree de facon ASYNCHRONE au demarrage, voir
+  // syncUserDataFromServer dans app.js) n'ait fini d'etre rapatriee depuis le
+  // serveur - la cle semble alors absente alors qu'elle existe bel et bien,
+  // et ce nettoyage effacait purement et simplement le temps cible/pauses
+  // pourtant deja valides. Bug reel constate : "au redemarrage le temps
+  // cible disparait, il faut le ressaisir". isPlanChange seul ne suffit pas
+  // a se proteger de cette fenetre de course : sur un DOM tout juste charge,
+  // dataset.planId n'a jamais ete pose, donc isPlanChange vaut toujours vrai
+  // au tout premier rendu, meme sans aucun changement reel de plan. A partir
+  // du 2e rendu de la session (sync forcement deja retombee), le
+  // comportement original (nettoyage sur changement de plan reel) reprend
+  // normalement.
   const _planId = goal._id || 'plan';
   const _validatedKey = 'suivi_objectif_validated_' + _planId;
-  if (!localStorage.getItem(_validatedKey)) {
+  if (_objectifsBlocksRenderedOnce && isPlanChange && !localStorage.getItem(_validatedKey)) {
     localStorage.removeItem('suivi_objectif_dist_'  + _planId);
     localStorage.removeItem('suivi_objectif_dplus_' + _planId);
     const _pg = JSON.parse(localStorage.getItem('suivi_personal_goals') || '{}');
@@ -3173,6 +3192,7 @@ function renderObjectifsBlocks(goal, weeks) {
     if (_dpi) _dpi.value = '';
     if (_ti)  _ti.value  = '';
   }
+  _objectifsBlocksRenderedOnce = true;
   // ────────────────────────────────────────────────────────────────
 
 
