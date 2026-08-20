@@ -4,6 +4,8 @@ const cors     = require('cors');
 const path     = require('path');
 const fs       = require('fs');
 const crypto   = require('crypto');
+const os       = require('os');
+const { spawn } = require('child_process');
 
 // â?,â?,â?, Logger fichier (admin /api/logs) â?,â?,â?,â?,â?,â?,â?,â?,â?,â?,â?,â?,â?,â?,â?,â?,â?,â?,â?,â?,â?,â?,â?,â?,
 const _logFile = path.join(__dirname, 'server.log');
@@ -920,53 +922,138 @@ function isNewerVersion(latest, current) {
 // versions (ex: bloque sur 1.23.0 pendant que 1.24.0 puis 1.24.1 sortent) -
 // sinon la modale ne montrerait que le changelog de la toute derniere
 // version, en oubliant ce qui a change entre-temps.
+// Factorisee (etait avant le corps direct de /api/check-update) pour etre
+// reutilisee par /api/update/download : le telechargement re-derive son
+// URL lui-meme depuis GitHub plutot que de faire confiance a un downloadUrl
+// fourni par le client (evite qu'un appel direct a cette route serve de
+// telechargeur generique vers une URL arbitraire).
+async function getUpdateInfo() {
+  let releases = (_updateCheckCache && (Date.now() - _updateCheckCache.ts) < UPDATE_CHECK_TTL_MS)
+    ? _updateCheckCache.releases : null;
+  if (!releases) {
+    const r = await fetch(`https://api.github.com/repos/${UPDATE_REPO}/releases?per_page=20`, {
+      headers: { 'Accept': 'application/vnd.github+json', 'User-Agent': 'AllurePlus-App' },
+      cache: 'no-store',
+    });
+    if (!r.ok) return { updateAvailable: false };
+    releases = await r.json();
+    _updateCheckCache = { releases, ts: Date.now() };
+  }
+
+  const parsed = releases
+    .filter(rel => !rel.draft && !rel.prerelease && rel.tag_name)
+    .map(rel => ({
+      version: rel.tag_name.replace(/^v/, ''),
+      body: rel.body || '',
+      assets: rel.assets || [],
+      html_url: rel.html_url,
+      published_at: rel.published_at,
+    }))
+    .sort((a, b) => isNewerVersion(a.version, b.version) ? 1 : -1); // ascending : plus ancien -> plus recent
+
+  const pending = parsed.filter(rel => isNewerVersion(rel.version, APP_VERSION));
+  if (pending.length === 0) {
+    return { updateAvailable: false, currentVersion: APP_VERSION, latestVersion: APP_VERSION };
+  }
+
+  const latest = pending[pending.length - 1];
+  const asset = latest.assets.find(a => a.name.endsWith('.exe'));
+  // Fusion par categorie (Nouveautes/Ameliorations/Corrections) de toutes
+  // les releases manquees, plutot qu'un empilement "## Version X.Y.Z" par
+  // release - voir mergeReleaseNotesByCategory.
+  const releaseNotes = mergeReleaseNotesByCategory(pending);
+
+  return {
+    updateAvailable: true,
+    currentVersion: APP_VERSION,
+    latestVersion: latest.version,
+    releaseNotes,
+    downloadUrl: asset ? asset.browser_download_url : latest.html_url,
+    downloadIsExe: !!asset,
+    publishedAt: latest.published_at,
+  };
+}
+
 app.get('/api/check-update', async (req, res) => {
   try {
-    let releases = (_updateCheckCache && (Date.now() - _updateCheckCache.ts) < UPDATE_CHECK_TTL_MS)
-      ? _updateCheckCache.releases : null;
-    if (!releases) {
-      const r = await fetch(`https://api.github.com/repos/${UPDATE_REPO}/releases?per_page=20`, {
-        headers: { 'Accept': 'application/vnd.github+json', 'User-Agent': 'AllurePlus-App' },
-        cache: 'no-store',
-      });
-      if (!r.ok) return res.json({ updateAvailable: false });
-      releases = await r.json();
-      _updateCheckCache = { releases, ts: Date.now() };
-    }
-
-    const parsed = releases
-      .filter(rel => !rel.draft && !rel.prerelease && rel.tag_name)
-      .map(rel => ({
-        version: rel.tag_name.replace(/^v/, ''),
-        body: rel.body || '',
-        assets: rel.assets || [],
-        html_url: rel.html_url,
-        published_at: rel.published_at,
-      }))
-      .sort((a, b) => isNewerVersion(a.version, b.version) ? 1 : -1); // ascending : plus ancien -> plus recent
-
-    const pending = parsed.filter(rel => isNewerVersion(rel.version, APP_VERSION));
-    if (pending.length === 0) {
-      return res.json({ updateAvailable: false, currentVersion: APP_VERSION, latestVersion: APP_VERSION });
-    }
-
-    const latest = pending[pending.length - 1];
-    const asset = latest.assets.find(a => a.name.endsWith('.exe'));
-    // Fusion par categorie (Nouveautes/Ameliorations/Corrections) de toutes
-    // les releases manquees, plutot qu'un empilement "## Version X.Y.Z" par
-    // release - voir mergeReleaseNotesByCategory.
-    const releaseNotes = mergeReleaseNotesByCategory(pending);
-
-    res.json({
-      updateAvailable: true,
-      currentVersion: APP_VERSION,
-      latestVersion: latest.version,
-      releaseNotes,
-      downloadUrl: asset ? asset.browser_download_url : latest.html_url,
-      publishedAt: latest.published_at,
-    });
+    res.json(await getUpdateInfo());
   } catch (e) {
     res.json({ updateAvailable: false });
+  }
+});
+
+// ─────────────────────────────────────────────
+// Telechargement + installation de la mise a jour (demande utilisateur,
+// 20/08) : jusqu'ici "Telecharger" se contentait d'un <a download> pointant
+// directement vers l'asset GitHub - un telechargement navigateur classique,
+// invisible dans cette fenetre --app= sans barre de telechargement, et sans
+// aucune suite (l'utilisateur devait retrouver le .exe lui-meme dans son
+// dossier Telechargements puis le lancer a la main). Allure+ tourne avec son
+// propre serveur local : le telechargement se fait desormais ICI (flux vers
+// le disque, progression suivie en memoire), et l'installeur peut etre
+// lance directement en fin de telechargement - le frontend n'a plus qu'a
+// afficher une barre de progression en interrogeant /api/update/download-
+// progress, puis proposer "installer maintenant" une fois `status: 'done'`.
+let _updateDownloadState = { status: 'idle', downloadedBytes: 0, totalBytes: 0, filePath: null, error: null };
+
+app.post('/api/update/download', async (req, res) => {
+  if (_updateDownloadState.status === 'downloading') {
+    return res.json({ started: false, reason: 'already-downloading' });
+  }
+  let info;
+  try { info = await getUpdateInfo(); } catch (e) { return res.status(502).json({ error: 'Verification de mise a jour impossible.' }); }
+  if (!info.updateAvailable || !info.downloadIsExe) {
+    return res.status(400).json({ error: 'Aucune mise a jour telechargeable pour le moment.' });
+  }
+
+  const destPath = path.join(os.tmpdir(), `AllurePlus_Update_${info.latestVersion}.exe`);
+  _updateDownloadState = { status: 'downloading', downloadedBytes: 0, totalBytes: 0, filePath: destPath, error: null };
+  res.json({ started: true });
+
+  // Asynchrone, apres la reponse : le frontend suit la progression via
+  // /api/update/download-progress plutot que d'attendre cette requete.
+  (async () => {
+    try {
+      const r = await fetch(info.downloadUrl, { redirect: 'follow' });
+      if (!r.ok || !r.body) throw new Error(`Telechargement echoue (HTTP ${r.status})`);
+      _updateDownloadState.totalBytes = parseInt(r.headers.get('content-length') || '0', 10);
+      const fileStream = fs.createWriteStream(destPath);
+      const reader = r.body.getReader();
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        _updateDownloadState.downloadedBytes += value.length;
+        await new Promise((resolve, reject) => fileStream.write(Buffer.from(value), (err) => err ? reject(err) : resolve()));
+      }
+      await new Promise((resolve, reject) => fileStream.end((err) => err ? reject(err) : resolve()));
+      _updateDownloadState.status = 'done';
+    } catch (e) {
+      _updateDownloadState.status = 'error';
+      _updateDownloadState.error = e.message;
+      console.error('[UPDATE] Telechargement echoue:', e.message);
+    }
+  })();
+});
+
+app.get('/api/update/download-progress', (req, res) => {
+  res.json(_updateDownloadState);
+});
+
+// Lance l'installeur telecharge - detached (le processus survit a l'arret
+// du serveur Node courant, que l'installeur va justement devoir remplacer)
+// et stdio ignore (aucune console a garder ouverte). Le reste (fermer
+// proprement l'app en cours, demander confirmation ecrasement) est gere par
+// l'installeur Inno Setup lui-meme, pas ce code.
+app.post('/api/update/install', (req, res) => {
+  if (_updateDownloadState.status !== 'done' || !_updateDownloadState.filePath) {
+    return res.status(400).json({ error: 'Aucun installeur pret a etre lance.' });
+  }
+  try {
+    const child = spawn(_updateDownloadState.filePath, [], { detached: true, stdio: 'ignore' });
+    child.unref();
+    res.json({ launched: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
 });
 
