@@ -70,7 +70,6 @@ const {
   getCurrentWeekSessions,
   exportSessionToGarmin,
   getFullTrainingPlan,
-  getGoalSummary,
   getPaces,
 } = require('./campus_client');
 
@@ -3629,17 +3628,6 @@ app.get('/api/campus/training', (req, res, next) => {
     }
     handleError(res, err);
   }
-});
-
-// R©sum© d©taill© du goal actif
-app.get('/api/campus/goal-detail', requireCampusToken, async (req, res) => {
-  try {
-    const goal = await getActiveGoal(req.campusToken);
-    const goalId = goal._id;
-    if (!goalId) throw new Error('goalId introuvable');
-    const summary = await getGoalSummary(req.campusToken, goalId);
-    res.json({ goalId, summary });
-  } catch(err) { handleError(res, err); }
 });
 
 // Allures d'entra®nement

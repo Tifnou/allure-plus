@@ -3388,12 +3388,6 @@ async function loadGoalsPage() {
 
   updateGoalsPage(goal, weeks);
 
-  // Tentative de chargement du résumé détaillé + allures
-  try {
-    const detailRes = await fetchJSON('/api/campus/goal-detail');
-    if (detailRes?.summary) renderGoalSummary(detailRes.summary);
-  } catch(e) { /* pas de token = pas de détail */ }
-
   // Re-rendu des estimations après tous les fetches (VMA peut être à présent disponible)
   if (campusState.goal && campusState.weeks) {
     const dplusInput = document.getElementById('goals-dplus-input');
@@ -3564,18 +3558,6 @@ function renderCyclesFromWeeks(weeks, now) {
   }).join('');
 
   cyclesContainer.innerHTML = html;
-}
-
-// "?"? Résumé goal Campus "?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?
-function renderGoalSummary(summary) {
-  const header = summary.header || {};
-  const assiduity = summary.assiduity || {};
-  const el = id => document.getElementById(id);
-
-  // Mise à jour du compteur d'assiduité si l'élément existe
-  if (el('goals-sessions-done') && assiduity.sessionsDone !== undefined) {
-    el('goals-sessions-done').textContent = `${assiduity.sessionsDone} / ${assiduity.sessionsTotal} séances`;
-  }
 }
 
 // Allures de course — Route + Trail selon le type de plan
