@@ -101,8 +101,20 @@ function installCookieJar(client) {
     return config;
   });
 
+  // Garde defensive sur `response` (pas seulement sur error.response) : le
+  // propre intercepteur response de la lib (constructeur HttpClient, logique
+  // de rafraichissement OAuth2 pour les 401) fait `return [2, undefined]`
+  // quand this.oauth2Token n'est pas encore defini - ca CONVERTIT le rejet
+  // en resolution avec la valeur undefined dans la chaine axios, et notre
+  // intercepteur (enregistre APRES, cf ordre d'installation) recoit alors
+  // `response = undefined` en tant que "succes". Cause racine reelle du
+  // crash observe (collegue, 21/08, 3e passe) : "Cannot read properties of
+  // undefined (reading 'headers')" - Garmin repondait 401 a la soumission du
+  // code MFA (avant meme d'atteindre l'analyse du ticket), et cette logique
+  // de retry OAuth2 (pensee pour les APPELS API apres connexion, pas pour le
+  // flux SSO de connexion lui-meme) avalait l'erreur silencieusement.
   client.interceptors.response.use(
-    (response) => { captureSetCookie(response.headers); return response; },
+    (response) => { if (response) captureSetCookie(response.headers); return response; },
     (error) => {
       if (error && error.response) captureSetCookie(error.response.headers);
       return Promise.reject(error);
@@ -259,6 +271,22 @@ HttpClient.prototype.resumeWithMfa = async function (mfaCode) {
         Referer: signinUrl,
         'User-Agent': USER_AGENT_BROWSER,
       },
+      // Reproduit et confirme (21/08, 3e passe, trace complete obtenue) :
+      // Garmin repond 401 a cette requete (avant meme l'analyse du ticket -
+      // code correct ou non). L'intercepteur response PARTAGE de la lib
+      // (constructeur HttpClient, pense pour rafraichir un token OAuth2
+      // expire sur des appels API APRES connexion) traite N'IMPORTE QUEL 401
+      // comme "peut-etre a rafraichir", et avale silencieusement l'erreur
+      // (resout avec `undefined`) quand this.oauth2Token n'est pas encore
+      // defini - ce qui est TOUJOURS le cas ici (le flux SSO de connexion
+      // n'a par definition pas encore de token). `_retry: true` est le
+      // marqueur que cette MEME logique pose normalement APRES une premiere
+      // tentative pour ne jamais boucler - le poser des le depart fait
+      // sauter cette branche entierement (voir la condition en tete de son
+      // gestionnaire, HttpClient.js) et laisse l'erreur 401 remonter
+      // normalement, avec le VRAI statut/corps de reponse Garmin exploitable
+      // dans le catch ci-dessous.
+      _retry: true,
     });
   } catch (err) {
     // La reponse HTML/JSON de Garmin (si le serveur en a renvoye une avec le
