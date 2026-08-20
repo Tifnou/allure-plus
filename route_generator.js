@@ -651,6 +651,26 @@ function trailLevelMidKmh(level) {
   return lvl ? (lvl.minKmh + lvl.maxKmh) / 2 : null;
 }
 
+// Rejette une ALTERNATIVE (jamais l'option principale) trop eloignee de la
+// cible - la convergence iterative de refineLoopFromBearing/
+// generateOutAndBack (2 iterations, ratio de correction plafonne a x0.5/x2
+// par iteration) peut echouer a converger correctement dans certaines
+// directions precises (reseau de chemins plus circuitueux que prevu par le
+// rayon initial, meme point de depart et memes criteres) - bug reel
+// constate : une alternative aller-retour a 20,1 km/6h51 alors que les 5
+// autres options generees pour la MEME cible (195 min) tournaient toutes
+// entre 9,5 et 12,9 km/2h55-3h57 - "exotique" par rapport au reste des
+// propositions. Ne s'applique jamais a l'option principale (toujours
+// montree, avec ses propres avertissements existants si besoin) - une
+// alternative doit rester une vraie variante "similaire ailleurs", pas un
+// egarement de la recherche.
+const ALT_MIN_CLOSENESS = 0.5;
+function altCloseness(distanceM, durationMin, targetDistanceM, targetDurationMin) {
+  return (targetDurationMin && durationMin)
+    ? 1 - Math.abs(durationMin / targetDurationMin - 1)
+    : 1 - Math.abs(distanceM / targetDistanceM - 1);
+}
+
 // Duree reelle predite : decoupe le tracé en segments (fusionnes jusqu'a
 // >=15m pour lisser le bruit). Deux modes : allure reelle par tranche de
 // pente (comportement d'origine, ecart constate de 40%+ sur une sortie
@@ -1032,6 +1052,11 @@ async function buildLoopOptionsAtSinglePoint({ start, targetDistanceM, targetAsc
       }
     }
 
+    // Alternative trop eloignee de la cible (echec de convergence propre a
+    // cette direction, cf ALT_MIN_CLOSENESS) - ecartee plutot que proposee
+    // comme si elle etait une variante valable au meme titre que les autres.
+    if (altCloseness(altDistanceM, altDurationMin, targetDistanceM, targetDurationMin) < ALT_MIN_CLOSENESS) continue;
+
     options.push({
       type: 'boucle-alternative',
       shape: 'loop',
@@ -1171,6 +1196,12 @@ async function buildOutAndBackOptionsAtSinglePoint({ start, targetDistanceM, tar
       }
     }
 
+    const outbackDurationMin = predictDurationMin(result.points, paceMinPerKm, trailLevel);
+    // Alternative (jamais l'option principale, i===0) trop eloignee de la
+    // cible - echec de convergence propre a cette direction, cf
+    // ALT_MIN_CLOSENESS.
+    if (i > 0 && altCloseness(result.distanceM, outbackDurationMin, targetDistanceM, targetDurationMin) < ALT_MIN_CLOSENESS) continue;
+
     const toward = towardCompassPhrase(bearing);
     options.push({
       type: repeatedSegments ? 'aller-retour-repetitions' : 'aller-retour',
@@ -1182,7 +1213,7 @@ async function buildOutAndBackOptionsAtSinglePoint({ start, targetDistanceM, tar
       distanceM: result.distanceM,
       ascentM,
       repeatedSegments,
-      predictedDurationMin: predictDurationMin(result.points, paceMinPerKm, trailLevel),
+      predictedDurationMin: outbackDurationMin,
       commentary: `Aller-retour ${toward} : le retour emprunte exactement le même tracé que l'aller.`
         + (repeatedSegments ? ` Le D+ naturel ne suffisait pas seul — une ou plusieurs côtes sont répétées à l'aller uniquement, le retour reste direct.` : ''),
       alternateStart: null,
