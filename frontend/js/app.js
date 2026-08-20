@@ -85,10 +85,15 @@ let _userDataSyncPromise = null;
 function isDurableLsKey(key) {
   return DURABLE_LS_KEYS.includes(key) || DURABLE_LS_PREFIXES.some(p => key.startsWith(p));
 }
+// nativeSetItem expose au-dela de l'IIFE : syncUserDataFromServer() (plus
+// bas) doit pouvoir ecrire une valeur reçue DU serveur sans redeclencher un
+// POST vers /api/user-data (echo inutile, et ça re-daterait a tort le
+// sidecar de sync.js comme si CETTE machine venait de produire la valeur).
+let _nativeLsSetItem = null;
 (function patchLocalStorageForServerSync() {
-  const nativeSetItem = localStorage.setItem.bind(localStorage);
+  _nativeLsSetItem = localStorage.setItem.bind(localStorage);
   localStorage.setItem = function(key, value) {
-    nativeSetItem(key, value);
+    _nativeLsSetItem(key, value);
     if (isDurableLsKey(key)) {
       fetch(`${API}/api/user-data`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -97,23 +102,51 @@ function isDurableLsKey(key) {
     }
   };
 })();
+// Cle purement locale (pas une DURABLE_LS_KEYS, jamais synchronisee) qui
+// retient, par cle durable, l'horodatage serveur (meta.updatedAt) DEJA
+// applique sur CET appareil — sans elle, syncUserDataFromServer() ne peut
+// que "combler les cles manquantes" et ignore pour toujours une mise a jour
+// faite depuis un autre appareil des qu'une valeur existe deja en local,
+// meme perimee. Bug reel constate (compte de l'epouse, PC du bureau) :
+// seances pointees "faites" et ressenti saisis sur son PC perso jamais
+// repercutes sur le PC du bureau, qui avait deja sa propre valeur (souvent
+// vide) pour suivi_local_done/suivi_session_mood. Purgee au logout comme le
+// reste (localStorage.clear(), voir logout()) : une reconnexion repart d'un
+// catch-up complet, jamais d'un etat perime d'un compte precedent.
+const DURABLE_SYNC_APPLIED_KEY = '_durable_sync_applied_meta';
+function readAppliedSyncMeta() {
+  try { return JSON.parse(localStorage.getItem(DURABLE_SYNC_APPLIED_KEY) || '{}'); } catch (e) { return {}; }
+}
 async function syncUserDataFromServer() {
   try {
     const res = await fetch(`${API}/api/user-data`);
     if (!res.ok) return;
-    const serverData = await res.json();
-    // Serveur -> local : comble les cles manquantes en local (recuperation
-    // apres un nettoyage du navigateur).
-    Object.entries(serverData).forEach(([key, value]) => {
-      if (isDurableLsKey(key) && localStorage.getItem(key) == null) localStorage.setItem(key, value);
+    const { data: serverData, meta: serverMeta } = await res.json();
+    // Serveur -> local : adopte une valeur serveur si elle est soit absente
+    // en local, soit plus recente (meta.updatedAt) que la derniere version
+    // serveur deja appliquee sur CET appareil — jamais si le local est deja
+    // a jour ou plus recent (protege toujours contre un revert vers une
+    // copie serveur perimee, ex: coupure reseau ponctuelle lors d'un push).
+    const applied = readAppliedSyncMeta();
+    let appliedChanged = false;
+    Object.entries(serverData || {}).forEach(([key, value]) => {
+      if (!isDurableLsKey(key)) return;
+      const serverTs = serverMeta && serverMeta[key];
+      const localMissing = localStorage.getItem(key) == null;
+      const serverIsNewer = serverTs && (!applied[key] || serverTs > applied[key]);
+      if (localMissing || serverIsNewer) {
+        _nativeLsSetItem(key, value);
+        if (serverTs) { applied[key] = serverTs; appliedChanged = true; }
+      }
     });
+    if (appliedChanged) _nativeLsSetItem(DURABLE_SYNC_APPLIED_KEY, JSON.stringify(applied));
     // Local -> serveur : sauvegarde tout de suite les cles deja presentes en
     // local mais absentes du serveur (typiquement la toute premiere
     // synchro apres l'ajout de ce mecanisme) — sans attendre une prochaine
     // ecriture qui pourrait ne jamais survenir avant un nettoyage.
     const toPush = {};
     Object.keys(localStorage).forEach(key => {
-      if (isDurableLsKey(key) && !(key in serverData)) toPush[key] = localStorage.getItem(key);
+      if (isDurableLsKey(key) && !(key in (serverData || {}))) toPush[key] = localStorage.getItem(key);
     });
     if (Object.keys(toPush).length) {
       fetch(`${API}/api/user-data`, {

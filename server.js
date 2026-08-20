@@ -58,7 +58,7 @@ const { getZoneRange, annotatePaceZones, ZONE_LABELS } = require('./zones');
 const { isBrouterConfigured, isTilePresent, getTileRemoteSize, downloadTile } = require('./brouter_manager');
 const { geocode, getCommunesForPostcode, getCommunesForDepartment, searchStreet, getTownHall, generateRouteOptions, buildGpxXml } = require('./route_generator');
 const { getPaceProfile, refreshPaceProfile, migratePaceProfileToScoped } = require('./pace_profile');
-const { scheduleSync, runFullReconciliation, getSyncStatus, syncBinaryFile, deleteBinaryFile, syncAvatarFile } = require('./sync');
+const { scheduleSync, runFullReconciliation, getSyncStatus, syncBinaryFile, deleteBinaryFile, syncAvatarFile, SYNC_TYPES } = require('./sync');
 const syncClient = require('./sync_client');
 const { buildPlanWorkbook } = require('./xlsx_export');
 const {
@@ -275,10 +275,24 @@ app.post('/api/pref2', requireSession, (req, res) => {
 // allure-plus.iss). Cle/valeur libres (n'importe quelle cle localStorage
 // "durable" cote client, cf DURABLE_LS_KEYS dans app.js), stocke par compte
 // comme PREFS_FILE au cas ou plusieurs comptes utilisent le meme serveur.
+// `meta` (updatedAt par cle, tire du sidecar de sync.js) permet au client de
+// distinguer "jamais vu" de "deja vu mais perime depuis" — indispensable
+// multi-appareils : la synchro cross-appareils (sync.js/runFullReconciliation)
+// peut rafraichir ce fichier data/user_data.json EN ARRIERE-PLAN (pull
+// periodique, ou juste apres connexion) sans que le navigateur de CETTE
+// machine n'en soit informe ; sans horodatage, syncUserDataFromServer()
+// (app.js) ne peut que "combler les cles manquantes" et ignore alors pour
+// toujours une mise a jour faite depuis un autre appareil des que la cle
+// existe deja localement, meme perimee (bug reel constate : "done"/ressenti
+// d'une seance saisis sur le PC perso jamais recus sur le PC du bureau, une
+// fois que celui-ci avait deja une valeur locale pour ces cles).
 app.get('/api/user-data', requireSession, (req, res) => {
   const email = (req.session.email || '').toLowerCase();
   const store = readJsonSafe(USER_DATA_FILE, {});
-  res.json(store[email] || {});
+  const sidecar = readJsonSafe(SYNC_TYPES.user_data.sidecarFile, {});
+  const meta = {};
+  Object.entries(sidecar[email] || {}).forEach(([key, m]) => { if (m && m.updatedAt) meta[key] = m.updatedAt; });
+  res.json({ data: store[email] || {}, meta });
 });
 
 app.post('/api/user-data', requireSession, (req, res) => {
