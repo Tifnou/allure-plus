@@ -222,7 +222,22 @@ const SEARCH_DIRECTIONS = 8;
 // generateLoop pour pouvoir reutiliser le meme scan a la fois pour la boucle
 // principale ET pour les boucles alternatives (cf generateLoopWithAlternates),
 // sans relancer une deuxieme salve d'appels BRouter.
-async function scanDirections(start, targetDistanceM, profile) {
+// Tri des directions scannees : par PROXIMITE au D+ vise (targetAscentM)
+// quand une cible existe, sinon par D+ decroissant (comportement d'origine,
+// utile quand il n'y a rien a viser precisement - cf commentaire de
+// generateLoop plus bas). Le tri "toujours le plus de D+" appliquait la
+// meme logique meme quand la cible etait DEJA largement depassee par TOUTES
+// les directions (terrain naturellement tres vallonne, ex: Beaufort/73270
+// en plein massif du Beaufortain) : il choisissait alors systematiquement
+// la direction la PLUS pentue au lieu de la plus proche de la cible,
+// aggravant l'ecart au lieu de le minimiser (bug reel constate : 900 m de
+// D+ vises, propositions entre 1638 et 2417 m). Le tri par proximite couvre
+// aussi bien le cas "toutes les directions sont sous la cible" (la plus
+// proche par valeur absolue est alors mecaniquement celle qui a le PLUS de
+// D+, comportement inchange - la boucle "boostAscentViaRepeats" prend le
+// relais ensuite si besoin) que le nouveau cas "toutes au-dessus" (la plus
+// proche devient la MOINS pentue), sans code separe pour les deux cas.
+async function scanDirections(start, targetDistanceM, profile, targetAscentM) {
   const radius = targetDistanceM / 4;
   const bearingsToTry = Array.from({ length: SEARCH_DIRECTIONS }, (_, k) => (360 / SEARCH_DIRECTIONS) * k);
   const scanResults = await Promise.all(bearingsToTry.map(async (bearing) => {
@@ -239,7 +254,11 @@ async function scanDirections(start, targetDistanceM, profile) {
     }
   }));
   const candidates = scanResults.filter(Boolean);
-  candidates.sort((a, b) => b.result.filteredAscendM - a.result.filteredAscendM);
+  if (targetAscentM) {
+    candidates.sort((a, b) => Math.abs(a.result.filteredAscendM - targetAscentM) - Math.abs(b.result.filteredAscendM - targetAscentM));
+  } else {
+    candidates.sort((a, b) => b.result.filteredAscendM - a.result.filteredAscendM);
+  }
   return { candidates, radius };
 }
 
@@ -387,7 +406,7 @@ async function boostOutAndBackViaRepeats(outAndBack, targetAscentM, profile, pac
 // Pas besoin d'Overpass : BRouter accroche deja les points au reseau reel.
 async function generateLoop(start, targetDistanceM, profile, opts = {}) {
   const maxRefineIterations = opts.maxRefineIterations ?? 2;
-  const { candidates, radius } = await scanDirections(start, targetDistanceM, profile);
+  const { candidates, radius } = await scanDirections(start, targetDistanceM, profile, opts.targetAscentM);
   if (candidates.length === 0) {
     throw new Error('Impossible de generer une boucle exploitable autour de ce depart.');
   }
@@ -423,7 +442,7 @@ function towardCompassPhrase(bearing) {
 // tracés "ailleurs" plutot que la seule meilleure direction en D+.
 async function generateLoopWithAlternates(start, targetDistanceM, profile, opts = {}) {
   const maxRefineIterations = opts.maxRefineIterations ?? 2;
-  const { candidates, radius } = await scanDirections(start, targetDistanceM, profile);
+  const { candidates, radius } = await scanDirections(start, targetDistanceM, profile, opts.targetAscentM);
   if (candidates.length === 0) {
     throw new Error('Impossible de generer une boucle exploitable autour de ce depart.');
   }
@@ -624,6 +643,10 @@ const TERRAIN_PROFILES = { trail: 'hiking-mountain', route: 'trekking' };
 const MAX_REPEAT_SEGMENTS = 3;
 const MAX_REPEAT_STEPS = 15;
 const ASCENT_TOLERANCE_M = 30;
+// Seuil (au-dela du D+ vise) a partir duquel on avertit l'utilisateur que le
+// secteur est trop vallonne pour approcher sa cible, plutot que de laisser
+// une boucle 50%+ au-dessus du D+ demande sans aucune explication.
+const ASCENT_OVERSHOOT_WARNING_RATIO = 0.5;
 // Un "segment le plus efficace" avec moins que ça de gain n'est que du bruit
 // GPS/altimetrique sur terrain plat, pas une vraie cote exploitable - le
 // signaler plutot que de repeter indefiniment un quasi-rien.
@@ -764,7 +787,7 @@ async function buildZoneCandidate(shape, start, hotspot, targetDistanceM, target
   try {
     result = shape === 'outback'
       ? await generateOutAndBack(start, bearingBetween(start, hotspot), targetDistanceM, profile, { targetDurationMin, paceMinPerKm })
-      : await generateLoop(hotspot, targetDistanceM, profile, { targetDurationMin, paceMinPerKm });
+      : await generateLoop(hotspot, targetDistanceM, profile, { targetDurationMin, paceMinPerKm, targetAscentM: terrain === 'trail' ? targetAscentM : null });
   } catch (err) {
     return null; // zone non routable dans cette forme depuis ce centre
   }
@@ -881,7 +904,7 @@ async function generateOptionsAcrossSearchRadius({ start, targetDistanceM, targe
 // pour le dispatcher qui gere aussi 'outback'/'both', et
 // generateOptionsAcrossSearchRadius pour la recherche elargie.
 async function buildLoopOptionsAtSinglePoint({ start, targetDistanceM, targetAscentM, targetDurationMin, terrain, paceMinPerKm, profile }) {
-  let { best: natural, alternates } = await generateLoopWithAlternates(start, targetDistanceM, profile, { targetDurationMin, paceMinPerKm });
+  let { best: natural, alternates } = await generateLoopWithAlternates(start, targetDistanceM, profile, { targetDurationMin, paceMinPerKm, targetAscentM: terrain === 'trail' ? targetAscentM : null });
   let naturalAscentM = calibrateAscent(natural.filteredAscendM);
   const initialNeedsMoreAscent = terrain === 'trail' && targetAscentM
     && naturalAscentM < targetAscentM - ASCENT_TOLERANCE_M;
@@ -1026,6 +1049,16 @@ async function buildLoopOptionsAtSinglePoint({ start, targetDistanceM, targetAsc
         warning = `Le secteur ne permet pas d'atteindre ${targetAscentM} m de D+ sans dépasser largement ce qui a été demandé — essayez la recherche élargie pour explorer plus loin — meilleure option trouvée : ${repeatedAscentM} m de D+ (${repLabel}, ${budgetLabel}).`;
       }
     }
+  } else if (terrain === 'trail' && targetAscentM && naturalOption.ascentM > targetAscentM * (1 + ASCENT_OVERSHOOT_WARNING_RATIO)) {
+    // Symetrique du warning "pas assez de D+" ci-dessus, pour le cas inverse
+    // (terrain deja tres vallonne, ex: Beaufort/73270) : meme apres le tri
+    // par proximite de scanDirections (voir son commentaire), la direction
+    // la PLUS PROCHE de la cible peut rester tres au-dessus si litteralement
+    // aucune direction locale n'approche le D+ demande - avant ce correctif,
+    // ce cas restait silencieux (seul le manque de D+ etait signale), alors
+    // que l'ecart est tout aussi genant pour l'utilisateur (retour reel :
+    // 900 m vises, 1638 a 2417 m proposes sans aucun avertissement).
+    warning = `Le secteur est plus vallonné que le D+ visé (${targetAscentM} m) : impossible de descendre en dessous de ${naturalOption.ascentM} m sans trop s'écarter de la distance/durée demandée — essayez une distance/durée plus longue, ou un D+ visé plus élevé.`;
   }
 
   return { options, warning };
@@ -1038,7 +1071,7 @@ async function buildLoopOptionsAtSinglePoint({ start, targetDistanceM, targetAsc
 // bearing retenu plutot qu'une boucle. Utilise pour la forme 'outback' - cf
 // generateOptionsAtSinglePoint (dispatcher) et generateOutAndBack.
 async function buildOutAndBackOptionsAtSinglePoint({ start, targetDistanceM, targetAscentM, targetDurationMin, terrain, paceMinPerKm, profile }) {
-  const { candidates } = await scanDirections(start, targetDistanceM, profile);
+  const { candidates } = await scanDirections(start, targetDistanceM, profile, terrain === 'trail' ? targetAscentM : null);
   if (candidates.length === 0) {
     throw new Error('Impossible de generer un aller-retour exploitable autour de ce depart.');
   }
