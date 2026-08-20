@@ -114,7 +114,28 @@ function installCookieJar(client) {
   // de retry OAuth2 (pensee pour les APPELS API apres connexion, pas pour le
   // flux SSO de connexion lui-meme) avalait l'erreur silencieusement.
   client.interceptors.response.use(
-    (response) => { if (response) captureSetCookie(response.headers); return response; },
+    (response) => {
+      if (response) {
+        captureSetCookie(response.headers);
+        // Derniere URL reellement servie par Garmin, APRES tout redirect
+        // suivi automatiquement par axios (response.request.res.responseUrl,
+        // expose par l'adaptateur Node - verifie en direct). Necessaire pour
+        // la soumission du code MFA : le formulaire n'a pas d'attribut
+        // action (il se soumet a "l'URL actuelle"), et le script Garmin lui-
+        // meme (enterMfaCode.js) navigue entre plusieurs URLs sous
+        // /sso/verifyMFA/... - reconstruire une URL a partir de SIGNIN_URL
+        // (comme le fait le POST identifiant/mot de passe) suppose a tort
+        // que la page MFA est servie depuis /sso/signin, alors qu'elle
+        // arrive tres probablement via un redirect vers /sso/verifyMFA/...
+        // (constat reel, 21/08 : la soumission du code renvoyait le
+        // formulaire IDENTIFIANT/MOT DE PASSE avec "Invalid sign in" - la
+        // preuve que la requete atterrissait sur /sso/signin, jamais sur le
+        // vrai gestionnaire de verification MFA).
+        const finalUrl = response.request && response.request.res && response.request.res.responseUrl;
+        if (finalUrl) client._lastResponseUrl = finalUrl;
+      }
+      return response;
+    },
     (error) => {
       if (error && error.response) captureSetCookie(error.response.headers);
       return Promise.reject(error);
@@ -207,11 +228,17 @@ HttpClient.prototype.handleMFA = function (htmlStr) {
   dumpDebugFile(MFA_PAGE_DUMP_FILE, htmlStr, 'Page MFA detectee');
 
   const csrfMatch = CSRF_RE.exec(htmlStr);
-  // Meme URL que celle utilisee pour poster identifiant/mot de passe
-  // (step3Url, prive dans getLoginTicket) - reconstruite ici a l'identique
-  // plutot que capturee depuis cette variable locale non exposee : elle ne
-  // depend que de this.url (constant pour toute la session), donc
-  // strictement reproductible.
+  // URL a utiliser pour poster le code MFA : la VRAIE URL finale servie par
+  // Garmin pour CETTE page (captmassignee par l'intercepteur response du
+  // cookie jar, client._lastResponseUrl - suit tout redirect qu'axios a
+  // deja suivi tout seul), PAS une reconstruction de SIGNIN_URL (/sso/signin)
+  // comme avant. Le formulaire MFA n'a pas d'attribut action (il se soumet a
+  // "l'URL actuelle"), et Garmin sert vraisemblablement cette page depuis un
+  // chemin different (/sso/verifyMFA/... - vu dans enterMfaCode.js, le script
+  // Garmin lui-meme charge par cette page) apres un redirect suite au POST
+  // identifiant/mot de passe. Repli sur l'ancienne reconstruction si
+  // _lastResponseUrl est indisponible pour une raison quelconque (jamais nul
+  // en pratique, mais mieux vaut degrader que planter).
   const signinParams = {
     id: 'gauth-widget', embedWidget: true, clientId: 'GarminConnect', locale: 'en',
     gauthHost: this.url.GARMIN_SSO_EMBED, service: this.url.GARMIN_SSO_EMBED,
@@ -219,7 +246,8 @@ HttpClient.prototype.handleMFA = function (htmlStr) {
     redirectAfterAccountLoginUrl: this.url.GARMIN_SSO_EMBED,
     redirectAfterAccountCreationUrl: this.url.GARMIN_SSO_EMBED,
   };
-  const signinUrl = `${this.url.SIGNIN_URL}?${qs.stringify(signinParams)}`;
+  const fallbackSigninUrl = `${this.url.SIGNIN_URL}?${qs.stringify(signinParams)}`;
+  const signinUrl = this.client._lastResponseUrl || fallbackSigninUrl;
 
   this._mfaLoginState = { csrf: csrfMatch ? csrfMatch[1] : null, signinUrl };
   throw new GarminMfaRequiredError();
