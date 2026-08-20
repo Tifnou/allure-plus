@@ -26,7 +26,8 @@
 // autres utilisateurs. Seule l'etape "obtenir le ticket" est court-
 // circuitee par Garmin quand le MFA est actif ; une fois le code verifie et
 // le ticket obtenu, la suite est identique a une connexion normale.
-const { HttpClient } = require('garmin-connect/dist/common/HttpClient');
+const HttpClientModule = require('garmin-connect/dist/common/HttpClient');
+const { HttpClient } = HttpClientModule;
 const FormData = require('form-data');
 const qs = require('qs');
 const fs = require('fs');
@@ -51,6 +52,88 @@ class GarminMfaRequiredError extends Error {
     this.mfaRequired = true;
   }
 }
+
+// Cookie jar minimal, en memoire, par instance (21/08 - cause racine reelle
+// du MFA qui ne se declenchait jamais, confirmee sur le HTML de diagnostic
+// capture chez un collegue : compte AVEC MFA active cote Garmin (confirme -
+// il doit saisir un code SMS en se connectant sur connect.garmin.com dans un
+// vrai navigateur), mais la reponse Allure+ ressemblait a un tout premier
+// chargement de la page de connexion, sans aucune trace de MFA ni d'erreur).
+// HttpClient.js n'a AUCUNE gestion de cookies (verifie : zero occurrence de
+// "cookie" dans le fichier) - son client HTTP est un axios.create() nu, qui
+// contrairement a un vrai navigateur ne persiste PAS les cookies entre deux
+// requetes Node. Le flux de connexion enchaine pourtant plusieurs requetes
+// (GET page de connexion, GET jeton CSRF, POST identifiant/mot de passe) que
+// Garmin relie normalement via un cookie de session. Sur un compte SANS MFA
+// ca ne se voit jamais : Garmin delivre le ticket des la 3e requete, le
+// jeton CSRF seul suffit a valider la demande en un coup. Mais le flux MFA a
+// BESOIN de cette continuite de session entre "la requete qui soumet le mot
+// de passe" et, plus tard, "la requete qui soumettra le code SMS" - sans
+// cookie transmis, Garmin ne reconnait pas la 2e requete comme faisant
+// partie de la meme connexion et retombe sur la page de connexion vierge.
+// Scope volontairement simple (nom=valeur seulement, ignore domaine/path/
+// expiration/secure) : tout le flux reste sur le meme hote SSO Garmin et
+// dure quelques secondes, un vrai jar (tough-cookie) serait disproportionne
+// pour ce besoin.
+function installCookieJar(client) {
+  if (client._cookieJarInstalled) return;
+  client._cookieJarInstalled = true;
+  const jar = {};
+
+  function captureSetCookie(headers) {
+    const setCookie = headers && headers['set-cookie'];
+    if (!Array.isArray(setCookie)) return;
+    setCookie.forEach((sc) => {
+      const eq = sc.indexOf('=');
+      if (eq <= 0) return;
+      const semi = sc.indexOf(';');
+      const name = sc.slice(0, eq).trim();
+      const value = sc.slice(eq + 1, semi > eq ? semi : undefined).trim();
+      jar[name] = value;
+    });
+  }
+
+  client.interceptors.request.use((config) => {
+    const cookieHeader = Object.entries(jar).map(([k, v]) => `${k}=${v}`).join('; ');
+    if (cookieHeader) {
+      config.headers = config.headers || {};
+      config.headers['Cookie'] = cookieHeader;
+    }
+    return config;
+  });
+
+  client.interceptors.response.use(
+    (response) => { captureSetCookie(response.headers); return response; },
+    (error) => {
+      if (error && error.response) captureSetCookie(error.response.headers);
+      return Promise.reject(error);
+    }
+  );
+}
+
+// Installe le jar des la construction (avant la toute premiere requete du
+// flux, step1 de getLoginTicket, qui appelle this.client.get(...) EN DIRECT
+// sans passer par HttpClient.prototype.get) - impossible d'intercepter
+// "this.client = axios.create()" en ne patchant que des methodes du
+// prototype, d'ou cette sous-classe qui enveloppe le constructeur. Reste
+// entierement transparent pour handleMFA/resumeWithMfa ci-dessus (heritees
+// normalement via la chaine de prototypes) et pour le flux normal sans MFA
+// (n'ajoute qu'un header Cookie, ignore silencieusement quand le jar est
+// vide).
+class HttpClientWithCookies extends HttpClient {
+  constructor(url) {
+    super(url);
+    installCookieJar(this.client);
+  }
+}
+// Reaffecte sur l'OBJET module.exports partage (jamais une const locale) :
+// GarminConnect.js (dist/garmin/GarminConnect.js) fait `new HttpClient_1.
+// HttpClient(this.url)`, une lecture de propriete EN DIRECT sur ce meme
+// objet a chaque connexion - pas une valeur figee a son propre require()
+// initial - donc cette reaffectation est bien prise en compte meme si
+// GarminConnect.js a deja ete charge avant ce patch (c'est le cas : server.js
+// charge 'garmin-connect' avant ce fichier).
+HttpClientModule.HttpClient = HttpClientWithCookies;
 
 // Diagnostic (21/08) : premier retour utilisateur reel contre un compte
 // MFA (collegue, jamais teste avant faute de compte de test disponible - cf
