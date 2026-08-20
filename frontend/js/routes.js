@@ -16,6 +16,7 @@ function routesDefaultState() {
     terrain: 'trail',        // 'trail' | 'route'
     routeShape: 'loop',      // 'loop' | 'outback' | 'both'
     ascentM: 300,
+    trailLevel: 'moyenplus', // niveau de traileur (trail uniquement) - voir ROUTES_TRAIL_LEVELS
     searchWider: false,
     searchRadiusKm: 5,
     lastResult: null,
@@ -24,6 +25,35 @@ function routesDefaultState() {
 }
 
 const routesState = routesDefaultState();
+
+// Niveau de traileur -> vitesse (km/h) sur la distance equivalente plat
+// (distance + D+/100, cf equivalentFlatKm) - table fournie par l'utilisateur
+// (20/08). MIROIR EXACT de TRAIL_LEVELS (route_generator.js, cote serveur) :
+// garder les deux synchronises manuellement si les valeurs changent un jour
+// (meme motif que ALLURE_PLUS_ZONES, cf CLAUDE.md) - utilisee ici uniquement
+// pour l'apercu affiche AVANT de lancer la recherche (routesConfirmCriteria),
+// le calcul qui compte reellement est refait cote serveur avec la meme table.
+const ROUTES_TRAIL_LEVELS = {
+  elite:      { label: 'Élite / international', minKmh: 6.5, maxKmh: 7.5 },
+  excellent:  { label: 'Excellent traileur',     minKmh: 5.5, maxKmh: 6.5 },
+  tresbon:    { label: 'Très bon traileur',      minKmh: 4.8, maxKmh: 5.5 },
+  bon:        { label: 'Bon traileur',           minKmh: 4.1, maxKmh: 4.8 },
+  moyenplus:  { label: 'Moyen +',                minKmh: 3.5, maxKmh: 4.1 },
+  moyen:      { label: 'Moyen',                  minKmh: 3.0, maxKmh: 3.5 },
+  moyenmoins: { label: 'Moyen -',                minKmh: 2.5, maxKmh: 3.0 },
+  debutant:   { label: 'Débutant',               minKmh: 2.0, maxKmh: 2.5 },
+};
+
+function routesTrailLevelMidKmh(level) {
+  const lvl = ROUTES_TRAIL_LEVELS[level];
+  return lvl ? (lvl.minKmh + lvl.maxKmh) / 2 : null;
+}
+
+function routesFmtPaceFromKmh(kmh) {
+  const secPerKm = 3600 / kmh;
+  const m = Math.floor(secPerKm / 60), s = Math.round(secPerKm % 60);
+  return `${m}'${String(s).padStart(2, '0')}"`;
+}
 
 // Le formulaire gardait la saisie precedente (adresse, distance, D+...)
 // jusqu'a un refresh complet de la page - aucun moyen de repartir a zero
@@ -152,6 +182,18 @@ function renderRoutesForm() {
       </div>
     </div>
 
+    <div class="routes-field routes-field--full" id="routes-level-field" style="display:${routesHasAscentField() ? '' : 'none'}">
+      <div class="routes-field-label">Niveau de traileur</div>
+      <div class="routes-hint">Utilisé pour estimer une durée réaliste sur un parcours avec du D+ — une allure unique se trompe largement dès que le terrain devient très pentu.</div>
+      <select id="routes-input-level" class="routes-select" style="margin-top:6px;max-width:280px">
+        ${Object.entries(ROUTES_TRAIL_LEVELS).map(([key, lvl]) =>
+          `<option value="${key}" ${routesState.trailLevel === key ? 'selected' : ''}>${lvl.label} (${lvl.minKmh}–${lvl.maxKmh} km/h)</option>`
+        ).join('')}
+      </select>
+      <button type="button" class="btn-text-link" id="routes-level-table-toggle" style="display:block;margin-top:8px">ⓘ Voir le tableau des niveaux</button>
+      <div id="routes-level-table" style="display:none;margin-top:8px"></div>
+    </div>
+
     <div class="routes-field routes-field--full">
       <div class="routes-field-label">Recherche élargie</div>
       <div class="routes-hint">${routesHasAscentField()
@@ -189,6 +231,26 @@ function renderRoutesForm() {
 
   if (routesHasAscentField()) {
     wireNumericInput('routes-input-ascent', v => { routesState.ascentM = parseInt(v, 10) || 0; });
+    el('routes-input-level').onchange = e => { routesState.trailLevel = e.target.value; };
+    el('routes-level-table-toggle').onclick = () => {
+      const tableEl = el('routes-level-table');
+      const opening = tableEl.style.display === 'none';
+      tableEl.style.display = opening ? '' : 'none';
+      if (opening && !tableEl.dataset.built) {
+        tableEl.dataset.built = '1';
+        tableEl.innerHTML = `
+          <table class="races-table">
+            <thead><tr><th>Catégorie</th><th>Vitesse moyenne</th><th>Allure moyenne</th></tr></thead>
+            <tbody>${Object.values(ROUTES_TRAIL_LEVELS).map(lvl => `
+              <tr>
+                <td>${lvl.label}</td>
+                <td>${lvl.minKmh} – ${lvl.maxKmh} km/h</td>
+                <td>${routesFmtPaceFromKmh(lvl.maxKmh)} – ${routesFmtPaceFromKmh(lvl.minKmh)}/km</td>
+              </tr>`).join('')}
+            </tbody>
+          </table>`;
+      }
+    };
   }
   // Recherche élargie : utile quel que soit le terrain (repli sur le D+ en
   // trail, sur la distance/durée en route) - plus conditionnée par
@@ -513,8 +575,68 @@ async function recalcPaceProfile() {
   }
 }
 
+// Traduit le D+ vise (abstrait) en pente moyenne (%) et en distance/allure
+// REELLE concrete pour le niveau de traileur choisi - demande utilisateur
+// (20/08) : detecter une combinaison irrealiste AVANT de lancer une
+// recherche couteuse (BRouter) plutot qu'apres coup sur un resultat absurde
+// (cas reel : 900 m de D+ / 22,8 km estimes a 3h19, la ou meme un excellent
+// traileur mettrait plus de 3h30). Meme formule "distance equivalente plat"
+// que cote serveur (route_generator.js, TRAIL_LEVELS/equivalentFlatKm) :
+// distance + D+ (m) / 100.
+// Mode 'duration' (l'utilisateur vise une DUREE) : combien de km reels ce
+// niveau peut-il parcourir dans ce temps, compte tenu du D+ deja fixe ?
+// Mode 'distance' (l'utilisateur vise une DISTANCE) : a quelle vitesse
+// reelle ce niveau irait-il sur cette distance avec ce D+ ?
+function routesBuildLevelConfirmation() {
+  const ascentM = routesState.ascentM || 0;
+  const midKmh = routesTrailLevelMidKmh(routesState.trailLevel);
+  if (!midKmh) return null;
+  const levelLabel = (ROUTES_TRAIL_LEVELS[routesState.trailLevel] || {}).label || '';
+
+  if (routesState.mode === 'duration') {
+    const durationMin = routesState.durationMin;
+    const equivKmAvailable = midKmh * (durationMin / 60);
+    const realDistanceKm = equivKmAvailable - ascentM / 100;
+    if (realDistanceKm <= 0.1) {
+      return { ok: false, message: `Avec ${ascentM} m de D+ sur seulement ${durationMin} minutes, un(e) ${levelLabel.toLowerCase()} n'aurait même pas le temps de grimper ce dénivelé — réduisez le D+ visé, allongez la durée, ou choisissez un niveau plus rapide.` };
+    }
+    const avgGradePct = (ascentM / (realDistanceKm * 1000)) * 100;
+    return { ok: true, message: `Sur une durée de <strong>${durationMin} minutes</strong>, avec un D+ de <strong>${ascentM} m</strong>, cela signifie que vous seriez à même de courir <strong>${realDistanceKm.toFixed(1)} km</strong> avec une pente moyenne de <strong>${avgGradePct.toFixed(0)} %</strong>. Confirmez-vous ces critères ?` };
+  }
+
+  const distanceKm = routesState.distanceKm || 0;
+  if (distanceKm <= 0) return null;
+  const equivKm = distanceKm + ascentM / 100;
+  const durationHours = equivKm / midKmh;
+  const realAvgSpeedKmh = distanceKm / durationHours;
+  const avgGradePct = (ascentM / (distanceKm * 1000)) * 100;
+  return { ok: true, message: `Sur une distance de <strong>${distanceKm} km</strong>, avec un D+ de <strong>${ascentM} m</strong>, cela signifie que vous seriez à même de courir à <strong>${realAvgSpeedKmh.toFixed(1)} km/h</strong> avec une pente moyenne de <strong>${avgGradePct.toFixed(0)} %</strong>. Confirmez-vous ces critères ?` };
+}
+
 async function routesGenerateClicked() {
   const btn = el('routes-generate-btn');
+
+  // Confirmation niveau/pente uniquement en Trail avec D+ (Route garde le
+  // fonctionnement actuel : profil d'allure personnel, pas de niveau a
+  // choisir ni de distance a confirmer ici - demande utilisateur explicite).
+  if (routesHasAscentField()) {
+    const confirmation = routesBuildLevelConfirmation();
+    if (confirmation) {
+      if (!confirmation.ok) {
+        showToast(confirmation.message, 'error', 8000);
+        return;
+      }
+      const proceed = await showConfirmModal({
+        title: 'Vérifiez vos critères',
+        message: confirmation.message,
+        confirmLabel: 'Confirmer et lancer la recherche',
+        cancelLabel: 'Modifier mes critères',
+        icon: '🧭',
+      });
+      if (!proceed) return;
+    }
+  }
+
   btn.disabled = true;
   btn.textContent = 'Génération…';
   try {
@@ -531,6 +653,7 @@ async function routesGenerateClicked() {
       targetAscentM: routesHasAscentField() ? routesState.ascentM : null,
       terrain: routesState.terrain,
       routeShape: routesState.routeShape,
+      trailLevel: routesHasAscentField() ? routesState.trailLevel : null,
     };
     if (routesState.mode === 'distance') body.targetDistanceM = routesState.distanceKm * 1000;
     else body.targetDurationMin = routesState.durationMin;

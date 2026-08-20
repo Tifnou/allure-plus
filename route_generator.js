@@ -276,12 +276,12 @@ async function scanDirections(start, targetDistanceM, profile, targetAscentM) {
 // genereuse, sans jamais se rendre compte que le terrain la rendait plus
 // lente que prevu.
 async function refineLoopFromBearing(start, bearing, initialResult, initialRadius, targetDistanceM, profile, maxRefineIterations, opts = {}) {
-  const { targetDurationMin, paceMinPerKm } = opts;
+  const { targetDurationMin, paceMinPerKm, trailLevel } = opts;
   let best = initialResult;
   let bestRadius = initialRadius;
   for (let iter = 0; iter < maxRefineIterations; iter++) {
-    const ratio = (targetDurationMin && paceMinPerKm)
-      ? targetDurationMin / predictDurationMin(best.points, paceMinPerKm)
+    const ratio = (targetDurationMin && (paceMinPerKm || trailLevel))
+      ? targetDurationMin / predictDurationMin(best.points, paceMinPerKm, trailLevel)
       : targetDistanceM / best.distanceM;
     if (Math.abs(ratio - 1) < 0.15) break;
     // Clamp defensif : une estimation de duree bruitee sur un trace court/peu
@@ -326,7 +326,7 @@ const MIN_OUTBACK_RADIUS_M = 300;
 
 async function generateOutAndBack(start, bearing, targetDistanceM, profile, opts = {}) {
   const maxRefineIterations = opts.maxRefineIterations ?? 2;
-  const { targetDurationMin, paceMinPerKm } = opts;
+  const { targetDurationMin, paceMinPerKm, trailLevel } = opts;
   let radius = targetDistanceM / 2;
   let best = null;
   for (let iter = 0; iter <= maxRefineIterations; iter++) {
@@ -356,8 +356,8 @@ async function generateOutAndBack(start, bearing, targetDistanceM, profile, opts
       outLegPoints: outLeg.points,
     };
     if (iter === maxRefineIterations) break;
-    const ratio = (targetDurationMin && paceMinPerKm)
-      ? targetDurationMin / predictDurationMin(best.points, paceMinPerKm)
+    const ratio = (targetDurationMin && (paceMinPerKm || trailLevel))
+      ? targetDurationMin / predictDurationMin(best.points, paceMinPerKm, trailLevel)
       : targetDistanceM / best.distanceM;
     if (Math.abs(ratio - 1) < 0.15) break;
     radius = Math.max(radius * Math.max(0.5, Math.min(2, ratio)), MIN_OUTBACK_RADIUS_M);
@@ -372,14 +372,14 @@ async function generateOutAndBack(start, bearing, targetDistanceM, profile, opts
 // LES COTES". Les eventuelles repetitions restent donc uniquement sur le
 // trajet aller ; le retour est toujours le trace direct (mirrorOutAndBack de
 // l'aller NON boosté), jamais une deuxieme fois les detours de repetition.
-async function boostOutAndBackViaRepeats(outAndBack, targetAscentM, profile, paceMinPerKm, targetDurationMin, targetDistanceM) {
+async function boostOutAndBackViaRepeats(outAndBack, targetAscentM, profile, paceMinPerKm, targetDurationMin, targetDistanceM, trailLevel) {
   // Budgets divises par 2 : boostAscentViaRepeats ne voit que l'aller, dont
   // le round-trip final doublera mecaniquement distance/duree/D+ - heuristique
   // interne rapide comme partout ailleurs dans le fichier, le chiffre final
   // affiche vient de Geoportail sur le trace complet.
   const boost = await boostAscentViaRepeats(
     outAndBack.outLegPoints, targetAscentM ? targetAscentM / 2 : null, profile, paceMinPerKm,
-    targetDurationMin ? targetDurationMin / 2 : null, targetDistanceM / 2
+    targetDurationMin ? targetDurationMin / 2 : null, targetDistanceM / 2, trailLevel
   );
   if (!boost) return null;
   const directReturn = [...outAndBack.outLegPoints].slice(0, -1).reverse();
@@ -521,7 +521,7 @@ function findSteepestSegment(points, opts = {}) {
 // leur D+ "naturel" brut meme tres en dessous de la cible - plainte
 // utilisateur reelle, ex. 600 m vises, 154-280 m sur les alternatives).
 // Retourne null si aucun segment exploitable n'a ete trouve.
-async function boostAscentViaRepeats(basePoints, targetAscentM, profile, paceMinPerKm, targetDurationMin, targetDistanceM) {
+async function boostAscentViaRepeats(basePoints, targetAscentM, profile, paceMinPerKm, targetDurationMin, targetDistanceM, trailLevel) {
   const segments = findSteepestSegments(basePoints, { maxSegments: MAX_REPEAT_SEGMENTS });
   if (segments.length === 0) return null;
 
@@ -542,7 +542,7 @@ async function boostAscentViaRepeats(basePoints, targetAscentM, profile, paceMin
       repsBySegment[segIdx]--; // cette etape n'est pas routable - revient a l'etat precedent, garde le dernier resultat valide
       break;
     }
-    const candidateDurationMin = predictDurationMin(candidate.points, paceMinPerKm);
+    const candidateDurationMin = predictDurationMin(candidate.points, paceMinPerKm, trailLevel);
     const overBudget = overshootBudgetMin ? candidateDurationMin > overshootBudgetMin : candidate.distanceM > overshootBudgetDistM;
 
     repeated = candidate;
@@ -611,19 +611,70 @@ function calibrateAscent(filteredAscendM) {
   return Math.round(filteredAscendM * ASCENT_CALIBRATION_FACTOR);
 }
 
+// Niveau de traileur -> vitesse (km/h) sur la "distance equivalente plat"
+// (voir equivalentFlatKm juste en dessous) - table fournie par l'utilisateur
+// (20/08), UNIQUEMENT pour la prediction de duree en trail dans le calcul
+// d'itineraires (rien d'autre dans l'app n'est concerne). Remplace le
+// decoupage par tranche de pente (GRADIENT_BUCKETS, pace_profile.js, calibre
+// sur les sorties Garmin reelles de l'utilisateur) pour ce cas precis : ce
+// decoupage n'a que 4 tranches, dont "steep" (>8%) qui regroupe
+// INDIFFEREMMENT un faux plat a 9% et un mur a 35% avec la MEME allure -
+// bug reel constate : 3657 m D+ / 22,8 km estime a 3h19 par ce modele, la ou
+// meme un excellent traileur mettrait plus de 3h30 (cf table fournie), les
+// sorties reelles de l'utilisateur ne couvrant jamais un terrain aussi
+// extreme pour calibrer correctement la tranche "steep".
+const TRAIL_LEVELS = {
+  elite:      { label: 'Élite / international', minKmh: 6.5, maxKmh: 7.5 },
+  excellent:  { label: 'Excellent traileur',     minKmh: 5.5, maxKmh: 6.5 },
+  tresbon:    { label: 'Très bon traileur',      minKmh: 4.8, maxKmh: 5.5 },
+  bon:        { label: 'Bon traileur',           minKmh: 4.1, maxKmh: 4.8 },
+  moyenplus:  { label: 'Moyen +',                minKmh: 3.5, maxKmh: 4.1 },
+  moyen:      { label: 'Moyen',                  minKmh: 3.0, maxKmh: 3.5 },
+  moyenmoins: { label: 'Moyen -',                minKmh: 2.5, maxKmh: 3.0 },
+  debutant:   { label: 'Débutant',               minKmh: 2.0, maxKmh: 2.5 },
+};
+
+// "Distance equivalente plat" = distance reelle (km) + D+ (m) / 100 -
+// convention trail standard, confirmee par l'utilisateur sur son propre
+// exemple : 22,8 km + 3657 m D+ = 22,8 + 36,57 = ~59 km equivalent
+// ("l'equivalent d'une course de 59 km").
+function equivalentFlatKm(distanceKm, ascentM) {
+  return distanceKm + (ascentM || 0) / 100;
+}
+
+function trailLevelMidKmh(level) {
+  const lvl = TRAIL_LEVELS[level];
+  return lvl ? (lvl.minKmh + lvl.maxKmh) / 2 : null;
+}
+
 // Duree reelle predite : decoupe le tracé en segments (fusionnes jusqu'a
-// >=15m pour lisser le bruit), applique l'allure reelle par tranche de pente
-// plutot qu'une allure unique (ecart constate de 40%+ sur une sortie testee).
-function predictDurationMin(points, paceMinPerKm) {
+// >=15m pour lisser le bruit). Deux modes : allure reelle par tranche de
+// pente (comportement d'origine, ecart constate de 40%+ sur une sortie
+// testee avec une allure unique) si `trailLevel` est absent ; sinon, vitesse
+// du niveau de traileur choisi appliquee a la distance equivalente plat du
+// trace entier (distance + D+ cumule / 100) - voir TRAIL_LEVELS ci-dessus.
+function predictDurationMin(points, paceMinPerKm, trailLevel) {
+  const midKmh = trailLevel ? trailLevelMidKmh(trailLevel) : null;
   let totalMin = 0;
+  let totalDistM = 0;
+  let totalAscentM = 0;
   let i = 0;
   while (i < points.length - 1) {
     let j = i + 1;
     let segDist = haversineDistance(points[i], points[j]);
     while (segDist < 15 && j < points.length - 1) { j++; segDist = haversineDistance(points[i], points[j]); }
-    const grade = segDist > 0 ? (points[j].ele - points[i].ele) / segDist : 0;
-    totalMin += (segDist / 1000) * paceMinPerKm[bucketForGrade(grade)];
+    const eleDelta = points[j].ele - points[i].ele;
+    if (midKmh) {
+      totalDistM += segDist;
+      if (eleDelta > 0) totalAscentM += eleDelta;
+    } else {
+      const grade = segDist > 0 ? eleDelta / segDist : 0;
+      totalMin += (segDist / 1000) * paceMinPerKm[bucketForGrade(grade)];
+    }
     i = j;
+  }
+  if (midKmh) {
+    return (equivalentFlatKm(totalDistM / 1000, totalAscentM) / midKmh) * 60;
   }
   return totalMin;
 }
@@ -713,9 +764,9 @@ function distanceCloseness(distanceM, targetM) {
 // l'allure a plat, cf server.js) : une boucle plus courte que cette
 // estimation peut tres bien coller pile a la duree visee si elle est plus
 // vallonnee/lente que prevu, et inversement.
-function goalCloseness(loop, targetDistanceM, targetDurationMin, paceMinPerKm) {
-  if (targetDurationMin && paceMinPerKm) {
-    return distanceCloseness(predictDurationMin(loop.points, paceMinPerKm), targetDurationMin);
+function goalCloseness(loop, targetDistanceM, targetDurationMin, paceMinPerKm, trailLevel) {
+  if (targetDurationMin && (paceMinPerKm || trailLevel)) {
+    return distanceCloseness(predictDurationMin(loop.points, paceMinPerKm, trailLevel), targetDurationMin);
   }
   return distanceCloseness(loop.distanceM, targetDistanceM);
 }
@@ -782,12 +833,12 @@ async function findHillyCandidateCenters(start, searchRadiusM, count) {
 // cible) entre les deux formes, chacune ayant sa propre construction de
 // trace mais le meme traitement ensuite. Renvoie null si la zone n'est pas
 // routable dans cette forme depuis ce centre.
-async function buildZoneCandidate(shape, start, hotspot, targetDistanceM, targetAscentM, targetDurationMin, terrain, paceMinPerKm, profile) {
+async function buildZoneCandidate(shape, start, hotspot, targetDistanceM, targetAscentM, targetDurationMin, terrain, paceMinPerKm, profile, trailLevel) {
   let result;
   try {
     result = shape === 'outback'
-      ? await generateOutAndBack(start, bearingBetween(start, hotspot), targetDistanceM, profile, { targetDurationMin, paceMinPerKm })
-      : await generateLoop(hotspot, targetDistanceM, profile, { targetDurationMin, paceMinPerKm, targetAscentM: terrain === 'trail' ? targetAscentM : null });
+      ? await generateOutAndBack(start, bearingBetween(start, hotspot), targetDistanceM, profile, { targetDurationMin, paceMinPerKm, trailLevel })
+      : await generateLoop(hotspot, targetDistanceM, profile, { targetDurationMin, paceMinPerKm, trailLevel, targetAscentM: terrain === 'trail' ? targetAscentM : null });
   } catch (err) {
     return null; // zone non routable dans cette forme depuis ce centre
   }
@@ -804,8 +855,8 @@ async function buildZoneCandidate(shape, start, hotspot, targetDistanceM, target
     // les repetitions ne portent que sur l'aller (cf boostOutAndBackViaRepeats)
     // - le retour reste toujours le trace direct, sans repeter les cotes.
     const boost = shape === 'outback'
-      ? await boostOutAndBackViaRepeats(result, targetAscentM, profile, paceMinPerKm, targetDurationMin, targetDistanceM)
-      : await boostAscentViaRepeats(result.points, targetAscentM, profile, paceMinPerKm, targetDurationMin, targetDistanceM);
+      ? await boostOutAndBackViaRepeats(result, targetAscentM, profile, paceMinPerKm, targetDurationMin, targetDistanceM, trailLevel)
+      : await boostAscentViaRepeats(result.points, targetAscentM, profile, paceMinPerKm, targetDurationMin, targetDistanceM, trailLevel);
     if (boost) {
       const boostedAscentM = calibrateAscent(boost.repeated ? boost.repeated.filteredAscendM : boost.filteredAscendM);
       if (boostedAscentM > ascentM) {
@@ -818,7 +869,7 @@ async function buildZoneCandidate(shape, start, hotspot, targetDistanceM, target
 
   return {
     shape, hotspot, result, ascentM, repeatedSegments,
-    closeness: goalCloseness(result, targetDistanceM, targetDurationMin, paceMinPerKm),
+    closeness: goalCloseness(result, targetDistanceM, targetDurationMin, paceMinPerKm, trailLevel),
   };
 }
 
@@ -829,14 +880,14 @@ async function buildZoneCandidate(shape, start, hotspot, targetDistanceM, target
 // deux") : un aller-retour reste jouable meme sur un sentier qui ne forme
 // aucune boucle naturelle (impasse, cul-de-sac), la ou une boucle echoue
 // completement - les deux formes sont donc complementaires, pas redondantes.
-async function generateOptionsAcrossSearchRadius({ start, targetDistanceM, targetAscentM, targetDurationMin, terrain, paceMinPerKm, searchRadiusM, profile, routeShape = 'loop' }) {
+async function generateOptionsAcrossSearchRadius({ start, targetDistanceM, targetAscentM, targetDurationMin, terrain, paceMinPerKm, searchRadiusM, profile, routeShape = 'loop', trailLevel }) {
   const hotspots = await findHillyCandidateCenters(start, searchRadiusM, HOTSPOT_CANDIDATE_COUNT);
   const shapes = routeShape === 'both' ? ['loop', 'outback'] : [routeShape];
 
   const candidates = [];
   for (const hotspot of hotspots) {
     for (const shape of shapes) {
-      const candidate = await buildZoneCandidate(shape, start, hotspot, targetDistanceM, targetAscentM, targetDurationMin, terrain, paceMinPerKm, profile);
+      const candidate = await buildZoneCandidate(shape, start, hotspot, targetDistanceM, targetAscentM, targetDurationMin, terrain, paceMinPerKm, profile, trailLevel);
       if (candidate) candidates.push(candidate);
     }
   }
@@ -880,7 +931,7 @@ async function generateOptionsAcrossSearchRadius({ start, targetDistanceM, targe
       distanceM: c.result.distanceM,
       ascentM: c.ascentM,
       repeatedSegments: c.repeatedSegments,
-      predictedDurationMin: predictDurationMin(points, paceMinPerKm),
+      predictedDurationMin: predictDurationMin(points, paceMinPerKm, trailLevel),
       commentary,
       alternateStart: isAtRequestedStart ? null : { lat: c.hotspot.lat, lon: c.hotspot.lon, distanceFromRequestedM: distFromStartM },
     };
@@ -903,8 +954,8 @@ async function generateOptionsAcrossSearchRadius({ start, targetDistanceM, targe
 // suffit pas. Utilise pour la forme 'loop' - voir generateOptionsAtSinglePoint
 // pour le dispatcher qui gere aussi 'outback'/'both', et
 // generateOptionsAcrossSearchRadius pour la recherche elargie.
-async function buildLoopOptionsAtSinglePoint({ start, targetDistanceM, targetAscentM, targetDurationMin, terrain, paceMinPerKm, profile }) {
-  let { best: natural, alternates } = await generateLoopWithAlternates(start, targetDistanceM, profile, { targetDurationMin, paceMinPerKm, targetAscentM: terrain === 'trail' ? targetAscentM : null });
+async function buildLoopOptionsAtSinglePoint({ start, targetDistanceM, targetAscentM, targetDurationMin, terrain, paceMinPerKm, profile, trailLevel }) {
+  let { best: natural, alternates } = await generateLoopWithAlternates(start, targetDistanceM, profile, { targetDurationMin, paceMinPerKm, trailLevel, targetAscentM: terrain === 'trail' ? targetAscentM : null });
   let naturalAscentM = calibrateAscent(natural.filteredAscendM);
   const initialNeedsMoreAscent = terrain === 'trail' && targetAscentM
     && naturalAscentM < targetAscentM - ASCENT_TOLERANCE_M;
@@ -923,7 +974,7 @@ async function buildLoopOptionsAtSinglePoint({ start, targetDistanceM, targetAsc
     points: natural.points,
     distanceM: natural.distanceM,
     ascentM: naturalAscentM,
-    predictedDurationMin: predictDurationMin(natural.points, paceMinPerKm),
+    predictedDurationMin: predictDurationMin(natural.points, paceMinPerKm, trailLevel),
     commentary: terrain === 'trail'
       ? `Boucle construite en explorant ${SEARCH_DIRECTIONS} directions autour du départ pour trouver le meilleur dénivelé naturel du secteur, sans répétition de côte.`
       : `Boucle construite en explorant ${SEARCH_DIRECTIONS} directions autour du départ pour coller au mieux à la distance/durée visée.`,
@@ -952,13 +1003,13 @@ async function buildLoopOptionsAtSinglePoint({ start, targetDistanceM, targetAsc
     let altPoints = alt.result.points;
     let altDistanceM = alt.result.distanceM;
     let altAscentM = calibrateAscent(alt.result.filteredAscendM);
-    let altDurationMin = predictDurationMin(altPoints, paceMinPerKm);
+    let altDurationMin = predictDurationMin(altPoints, paceMinPerKm, trailLevel);
     let altCommentary = `Autre tracé possible, orienté ${toward} plutôt que vers le secteur retenu pour l'option principale — pour varier l'itinéraire tout en visant les mêmes critères.`;
     let altRepeatedSegments = null;
 
     const altNeedsMoreAscent = terrain === 'trail' && targetAscentM && altAscentM < targetAscentM - ASCENT_TOLERANCE_M;
     if (altNeedsMoreAscent) {
-      const boost = await boostAscentViaRepeats(altPoints, targetAscentM, profile, paceMinPerKm, targetDurationMin, targetDistanceM);
+      const boost = await boostAscentViaRepeats(altPoints, targetAscentM, profile, paceMinPerKm, targetDurationMin, targetDistanceM, trailLevel);
       if (boost && boost.repeatedAscentM > altAscentM) {
         const stillShort = boost.repeatedAscentM < targetAscentM - ASCENT_TOLERANCE_M;
         altPoints = boost.repeated.points;
@@ -1000,7 +1051,7 @@ async function buildLoopOptionsAtSinglePoint({ start, targetDistanceM, targetAsc
   // specifique au D+ trail. Ne se declenche pas si c'est le D+ qui pilotait
   // la recherche (deja couvert par son propre warning plus bas le cas echeant).
   const finalDistanceShortfall = !initialNeedsMoreAscent
-    && goalCloseness(natural, targetDistanceM, targetDurationMin, paceMinPerKm) < (1 - DISTANCE_SHORTFALL_TOLERANCE);
+    && goalCloseness(natural, targetDistanceM, targetDurationMin, paceMinPerKm, trailLevel) < (1 - DISTANCE_SHORTFALL_TOLERANCE);
   if (finalDistanceShortfall) {
     const gotLabel = targetDurationMin ? `${Math.round(naturalOption.predictedDurationMin)} min` : `${(natural.distanceM / 1000).toFixed(1)} km`;
     const targetLabel = targetDurationMin ? `${targetDurationMin} min` : `${(targetDistanceM / 1000).toFixed(1)} km`;
@@ -1015,7 +1066,7 @@ async function buildLoopOptionsAtSinglePoint({ start, targetDistanceM, targetAsc
     // chaque etape (tournicoti round-robin entre les segments trouves) -
     // teste apres CHAQUE etape et s'arrete des que le D+ vise est atteint OU
     // que le budget (duree/distance) est depasse - voir boostAscentViaRepeats.
-    const boost = await boostAscentViaRepeats(natural.points, targetAscentM, profile, paceMinPerKm, targetDurationMin, targetDistanceM);
+    const boost = await boostAscentViaRepeats(natural.points, targetAscentM, profile, paceMinPerKm, targetDurationMin, targetDistanceM, trailLevel);
     if (!boost) {
       warning = `Aucune côte exploitable trouvée pour compléter le D+ dans ce secteur — seule la boucle naturelle (${naturalOption.ascentM} m) est proposée.`;
     } else {
@@ -1070,7 +1121,7 @@ async function buildLoopOptionsAtSinglePoint({ start, targetDistanceM, targetAsc
 // inutile de rescanner), mais construit un aller-retour le long de chaque
 // bearing retenu plutot qu'une boucle. Utilise pour la forme 'outback' - cf
 // generateOptionsAtSinglePoint (dispatcher) et generateOutAndBack.
-async function buildOutAndBackOptionsAtSinglePoint({ start, targetDistanceM, targetAscentM, targetDurationMin, terrain, paceMinPerKm, profile }) {
+async function buildOutAndBackOptionsAtSinglePoint({ start, targetDistanceM, targetAscentM, targetDurationMin, terrain, paceMinPerKm, profile, trailLevel }) {
   const { candidates } = await scanDirections(start, targetDistanceM, profile, terrain === 'trail' ? targetAscentM : null);
   if (candidates.length === 0) {
     throw new Error('Impossible de generer un aller-retour exploitable autour de ce depart.');
@@ -1094,7 +1145,7 @@ async function buildOutAndBackOptionsAtSinglePoint({ start, targetDistanceM, tar
     const bearing = bearings[i];
     let result;
     try {
-      result = await generateOutAndBack(start, bearing, targetDistanceM, profile, { targetDurationMin, paceMinPerKm });
+      result = await generateOutAndBack(start, bearing, targetDistanceM, profile, { targetDurationMin, paceMinPerKm, trailLevel });
     } catch (err) {
       continue; // direction non routable en aller-retour, on garde les autres
     }
@@ -1102,7 +1153,7 @@ async function buildOutAndBackOptionsAtSinglePoint({ start, targetDistanceM, tar
     let repeatedSegments = null;
     const needsMoreAscent = terrain === 'trail' && targetAscentM && ascentM < targetAscentM - ASCENT_TOLERANCE_M;
     if (needsMoreAscent) {
-      const boost = await boostOutAndBackViaRepeats(result, targetAscentM, profile, paceMinPerKm, targetDurationMin, targetDistanceM);
+      const boost = await boostOutAndBackViaRepeats(result, targetAscentM, profile, paceMinPerKm, targetDurationMin, targetDistanceM, trailLevel);
       if (boost) {
         const boostedAscentM = calibrateAscent(boost.filteredAscendM);
         if (boostedAscentM > ascentM) {
@@ -1127,7 +1178,7 @@ async function buildOutAndBackOptionsAtSinglePoint({ start, targetDistanceM, tar
       distanceM: result.distanceM,
       ascentM,
       repeatedSegments,
-      predictedDurationMin: predictDurationMin(result.points, paceMinPerKm),
+      predictedDurationMin: predictDurationMin(result.points, paceMinPerKm, trailLevel),
       commentary: `Aller-retour ${toward} : le retour emprunte exactement le même tracé que l'aller.`
         + (repeatedSegments ? ` Le D+ naturel ne suffisait pas seul — une ou plusieurs côtes sont répétées à l'aller uniquement, le retour reste direct.` : ''),
       alternateStart: null,
@@ -1146,19 +1197,19 @@ async function buildOutAndBackOptionsAtSinglePoint({ start, targetDistanceM, tar
 // ('loop' | 'outback' | 'both') - demande utilisateur explicite ("il faut
 // donc proposer boucle, A/R ou les deux"). Voir generateOptionsAcrossSearchRadius
 // pour le cas "recherche elargie" (plusieurs zones distinctes).
-async function generateOptionsAtSinglePoint({ start, targetDistanceM, targetAscentM, targetDurationMin, terrain, paceMinPerKm, profile, routeShape = 'loop' }) {
+async function generateOptionsAtSinglePoint({ start, targetDistanceM, targetAscentM, targetDurationMin, terrain, paceMinPerKm, profile, routeShape = 'loop', trailLevel }) {
   const options = [];
   let warning = null;
 
   if (routeShape === 'loop' || routeShape === 'both') {
-    const loopResult = await buildLoopOptionsAtSinglePoint({ start, targetDistanceM, targetAscentM, targetDurationMin, terrain, paceMinPerKm, profile });
+    const loopResult = await buildLoopOptionsAtSinglePoint({ start, targetDistanceM, targetAscentM, targetDurationMin, terrain, paceMinPerKm, profile, trailLevel });
     options.push(...loopResult.options);
     warning = loopResult.warning;
   }
 
   if (routeShape === 'outback' || routeShape === 'both') {
     try {
-      const outbackResult = await buildOutAndBackOptionsAtSinglePoint({ start, targetDistanceM, targetAscentM, targetDurationMin, terrain, paceMinPerKm, profile });
+      const outbackResult = await buildOutAndBackOptionsAtSinglePoint({ start, targetDistanceM, targetAscentM, targetDurationMin, terrain, paceMinPerKm, profile, trailLevel });
       options.push(...outbackResult.options);
       if (!warning) warning = outbackResult.warning;
     } catch (err) {
@@ -1178,7 +1229,7 @@ async function generateOptionsAtSinglePoint({ start, targetDistanceM, targetAsce
 // (recherche simple au point demande), puis applique la correction finale de
 // D+ via l'API Altimetrie IGN a toutes les options obtenues, quel que soit
 // le chemin emprunte.
-async function generateRouteOptions({ start, targetDistanceM, targetAscentM, targetDurationMin, terrain = 'trail', paceMinPerKm, searchRadiusM, routeShape = 'loop' }) {
+async function generateRouteOptions({ start, targetDistanceM, targetAscentM, targetDurationMin, terrain = 'trail', paceMinPerKm, searchRadiusM, routeShape = 'loop', trailLevel }) {
   // Verifie l'infrastructure avant toute tentative de routage : sans ca, les
   // echecs de generateLoop (qui retente avec un rayon reduit, pensant a un
   // probleme de terrain) masqueraient un message clair du type "BRouter non
@@ -1189,8 +1240,8 @@ async function generateRouteOptions({ start, targetDistanceM, targetAscentM, tar
 
   const profile = TERRAIN_PROFILES[terrain] || TERRAIN_PROFILES.trail;
   const { options, warning } = searchRadiusM
-    ? await generateOptionsAcrossSearchRadius({ start, targetDistanceM, targetAscentM, targetDurationMin, terrain, paceMinPerKm, searchRadiusM, profile, routeShape })
-    : await generateOptionsAtSinglePoint({ start, targetDistanceM, targetAscentM, targetDurationMin, terrain, paceMinPerKm, profile, routeShape });
+    ? await generateOptionsAcrossSearchRadius({ start, targetDistanceM, targetAscentM, targetDurationMin, terrain, paceMinPerKm, searchRadiusM, profile, routeShape, trailLevel })
+    : await generateOptionsAtSinglePoint({ start, targetDistanceM, targetAscentM, targetDurationMin, terrain, paceMinPerKm, profile, routeShape, trailLevel });
 
   // Correction finale du D+ affiche via l'API Altimetrie IGN (donnees RGE
   // ALTI, precision LIDAR) - remplace le D+ estime par BRouter (MNT
@@ -1256,6 +1307,9 @@ module.exports = {
   buildMultiRepeatedWaypoints,
   calibrateAscent,
   predictDurationMin,
+  TRAIL_LEVELS,
+  equivalentFlatKm,
+  trailLevelMidKmh,
   findHillyCandidateCenters,
   generateRouteOptions,
   buildGpxXml,

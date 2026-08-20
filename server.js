@@ -58,7 +58,7 @@ const {
 } = require('./garmin_client');
 const { getZoneRange, annotatePaceZones, ZONE_LABELS } = require('./zones');
 const { isBrouterConfigured, isTilePresent, getTileRemoteSize, downloadTile } = require('./brouter_manager');
-const { geocode, getCommunesForPostcode, getCommunesForDepartment, searchStreet, getTownHall, generateRouteOptions, buildGpxXml } = require('./route_generator');
+const { geocode, getCommunesForPostcode, getCommunesForDepartment, searchStreet, getTownHall, generateRouteOptions, buildGpxXml, trailLevelMidKmh } = require('./route_generator');
 const { getPaceProfile, refreshPaceProfile, migratePaceProfileToScoped } = require('./pace_profile');
 const { scheduleSync, runFullReconciliation, getSyncStatus, syncBinaryFile, deleteBinaryFile, syncAvatarFile, SYNC_TYPES } = require('./sync');
 const syncClient = require('./sync_client');
@@ -1466,7 +1466,7 @@ app.post('/api/routes/tile-download', requireSession, async (req, res) => {
 
 app.post('/api/routes/generate', requireSession, async (req, res) => {
   try {
-    const { start, targetDistanceM, targetDurationMin, targetAscentM, terrain, searchRadiusKm, routeShape } = req.body || {};
+    const { start, targetDistanceM, targetDurationMin, targetAscentM, terrain, searchRadiusKm, routeShape, trailLevel } = req.body || {};
     if (!start || typeof start.lat !== 'number' || typeof start.lon !== 'number') {
       return res.status(400).json({ error: 'Point de départ invalide (adresse non confirmée ?)' });
     }
@@ -1474,20 +1474,33 @@ app.post('/api/routes/generate', requireSession, async (req, res) => {
       return res.status(400).json({ error: 'Distance ou durée cible invalide' });
     }
     const paceProfile = getPaceProfile(req.session.email);
+    const isTrail = terrain !== 'route';
+    const levelMidKmh = isTrail ? trailLevelMidKmh(trailLevel) : null;
     // Si seule la duree est fournie, estimation de depart pour la forme de la
-    // boucle (affinee ensuite par generateLoop) - au rythme "plat", optimiste
-    // par construction mais recalcule reellement une fois le tracé obtenu.
+    // boucle (affinee ensuite par generateLoop). Deux modeles selon le
+    // contexte : en trail avec un niveau de traileur choisi, la MEME formule
+    // "distance equivalente plat" (distance + D+/100) que le reste du calcul
+    // niveau-based (voir route_generator.js, TRAIL_LEVELS) - reutilise ici en
+    // sens inverse (duree+D++vitesse -> distance) pour une estimation de
+    // depart deja realiste, cohérente avec ce qui a ete confirme cote client
+    // (routesBuildLevelConfirmation, routes.js) avant l'envoi de cette
+    // requete. Sinon (route, ou trail sans niveau fourni), comportement
+    // d'origine : allure A PLAT du profil personnel, optimiste par
+    // construction mais recalculee reellement une fois le tracé obtenu.
     const distanceEstimateM = targetDistanceM
-      || (targetDurationMin * 1000) / paceProfile.paceMinPerKm.flat;
+      || (levelMidKmh
+        ? Math.max(500, (levelMidKmh * (targetDurationMin / 60) - (targetAscentM || 0) / 100) * 1000)
+        : (targetDurationMin * 1000) / paceProfile.paceMinPerKm.flat);
     const result = await generateRouteOptions({
       start,
       targetDistanceM: distanceEstimateM,
       targetDurationMin: targetDurationMin || null,
       targetAscentM: targetAscentM || null,
-      terrain: terrain === 'route' ? 'route' : 'trail',
+      terrain: isTrail ? 'trail' : 'route',
       paceMinPerKm: paceProfile.paceMinPerKm,
       searchRadiusM: (searchRadiusKm && searchRadiusKm > 0) ? searchRadiusKm * 1000 : null,
       routeShape: ['loop', 'outback', 'both'].includes(routeShape) ? routeShape : 'loop',
+      trailLevel: levelMidKmh ? trailLevel : null,
     });
     res.json({ ...result, paceProfileIsGeneric: paceProfile.isGeneric });
   } catch (err) { handleError(res, err); }
