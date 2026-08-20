@@ -158,6 +158,31 @@ function dumpUnrecognizedLoginPage(htmlStr) {
   } catch (e) { /* diagnostic best-effort, ne doit jamais faire echouer la connexion */ }
 }
 
+// Diagnostic generique (best-effort, ne doit jamais faire echouer la
+// connexion) - reutilise pour les deux nouveaux points de capture ci-dessous.
+function dumpDebugFile(filePath, content, label) {
+  try {
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(filePath, content, 'utf8');
+    console.log('[MFA]', label, '- sauvegarde dans', filePath);
+  } catch (e) { /* best-effort */ }
+}
+// Page reelle detectee comme MFA (voir handleMFA) - jamais encore vue en
+// vrai jusqu'ici (le tout premier retour utilisateur, 21/08, butait plus tot
+// dans le flux, sur les cookies manquants - handleMFA n'atteignait jamais ce
+// point). Permet de verifier sur du reel : le nom exact du champ code, le
+// jeton _csrf attendu par CE formulaire specifiquement (peut-etre different
+// de celui de la page precedente, si Garmin le fait tourner par page), et
+// tout champ cache supplementaire que resumeWithMfa n'envoie pas encore.
+const MFA_PAGE_DUMP_FILE = path.join(__dirname, 'data', 'garmin_mfa_page_debug.html');
+// Reponse a la soumission du code (voir resumeWithMfa) quand aucun ticket
+// n'y est trouve - le message "Code incorrect ou expire" renvoye a
+// l'utilisateur dans ce cas est une supposition (TICKET_RE ne matche pas),
+// pas une lecture du vrai message Garmin. Capture ce que Garmin repond
+// reellement (vraie erreur de code, jeton CSRF rejete, structure de reponse
+// differente...) pour corriger sur preuve plutot que re-deviner.
+const MFA_RESPONSE_DUMP_FILE = path.join(__dirname, 'data', 'garmin_mfa_response_debug.html');
+
 // Remplace le no-op de la lib. Appelee par HttpClient.prototype.getLoginTicket
 // (code interne de la lib, inchange) juste apres la soumission du formulaire
 // identifiant/mot de passe, avec le HTML de la reponse Garmin.
@@ -167,6 +192,8 @@ HttpClient.prototype.handleMFA = function (htmlStr) {
     if (!TICKET_RE.test(htmlStr)) dumpUnrecognizedLoginPage(htmlStr);
     return;
   }
+
+  dumpDebugFile(MFA_PAGE_DUMP_FILE, htmlStr, 'Page MFA detectee');
 
   const csrfMatch = CSRF_RE.exec(htmlStr);
   // Meme URL que celle utilisee pour poster identifiant/mot de passe
@@ -223,6 +250,7 @@ HttpClient.prototype.resumeWithMfa = async function (mfaCode) {
 
   const ticketMatch = TICKET_RE.exec(mfaResult);
   if (!ticketMatch) {
+    dumpDebugFile(MFA_RESPONSE_DUMP_FILE, typeof mfaResult === 'string' ? mfaResult : JSON.stringify(mfaResult), 'Reponse a la soumission du code (aucun ticket trouve)');
     throw new Error('Code de vérification incorrect ou expiré.');
   }
   const ticket = ticketMatch[1];
