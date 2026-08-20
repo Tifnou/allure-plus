@@ -33,10 +33,16 @@ const _healthCategoryBuilt = { sante: false, performance: false };
 // Force la reconstruction des categories Sante/Performance au prochain
 // affichage (appele par "Actualiser les donnees" cote app.js) — sans ca,
 // _healthCategoryBuilt court-circuite le rechargement et la page continue
-// d'afficher les anciennes valeurs tant qu'on ne fait pas F5.
+// d'afficher les anciennes valeurs tant qu'on ne fait pas F5. Doit AUSSI
+// vider _healthDataCache (bug reel constate : le clic rebalayait bien
+// _healthCategoryBuilt, mais fetchHealthMetric() retombait quand meme sur
+// les valeurs mises en cache cote client - la Body Battery et le reste ne
+// se rafraichissaient jamais malgre le cache SERVEUR bien vide par
+// /api/refresh, tant qu'on ne rechargeait pas completement la page).
 function invalidateHealthCategories() {
   _healthCategoryBuilt.sante = false;
   _healthCategoryBuilt.performance = false;
+  Object.keys(_healthDataCache).forEach(k => delete _healthDataCache[k]);
 }
 
 async function fetchHealthMetric(key, days, loadFn) {
