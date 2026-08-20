@@ -29,9 +29,15 @@
 const { HttpClient } = require('garmin-connect/dist/common/HttpClient');
 const FormData = require('form-data');
 const qs = require('qs');
+const fs = require('fs');
+const path = require('path');
 
 const CSRF_RE = /name="_csrf"\s+value="(.+?)"/;
 const TICKET_RE = /ticket=([^"]+)"/;
+// Fichier de diagnostic (voir dumpUnrecognizedLoginPage plus bas) - dans
+// data/ comme le reste des fichiers proteges (jamais ecrase par
+// l'installeur, jamais commite).
+const DEBUG_DUMP_FILE = path.join(__dirname, 'data', 'garmin_login_debug.html');
 // Meme constante que celle utilisee en interne par la lib pour ses propres
 // requetes de connexion (dist/common/HttpClient.js) - Garmin sert une page
 // differente selon le user-agent, on doit rester coherent avec le reste du
@@ -46,12 +52,38 @@ class GarminMfaRequiredError extends Error {
   }
 }
 
+// Diagnostic (21/08) : premier retour utilisateur reel contre un compte
+// MFA (collegue, jamais teste avant faute de compte de test disponible - cf
+// note en tete de fichier) et la detection ci-dessous n'a PAS reconnu la
+// page comme MFA (message generique "Ticket not found or MFA" renvoye tel
+// quel a l'utilisateur, cf /api/setup dans server.js) - la detection a donc
+// ete ecrite par retro-ingenierie d'une PR non fusionnee, sur un HTML jamais
+// verifie contre un vrai defi MFA Garmin. Plutot que de re-deviner a
+// l'aveugle une deuxieme fois (risque de regression sur les comptes SANS
+// MFA qui fonctionnent deja en production si le motif est trop large - une
+// simple sous-chaine "mfa" insensible a la casse peut apparaitre dans un
+// blob JS/JSON de config sans rapport), on capture le HTML reel recu quand
+// ni la detection MFA ni le ticket normal ne matchent, pour ajuster ce
+// motif avec des preuves plutot qu'une hypothese. Fichier ecrase a chaque
+// nouvelle tentative (pas d'accumulation) - purement local, jamais envoye
+// nulle part, jamais commite (voir .gitignore).
+function dumpUnrecognizedLoginPage(htmlStr) {
+  try {
+    fs.mkdirSync(path.dirname(DEBUG_DUMP_FILE), { recursive: true });
+    fs.writeFileSync(DEBUG_DUMP_FILE, htmlStr, 'utf8');
+    console.log('[MFA] Page de connexion non reconnue (ni MFA, ni ticket normal) - HTML sauvegarde dans', DEBUG_DUMP_FILE);
+  } catch (e) { /* diagnostic best-effort, ne doit jamais faire echouer la connexion */ }
+}
+
 // Remplace le no-op de la lib. Appelee par HttpClient.prototype.getLoginTicket
 // (code interne de la lib, inchange) juste apres la soumission du formulaire
 // identifiant/mot de passe, avec le HTML de la reponse Garmin.
 HttpClient.prototype.handleMFA = function (htmlStr) {
   const isMfaPage = htmlStr.includes('verifyMFA') || htmlStr.includes('setupEnterMfaCode') || htmlStr.includes('mfa-code');
-  if (!isMfaPage) return;
+  if (!isMfaPage) {
+    if (!TICKET_RE.test(htmlStr)) dumpUnrecognizedLoginPage(htmlStr);
+    return;
+  }
 
   const csrfMatch = CSRF_RE.exec(htmlStr);
   // Meme URL que celle utilisee pour poster identifiant/mot de passe
