@@ -28,7 +28,6 @@
 // le ticket obtenu, la suite est identique a une connexion normale.
 const HttpClientModule = require('garmin-connect/dist/common/HttpClient');
 const { HttpClient } = HttpClientModule;
-const FormData = require('form-data');
 const qs = require('qs');
 const fs = require('fs');
 const path = require('path');
@@ -227,26 +226,53 @@ HttpClient.prototype.resumeWithMfa = async function (mfaCode) {
   }
   const { csrf, signinUrl } = this._mfaLoginState;
 
-  // Meme construction (form-data + Content-Type urlencoded declare) que le
-  // POST identifiant/mot de passe de la lib (getLoginTicket, step3) - garder
-  // exactement le meme motif meme s'il semble incoherent (multipart produit,
-  // urlencoded declare) : c'est ce motif qui fonctionne deja en production
-  // pour la connexion normale, donc le plus sur a reproduire a l'identique.
-  const mfaForm = new FormData();
-  mfaForm.append('mfa-code', mfaCode);
-  mfaForm.append('embed', 'true');
-  mfaForm.append('_csrf', csrf);
-  mfaForm.append('fromPage', 'setupEnterMfaCode');
-
-  const mfaResult = await this.post(signinUrl, mfaForm, {
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
-      Dnt: 1,
-      Origin: this.url.GARMIN_SSO_ORIGIN,
-      Referer: signinUrl,
-      'User-Agent': USER_AGENT_BROWSER,
-    },
+  // 21/08 (2e passe) : la 1ere version envoyait un corps form-data
+  // (multipart) sous un Content-Type declare "urlencoded" - copie du motif
+  // du POST identifiant/mot de passe de la lib (getLoginTicket, step3), qui
+  // fonctionne bien en production pour CE POST-LA. Mais rien ne prouve que
+  // l'endpoint MFA (meme URL, champs differents) tolere la meme incoherence
+  // - premier vrai test (collegue, compte MFA confirme) : l'ecran MFA
+  // s'affiche (donc handleMFA/le cookie jar fonctionnent), le champ HTML
+  // reel de la page (mfa-code/_csrf/fromPage/embed, capture dans
+  // garmin_mfa_page_debug.html) correspond exactement a ce qu'on envoie deja
+  // - mais la soumission du code echoue TOUJOURS, et sans meme produire de
+  // fichier de diagnostic reponse (voir plus bas) : signe que la requete
+  // echoue au niveau HTTP (axios rejette sur un statut non-2xx) AVANT
+  // d'atteindre l'analyse du ticket, pas que Garmin refuse un "mauvais"
+  // code. Corrige en envoyant un vrai corps urlencoded (qs.stringify),
+  // coherent avec le Content-Type declare - plus standard, aucun risque de
+  // regression (ce chemin MFA n'a jamais fonctionne jusqu'ici).
+  const mfaBody = qs.stringify({
+    'mfa-code': mfaCode,
+    embed: 'true',
+    _csrf: csrf,
+    fromPage: 'setupEnterMfaCode',
   });
+
+  let mfaResult;
+  try {
+    mfaResult = await this.post(signinUrl, mfaBody, {
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        Dnt: 1,
+        Origin: this.url.GARMIN_SSO_ORIGIN,
+        Referer: signinUrl,
+        'User-Agent': USER_AGENT_BROWSER,
+      },
+    });
+  } catch (err) {
+    // La reponse HTML/JSON de Garmin (si le serveur en a renvoye une avec le
+    // statut d'erreur) est LA preuve manquante du premier test - jamais
+    // capturee jusqu'ici puisque l'exception sautait directement par-dessus
+    // le point de capture normal (voir plus bas) jusqu'au catch generique
+    // de /api/login/mfa (server.js), qui affiche toujours le meme message
+    // "Code incorrect ou expire" quelle que soit la vraie cause.
+    const detail = err?.response
+      ? `HTTP ${err.response.status}\n\n${typeof err.response.data === 'string' ? err.response.data : JSON.stringify(err.response.data, null, 2)}`
+      : `Pas de reponse HTTP (erreur reseau/JS) : ${err?.message || err}`;
+    dumpDebugFile(MFA_RESPONSE_DUMP_FILE, detail, 'Echec HTTP de la soumission du code');
+    throw err;
+  }
 
   const ticketMatch = TICKET_RE.exec(mfaResult);
   if (!ticketMatch) {
