@@ -98,7 +98,7 @@ function renderRoutesForm() {
       <div class="routes-address-row">
         <div>
           <div class="routes-microlabel">Code postal</div>
-          <input type="text" id="routes-input-postcode" class="routes-text-input" inputmode="text" maxlength="5" placeholder="ex: 75015 ou 33" title="Code postal complet, ou 2 chiffres du département si vous ne le connaissez pas" value="${routesState.postcode}">
+          <input type="text" id="routes-input-postcode" class="routes-text-input" inputmode="text" maxlength="5" placeholder="ex: 75015 ou 33" title="Code postal complet, ou 2 chiffres du département si vous ne le connaissez pas" autocomplete="off" value="${routesState.postcode}">
         </div>
         <div>
           <div class="routes-microlabel">Ville</div>
@@ -107,7 +107,7 @@ function renderRoutesForm() {
       </div>
       <div class="routes-address-street">
         <div class="routes-microlabel">Rue (optionnel — vide = mairie)</div>
-        <input type="text" id="routes-input-street" class="routes-text-input" value="${routesState.street}" ${routesState.selectedCommune ? '' : 'disabled'}>
+        <input type="text" id="routes-input-street" class="routes-text-input" autocomplete="off" value="${routesState.street}" ${routesState.selectedCommune ? '' : 'disabled'}>
         <div id="routes-street-suggestions" class="routes-suggestions" style="display:none"></div>
       </div>
       <div id="routes-start-confirm" class="routes-start-confirm" style="display:none"></div>
