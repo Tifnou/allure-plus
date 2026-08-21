@@ -120,14 +120,22 @@ function computeElevationProfile(points) {
   };
 }
 
-// Point d'entree : parse + sous-echantillonne + calcule les stats, sur le
-// trace DEJA sous-echantillonne (coherence points affiches / bins de pente).
+// Point d'entree : parse + calcule les stats sur le trace BRUT complet, PUIS
+// sous-echantillonne pour le stockage/affichage. Bug reel constate (retour
+// utilisateur : distance/D+ differents de l'import du meme GPX dans Garmin) :
+// une version precedente calculait les stats sur le trace DEJA sous-
+// echantillonne (1200 points max) - sur un fichier de plusieurs milliers de
+// points (course longue), reduire l'index AVANT de mesurer coupe des
+// virages/lacets et fausse aussi bien la distance que le D+ (les bins de
+// pente de computeElevationProfile n'ont alors plus la meme base que le
+// trace reel). Les stats et les points affiches doivent venir de deux
+// passes independantes : la precision d'abord, l'affichage ensuite.
 function analyzeGpx(gpxText) {
   const rawPoints = parseGpxTrack(gpxText);
   if (rawPoints.length < 2) return null;
-  const points = downsample(rawPoints, MAX_PROFILE_POINTS);
-  const stats = computeElevationProfile(points);
+  const stats = computeElevationProfile(rawPoints);
   if (!stats) return null;
+  const points = downsample(rawPoints, MAX_PROFILE_POINTS);
   return { points, stats };
 }
 
