@@ -646,7 +646,14 @@ function renderUpdateStepInstallPrompt(bd, close) {
       <button class="confirm-modal-btn confirm-modal-btn--confirm" id="upd-install-now">Installer maintenant</button>
     </div>`;
   body.querySelector('#upd-install-later').onclick = close;
-  body.querySelector('#upd-install-now').onclick = async () => {
+  const installBtn = body.querySelector('#upd-install-now');
+  installBtn.onclick = async () => {
+    // Retour visuel immediat au clic - avant meme l'appel reseau, jamais
+    // apres (retour utilisateur explicite : lancer l'installeur prend un
+    // instant sans aucun signe visible, l'utilisateur pensait son clic
+    // ignore et re-cliquait, risquant de lancer l'installeur deux fois).
+    installBtn.disabled = true;
+    installBtn.textContent = 'Installation en cours…';
     try {
       const res = await fetch(`${API}/api/update/install`, { method: 'POST' });
       const data = await res.json();
@@ -656,6 +663,8 @@ function renderUpdateStepInstallPrompt(bd, close) {
         showToast('Installeur lancé — suivez les instructions à l’écran.', 'success');
       }
     } catch (e) {
+      installBtn.disabled = false;
+      installBtn.textContent = 'Installer maintenant';
       if (typeof showToast === 'function') showToast(e.message || "Impossible de lancer l'installeur.", 'error');
     }
   };

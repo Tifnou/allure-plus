@@ -925,13 +925,25 @@ function renderRouteMap(mapDivId, opt, context = {}) {
   // Alterne vert (parcours normal) / orange (zone repetee), une paire par
   // côte sollicitée - genéralise le cas a une seule côte (comportement
   // inchangé) comme a plusieurs.
+  // Chevauchement geometrique REEL et inevitable a l'approche d'une cote en
+  // impasse/singletrack (confirme sur un cas reel, retour utilisateur) : la
+  // toute derniere portion de l'approche naturelle (avant la 1ere repetition)
+  // et le tout debut de la descente de la repetition retracent exactement
+  // les MEMES coordonnees en sens inverse (un seul chemin existe pour
+  // rejoindre le sommet). Les deux polylines (avant=vert, zone=orange) se
+  // superposent alors pixel pour pixel sur ce court tronçon - sans mesure
+  // explicite, l'ordre d'empilement SVG par defaut de Leaflet ne garantissait
+  // pas que l'orange (le renseignement le plus important ici) l'emporte
+  // visuellement. bringToFront() force l'orange au-dessus de tout, quel que
+  // soit l'ordre d'ajout.
+  const zonePolylines = [];
   function drawWithRepeatZones(latLngsSlice, zones) {
     if (zones.length > 0) {
       let cursor = 0;
       zones.forEach(zone => {
         const before = latLngsSlice.slice(cursor, zone.startIdx + 1);
         if (before.length > 1) L.polyline(before, { color: '#2f6f3e', weight: 3.5 }).addTo(map);
-        L.polyline(latLngsSlice.slice(zone.startIdx, zone.endIdx + 1), { color: '#e8590c', weight: 4 }).addTo(map);
+        zonePolylines.push(L.polyline(latLngsSlice.slice(zone.startIdx, zone.endIdx + 1), { color: '#e8590c', weight: 4 }).addTo(map));
         cursor = zone.endIdx;
       });
       const after = latLngsSlice.slice(cursor);
@@ -983,6 +995,14 @@ function renderRouteMap(mapDivId, opt, context = {}) {
     }
   }
   map.fitBounds(bounds, { padding: [12, 12] });
+  // bringToFront() APRES le premier fitBounds - avant, la projection
+  // interne des paths (this._map._latLngToNewLayerPoint...) n'est pas
+  // encore prete sur une carte fraichement creee, meme comportement que le
+  // "Cannot read properties of undefined" deja documente ci-dessus pour
+  // circle.getBounds() (bug reel constate en testant ce correctif : chaque
+  // ouverture de carte avec une zone repetee levait une exception qui
+  // coupait tout le rendu, avant meme d'atteindre ce fitBounds).
+  zonePolylines.forEach(pl => pl.bringToFront());
 
   let cursorMarker = null;
   return {

@@ -312,7 +312,11 @@
   overflow: hidden;
   margin-bottom: 10px;
   background: var(--bg);
-  max-width: 640px;
+  /* Meme largeur que le formulaire au-dessus (.routes-form-card,
+     width:100%) - un max-width fixe de 640px tronquait les mini-stats
+     (badge + km + D+ + duree + allure + distance du depart) des que la
+     fenetre est plus large, retour utilisateur explicite. */
+  width: 100%;
 }
 .routes-result-card:last-child { margin-bottom: 0; }
 

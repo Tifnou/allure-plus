@@ -17,7 +17,7 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cesium@1.120.0/Build/Cesium/Widgets/widgets.css" />
   <link rel="stylesheet" href="css/style.css?v=1787234763459" />
   <link rel="stylesheet" href="css/plans.css?v=1787132767394" />
-  <link rel="stylesheet" href="css/routes.css?v=1787308480678" />
+  <link rel="stylesheet" href="css/routes.css?v=1787310810731" />
 </head>
 <body>
 <!-- ✨ SPLASH SCREEN ✨ -->
@@ -991,6 +991,11 @@
                       <span id="goals-pause-hint" class="sr-only">Temps total estimé aux ravitaillements, changements de matériel, etc. sur les efforts longs — ajouté aux estimations de temps de course.</span>
                     </div>
                   </div>
+                  <div class="goals-hero-input-item" id="goals-gpx-item">
+                    <label class="goals-hero-input-label">Tracé GPX</label>
+                    <input type="file" id="goals-gpx-file-input" accept=".gpx" style="display:none">
+                    <div id="goals-gpx-status" class="goals-gpx-status"></div>
+                  </div>
                 </div>
                 <button class="btn-goals-valider" onclick="applyRaceInputs()" title="Valider / Recalculer">
                   &#x2713; Valider
@@ -1369,7 +1374,7 @@
     <span class="support-fab-dot" id="support-fab-dot" style="display:none"></span>
   </button>
 
-  <script src="js/app.js?v=1787234763459"></script>
+  <script src="js/app.js?v=1787310810731"></script>
   <script src="js/gear.js?v=1786459105633"></script>
   <script src="js/campus.js?v=1787232833223"></script>
   <script src="js/free_sessions.js?v=1786701705047"></script>
@@ -1378,7 +1383,7 @@
   <script src="js/records.js?v=1787231562110"></script>
   <script src="js/health.js?v=1787231562110"></script>
   <script src="js/plans.js?v=1787050930665"></script>
-  <script src="js/routes.js?v=1787308480678"></script>
+  <script src="js/routes.js?v=1787311402028"></script>
   <script src="js/support.js?v=1786966950464"></script>
   <script src="js/globe.js?v=1787147104923"></script>
   <!-- ... MODAL LOGS ........................... -->
