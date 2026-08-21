@@ -128,9 +128,16 @@ function renderRoutesForm() {
     <div class="routes-field routes-field--full">
       <div class="routes-field-label">Point de départ</div>
       <div class="routes-address-row">
+        <!-- Code postal/rue : Chrome propose ses adresses enregistrees
+             (autofill "Adresses") meme avec autocomplete="off", des que le
+             champ recoit le focus - "off" n'est plus respecte pour ce type
+             de champ depuis quelques annees. readonly+onfocus (le champ
+             devient editable seulement APRES avoir recu le focus) empeche
+             Chrome de reconnaitre le champ comme cible d'autofill au moment
+             ou il declenche habituellement la suggestion. -->
         <div>
           <div class="routes-microlabel">Code postal</div>
-          <input type="text" id="routes-input-postcode" class="routes-text-input" inputmode="text" maxlength="5" placeholder="ex: 75015 ou 33" title="Code postal complet, ou 2 chiffres du département si vous ne le connaissez pas" autocomplete="off" value="${routesState.postcode}">
+          <input type="text" id="routes-input-postcode" class="routes-text-input" inputmode="text" maxlength="5" placeholder="ex: 75015 ou 33" title="Code postal complet, ou 2 chiffres du département si vous ne le connaissez pas" autocomplete="off" readonly onfocus="this.removeAttribute('readonly')" value="${routesState.postcode}">
         </div>
         <div>
           <div class="routes-microlabel">Ville</div>
@@ -139,7 +146,7 @@ function renderRoutesForm() {
       </div>
       <div class="routes-address-street">
         <div class="routes-microlabel">Rue (optionnel — vide = mairie)</div>
-        <input type="text" id="routes-input-street" class="routes-text-input" autocomplete="off" value="${routesState.street}" ${routesState.selectedCommune ? '' : 'disabled'}>
+        <input type="text" id="routes-input-street" class="routes-text-input" autocomplete="off" readonly onfocus="this.removeAttribute('readonly')" value="${routesState.street}" ${routesState.selectedCommune ? '' : 'disabled'}>
         <div id="routes-street-suggestions" class="routes-suggestions" style="display:none"></div>
       </div>
       <div id="routes-start-confirm" class="routes-start-confirm" style="display:none"></div>
@@ -778,6 +785,11 @@ function renderRoutesResults(data) {
       </div>
       <div class="routes-result-body" style="display:${open ? '' : 'none'}">
         <div class="routes-commentary">${opt.commentary || ''}</div>
+        ${opt.surfaceBreakdown && opt.surfaceBreakdown.length ? `
+        <div class="routes-surface-breakdown">
+          <div class="routes-surface-bar">${opt.surfaceBreakdown.map(s => `<span class="routes-surface-seg routes-surface-seg--${routesSurfaceSlug(s.label)}" style="width:${s.pct}%" title="${s.label} : ${s.pct}% (${(s.distanceM / 1000).toFixed(1)} km)"></span>`).join('')}</div>
+          <div class="routes-surface-legend">${opt.surfaceBreakdown.map(s => `<span class="routes-surface-legend-item"><span class="routes-surface-dot routes-surface-dot--${routesSurfaceSlug(s.label)}"></span>${s.label} : ${s.pct}%</span>`).join('')}</div>
+        </div>` : ''}
         <div class="routes-elev-container"><canvas id="routes-elev-${idx}"></canvas></div>
         <div class="routes-result-map" id="routes-map-${idx}"></div>
         ${hasRepeatZone ? '<div class="routes-hint routes-map-legend"><span class="routes-legend-swatch routes-legend-swatch--repeat"></span> Portion(s) répétée(s) (aller-retour) &nbsp; <span class="routes-legend-swatch routes-legend-swatch--normal"></span> Reste du parcours</div>' : ''}
@@ -839,6 +851,16 @@ function routesRepeatZones(opt) {
 }
 function routesHasRepeatZone(opt) {
   return routesRepeatZones(opt).length > 0;
+}
+
+// Classe CSS courte pour chaque categorie de opt.surfaceBreakdown (cf
+// classifyWayTags, route_generator.js) - les libelles complets contiennent
+// espaces/accents/slash, pas exploitables tels quels comme suffixe de classe.
+function routesSurfaceSlug(label) {
+  if (label.includes('cyclable')) return 'cycle';
+  if (label.includes('Route')) return 'road';
+  if (label.includes('Chemin')) return 'path';
+  return 'other';
 }
 
 // onHoverIndex(index|null) est rappelé à chaque déplacement de la souris sur

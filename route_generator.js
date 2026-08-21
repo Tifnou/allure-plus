@@ -618,15 +618,15 @@ async function boostAscentViaRepeats(basePoints, targetAscentM, profile, paceMin
   if (!repeated) return null; // meme la toute premiere etape n'etait pas routable (ou deja hors budget)
 
   const repeatedAscentM = calibrateAscent(repeated.filteredAscendM);
-  const repeatedSegments = segments.map((segment, i) => {
-    const zone = findRepeatedZoneIndexRange(repeated.points, segment);
-    return {
-      fromLat: segment.from.lat, fromLon: segment.from.lon, toLat: segment.to.lat, toLon: segment.to.lon, gainM: segment.gainM,
-      reps: repsBySegment[i],
-      startIdx: zone ? zone.startIdx : null,
-      endIdx: zone ? zone.endIdx : null,
-    };
-  }).filter(s => s.reps > 0); // exclut les segments jamais sollicites (objectif deja atteint avant leur tour)
+  // Tous les segments (reps=0 inclus) pour reconstruire EXACTEMENT la meme
+  // sequence de waypoints que celle ayant produit `repeated` (cf
+  // buildMultiRepeatedWaypoints, appele avec repsBySegment tel quel a
+  // l'etape gagnante) - necessaire pour que le reperage des zones
+  // (computeRepeatedZones) parte de la bonne geometrie ; filtre seulement a
+  // la toute fin (reps>0) pour l'affichage.
+  const allSegmentReps = segments.map((segment, i) => ({ segment, reps: repsBySegment[i] }));
+  const repeatedSegments = computeRepeatedZones(basePoints, allSegmentReps, repeated.points)
+    .filter(s => s.reps > 0); // exclut les segments jamais sollicites (objectif deja atteint avant leur tour)
 
   return { repeated, repeatedDurationMin, repeatedAscentM, repeatedSegments };
 }
@@ -654,51 +654,75 @@ function buildRepeatedWaypoints(basePoints, segment, n) {
   return buildMultiRepeatedWaypoints(basePoints, [{ segment, reps: n }]);
 }
 
-// Localise, dans le tracé final renvoyé par BRouter, la plage d'indices
-// correspondant a la zone repetee (aller-retour sur le segment le plus
-// efficace). Necessaire cote UI pour colorer cette portion differemment sur
-// la carte - les index d'entree (waypoints) ne correspondent pas aux index
-// de sortie (points du tracé, reechantillonnes par BRouter).
-// Principe : `segment.to` est atteint une premiere fois a la fin de la
-// portion "before" (avant les repetitions), puis une fois de plus a la fin
-// de chaque aller-retour - la derniere occurrence marque la fin de la zone
-// repetee, juste avant que le tracé ne reparte vers la portion "after".
-// Une simple recherche par proximite SPATIALE de `segment.to` (< thresholdM,
-// n'importe ou dans le trace) est fragile : une boucle peut repasser a moins
-// de thresholdM du sommet de la cote a un tout autre endroit du parcours
-// (croisement de deux branches proches du meme reseau de chemins) - bug reel
-// constate : zone orange demarrant bien avant la vraie repetition, ou
-// couvrant la quasi-totalite du trace. Les occurrences sont donc regroupees
-// par PROXIMITE DE PARCOURS (distance cumulee le long du trace, pas distance
-// a vol d'oiseau) - deux occurrences appartiennent a la meme repetition si
-// l'ecart de distance cumulee entre elles reste de l'ordre d'un aller-retour
-// sur ce segment (up + down) ; seul le plus grand groupe est retenu, les
-// eventuelles occurrences isolees ailleurs dans le trace sont ignorees.
-function findRepeatedZoneIndexRange(points, segment, thresholdM = 25) {
-  const toMatches = [];
-  points.forEach((p, i) => {
-    if (haversineDistance(p, segment.to) <= thresholdM) toMatches.push(i);
-  });
-  if (toMatches.length < 2) return null; // pas de veritable repetition detectee (garde-fou)
+// Meme construction que buildMultiRepeatedWaypoints, mais garde aussi trace,
+// pour chaque segment, de l'INDEX DANS LA SEQUENCE DE WAYPOINTS du dernier
+// waypoint avant ses repetitions (le point naturel, une fois) et du dernier
+// waypoint de sa derniere repetition (le sommet apres la derniere ascension)
+// - ces deux reperes, une fois traduits en index du trace de sortie (cf
+// matchWaypointsForward), delimitent exactement la "zone repetee" a colorer.
+function buildMultiRepeatedWaypointsWithZones(basePoints, segmentReps) {
+  const sorted = [...segmentReps].sort((a, b) => a.segment.endIdx - b.segment.endIdx);
+  const waypoints = [];
+  const zoneWaypointRanges = [];
+  let cursor = 0;
+  for (const { segment, reps } of sorted) {
+    waypoints.push(...basePoints.slice(cursor, segment.endIdx + 1));
+    const startWpIdx = waypoints.length - 1;
+    for (let k = 0; k < reps; k++) waypoints.push(segment.from, segment.to);
+    const endWpIdx = waypoints.length - 1;
+    zoneWaypointRanges.push({ segment, reps, startWpIdx, endWpIdx });
+    cursor = segment.endIdx + 1;
+  }
+  waypoints.push(...basePoints.slice(cursor));
+  return { waypoints: waypoints.map(p => ({ lat: p.lat, lon: p.lon })), zoneWaypointRanges };
+}
 
+// Associe chaque waypoint (dans l'ORDRE) au point du trace de sortie le plus
+// proche, en ne cherchant JAMAIS en arriere du dernier point deja associe
+// (correspondance strictement croissante) et en bornant la recherche a une
+// fenetre de distance parcourue (windowM) a partir de ce curseur. Remplace
+// une premiere version qui recherchait `segment.to` par simple proximite
+// spatiale n'importe ou dans le trace - fragile des qu'une boucle repasse a
+// moins de quelques dizaines de metres du sommet d'une cote ailleurs dans le
+// parcours (croisement de deux branches proches), ce qui faussait
+// completement la zone detectee (bug reel constate, y compris apres un
+// premier correctif par regroupement spatial : toujours des cas en defaut).
+// Ici, comme l'ORDRE des waypoints est connu avec certitude (c'est nous qui
+// l'avons construit), une correspondance strictement sequentielle ne peut
+// plus se tromper de repetition, seulement au pire de quelques metres sur le
+// point exact.
+function matchWaypointsForward(points, waypoints, windowM = 5000) {
   const cum = [0];
   for (let i = 1; i < points.length; i++) cum.push(cum[i - 1] + haversineDistance(points[i - 1], points[i]));
-
-  const maxGapM = Math.max((segment.distM || 0) * 3, thresholdM * 4);
-  let bestGroup = [toMatches[0]];
-  let currentGroup = [toMatches[0]];
-  for (let k = 1; k < toMatches.length; k++) {
-    if (cum[toMatches[k]] - cum[toMatches[k - 1]] <= maxGapM) {
-      currentGroup.push(toMatches[k]);
-    } else {
-      if (currentGroup.length > bestGroup.length) bestGroup = currentGroup;
-      currentGroup = [toMatches[k]];
+  let cursor = 0;
+  const matchedIdx = [];
+  for (const wp of waypoints) {
+    let bestIdx = cursor, bestDist = Infinity;
+    for (let i = cursor; i < points.length && (cum[i] - cum[cursor]) <= windowM; i++) {
+      const d = haversineDistance(points[i], wp);
+      if (d < bestDist) { bestDist = d; bestIdx = i; }
     }
+    matchedIdx.push(bestIdx);
+    cursor = bestIdx;
   }
-  if (currentGroup.length > bestGroup.length) bestGroup = currentGroup;
-  if (bestGroup.length < 2) return null; // le plus grand groupe n'est finalement qu'un point isole
+  return matchedIdx;
+}
 
-  return { startIdx: bestGroup[0], endIdx: bestGroup[bestGroup.length - 1] };
+// Point d'entree : calcule, pour chaque segment repete, la plage d'indices
+// [startIdx,endIdx] dans le trace final `finalPoints` correspondant a sa
+// zone repetee - cote UI, sert a colorer cette portion differemment sur la
+// carte (cf routes.js renderRouteMap). `segmentReps` doit contenir TOUS les
+// segments consideres (reps=0 inclus) pour reconstruire exactement la meme
+// sequence de waypoints que celle ayant produit `finalPoints`.
+function computeRepeatedZones(basePoints, segmentReps, finalPoints) {
+  const { waypoints, zoneWaypointRanges } = buildMultiRepeatedWaypointsWithZones(basePoints, segmentReps);
+  const matched = matchWaypointsForward(finalPoints, waypoints);
+  return zoneWaypointRanges.map(({ segment, reps, startWpIdx, endWpIdx }) => ({
+    fromLat: segment.from.lat, fromLon: segment.from.lon, toLat: segment.to.lat, toLon: segment.to.lon, gainM: segment.gainM,
+    reps,
+    startIdx: matched[startWpIdx] ?? null,
+    endIdx: matched[endWpIdx] ?? null,
+  }));
 }
 
 function calibrateAscent(filteredAscendM) {
@@ -851,6 +875,79 @@ function worseMatchLabel(a, b) {
   if (!a) return b;
   if (!b) return a;
   return MATCH_LABEL_RANK[a] >= MATCH_LABEL_RANK[b] ? a : b;
+}
+
+// Classement d'un parcours par type de voie (% route / chemin / piste
+// cyclable) - retour utilisateur explicite (aout 2026) : "sommes-nous en
+// mesure de dire X% route, X% chemin, X% piste cyclable ?". Rendu possible
+// par `format=geojson` de BRouter (cf brouter_client.js), qui expose les
+// tags OSM bruts de chaque segment reellement emprunte (WayTags) - jamais
+// exploite jusqu'ici, seule la geometrie et le D+ etaient lus.
+// Un amenagement cyclable (piste separee OU simple bande/voie partagee sur
+// une route) prime sur le type de voie porteur - c'est la distinction qui
+// interesse l'utilisateur ("les routes pour voitures sont le dernier
+// recours"), peu importe que ce soit techniquement une route secondaire
+// avec bande cyclable ou une vraie piste separee.
+const SURFACE_CATEGORY_CYCLE = 'Piste cyclable / voie mixte';
+const SURFACE_CATEGORY_ROAD = 'Route ouverte à la circulation';
+const SURFACE_CATEGORY_PATH = 'Chemin / sentier';
+const SURFACE_CATEGORY_OTHER = 'Autre';
+const SURFACE_ROAD_HIGHWAYS = new Set(['motorway', 'motorway_link', 'trunk', 'trunk_link', 'primary', 'primary_link', 'secondary', 'secondary_link', 'tertiary', 'tertiary_link', 'unclassified', 'residential', 'living_street', 'service']);
+const SURFACE_PATH_HIGHWAYS = new Set(['path', 'track', 'footway', 'bridleway', 'pedestrian', 'steps']);
+function classifyWayTags(wayTags) {
+  if (!wayTags) return SURFACE_CATEGORY_OTHER;
+  const hwMatch = /highway=([a-z_]+)/.exec(wayTags);
+  const highway = hwMatch ? hwMatch[1] : null;
+  const hasCycleInfra = /cycleway(:[a-z]+)?=(track|lane|shared_lane|opposite_track|opposite_lane)/.test(wayTags)
+    || /bicycle=designated/.test(wayTags)
+    || highway === 'cycleway';
+  if (hasCycleInfra) return SURFACE_CATEGORY_CYCLE;
+  if (highway && SURFACE_ROAD_HIGHWAYS.has(highway)) return SURFACE_CATEGORY_ROAD;
+  if (highway && SURFACE_PATH_HIGHWAYS.has(highway)) return SURFACE_CATEGORY_PATH;
+  return SURFACE_CATEGORY_OTHER;
+}
+
+// Sous-echantillonne les points du trace final en un nombre raisonnable de
+// waypoints pour la requete de classification (cf computeSurfaceBreakdown) -
+// renvoyer les 400-600 points du trace tels quels ferait router BRouter
+// via_point par via_point sur autant de segments quasi nuls, inutilement
+// lent. Un trace reel n'a generalement pas d'alternative aussi courte entre
+// deux points espaces de quelques centaines de metres sur le MEME reseau de
+// chemins, donc cet echantillonnage reproduit en pratique le meme itineraire
+// - risque residuel de leger ecart geometrique assume, cette classification
+// restant une INFORMATION, jamais un critere de decision de l'algorithme.
+const SURFACE_BREAKDOWN_MAX_WAYPOINTS = 60;
+function subsampleForClassification(points, maxWaypoints) {
+  if (points.length <= maxWaypoints) return points.map(p => ({ lat: p.lat, lon: p.lon }));
+  const step = (points.length - 1) / (maxWaypoints - 1);
+  const out = [];
+  for (let i = 0; i < maxWaypoints; i++) out.push(points[Math.round(i * step)]);
+  return out.map(p => ({ lat: p.lat, lon: p.lon }));
+}
+
+// Repli silencieux sur null en cas d'echec (reseau, BRouter temporairement
+// indisponible...) - fonctionnalite d'appoint, jamais bloquante pour
+// l'affichage du reste de l'option (meme philosophie que getRouteAscent).
+async function computeSurfaceBreakdown(points, profile) {
+  try {
+    const waypoints = subsampleForClassification(points, SURFACE_BREAKDOWN_MAX_WAYPOINTS);
+    if (waypoints.length < 2) return null;
+    const result = await routeThroughPoints(waypoints, profile, { trackname: 'surface_classify' });
+    if (!result.wayMessages || result.wayMessages.length === 0) return null;
+    const totals = {};
+    let totalDist = 0;
+    for (const msg of result.wayMessages) {
+      const cat = classifyWayTags(msg.wayTags);
+      totals[cat] = (totals[cat] || 0) + msg.distM;
+      totalDist += msg.distM;
+    }
+    if (totalDist === 0) return null;
+    return Object.entries(totals)
+      .map(([label, distanceM]) => ({ label, distanceM: Math.round(distanceM), pct: Math.round((distanceM / totalDist) * 100) }))
+      .sort((a, b) => b.distanceM - a.distanceM);
+  } catch (err) {
+    return null;
+  }
 }
 
 const TERRAIN_PROFILES = { trail: 'hiking-mountain', route: 'fastbike-lowtraffic' };
@@ -1481,6 +1578,9 @@ async function generateRouteOptions({ start, targetDistanceM, targetAscentM, tar
     if (opt.durationMatch || opt.ascentMatch) {
       opt.matchLabel = worseMatchLabel(opt.durationMatch && opt.durationMatch.label, opt.ascentMatch && opt.ascentMatch.label);
     }
+    // % route / chemin / piste cyclable - meme philosophie que la correction
+    // IGN ci-dessus (une fois par option finale, jamais bloquant si echec).
+    opt.surfaceBreakdown = await computeSurfaceBreakdown(opt.points, profile);
   }
 
   // requestedStart (toujours le point litteralement demande) + searchRadiusM
@@ -1523,7 +1623,8 @@ module.exports = {
   reorientLoopToClosestPoint,
   findSteepestSegment,
   findSteepestSegments,
-  findRepeatedZoneIndexRange,
+  computeRepeatedZones,
+  matchWaypointsForward,
   buildRepeatedWaypoints,
   buildMultiRepeatedWaypoints,
   calibrateAscent,
@@ -1532,6 +1633,8 @@ module.exports = {
   equivalentFlatKm,
   trailLevelMidKmh,
   findHillyCandidateCenters,
+  classifyWayTags,
+  computeSurfaceBreakdown,
   generateRouteOptions,
   buildGpxXml,
   TERRAIN_PROFILES,

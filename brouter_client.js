@@ -4,26 +4,37 @@
 
 const { ensureBrouterRunning, getPort } = require('./brouter_manager');
 
-const TRKPT_RE = /<trkpt lon="([^"]+)" lat="([^"]+)"><ele>([^<]+)<\/ele>/g;
-// plain-ascend peut etre negatif (trajet point-a-point net descendant, ex :
-// l'aller d'un aller-retour qui redescend globalement) - sans le \-? sur ce
-// groupe, toute la regex echouait a matcher des qu'un "-" apparaissait dans
-// cette valeur (bug reel constate : distanceM/filteredAscendM silencieusement
-// null sur certaines directions d'aller-retour, jamais vu sur des boucles ou
-// plain-ascend est quasi toujours >=0 puisque le depart=arrivee).
-const HEADER_RE = /track-length\s*=\s*(\d+)\s+filtered ascend\s*=\s*(\d+)\s+plain-ascend\s*=\s*(-?\d+)/;
+// format=geojson (plutot que gpx) : memes donnees de base (points, distance,
+// D+ filtre), mais expose EN PLUS `properties.messages` - un tableau de
+// lignes de debug BRouter (une par transition de noeud/way reellement
+// traversee, plus dense que les points geometrie qui sont lissés/rééchantillonnés)
+// dont la colonne WayTags donne les tags OSM bruts de la voie ("highway=path
+// surface=gravel...") et Distance la longueur en m de ce segment - exploite
+// par computeSurfaceBreakdown (route_generator.js) pour classer le parcours
+// en % route/chemin/piste cyclable, sans requete BRouter supplementaire.
+// Colonnes confirmees empiriquement (aout 2026) : ["Longitude","Latitude",
+// "Elevation","Distance","CostPerKm","ElevCost","TurnCost","NodeCost",
+// "InitialCost","WayTags","NodeTags","Time","Energy"] - Longitude/Latitude
+// sont des entiers scalés ×1e6 (ex: "2168750" = 2.168750°), inutilises ici
+// (la geometrie vient deja de `coordinates`), Distance et WayTags en clair.
+const WAYMSG_COL_DISTANCE = 3;
+const WAYMSG_COL_WAYTAGS = 9;
 
-function parseGpx(gpxText) {
-  const points = [];
-  let m;
-  TRKPT_RE.lastIndex = 0;
-  while ((m = TRKPT_RE.exec(gpxText)) !== null) {
-    points.push({ lon: parseFloat(m[1]), lat: parseFloat(m[2]), ele: parseFloat(m[3]) });
-  }
-  const header = HEADER_RE.exec(gpxText);
-  const distanceM = header ? parseInt(header[1], 10) : null;
-  const filteredAscendM = header ? parseInt(header[2], 10) : null;
-  return { points, distanceM, filteredAscendM };
+function parseGeoJson(jsonText) {
+  const data = JSON.parse(jsonText);
+  const feature = data.features && data.features[0];
+  if (!feature) return { points: [], distanceM: null, filteredAscendM: null, wayMessages: [] };
+  const points = (feature.geometry.coordinates || []).map(c => ({ lon: c[0], lat: c[1], ele: c[2] }));
+  const props = feature.properties || {};
+  const distanceM = props['track-length'] != null ? parseInt(props['track-length'], 10) : null;
+  const filteredAscendM = props['filtered ascend'] != null ? parseInt(props['filtered ascend'], 10) : null;
+  // 1ere ligne de `messages` = en-tetes de colonnes, pas une donnee.
+  const rows = Array.isArray(props.messages) ? props.messages.slice(1) : [];
+  const wayMessages = rows.map(r => ({
+    distM: parseInt(r[WAYMSG_COL_DISTANCE], 10) || 0,
+    wayTags: r[WAYMSG_COL_WAYTAGS] || '',
+  }));
+  return { points, distanceM, filteredAscendM, wayMessages };
 }
 
 // waypoints: [{lat, lon}, ...] dans l'ordre de passage souhaite.
@@ -42,7 +53,7 @@ async function routeThroughPoints(waypoints, profile, { trackname, profileParams
     lonlats,
     profile,
     alternativeidx: '0',
-    format: 'gpx',
+    format: 'geojson',
   });
   if (trackname) params.set('trackname', trackname);
   if (profileParams) Object.entries(profileParams).forEach(([k, v]) => params.set(k, v));
@@ -54,11 +65,11 @@ async function routeThroughPoints(waypoints, profile, { trackname, profileParams
   if (!res.ok) {
     throw new Error(`BRouter a repondu ${res.status} (${text.slice(0, 200) || 'sans detail'})`);
   }
-  const parsed = parseGpx(text);
+  const parsed = parseGeoJson(text);
   if (parsed.points.length === 0) {
     throw new Error('BRouter a repondu sans tracé exploitable (verifier les points de passage / profil).');
   }
   return parsed;
 }
 
-module.exports = { routeThroughPoints, parseGpx };
+module.exports = { routeThroughPoints, parseGeoJson };

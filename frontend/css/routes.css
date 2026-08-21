@@ -362,6 +362,22 @@
   padding: 14px;
 }
 
+/* % route/chemin/piste cyclable (opt.surfaceBreakdown, cf route_generator.js computeSurfaceBreakdown) */
+.routes-surface-breakdown { margin-bottom: 12px; }
+.routes-surface-bar { display: flex; width: 100%; height: 8px; border-radius: 4px; overflow: hidden; background: var(--bg-hover); }
+.routes-surface-seg { height: 100%; min-width: 2px; }
+.routes-surface-seg--road { background: #ef4444; }
+.routes-surface-seg--path { background: #16a34a; }
+.routes-surface-seg--cycle { background: #3b82f6; }
+.routes-surface-seg--other { background: var(--text-muted); }
+.routes-surface-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 6px; }
+.routes-surface-legend-item { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text-secondary); }
+.routes-surface-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.routes-surface-dot--road { background: #ef4444; }
+.routes-surface-dot--path { background: #16a34a; }
+.routes-surface-dot--cycle { background: #3b82f6; }
+.routes-surface-dot--other { background: var(--text-muted); }
+
 .routes-commentary {
   font-size: 12.5px;
   color: var(--text-secondary);
