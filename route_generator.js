@@ -19,6 +19,7 @@ const { routeThroughPoints: routeThroughPointsRaw } = require('./brouter_client'
 const { isBrouterConfigured } = require('./brouter_manager');
 const { bucketForGrade } = require('./pace_profile');
 const { getRouteAscent, getElevations } = require('./geoportail_client');
+const { queryNaturalAreas, isPointInAnyPolygon } = require('./overpass_client');
 
 // Le profil 'trekking' (mode "route", utilise jusqu'en aout 2026) est un
 // profil velo generique qui exclut bien les autoroutes mais ne compare les
@@ -1089,15 +1090,22 @@ function goalCloseness(loop, targetDistanceM, targetDurationMin, paceMinPerKm, t
   return distanceCloseness(loop.distanceM, targetDistanceM);
 }
 
-// Repere les zones les plus vallonnees dans searchRadiusM autour de `start`,
-// via un quadrillage bearing x rayon echantillonne cote Geoportail - AUCUN
-// appel BRouter ici, juste des lectures d'altitude en points isoles
-// (getElevations), donc rapide (quelques centaines de points en 1-2 appels
-// chunkes) malgre le nombre de centres testes. Renvoie jusqu'a `count`
-// centres, toujours en incluant le point demande en premier (l'utilisateur
-// doit toujours voir ce qui est possible sans se deplacer), tries par relief
-// decroissant sinon, avec un ecart geographique minimal entre eux pour
-// couvrir vraiment le rayon plutot que de proposer 5 fois le meme versant.
+// Repere les zones les plus vallonnees ET boisees dans searchRadiusM autour
+// de `start`, via un quadrillage bearing x rayon echantillonne cote
+// Geoportail (relief) et Overpass (bois/foret/parc naturel) - AUCUN appel
+// BRouter ici, donc rapide malgre le nombre de centres testes. Renvoie
+// jusqu'a `count` centres, toujours en incluant le point demande en premier
+// (l'utilisateur doit toujours voir ce qui est possible sans se deplacer),
+// tries par presence en zone naturelle PUIS relief decroissant, avec un
+// ecart geographique minimal entre eux pour couvrir vraiment le rayon
+// plutot que de proposer 5 fois le meme versant.
+// Le critere "boise" prime sur le relief (retour utilisateur explicite,
+// aout 2026) : une recherche elargie en trail pouvait renvoyer une boucle
+// avec de grosses portions en zone urbaine simplement parce que le relief y
+// etait suffisant (denivele urbain — parkings, ponts, echangeurs — compte
+// autant qu'un vrai relief naturel pour ce quadrillage), sans que la zone
+// soit un vrai terrain de trail. Cherche d'abord un endroit propice
+// (bois/foret proche du relief detecte), pas seulement "le plus de D+".
 async function findHillyCandidateCenters(start, searchRadiusM, count) {
   const centers = [{ lat: start.lat, lon: start.lon }];
   for (const frac of HOTSPOT_RADIUS_FRACTIONS) {
@@ -1115,7 +1123,12 @@ async function findHillyCandidateCenters(start, searchRadiusM, count) {
     [0, 90, 180, 270].forEach(b => samplePoints.push(destinationPoint(c.lat, c.lon, b, HOTSPOT_SAMPLE_OFFSET_M)));
   });
 
-  const elevations = await getElevations(samplePoints);
+  // Independants (Geoportail vs Overpass) - lances en parallele pour ne pas
+  // doubler la latence de ce reperage.
+  const [elevations, naturalAreas] = await Promise.all([
+    getElevations(samplePoints),
+    queryNaturalAreas(start.lat, start.lon, searchRadiusM),
+  ]);
   // Geoportail indisponible : repli sur le seul point demande - pas de
   // degradation par rapport a avant l'existence de ce mecanisme, juste pas
   // d'aide au reperage pour cette generation.
@@ -1124,13 +1137,18 @@ async function findHillyCandidateCenters(start, searchRadiusM, count) {
   const scored = centers.map((c, idx) => {
     const zs = elevations.slice(sampleStartIdx[idx], sampleStartIdx[idx] + 5).filter(z => z != null);
     const relief = zs.length >= 2 ? Math.max(...zs) - Math.min(...zs) : 0;
-    return { ...c, relief };
+    // Overpass indisponible (naturalAreas === null) : inForest reste false
+    // partout, le tri retombe alors sur le relief seul (comportement
+    // d'origine) - jamais bloquant.
+    const inForest = naturalAreas ? isPointInAnyPolygon(c, naturalAreas) : false;
+    return { ...c, relief, inForest };
   });
 
   const startEntry = scored[0]; // centers[0] est toujours `start`
   const minSepM = Math.max(searchRadiusM * HOTSPOT_MIN_SEPARATION_FRACTION, HOTSPOT_MIN_SEPARATION_FLOOR_M);
   const picked = [startEntry];
-  for (const cand of [...scored].sort((a, b) => b.relief - a.relief)) {
+  const ranked = [...scored].sort((a, b) => (b.inForest - a.inForest) || (b.relief - a.relief));
+  for (const cand of ranked) {
     if (picked.length >= count) break;
     if (haversineDistance(cand, start) < 1) continue; // deja inclus (= start)
     if (picked.every(p => haversineDistance(p, cand) >= minSepM)) picked.push(cand);
