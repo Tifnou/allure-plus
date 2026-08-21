@@ -4049,6 +4049,48 @@ body.plans-active {
 }
 .btn-goals-valider:hover { opacity: .85; }
 
+/* ── Import GPX de la course cible ─────────────────────────────── */
+.goals-gpx-status { display: flex; align-items: center; gap: 6px; min-height: 26px; }
+.goals-gpx-btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 5px 10px; border-radius: 7px;
+  background: transparent; border: 1px dashed var(--border);
+  color: var(--text-secondary); cursor: pointer;
+  font-size: 11.5px; font-weight: 600; white-space: nowrap;
+  transition: border-color .15s, color .15s;
+}
+.goals-gpx-btn:hover { border-color: var(--accent); color: var(--accent); }
+.goals-gpx-imported { display: flex; align-items: center; gap: 6px; font-size: 11.5px; }
+.goals-gpx-imported-name { color: var(--text-secondary); max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.goals-gpx-imported-view, .goals-gpx-imported-remove {
+  background: none; border: none; cursor: pointer;
+  font-size: 11.5px; font-weight: 600; padding: 2px 4px;
+}
+.goals-gpx-imported-view { color: var(--accent); }
+.goals-gpx-imported-remove { color: var(--text-muted); }
+.goals-gpx-imported-view:hover, .goals-gpx-imported-remove:hover { text-decoration: underline; }
+
+/* ── Allures à tenir par terrain (plat/montée/descente), depuis un GPX importé ── */
+.goals-gpx-paces { margin-top: 10px; }
+.goals-gpx-pace-title { font-size: 0.75rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.02em; margin-bottom: 6px; }
+.goals-gpx-pace-hint { cursor: help; font-weight: 400; text-transform: none; letter-spacing: normal; }
+.goals-gpx-pace-row { display: flex; align-items: center; gap: 8px; font-size: 13px; padding: 3px 0; }
+.goals-gpx-pace-label { width: 70px; color: var(--text-secondary); flex-shrink: 0; }
+.goals-gpx-pace-val { font-variant-numeric: tabular-nums; font-weight: 600; }
+.goals-gpx-pace-val--target { color: var(--accent); }
+.goals-gpx-pace-arrow { color: var(--text-muted); }
+
+/* ── Modale de visualisation du profil GPX importé (Objectifs) ────────── */
+.gpx-profile-modal { max-width: 720px; width: 100%; }
+.gpx-profile-stats { display: flex; flex-wrap: wrap; gap: 10px 18px; margin: 10px 0 14px; justify-content: center; }
+.gpx-profile-stat { font-size: 13px; color: var(--text-secondary); }
+.gpx-profile-stat b { font-size: 15px; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.gpx-profile-elev-container { position: relative; height: 140px; margin-bottom: 10px; }
+.gpx-profile-map { height: 320px; border-radius: var(--radius-md); overflow: hidden; border: 1px solid var(--border); }
+.gpx-profile-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; justify-content: center; margin-top: 10px; }
+.gpx-profile-legend-item { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text-secondary); }
+.gpx-profile-legend-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+
 /* ── Bouton "Voir mes allures" (ouvre la modale) ──────────────── */
 .btn-goals-paces {
   display: inline-flex; align-items: center; gap: 6px;

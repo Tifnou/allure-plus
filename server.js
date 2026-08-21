@@ -60,6 +60,7 @@ const { getZoneRange, annotatePaceZones, ZONE_LABELS } = require('./zones');
 const { isBrouterConfigured, isTilePresent, getTileRemoteSize, downloadTile } = require('./brouter_manager');
 const { geocode, getCommunesForPostcode, getCommunesForDepartment, searchStreet, getTownHall, generateRouteOptions, buildGpxXml, trailLevelMidKmh } = require('./route_generator');
 const { getPaceProfile, refreshPaceProfile, migratePaceProfileToScoped, efFastPaceMinPerKm, applyEfPaceAnchor } = require('./pace_profile');
+const { analyzeGpx } = require('./gpx_parser');
 const { scheduleSync, runFullReconciliation, getSyncStatus, syncBinaryFile, deleteBinaryFile, syncAvatarFile, SYNC_TYPES } = require('./sync');
 const syncClient = require('./sync_client');
 const { buildPlanWorkbook } = require('./xlsx_export');
@@ -137,6 +138,7 @@ const ACTIVITIES_CACHE_FILE   = path.join(DATA_DIR, 'activities_cache.json');
 const SESSION_ANALYSES_FILE   = path.join(DATA_DIR, 'session_analyses.json');
 const GEAR_FILE                = path.join(DATA_DIR, 'gear.json');
 const ACTIVITY_GEAR_FILE       = path.join(DATA_DIR, 'activity_gear.json');
+const GOAL_GPX_FILE            = path.join(DATA_DIR, 'goal_gpx_profiles.json');
 // Cases a cocher "sera propose" du tableau de suivi des plans (Admin, compte
 // shiznogoud@gmail.com uniquement) - global, pas scope par compte Garmin
 // (readScoped/writeScoped) : ce tableau n'a de sens que pour l'auteur des
@@ -2770,6 +2772,57 @@ app.delete('/api/pps/:id', requireSession, (req, res) => {
     scheduleSync('pps', req.params.id, req.session.email, true);
     res.json({ success: true });
   } catch (err) { handleError(res, err); }
+});
+
+// ─── GPX de la course cible (Objectifs) ────────────────────────────────
+// Retour utilisateur explicite (aout 2026) : le temps/allure de course
+// estime (estimateRaceTime, app.js) applique une regle generique "1 m D+ =
+// 10 m plat" au D+ total saisi, ignorant completement la descente et la
+// repartition reelle des pentes (une meme quantite de D+ concentree sur un
+// mur ou etalee sur une pente douce n'a pas le meme cout). Importer le GPX
+// reel de la course permet un profil altimetrique reel (cf gpx_parser.js) :
+// % plat/montee/descente, pente moyenne en montee/descente - a la fois pour
+// affiner l'estimation et pour une visualisation du parcours (modale dediee,
+// campus.js). Stocke localement (comme records_overrides.json) plutot que
+// synchronise entre appareils (scheduleSync) - simplification assumee pour
+// une premiere version, le GPX peut etre reimporte sur un autre poste au besoin.
+app.post('/api/goals/gpx', requireSession, upload.single('gpx'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'Aucun fichier reçu' });
+    const planId = (req.body?.planId || 'plan').slice(0, 80);
+    if (!/\.gpx$/i.test(req.file.originalname || '') && !/<gpx[\s>]/i.test(req.file.buffer.slice(0, 500).toString('utf8'))) {
+      return res.status(400).json({ error: 'Le fichier doit être un GPX' });
+    }
+    const gpxText = req.file.buffer.toString('utf8');
+    const result = analyzeGpx(gpxText);
+    if (!result) return res.status(400).json({ error: 'GPX illisible ou sans trace exploitable (moins de 2 points).' });
+
+    const store = readScoped(GOAL_GPX_FILE, req.session.email, {});
+    store[planId] = {
+      points: result.points,
+      stats: result.stats,
+      filename: req.file.originalname || 'course.gpx',
+      importedAt: new Date().toISOString(),
+    };
+    writeScoped(GOAL_GPX_FILE, req.session.email, store);
+    res.json({ success: true, stats: result.stats, filename: store[planId].filename });
+  } catch (err) { handleError(res, err); }
+});
+
+app.get('/api/goals/gpx/:planId', requireSession, (req, res) => {
+  const store = readScoped(GOAL_GPX_FILE, req.session.email, {});
+  const entry = store[req.params.planId];
+  if (!entry) return res.status(404).json({ error: 'Aucun GPX importé pour cet objectif' });
+  res.json(entry);
+});
+
+app.delete('/api/goals/gpx/:planId', requireSession, (req, res) => {
+  const store = readScoped(GOAL_GPX_FILE, req.session.email, {});
+  if (store[req.params.planId]) {
+    delete store[req.params.planId];
+    writeScoped(GOAL_GPX_FILE, req.session.email, store);
+  }
+  res.json({ success: true });
 });
 
 // ─── Export / import des records + courses (changement de PC, reinstall) ──

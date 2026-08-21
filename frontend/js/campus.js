@@ -2791,7 +2791,11 @@ function renderEstimations(goal, weeks, dplusM, distKmOverride) {
   };
 
   const vo2max = parseFloat((_latestVO2Max || (vma * 1000 / 60 * 0.2 + 3.5)).toFixed(1));
-  const secsNow = estimateRaceTime(vma, distKm, dplusM, isTrail);
+  // GPX importé pour ce plan : estimation affinée par le profil altimétrique
+  // réel (plat/montée/descente) plutôt que la règle générique "1 m D+ =
+  // 10 m plat" - cf estimateRaceTimeFromGpxProfile.
+  const gpxStats = campusState.gpxProfile?.stats || null;
+  const secsNow = gpxStats ? estimateRaceTimeFromGpxProfile(vma, gpxStats, isTrail)?.totalSecs : estimateRaceTime(vma, distKm, dplusM, isTrail);
   const vo2Color = vo2max >= 55 ? '#22c55e' : vo2max >= 45 ? '#3b82f6' : vo2max >= 35 ? '#f59e0b' : '#ef4444';
   const vo2El = el('goals-vo2-current');
   if (vo2El) { vo2El.textContent = vo2max; vo2El.style.color = vo2Color; vo2El.style.fontWeight = '700'; }
@@ -2819,7 +2823,7 @@ function renderEstimations(goal, weeks, dplusM, distKmOverride) {
   const gainPct = getRemainingVmaGainPct(weeksTotal, weeks);
   const vmaEnd = vma * (1 + gainPct);
   const vo2maxEnd = parseFloat(vmaToVo2Calibrated(vmaEnd).toFixed(1));
-  const secsEnd = estimateRaceTime(vmaEnd, distKm, dplusM, isTrail);
+  const secsEnd = gpxStats ? estimateRaceTimeFromGpxProfile(vmaEnd, gpxStats, isTrail)?.totalSecs : estimateRaceTime(vmaEnd, distKm, dplusM, isTrail);
   // Le delta "gain attendu" n'est pas affecté par les pauses (offset constant
   // ajouté aux deux termes, s'annule dans la différence).
   const delta = secsNow && secsEnd ? secsNow - secsEnd : null;
@@ -2877,6 +2881,8 @@ function renderEstimations(goal, weeks, dplusM, distKmOverride) {
   } else if (targetEl) {
     targetEl.innerHTML = '';
   }
+
+  renderGoalGpxPaces(vma, isTrail, targetSecs);
 }
 
 let _goalsChartInst = null;
@@ -3387,6 +3393,7 @@ async function loadGoalsPage() {
   }
 
   updateGoalsPage(goal, weeks);
+  await loadGoalGpxStatus(goal);
 
   // Re-rendu des estimations après tous les fetches (VMA peut être à présent disponible)
   if (campusState.goal && campusState.weeks) {
@@ -3629,7 +3636,363 @@ function showPacesModal() {
   document.addEventListener('keydown', escHandler);
 }
 
-// "?"? Objectifs personnels sauvegardés "?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?
+// ═══ GPX de la course cible (Objectifs) ═══════════════════════════════
+// Retour utilisateur explicite (aout 2026) : le temps/allure de course
+// estime (estimateRaceTime, app.js) applique une regle generique "1 m D+ =
+// 10 m plat" au D+ total saisi, ignorant la descente et la repartition
+// reelle des pentes. Importer le GPX reel de la course (cf /api/goals/gpx,
+// server.js + gpx_parser.js) donne acces a un vrai profil altimetrique :
+// % plat/montee/descente, pente moyenne en montee/descente - exploite ici
+// pour (1) affiner l'estimation, (2) afficher les allures/vitesses a tenir
+// par type de terrain, (3) visualiser le parcours (modale dediee).
+
+// État du profil GPX importe pour le plan actuellement affiche - null si
+// aucun import, sinon {points, stats, filename, importedAt} (cf reponse de
+// GET /api/goals/gpx/:planId).
+async function loadGoalGpxStatus(goal) {
+  const planId = goal?._id || 'plan';
+  try {
+    campusState.gpxProfile = await fetchJSON(`${API}/api/goals/gpx/${encodeURIComponent(planId)}`);
+  } catch (e) {
+    campusState.gpxProfile = null; // 404 = pas encore importe, ou erreur reseau
+  }
+  renderGoalGpxStatus();
+  wireGoalGpxUpload();
+}
+
+function renderGoalGpxStatus() {
+  const box = document.getElementById('goals-gpx-status');
+  if (!box) return;
+  const profile = campusState.gpxProfile;
+  if (!profile) {
+    box.innerHTML = `<button type="button" class="goals-gpx-btn" id="goals-gpx-import-btn">📎 Importer</button>`;
+    const btn = document.getElementById('goals-gpx-import-btn');
+    if (btn) btn.onclick = () => document.getElementById('goals-gpx-file-input')?.click();
+    return;
+  }
+  box.innerHTML = `
+    <span class="goals-gpx-imported">
+      <span title="${profile.filename}">✅</span>
+      <span class="goals-gpx-imported-name" title="${profile.filename}">${profile.filename}</span>
+      <button type="button" class="goals-gpx-imported-view" id="goals-gpx-view-btn">Voir</button>
+      <button type="button" class="goals-gpx-imported-remove" id="goals-gpx-remove-btn" title="Supprimer">✕</button>
+    </span>`;
+  const viewBtn = document.getElementById('goals-gpx-view-btn');
+  const removeBtn = document.getElementById('goals-gpx-remove-btn');
+  if (viewBtn) viewBtn.onclick = showGoalGpxProfileModal;
+  if (removeBtn) removeBtn.onclick = removeGoalGpx;
+}
+
+function wireGoalGpxUpload() {
+  const input = document.getElementById('goals-gpx-file-input');
+  if (!input || input._wired) return;
+  input._wired = true;
+  input.onchange = async () => {
+    const file = input.files[0];
+    input.value = '';
+    if (file) await handleGoalGpxFileSelected(file);
+  };
+}
+
+async function removeGoalGpx() {
+  const goal = campusState.goal;
+  if (!goal) return;
+  const planId = goal._id || 'plan';
+  const proceed = await showConfirmModal({
+    title: 'Supprimer le GPX importé ?',
+    message: 'Les estimations reviendront au calcul générique (distance + D+ total, sans détail des pentes).',
+    confirmLabel: 'Supprimer', cancelLabel: 'Annuler', icon: '🗑️',
+  });
+  if (!proceed) return;
+  try { await fetchJSON(`${API}/api/goals/gpx/${encodeURIComponent(planId)}`, { method: 'DELETE' }); } catch (e) {}
+  campusState.gpxProfile = null;
+  renderGoalGpxStatus();
+  refreshGoalEstimations();
+}
+
+async function handleGoalGpxFileSelected(file) {
+  const goal = campusState.goal;
+  if (!goal) return;
+  const planId = goal._id || 'plan';
+  const statusBox = document.getElementById('goals-gpx-status');
+  if (statusBox) statusBox.innerHTML = `<span class="goals-gpx-imported">⏳ Import…</span>`;
+  try {
+    const fd = new FormData();
+    fd.append('gpx', file);
+    fd.append('planId', planId);
+    const res = await fetch(`${API}/api/goals/gpx`, { method: 'POST', body: fd });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Import impossible');
+
+    await loadGoalGpxStatus(goal);
+
+    // Propose de reprendre distance/D+ du GPX - jamais un remplacement
+    // silencieux (convention de l'app), seulement si un ecart notable
+    // existe avec la saisie actuelle.
+    const distInput = document.getElementById('goals-dist-input');
+    const dplusInput = document.getElementById('goals-dplus-input');
+    const gpxDistKm = Math.round(data.stats.totalDistM / 100) / 10;
+    const gpxDplusM = data.stats.ascentM;
+    const curDist = parseFloat(distInput?.value) || 0;
+    const curDplus = parseInt(dplusInput?.value) || 0;
+    const distDiffers = Math.abs(gpxDistKm - curDist) > 0.3;
+    const dplusDiffers = Math.abs(gpxDplusM - curDplus) > 20;
+    if (distInput && (distDiffers || (dplusInput && dplusDiffers))) {
+      const proceed = await showConfirmModal({
+        title: 'Reprendre les valeurs du GPX ?',
+        message: `Le GPX indique <strong>${gpxDistKm} km</strong>${dplusInput ? ` et <strong>${gpxDplusM} m D+</strong>` : ''} — mettre à jour les champs ?`,
+        confirmLabel: 'Mettre à jour', cancelLabel: 'Garder mes valeurs', icon: '🗺️',
+      });
+      if (proceed) {
+        distInput.value = gpxDistKm;
+        if (dplusInput) dplusInput.value = gpxDplusM;
+        applyRaceInputs();
+      }
+    }
+    refreshGoalEstimations();
+    showToast('GPX importé — profil altimétrique disponible.', 'success');
+  } catch (e) {
+    renderGoalGpxStatus();
+    showToast(e.message || 'Import GPX impossible', 'error');
+  }
+}
+
+function refreshGoalEstimations() {
+  if (campusState.goal && campusState.weeks) {
+    const dplusInput = document.getElementById('goals-dplus-input');
+    const distInput = document.getElementById('goals-dist-input');
+    const dplusM = parseInt(dplusInput?.value) || 0;
+    const distKm = parseFloat(distInput?.value) || 0;
+    renderEstimations(campusState.goal, campusState.weeks, dplusM, distKm);
+  }
+}
+
+// Penalite d'allure par pente reelle (secondes/km multiplicateur) : montee
+// = +10% de temps par point de pente au-dela du seuil plat (coherent avec
+// la regle "1 m D+ = 10 m plat" deja utilisee ailleurs dans l'app, ex.
+// equivalentFlatKm route_generator.js), appliquee ici au SEGMENT reel
+// (climb bins du GPX) plutot qu'etalee uniformement sur toute la distance.
+// Descente : neutre jusqu'a -15% (le regain de vitesse en pente douce
+// compense a peu pres le cout technique), puis penalite progressive au-dela
+// (descente technique, freinage) - la descente n'etait auparavant JAMAIS
+// prise en compte (retour utilisateur explicite : "la durée du plat et des
+// descentes aussi").
+function gpxGradePenaltyFactor(gradePct) {
+  if (gradePct >= 3) return 1 + gradePct / 10;
+  if (gradePct <= -15) return 1 + (Math.abs(gradePct) - 15) * 0.02;
+  return 1;
+}
+
+/** Estimation de temps de course affinee par le profil GPX reel (flat/climb/
+ *  descent, pentes moyennes reelles) - remplace le modele generique
+ *  (estimateRaceTime, app.js, "distKm + dplusM/100") uniquement quand un
+ *  GPX est importe pour ce plan. Renvoie aussi l'allure par type de terrain
+ *  (paceFlatSecKm/paceClimbSecKm/paceDescentSecKm) pour affichage direct. */
+function estimateRaceTimeFromGpxProfile(vma, stats, isTrail) {
+  if (!vma || !stats || !stats.totalDistM) return null;
+  const distKm = stats.totalDistM / 1000;
+  const pctVmaBase = isTrail
+    ? (distKm <= 21 ? 0.70 : distKm <= 42 ? 0.65 : distKm <= 80 ? 0.58 : 0.50)
+    : (distKm <= 5 ? 0.97 : distKm <= 10 ? 0.90 : distKm <= 21.1 ? 0.83 : 0.76);
+  const flatPaceSecKm = 3600 / (vma * pctVmaBase);
+  const climbFactor = gpxGradePenaltyFactor(stats.avgClimbGradePct || 0);
+  const descentFactor = gpxGradePenaltyFactor(stats.avgDescentGradePct || 0);
+  const paceClimbSecKm = flatPaceSecKm * climbFactor;
+  const paceDescentSecKm = flatPaceSecKm * descentFactor;
+
+  const flatDistKm = distKm * (stats.pctFlat || 0) / 100;
+  const climbDistKm = distKm * (stats.pctClimb || 0) / 100;
+  const descentDistKm = distKm * (stats.pctDescent || 0) / 100;
+  const totalSecs = flatDistKm * flatPaceSecKm + climbDistKm * paceClimbSecKm + descentDistKm * paceDescentSecKm;
+
+  return {
+    totalSecs: Math.round(totalSecs),
+    paceFlatSecKm: Math.round(flatPaceSecKm),
+    paceClimbSecKm: Math.round(paceClimbSecKm),
+    paceDescentSecKm: Math.round(paceDescentSecKm),
+  };
+}
+
+/** Allures a tenir pour atteindre le temps cible (mise a l'echelle
+ *  proportionnelle des 3 allures ci-dessus par le rapport temps cible /
+ *  temps estime actuel) - approximation simple mais coherente avec le reste
+ *  de l'app (deja le principe utilise par computeGoalPaceInfo). */
+function scaleGpxPacesToTarget(estimate, targetSecs) {
+  if (!estimate || !targetSecs || !estimate.totalSecs) return null;
+  const scale = targetSecs / estimate.totalSecs;
+  return {
+    paceFlatSecKm: Math.round(estimate.paceFlatSecKm * scale),
+    paceClimbSecKm: Math.round(estimate.paceClimbSecKm * scale),
+    paceDescentSecKm: Math.round(estimate.paceDescentSecKm * scale),
+  };
+}
+
+function fmtPaceShort(secKm) {
+  if (!secKm || secKm <= 0) return '—';
+  const m = Math.floor(secKm / 60), s = Math.round(secKm % 60);
+  return `${m}'${String(s).padStart(2, '0')}"/km`;
+}
+
+/** Bloc "Allures à tenir" (plat/montée/descente) - affiché sous les
+ *  estimations quand un GPX est importé : l'allure actuelle projetée ET,
+ *  si un temps cible est saisi, l'allure nécessaire pour l'atteindre. */
+function renderGoalGpxPaces(vma, isTrail, targetSecs) {
+  const box = document.getElementById('goals-gpx-paces');
+  if (!box) return;
+  const profile = campusState.gpxProfile;
+  if (!profile || !vma) { box.innerHTML = ''; return; }
+  const now = estimateRaceTimeFromGpxProfile(vma, profile.stats, isTrail);
+  if (!now) { box.innerHTML = ''; return; }
+  const target = targetSecs ? scaleGpxPacesToTarget(now, targetSecs) : null;
+  const row = (label, nowVal, targetVal) => `
+    <div class="goals-gpx-pace-row">
+      <span class="goals-gpx-pace-label">${label}</span>
+      <span class="goals-gpx-pace-val">${fmtPaceShort(nowVal)}</span>
+      ${target ? `<span class="goals-gpx-pace-arrow">→</span><span class="goals-gpx-pace-val goals-gpx-pace-val--target">${fmtPaceShort(targetVal)}</span>` : ''}
+    </div>`;
+  box.innerHTML = `
+    <div class="goals-gpx-pace-title">⏱ Allures ${target ? 'actuelle → à tenir pour l\'objectif' : 'projetées'} <span class="goals-gpx-pace-hint" title="Calculées depuis le profil altimétrique réel du GPX importé (plat/montée/descente), plus précis que l'estimation générique distance + D+.">ⓘ</span></div>
+    ${row('Plat', now.paceFlatSecKm, target?.paceFlatSecKm)}
+    ${row('Montée', now.paceClimbSecKm, target?.paceClimbSecKm)}
+    ${row('Descente', now.paceDescentSecKm, target?.paceDescentSecKm)}
+  `;
+}
+
+// Classement par pente pour la coloration du parcours (carte + graphique) -
+// plus fin que les 3 categories des stats globales (flat/climb/descent),
+// pour distinguer visuellement une pente douce d'un mur. Seuils/couleurs
+// dedies a cette visualisation uniquement (n'affectent pas le calcul des
+// stats/estimations, qui restent sur CLIMB_GRADE_PCT=3%).
+const GPX_GRADE_BANDS = [
+  { max: -8, color: '#2563eb', label: 'Descente forte' },
+  { max: -3, color: '#93c5fd', label: 'Descente' },
+  { max: 3, color: '#16a34a', label: 'Plat' },
+  { max: 8, color: '#f59e0b', label: 'Montée' },
+  { max: Infinity, color: '#ef4444', label: 'Montée forte' },
+];
+function gpxGradeBand(gradePct) {
+  return GPX_GRADE_BANDS.find(b => gradePct < b.max) || GPX_GRADE_BANDS[GPX_GRADE_BANDS.length - 1];
+}
+
+// Regroupe les points du profil en tronçons de ~binSizeM avec leur pente,
+// pour colorer coheremment la carte ET le graphique d'altitude par les
+// memes tronçons (meme esprit que gpx_parser.js computeElevationProfile,
+// mais sur les points DEJA sous-echantillonnes stockes, cote client).
+function computeGpxDisplayBins(points, binSizeM = 100) {
+  if (!Array.isArray(points) || points.length < 2) return [];
+  const cum = [0];
+  for (let i = 1; i < points.length; i++) cum.push(cum[i - 1] + haversineKm(points[i - 1], points[i]) * 1000);
+  const bins = [];
+  let start = 0;
+  for (let i = 1; i < points.length; i++) {
+    if (cum[i] - cum[start] >= binSizeM || i === points.length - 1) {
+      const distM = cum[i] - cum[start];
+      if (distM > 5) {
+        const gradePct = ((points[i].ele - points[start].ele) / distM) * 100;
+        bins.push({ startIdx: start, endIdx: i, gradePct });
+      }
+      start = i;
+    }
+  }
+  return bins;
+}
+
+let _gpxProfileMap = null;
+let _gpxProfileChart = null;
+
+/** Modale de visualisation du parcours GPX importé : carte (tracé coloré
+ *  par pente) + profil altimétrique (même code couleur), infos clé. Réutilise
+ *  Leaflet/Chart.js déjà chargés pour la page Itinéraires (index.html). */
+function showGoalGpxProfileModal() {
+  const profile = campusState.gpxProfile;
+  if (!profile) return;
+  const existing = document.getElementById('gpx-profile-modal');
+  if (existing) existing.remove();
+
+  const stats = profile.stats;
+  const modal = document.createElement('div');
+  modal.id = 'gpx-profile-modal';
+  modal.className = 'confirm-modal-backdrop';
+  modal.innerHTML = `
+    <div class="confirm-modal gpx-profile-modal">
+      <div class="confirm-modal-title">🗺️ ${profile.filename}</div>
+      <div class="gpx-profile-stats">
+        <div class="gpx-profile-stat"><b>${(stats.totalDistM / 1000).toFixed(1)}</b> km</div>
+        <div class="gpx-profile-stat"><b>+${stats.ascentM}</b> m</div>
+        <div class="gpx-profile-stat"><b>-${stats.descentM}</b> m</div>
+        <div class="gpx-profile-stat"><b>${stats.pctClimb}%</b> montée</div>
+        <div class="gpx-profile-stat"><b>${stats.pctDescent}%</b> descente</div>
+        <div class="gpx-profile-stat"><b>${stats.avgClimbGradePct}%</b> pente moy. montée</div>
+      </div>
+      <div class="gpx-profile-elev-container"><canvas id="gpx-profile-elev-chart"></canvas></div>
+      <div class="gpx-profile-map" id="gpx-profile-map"></div>
+      <div class="gpx-profile-legend">
+        ${GPX_GRADE_BANDS.map(b => `<span class="gpx-profile-legend-item"><span class="gpx-profile-legend-dot" style="background:${b.color}"></span>${b.label}</span>`).join('')}
+      </div>
+      <button id="gpx-profile-modal-close" class="btn-plans-restart" style="width:100%;margin-top:10px">Fermer</button>
+    </div>
+  `;
+  document.body.appendChild(modal);
+
+  const close = () => {
+    if (_gpxProfileMap) { _gpxProfileMap.remove(); _gpxProfileMap = null; }
+    if (_gpxProfileChart) { _gpxProfileChart.destroy(); _gpxProfileChart = null; }
+    modal.remove();
+  };
+  modal.querySelector('#gpx-profile-modal-close').onclick = close;
+  attachBackdropClose(modal, close);
+
+  setTimeout(() => renderGpxProfileVisuals(profile), 0);
+}
+
+function renderGpxProfileVisuals(profile) {
+  const points = profile.points;
+  const bins = computeGpxDisplayBins(points);
+
+  // Carte : un segment de polyligne par tronçon, colore selon sa pente.
+  const mapDiv = document.getElementById('gpx-profile-map');
+  if (mapDiv && typeof L !== 'undefined') {
+    const latLngs = points.map(p => [p.lat, p.lon]);
+    const map = L.map(mapDiv, { zoomControl: true, attributionControl: true });
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+      maxZoom: 19, attribution: '&copy; <a href="https://openstreetmap.org">OSM</a> &copy; <a href="https://carto.com">CARTO</a>',
+    }).addTo(map);
+    bins.forEach(bin => {
+      const seg = latLngs.slice(bin.startIdx, bin.endIdx + 1);
+      if (seg.length > 1) L.polyline(seg, { color: gpxGradeBand(bin.gradePct).color, weight: 4 }).addTo(map);
+    });
+    L.marker(latLngs[0]).addTo(map).bindTooltip('Départ');
+    L.marker(latLngs[latLngs.length - 1]).addTo(map).bindTooltip('Arrivée');
+    map.fitBounds(L.latLngBounds(latLngs), { padding: [12, 12] });
+    _gpxProfileMap = map;
+  }
+
+  // Profil d'altitude : colore par segment via l'API `segment` de Chart.js
+  // (Chart.js 4, deja chargee par l'app pour la page Itineraires).
+  const canvas = document.getElementById('gpx-profile-elev-chart');
+  if (canvas && typeof Chart !== 'undefined') {
+    const cum = [0];
+    for (let i = 1; i < points.length; i++) cum.push(cum[i - 1] + haversineKm(points[i - 1], points[i]));
+    const labels = points.map((p, i) => cum[i].toFixed(1) + ' km');
+    const data = points.map(p => Math.round(p.ele));
+    // Pente au point i (celle du bin qui le contient) - pour colorer le
+    // segment [i, i+1] du graphique via segment.borderColor.
+    const gradeAtIdx = new Array(points.length).fill(0);
+    bins.forEach(bin => { for (let i = bin.startIdx; i <= bin.endIdx; i++) gradeAtIdx[i] = bin.gradePct; });
+    const baseOptions = typeof chartOptions === 'function' ? chartOptions() : { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } };
+    _gpxProfileChart = new Chart(canvas.getContext('2d'), {
+      type: 'line',
+      data: { labels, datasets: [{
+        data, borderWidth: 2, pointRadius: 0, tension: 0.25, fill: true,
+        backgroundColor: 'rgba(22,163,74,0.08)',
+        segment: { borderColor: ctx => gpxGradeBand(gradeAtIdx[ctx.p0DataIndex]).color },
+      }] },
+      options: { ...baseOptions, scales: { ...(baseOptions.scales || {}), x: { ...(baseOptions.scales?.x || {}), ticks: { maxTicksLimit: 8 } } } },
+    });
+  }
+}
+
+// ═══ Objectifs personnels sauvegardés ═════════════════════════════════
 /** Valide et applique les saisies course (distance, D+, temps cible) */
 function applyRaceInputs() {
   const el = id => document.getElementById(id);
