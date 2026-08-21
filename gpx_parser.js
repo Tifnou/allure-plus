@@ -62,10 +62,16 @@ const BIN_SIZE_M = 50;
 // GPS/fitness grand public (Garmin, Strava...) pour calculer un D+ total :
 // une ondulation de moins de ce seuil depuis le dernier extremum confirme
 // est ignoree plutot que comptee, pour ne pas cumuler le bruit GPS/DEM (ou
-// le micro-relief naturel) comme du denivele. Valeur conventionnelle (3 m),
-// approximative faute de connaitre l'algorithme exact de Garmin - a affiner
-// si l'ecart persiste sur d'autres fichiers reels.
-const ELEV_GAIN_THRESHOLD_M = 3;
+// le micro-relief naturel) comme du denivele. Calibre par allers-retours sur
+// un fichier reel (retour utilisateur, Marathon des Causses vs Garmin) :
+// 3 m -> 1646 m puis 1627 m affiches (Garmin: 1562 m), 5 m rapproche encore
+// un peu plus. Approximatif faute de connaitre l'algorithme exact de
+// Garmin - l'ecart residuel vient vraisemblablement de differences plus
+// profondes (source d'altitude, resolution du trace) qu'un simple seuil ne
+// peut plus resorber ; ne pas continuer a l'augmenter au-dela sans nouvelle
+// donnee reelle, au risque de sous-compter du vrai D+ sur un profil moins
+// bruite.
+const ELEV_GAIN_THRESHOLD_M = 5;
 
 // Parcourt une serie d'altitudes (dans l'ordre du trace) et cumule montee/
 // descente uniquement au-dela de `threshold` depuis le dernier extremum
