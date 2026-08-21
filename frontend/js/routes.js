@@ -740,12 +740,26 @@ function renderRoutesResults(data) {
     // (cf opt.alternateStart, deja couvert par son propre message).
     const startOffsetKm = (data.requestedStart && opt.points && opt.points[0])
       ? haversineKm(data.requestedStart, opt.points[0]) : null;
-    // Correspondance a la duree visee (Excellente/Bonne/Compromis) - n'existe
-    // que si une duree cible a ete fournie (mode "duree"), cf durationMatchInfo
-    // cote serveur (route_generator.js).
-    const matchBadge = opt.durationMatch
-      ? `<span class="routes-match-badge routes-match-badge--${opt.durationMatch.label.toLowerCase()}" title="Durée visée : ${Math.floor(opt.durationMatch.targetMin / 60)}h${String(opt.durationMatch.targetMin % 60).padStart(2, '0')}">${opt.durationMatch.label} (${opt.durationMatch.deltaMin >= 0 ? '+' : ''}${opt.durationMatch.deltaMin} min)</span>`
-      : '';
+    // Correspondance globale (Excellente/Bonne/Compromis) - la pire des deux
+    // correspondances individuelles duree/D+ quand les deux cibles existent
+    // (cf worseMatchLabel, route_generator.js) : une option a l'heure mais
+    // loin du D+ visé n'est pas "Excellente" pour autant. N'existe que si au
+    // moins une cible (duree et/ou D+) a ete fournie.
+    let matchBadge = '';
+    if (opt.matchLabel) {
+      const parts = [];
+      if (opt.durationMatch) parts.push(`${opt.durationMatch.deltaMin >= 0 ? '+' : ''}${opt.durationMatch.deltaMin} min`);
+      if (opt.ascentMatch) parts.push(`D+ ${opt.ascentMatch.deltaM >= 0 ? '+' : ''}${opt.ascentMatch.deltaM} m`);
+      const titleParts = [];
+      if (opt.durationMatch) titleParts.push(`Durée visée : ${Math.floor(opt.durationMatch.targetMin / 60)}h${String(opt.durationMatch.targetMin % 60).padStart(2, '0')}`);
+      if (opt.ascentMatch) titleParts.push(`D+ visé : ${opt.ascentMatch.targetM} m`);
+      matchBadge = `<span class="routes-match-badge routes-match-badge--${opt.matchLabel.toLowerCase()}" title="${titleParts.join(' — ')}">${opt.matchLabel} (${parts.join(', ')})</span>`;
+    }
+    // Allure moyenne estimee sur l'ensemble du parcours (D+ deja inclus dans
+    // predictedDurationMin, cf predictDurationMin cote serveur) - demande
+    // utilisateur explicite, pour juger d'un coup d'oeil l'effort implique
+    // sans avoir a recalculer distance/duree soi-meme.
+    const paceSecPerKm = opt.distanceM > 0 ? (opt.predictedDurationMin * 60) / (opt.distanceM / 1000) : null;
 
     const card = document.createElement('div');
     card.className = 'routes-result-card';
@@ -758,6 +772,7 @@ function renderRoutesResults(data) {
           <div class="routes-mini-stat"><b>${(opt.distanceM / 1000).toFixed(1)}</b> km</div>
           <div class="routes-mini-stat"><b>${opt.ascentM}</b> m D+</div>
           <div class="routes-mini-stat"><b>${durH}h${String(durM).padStart(2, '0')}</b></div>
+          <div class="routes-mini-stat" title="Allure moyenne estimée sur l'ensemble du parcours, dénivelé inclus"><b>${formatPace(paceSecPerKm)}</b></div>
           ${startOffsetKm !== null ? `<div class="routes-mini-stat" title="Distance entre le point demandé et le départ réel du parcours"><b>${formatStartOffset(startOffsetKm)}</b> du départ</div>` : ''}
         </div>
       </div>

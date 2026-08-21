@@ -20,15 +20,21 @@ const { isBrouterConfigured } = require('./brouter_manager');
 const { bucketForGrade } = require('./pace_profile');
 const { getRouteAscent, getElevations } = require('./geoportail_client');
 
-// Le profil 'trekking' (mode "route") est en réalité un profil vélo
-// générique (validForBikes=true dans trekking.brf) : il exclut bien les
-// autoroutes (highway=motorway, cout infini) et préfère nettement chemins/
-// pistes/rues résidentielles (cout ~1.0-1.5), mais route encore une route
-// départementale/nationale sans alternative (cout 1.4 à 10 selon la classe,
-// jamais bloquant) car `avoid_unsafe` vaut false par défaut dans le fichier.
-// On force ce switch à true pour ce profil - il ajoute un malus specifique
-// aux highways sans amenagement velo, pour vraiment minimiser la circulation
-// automobile plutot que de l'accepter passivement faute d'alternative locale.
+// Le profil 'trekking' (mode "route", utilise jusqu'en aout 2026) est un
+// profil velo generique qui exclut bien les autoroutes mais ne compare les
+// routes qu'a un hint binaire "isbike" (present/absent) avec un malus fixe
+// (+2, via `avoid_unsafe`) - retour utilisateur reel : sur un test a Saclay,
+// une departementale a ete choisie alors qu'une piste cyclable separee
+// existait ~200 m plus loin. Remplace par 'fastbike-lowtraffic', qui integre
+// un vrai modele de trafic (`estimated_traffic_class`, base sur le type de
+// voie/nombre de voies/vitesse max, cf fastbike-lowtraffic.brf) : le malus
+// de circulation est PROPORTIONNEL au trafic reel estime plutot qu'un forfait
+// binaire, plafonne a 0.3 des qu'une piste cyclable existe sur le troncon
+// (`hascycleway`) - une departementale rurale peu frequentee reste viable
+// (comportement voulu par l'utilisateur : "en campagne c'est moins genant"),
+// une departementale urbaine a fort trafic est fortement penalisee meme sans
+// alternative directe. `consider_traffic=true` est deja la valeur par defaut
+// du profil, explicite ici pour la documentation.
 //
 // Le profil 'hiking-mountain' (mode "trail") a `consider_elevation=false`
 // et `Offroad_factor=0.0` par defaut - il calcule juste le chemin le moins
@@ -45,7 +51,7 @@ const { getRouteAscent, getElevations } = require('./geoportail_client');
 // via Overpass autour de Saclay, donc pas un probleme de couverture ici),
 // mais fait pencher BRouter vers le sentier etroit quand les deux existent.
 const PROFILE_PARAMS = {
-  trekking: { avoid_unsafe: 'true' },
+  'fastbike-lowtraffic': { consider_traffic: 'true' },
   'hiking-mountain': { Offroad_factor: '1.0', path_preference: '10' },
 };
 function routeThroughPoints(waypoints, profile, opts = {}) {
@@ -657,13 +663,42 @@ function buildRepeatedWaypoints(basePoints, segment, n) {
 // portion "before" (avant les repetitions), puis une fois de plus a la fin
 // de chaque aller-retour - la derniere occurrence marque la fin de la zone
 // repetee, juste avant que le tracé ne reparte vers la portion "after".
+// Une simple recherche par proximite SPATIALE de `segment.to` (< thresholdM,
+// n'importe ou dans le trace) est fragile : une boucle peut repasser a moins
+// de thresholdM du sommet de la cote a un tout autre endroit du parcours
+// (croisement de deux branches proches du meme reseau de chemins) - bug reel
+// constate : zone orange demarrant bien avant la vraie repetition, ou
+// couvrant la quasi-totalite du trace. Les occurrences sont donc regroupees
+// par PROXIMITE DE PARCOURS (distance cumulee le long du trace, pas distance
+// a vol d'oiseau) - deux occurrences appartiennent a la meme repetition si
+// l'ecart de distance cumulee entre elles reste de l'ordre d'un aller-retour
+// sur ce segment (up + down) ; seul le plus grand groupe est retenu, les
+// eventuelles occurrences isolees ailleurs dans le trace sont ignorees.
 function findRepeatedZoneIndexRange(points, segment, thresholdM = 25) {
   const toMatches = [];
   points.forEach((p, i) => {
     if (haversineDistance(p, segment.to) <= thresholdM) toMatches.push(i);
   });
   if (toMatches.length < 2) return null; // pas de veritable repetition detectee (garde-fou)
-  return { startIdx: toMatches[0], endIdx: toMatches[toMatches.length - 1] };
+
+  const cum = [0];
+  for (let i = 1; i < points.length; i++) cum.push(cum[i - 1] + haversineDistance(points[i - 1], points[i]));
+
+  const maxGapM = Math.max((segment.distM || 0) * 3, thresholdM * 4);
+  let bestGroup = [toMatches[0]];
+  let currentGroup = [toMatches[0]];
+  for (let k = 1; k < toMatches.length; k++) {
+    if (cum[toMatches[k]] - cum[toMatches[k - 1]] <= maxGapM) {
+      currentGroup.push(toMatches[k]);
+    } else {
+      if (currentGroup.length > bestGroup.length) bestGroup = currentGroup;
+      currentGroup = [toMatches[k]];
+    }
+  }
+  if (currentGroup.length > bestGroup.length) bestGroup = currentGroup;
+  if (bestGroup.length < 2) return null; // le plus grand groupe n'est finalement qu'un point isole
+
+  return { startIdx: bestGroup[0], endIdx: bestGroup[bestGroup.length - 1] };
 }
 
 function calibrateAscent(filteredAscendM) {
@@ -793,7 +828,32 @@ function durationMatchInfo(predictedMin, targetMin) {
   return { targetMin, deltaMin, label };
 }
 
-const TERRAIN_PROFILES = { trail: 'hiking-mountain', route: 'trekking' };
+// Meme principe pour le D+ - seuils repris directement des "zones de
+// tolerance" de l'etude externe (section 4 : zone excellente ~±6%, zone
+// acceptable ~±13%). Retour utilisateur explicite : une option a l'heure
+// mais loin du D+ vise (ex: -100 m sur 490 m) ne doit pas etre etiquetee
+// "Excellente" pour autant - la correspondance globale (matchLabel,
+// generateRouteOptions) prend donc la PIRE des deux correspondances plutot
+// que de ne regarder que la duree.
+const ASCENT_MATCH_EXCELLENT_RATIO = 0.06;
+const ASCENT_MATCH_GOOD_RATIO = 0.13;
+function ascentMatchInfo(ascentM, targetAscentM) {
+  const deltaM = Math.round(ascentM - targetAscentM);
+  const relDelta = Math.abs(ascentM - targetAscentM) / targetAscentM;
+  const label = relDelta <= ASCENT_MATCH_EXCELLENT_RATIO ? 'Excellente'
+    : relDelta <= ASCENT_MATCH_GOOD_RATIO ? 'Bonne'
+    : 'Compromis';
+  return { targetM: targetAscentM, deltaM, label };
+}
+
+const MATCH_LABEL_RANK = { Excellente: 0, Bonne: 1, Compromis: 2 };
+function worseMatchLabel(a, b) {
+  if (!a) return b;
+  if (!b) return a;
+  return MATCH_LABEL_RANK[a] >= MATCH_LABEL_RANK[b] ? a : b;
+}
+
+const TERRAIN_PROFILES = { trail: 'hiking-mountain', route: 'fastbike-lowtraffic' };
 // Jusqu'a 3 côtes DISTINCTES enchainees plutot qu'une seule repetee en
 // boucle (cf findSteepestSegments) - un vrai parcours de trail ambitieux
 // varie ses montées, une répétition unique gonfle la distance bien plus
@@ -1414,6 +1474,13 @@ async function generateRouteOptions({ start, targetDistanceM, targetAscentM, tar
     const measured = await getRouteAscent(opt.points);
     if (measured) opt.ascentM = measured.ascentM;
     if (targetDurationMin) opt.durationMatch = durationMatchInfo(opt.predictedDurationMin, targetDurationMin);
+    if (terrain === 'trail' && targetAscentM) opt.ascentMatch = ascentMatchInfo(opt.ascentM, targetAscentM);
+    // Correspondance globale = la pire des deux (cf worseMatchLabel) - une
+    // option ne peut pas etre "Excellente" globalement si l'un des deux
+    // criteres vises est loin de la cible.
+    if (opt.durationMatch || opt.ascentMatch) {
+      opt.matchLabel = worseMatchLabel(opt.durationMatch && opt.durationMatch.label, opt.ascentMatch && opt.ascentMatch.label);
+    }
   }
 
   // requestedStart (toujours le point litteralement demande) + searchRadiusM
