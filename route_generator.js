@@ -71,6 +71,25 @@ const ASCENT_CALIBRATION_FACTOR = 1.26;
 const DEFAULT_REFINE_ITERATIONS = 3;
 const REFINE_CONVERGENCE_TOLERANCE = 0.10;
 
+// Budget de "reparation" reserve aux repetitions de cote (cf etude externe
+// aout 2026, section 6.1/6.3 : generer une boucle de base volontairement
+// plus courte que la cible plutot que de faire grossir toute la boucle
+// jusqu'a la cible AVANT de verifier si le D+ est atteint). Sans ca, la
+// boucle de base consomme tout le budget de duree en convergeant vers la
+// cible complete - si le D+ naturel est insuffisant, il ne reste alors
+// presque plus de marge pour les repetitions (cf DURATION_HARD_CEILING_RATIO),
+// qui ne peuvent combler qu'une petite fraction du D+ manquant (constate en
+// test reel : Saclay/115 min/490 m D+, une seule repetition possible avant
+// le plafond). Applique uniquement quand le scan initial (avant tout
+// affinage de rayon, cf scanDirections) suggere deja que la densite de D+
+// naturelle de la meilleure direction est nettement en dessous de la
+// densite visee - sinon (terrain deja assez vallonne pour la distance
+// visee), le comportement d'origine (converger sur la cible complete) reste
+// inchange, pour ne pas sous-viser inutilement une boucle qui n'aura jamais
+// besoin de repetition.
+const BASE_LOOP_REPAIR_FRACTION = 0.85;
+const DENSITY_SHORTFALL_MARGIN = 0.85;
+
 const R_EARTH = 6371000;
 
 function haversineDistance(a, b) {
@@ -409,6 +428,23 @@ async function boostOutAndBackViaRepeats(outAndBack, targetAscentM, profile, pac
   };
 }
 
+// Compare la densite de D+ (m par metre de distance) du candidat de scan
+// initial (avant tout affinage de rayon) a la densite visee - si elle est
+// nettement en dessous, reduit la cible distance/duree transmise a
+// refineLoopFromBearing/generateOutAndBack pour reserver un budget de
+// repetitions (cf BASE_LOOP_REPAIR_FRACTION). Ne s'applique qu'en trail avec
+// un D+ vise ; sans ca (route, ou trail sans D+ vise), rien a reparer.
+function reserveRepairBudget(scanResult, targetDistanceM, targetDurationMin, targetAscentM) {
+  if (!targetAscentM || !scanResult.distanceM) return { targetDistanceM, targetDurationMin };
+  const scanDensity = calibrateAscent(scanResult.filteredAscendM) / scanResult.distanceM;
+  const targetDensity = targetAscentM / targetDistanceM;
+  if (scanDensity >= targetDensity * DENSITY_SHORTFALL_MARGIN) return { targetDistanceM, targetDurationMin };
+  return {
+    targetDistanceM: targetDistanceM * BASE_LOOP_REPAIR_FRACTION,
+    targetDurationMin: targetDurationMin ? targetDurationMin * BASE_LOOP_REPAIR_FRACTION : null,
+  };
+}
+
 // Genere une boucle passant par `start`, convergeant vers targetDistanceM.
 // Ne se contente pas d'un seul losange symetrique fixe : explore plusieurs
 // directions autour du depart (en parallele) et garde celle qui cumule le
@@ -424,7 +460,8 @@ async function generateLoop(start, targetDistanceM, profile, opts = {}) {
     throw new Error('Impossible de generer une boucle exploitable autour de ce depart.');
   }
   const top = candidates[0];
-  return refineLoopFromBearing(start, top.bearing, top.result, radius, targetDistanceM, profile, maxRefineIterations, opts);
+  const budget = reserveRepairBudget(top.result, targetDistanceM, opts.targetDurationMin, opts.targetAscentM);
+  return refineLoopFromBearing(start, top.bearing, top.result, radius, budget.targetDistanceM, profile, maxRefineIterations, { ...opts, targetDurationMin: budget.targetDurationMin });
 }
 
 const MAX_ALT_DIRECTIONS = 2;
@@ -461,7 +498,8 @@ async function generateLoopWithAlternates(start, targetDistanceM, profile, opts 
   }
 
   const primary = candidates[0];
-  const best = await refineLoopFromBearing(start, primary.bearing, primary.result, radius, targetDistanceM, profile, maxRefineIterations, opts);
+  const primaryBudget = reserveRepairBudget(primary.result, targetDistanceM, opts.targetDurationMin, opts.targetAscentM);
+  const best = await refineLoopFromBearing(start, primary.bearing, primary.result, radius, primaryBudget.targetDistanceM, profile, maxRefineIterations, { ...opts, targetDurationMin: primaryBudget.targetDurationMin });
 
   const chosenBearings = [primary.bearing];
   const altPicks = [];
@@ -476,7 +514,8 @@ async function generateLoopWithAlternates(start, targetDistanceM, profile, opts 
   const alternates = [];
   for (const pick of altPicks) {
     try {
-      const refined = await refineLoopFromBearing(start, pick.bearing, pick.result, radius, targetDistanceM, profile, maxRefineIterations, opts);
+      const pickBudget = reserveRepairBudget(pick.result, targetDistanceM, opts.targetDurationMin, opts.targetAscentM);
+      const refined = await refineLoopFromBearing(start, pick.bearing, pick.result, radius, pickBudget.targetDistanceM, profile, maxRefineIterations, { ...opts, targetDurationMin: pickBudget.targetDurationMin });
       alternates.push({ bearing: pick.bearing, result: refined });
     } catch (err) { /* direction devenue non routable en affinant - on garde les autres */ }
   }
@@ -1240,15 +1279,19 @@ async function buildOutAndBackOptionsAtSinglePoint({ start, targetDistanceM, tar
       chosenBearings.push(c.bearing);
     }
   }
-  const bearings = [primary.bearing, ...altPicks.map(p => p.bearing)];
+  const bearingCandidates = [primary, ...altPicks];
 
   const options = [];
   let warning = null;
-  for (let i = 0; i < bearings.length; i++) {
-    const bearing = bearings[i];
+  for (let i = 0; i < bearingCandidates.length; i++) {
+    const { bearing, result: scanResult } = bearingCandidates[i];
     let result;
     try {
-      result = await generateOutAndBack(start, bearing, targetDistanceM, profile, { targetDurationMin, paceMinPerKm, trailLevel });
+      // Reserve un budget de repetitions si le scan initial de cette
+      // direction suggere deja un terrain trop plat pour le D+ vise - meme
+      // logique que pour les boucles, cf reserveRepairBudget.
+      const budget = reserveRepairBudget(scanResult, targetDistanceM, targetDurationMin, terrain === 'trail' ? targetAscentM : null);
+      result = await generateOutAndBack(start, bearing, budget.targetDistanceM, profile, { targetDurationMin: budget.targetDurationMin, paceMinPerKm, trailLevel });
     } catch (err) {
       continue; // direction non routable en aller-retour, on garde les autres
     }

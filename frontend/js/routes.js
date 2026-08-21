@@ -726,8 +726,12 @@ function renderRoutesResults(data) {
   list.innerHTML = '';
   data.options.forEach((opt, idx) => {
     const open = routesState.openIndex === idx;
-    const durH = Math.floor(opt.predictedDurationMin / 60);
-    const durM = Math.round(opt.predictedDurationMin % 60);
+    // Arrondir la duree totale AVANT de la decouper en h/min - arrondir
+    // les minutes seules (ex: 119.6 -> 1h60 au lieu de 2h00) produisait un
+    // affichage invalide des que les minutes fractionnaires depassaient 59.5.
+    const totalDurMin = Math.round(opt.predictedDurationMin);
+    const durH = Math.floor(totalDurMin / 60);
+    const durM = totalDurMin % 60;
     const hasRepeatZone = routesHasRepeatZone(opt);
     // Distance entre le point litteralement demande et le vrai point de
     // depart du trace (BRouter accroche toujours au reseau routable le plus
