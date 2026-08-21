@@ -227,8 +227,16 @@ function renderRoutesForm() {
     modeInput.innerHTML = `<input type="text" inputmode="numeric" id="routes-input-distance" class="routes-number-input" value="${routesState.distanceKm}"> km`;
     wireNumericInput('routes-input-distance', v => { routesState.distanceKm = parseFloat(v) || 0; });
   } else {
-    modeInput.innerHTML = `<input type="text" inputmode="numeric" id="routes-input-duration" class="routes-number-input" value="${routesState.durationMin}"> minutes`;
-    wireNumericInput('routes-input-duration', v => { routesState.durationMin = parseInt(v, 10) || 0; });
+    const h = Math.floor(routesState.durationMin / 60);
+    const m = routesState.durationMin % 60;
+    modeInput.innerHTML = `<input type="text" inputmode="numeric" id="routes-input-duration-h" class="routes-number-input routes-number-input--xs" value="${h}"> h <input type="text" inputmode="numeric" id="routes-input-duration-m" class="routes-number-input routes-number-input--xs" value="${String(m).padStart(2, '0')}"> min`;
+    const updateDurationMin = () => {
+      const hVal = parseInt(el('routes-input-duration-h').value, 10) || 0;
+      const mVal = Math.min(59, parseInt(el('routes-input-duration-m').value, 10) || 0);
+      routesState.durationMin = hVal * 60 + mVal;
+    };
+    wireNumericInput('routes-input-duration-h', updateDurationMin);
+    wireNumericInput('routes-input-duration-m', updateDurationMin);
   }
 
   if (routesHasAscentField()) {
@@ -728,6 +736,12 @@ function renderRoutesResults(data) {
     // (cf opt.alternateStart, deja couvert par son propre message).
     const startOffsetKm = (data.requestedStart && opt.points && opt.points[0])
       ? haversineKm(data.requestedStart, opt.points[0]) : null;
+    // Correspondance a la duree visee (Excellente/Bonne/Compromis) - n'existe
+    // que si une duree cible a ete fournie (mode "duree"), cf durationMatchInfo
+    // cote serveur (route_generator.js).
+    const matchBadge = opt.durationMatch
+      ? `<span class="routes-match-badge routes-match-badge--${opt.durationMatch.label.toLowerCase()}" title="Durée visée : ${Math.floor(opt.durationMatch.targetMin / 60)}h${String(opt.durationMatch.targetMin % 60).padStart(2, '0')}">${opt.durationMatch.label} (${opt.durationMatch.deltaMin >= 0 ? '+' : ''}${opt.durationMatch.deltaMin} min)</span>`
+      : '';
 
     const card = document.createElement('div');
     card.className = 'routes-result-card';
@@ -736,6 +750,7 @@ function renderRoutesResults(data) {
         <span class="routes-result-chevron${open ? ' routes-result-chevron--open' : ''}">&#x25BC;</span>
         <span class="routes-result-label">${opt.label}</span>
         <div class="routes-mini-stats">
+          ${matchBadge}
           <div class="routes-mini-stat"><b>${(opt.distanceM / 1000).toFixed(1)}</b> km</div>
           <div class="routes-mini-stat"><b>${opt.ascentM}</b> m D+</div>
           <div class="routes-mini-stat"><b>${durH}h${String(durM).padStart(2, '0')}</b></div>

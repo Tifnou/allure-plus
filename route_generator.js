@@ -58,6 +58,19 @@ function routeThroughPoints(waypoints, profile, opts = {}) {
 // aout 2026) - a recalculer avec plus d'echantillons quand disponibles.
 const ASCENT_CALIBRATION_FACTOR = 1.26;
 
+// Convergence de refineLoopFromBearing/generateOutAndBack vers la
+// distance/duree visee : nombre d'iterations d'affinage du rayon, et seuil
+// d'ecart en-dessous duquel on considere que c'est "assez proche" pour
+// s'arreter. Resserre suite a une etude externe (aout 2026) sur les ecarts
+// de duree constates par l'utilisateur (2h45 obtenues pour 1h55 visees) :
+// l'ancien seuil de 15% sur seulement 2 iterations laissait trop de marge a
+// la boucle de base AVANT meme que les repetitions de cote ne s'y ajoutent -
+// une iteration de plus et un seuil plus strict rapprochent davantage la
+// boucle de base de la cible en amont, ce qui laisse aussi un budget de
+// duree plus fiable pour les repetitions eventuelles (cf DURATION_HARD_CEILING_RATIO).
+const DEFAULT_REFINE_ITERATIONS = 3;
+const REFINE_CONVERGENCE_TOLERANCE = 0.10;
+
 const R_EARTH = 6371000;
 
 function haversineDistance(a, b) {
@@ -283,7 +296,7 @@ async function refineLoopFromBearing(start, bearing, initialResult, initialRadiu
     const ratio = (targetDurationMin && (paceMinPerKm || trailLevel))
       ? targetDurationMin / predictDurationMin(best.points, paceMinPerKm, trailLevel)
       : targetDistanceM / best.distanceM;
-    if (Math.abs(ratio - 1) < 0.15) break;
+    if (Math.abs(ratio - 1) < REFINE_CONVERGENCE_TOLERANCE) break;
     // Clamp defensif : une estimation de duree bruitee sur un trace court/peu
     // detaille peut produire un ratio extreme (constate reel sur un aller-retour
     // court, cf generateOutAndBack) - sans plafond, une seule iteration peut
@@ -325,7 +338,7 @@ function mirrorOutAndBack(outPoints) {
 const MIN_OUTBACK_RADIUS_M = 300;
 
 async function generateOutAndBack(start, bearing, targetDistanceM, profile, opts = {}) {
-  const maxRefineIterations = opts.maxRefineIterations ?? 2;
+  const maxRefineIterations = opts.maxRefineIterations ?? DEFAULT_REFINE_ITERATIONS;
   const { targetDurationMin, paceMinPerKm, trailLevel } = opts;
   let radius = targetDistanceM / 2;
   let best = null;
@@ -359,7 +372,7 @@ async function generateOutAndBack(start, bearing, targetDistanceM, profile, opts
     const ratio = (targetDurationMin && (paceMinPerKm || trailLevel))
       ? targetDurationMin / predictDurationMin(best.points, paceMinPerKm, trailLevel)
       : targetDistanceM / best.distanceM;
-    if (Math.abs(ratio - 1) < 0.15) break;
+    if (Math.abs(ratio - 1) < REFINE_CONVERGENCE_TOLERANCE) break;
     radius = Math.max(radius * Math.max(0.5, Math.min(2, ratio)), MIN_OUTBACK_RADIUS_M);
   }
   return best;
@@ -405,7 +418,7 @@ async function boostOutAndBackViaRepeats(outAndBack, targetAscentM, profile, pac
 // plat au nord/est de Saclay, relief net vers le sud/sud-est).
 // Pas besoin d'Overpass : BRouter accroche deja les points au reseau reel.
 async function generateLoop(start, targetDistanceM, profile, opts = {}) {
-  const maxRefineIterations = opts.maxRefineIterations ?? 2;
+  const maxRefineIterations = opts.maxRefineIterations ?? DEFAULT_REFINE_ITERATIONS;
   const { candidates, radius } = await scanDirections(start, targetDistanceM, profile, opts.targetAscentM);
   if (candidates.length === 0) {
     throw new Error('Impossible de generer une boucle exploitable autour de ce depart.');
@@ -441,7 +454,7 @@ function towardCompassPhrase(bearing) {
 // distinctes (cf ALT_DIRECTION_MIN_BEARING_DIFF) - pour proposer de vrais
 // tracés "ailleurs" plutot que la seule meilleure direction en D+.
 async function generateLoopWithAlternates(start, targetDistanceM, profile, opts = {}) {
-  const maxRefineIterations = opts.maxRefineIterations ?? 2;
+  const maxRefineIterations = opts.maxRefineIterations ?? DEFAULT_REFINE_ITERATIONS;
   const { candidates, radius } = await scanDirections(start, targetDistanceM, profile, opts.targetAscentM);
   if (candidates.length === 0) {
     throw new Error('Impossible de generer une boucle exploitable autour de ce depart.');
@@ -525,8 +538,8 @@ async function boostAscentViaRepeats(basePoints, targetAscentM, profile, paceMin
   const segments = findSteepestSegments(basePoints, { maxSegments: MAX_REPEAT_SEGMENTS });
   if (segments.length === 0) return null;
 
-  const overshootBudgetMin = targetDurationMin ? targetDurationMin * MAX_OVERSHOOT_RATIO : null;
-  const overshootBudgetDistM = !targetDurationMin ? targetDistanceM * MAX_OVERSHOOT_RATIO : null;
+  const overshootBudgetMin = targetDurationMin ? targetDurationMin * MAX_DURATION_OVERSHOOT_RATIO : null;
+  const overshootBudgetDistM = !targetDurationMin ? targetDistanceM * MAX_DISTANCE_OVERSHOOT_RATIO : null;
 
   let repeated = null;
   let repeatedDurationMin = 0;
@@ -544,13 +557,20 @@ async function boostAscentViaRepeats(basePoints, targetAscentM, profile, paceMin
     }
     const candidateDurationMin = predictDurationMin(candidate.points, paceMinPerKm, trailLevel);
     const overBudget = overshootBudgetMin ? candidateDurationMin > overshootBudgetMin : candidate.distanceM > overshootBudgetDistM;
+    // Budget depasse : cette etape est rejetee (pas gardee) - la duree est une
+    // contrainte quasi dure (cf etude externe aout 2026), donc on revient au
+    // dernier candidat encore dans le budget plutot que d'accepter celui qui
+    // vient tout juste de le franchir. Avant ce correctif, `repeated` etait
+    // affecte AVANT ce test et donc le candidat hors-budget restait quand
+    // meme le resultat final (bug reel constate : +30% de budget nominal,
+    // mais des sorties observees a +43% de la duree visee).
+    if (overBudget) { repsBySegment[segIdx]--; break; }
 
     repeated = candidate;
     repeatedDurationMin = candidateDurationMin;
-    if (overBudget) break; // on garde ce dernier essai (le meilleur compromis trouve dans le budget) et on s'arrete
     if (calibrateAscent(candidate.filteredAscendM) >= targetAscentM - ASCENT_TOLERANCE_M) break; // objectif atteint
   }
-  if (!repeated) return null; // meme la toute premiere etape n'etait pas routable
+  if (!repeated) return null; // meme la toute premiere etape n'etait pas routable (ou deja hors budget)
 
   const repeatedAscentM = calibrateAscent(repeated.filteredAscendM);
   const repeatedSegments = segments.map((segment, i) => {
@@ -703,6 +723,37 @@ function predictDurationMin(points, paceMinPerKm, trailLevel) {
   return totalMin;
 }
 
+// true si le trace a DEJA atteint le plafond dur de duree (cf
+// DURATION_HARD_CEILING_RATIO) - dans ce cas, ajouter une repetition pour
+// combler le D+ ne peut que degrader encore l'ecart de duree, deja hors
+// tolerance ; mieux vaut s'arreter et l'annoncer que d'aggraver l'ecart pour
+// grappiller un peu de D+ (cf etude externe aout 2026, principe "la duree
+// doit etre plus fortement protegee que le D+"). Ne s'applique qu'en mode
+// duree - sans cible de duree, seul le budget de distance des repetitions
+// s'applique (voir MAX_DISTANCE_OVERSHOOT_RATIO).
+function isAtDurationCeiling(points, targetDurationMin, paceMinPerKm, trailLevel) {
+  if (!targetDurationMin) return false;
+  return predictDurationMin(points, paceMinPerKm, trailLevel) >= targetDurationMin * DURATION_HARD_CEILING_RATIO;
+}
+
+// Etiquette de correspondance duree affichee sur chaque option finale (cf
+// etude externe aout 2026, section 12 "ce que l'interface peut afficher") -
+// rend visible l'ecart reel a la cible plutot que de laisser l'utilisateur
+// comparer lui-meme des chiffres bruts. Seuils inspires des "zones de
+// tolerance" de l'etude (zone ideale ~±5%, maximum conseille ~+7%), elargis
+// legerement pour Bonne car la granularite d'une repetition entiere (tout un
+// aller-retour de cote) ne permet pas toujours de converger aussi finement.
+const DURATION_MATCH_EXCELLENT_RATIO = 0.05;
+const DURATION_MATCH_GOOD_RATIO = 0.10;
+function durationMatchInfo(predictedMin, targetMin) {
+  const deltaMin = Math.round(predictedMin - targetMin);
+  const relDelta = Math.abs(predictedMin - targetMin) / targetMin;
+  const label = relDelta <= DURATION_MATCH_EXCELLENT_RATIO ? 'Excellente'
+    : relDelta <= DURATION_MATCH_GOOD_RATIO ? 'Bonne'
+    : 'Compromis';
+  return { targetMin, deltaMin, label };
+}
+
 const TERRAIN_PROFILES = { trail: 'hiking-mountain', route: 'trekking' };
 // Jusqu'a 3 côtes DISTINCTES enchainees plutot qu'une seule repetee en
 // boucle (cf findSteepestSegments) - un vrai parcours de trail ambitieux
@@ -729,8 +780,19 @@ const MIN_VIABLE_SEGMENT_GAIN_M = 8;
 // Les repetitions ne doivent jamais faire deraper la sortie loin au-dela de
 // ce qui a ete demande (bug reel constate : 1h05/300m D+ -> proposition a
 // 41 km, faute de plafond sur la duree/distance reelle pendant qu'on ajoute
-// des repetitions pour chercher le D+ a tout prix).
-const MAX_OVERSHOOT_RATIO = 1.3;
+// des repetitions pour chercher le D+ a tout prix). Distinction duree/distance
+// ajoutee suite a une etude externe (aout 2026, note "Calculateur d'itineraire
+// trail") : en entrainement, la duree est une contrainte QUASI DURE (une
+// seance a 1h55 ne doit pas devenir 2h45 pour quelques dizaines de m de D+
+// en plus) alors que la distance (mode "distance" only, sans duree visee)
+// reste plus souple - deux budgets separes plutot qu'un seul commun.
+const MAX_DURATION_OVERSHOOT_RATIO = 1.12;
+const MAX_DISTANCE_OVERSHOOT_RATIO = 1.3;
+// Plafond dur au-dela duquel on renonce a ajouter des repetitions meme si le
+// D+ vise n'est pas atteint - ajouter une repetition a une boucle DEJA a ce
+// niveau ne peut que degrader encore l'ecart de duree (cf etude externe,
+// principe "durée protégée avant la beauté de la boucle").
+const DURATION_HARD_CEILING_RATIO = 1.12;
 
 // Quadrillage bearing x rayon utilise par findHillyCandidateCenters pour
 // reperer les zones vallonnees dans le rayon de recherche elargie, cote
@@ -870,7 +932,8 @@ async function buildZoneCandidate(shape, start, hotspot, targetDistanceM, target
 
   let ascentM = calibrateAscent(result.filteredAscendM);
   let repeatedSegments = null;
-  const needsMoreAscent = terrain === 'trail' && targetAscentM && ascentM < targetAscentM - ASCENT_TOLERANCE_M;
+  const needsMoreAscent = terrain === 'trail' && targetAscentM && ascentM < targetAscentM - ASCENT_TOLERANCE_M
+    && !isAtDurationCeiling(result.points, targetDurationMin, paceMinPerKm, trailLevel);
   if (needsMoreAscent) {
     // Repetition acceptee comme filet de securite (demande utilisateur
     // explicite : "si il faut faire 5 fois la cote car ma demande est trop
@@ -1031,7 +1094,8 @@ async function buildLoopOptionsAtSinglePoint({ start, targetDistanceM, targetAsc
     let altCommentary = `Autre tracé possible, orienté ${toward} plutôt que vers le secteur retenu pour l'option principale — pour varier l'itinéraire tout en visant les mêmes critères.`;
     let altRepeatedSegments = null;
 
-    const altNeedsMoreAscent = terrain === 'trail' && targetAscentM && altAscentM < targetAscentM - ASCENT_TOLERANCE_M;
+    const altNeedsMoreAscent = terrain === 'trail' && targetAscentM && altAscentM < targetAscentM - ASCENT_TOLERANCE_M
+      && !isAtDurationCeiling(altPoints, targetDurationMin, paceMinPerKm, trailLevel);
     if (altNeedsMoreAscent) {
       const boost = await boostAscentViaRepeats(altPoints, targetAscentM, profile, paceMinPerKm, targetDurationMin, targetDistanceM, trailLevel);
       if (boost && boost.repeatedAscentM > altAscentM) {
@@ -1087,8 +1151,12 @@ async function buildLoopOptionsAtSinglePoint({ start, targetDistanceM, targetAsc
     warning = `Le secteur ne permet pas d'atteindre ${targetLabel} sans trop s'écarter — essayez la recherche élargie pour explorer plus loin — meilleure option trouvée : ${gotLabel}.`;
   }
 
+  const naturalAtDurationCeiling = terrain === 'trail' && targetAscentM
+    && naturalOption.ascentM < targetAscentM - ASCENT_TOLERANCE_M
+    && isAtDurationCeiling(natural.points, targetDurationMin, paceMinPerKm, trailLevel);
   const needsMoreAscent = terrain === 'trail' && targetAscentM
-    && naturalOption.ascentM < targetAscentM - ASCENT_TOLERANCE_M;
+    && naturalOption.ascentM < targetAscentM - ASCENT_TOLERANCE_M
+    && !naturalAtDurationCeiling;
 
   if (needsMoreAscent) {
     // Escalade fine, UN SEUL segment incremente d'UNE seule repetition a
@@ -1129,6 +1197,12 @@ async function buildLoopOptionsAtSinglePoint({ start, targetDistanceM, targetAsc
         warning = `Le secteur ne permet pas d'atteindre ${targetAscentM} m de D+ sans dépasser largement ce qui a été demandé — essayez la recherche élargie pour explorer plus loin — meilleure option trouvée : ${repeatedAscentM} m de D+ (${repLabel}, ${budgetLabel}).`;
       }
     }
+  } else if (naturalAtDurationCeiling) {
+    // La boucle de base a deja atteint le plafond dur de duree (cf
+    // DURATION_HARD_CEILING_RATIO) sans avoir atteint le D+ vise - ajouter une
+    // repetition ne ferait qu'aggraver l'ecart de duree pour grappiller du D+,
+    // contraire au principe "duree quasi dure" (etude externe aout 2026).
+    warning = `La durée visée (${targetDurationMin} min) est déjà atteinte sans avoir atteint le D+ visé (${targetAscentM} m — ${naturalOption.ascentM} m obtenus) — pas de répétition ajoutée pour ne pas dépasser davantage la durée demandée. Essayez une durée plus longue, ou un D+ visé moins élevé.`;
   } else if (terrain === 'trail' && targetAscentM && naturalOption.ascentM > targetAscentM * (1 + ASCENT_OVERSHOOT_WARNING_RATIO)) {
     // Symetrique du warning "pas assez de D+" ci-dessus, pour le cas inverse
     // (terrain deja tres vallonne, ex: Beaufort/73270) : meme apres le tri
@@ -1180,7 +1254,8 @@ async function buildOutAndBackOptionsAtSinglePoint({ start, targetDistanceM, tar
     }
     let ascentM = calibrateAscent(result.filteredAscendM);
     let repeatedSegments = null;
-    const needsMoreAscent = terrain === 'trail' && targetAscentM && ascentM < targetAscentM - ASCENT_TOLERANCE_M;
+    const needsMoreAscent = terrain === 'trail' && targetAscentM && ascentM < targetAscentM - ASCENT_TOLERANCE_M
+      && !isAtDurationCeiling(result.points, targetDurationMin, paceMinPerKm, trailLevel);
     if (needsMoreAscent) {
       const boost = await boostOutAndBackViaRepeats(result, targetAscentM, profile, paceMinPerKm, targetDurationMin, targetDistanceM, trailLevel);
       if (boost) {
@@ -1295,6 +1370,7 @@ async function generateRouteOptions({ start, targetDistanceM, targetAscentM, tar
   for (const opt of options) {
     const measured = await getRouteAscent(opt.points);
     if (measured) opt.ascentM = measured.ascentM;
+    if (targetDurationMin) opt.durationMatch = durationMatchInfo(opt.predictedDurationMin, targetDurationMin);
   }
 
   // requestedStart (toujours le point litteralement demande) + searchRadiusM
