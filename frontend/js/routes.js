@@ -756,9 +756,11 @@ function renderRoutesResults(data) {
     if (opt.matchLabel) {
       const parts = [];
       if (opt.durationMatch) parts.push(`${opt.durationMatch.deltaMin >= 0 ? '+' : ''}${opt.durationMatch.deltaMin} min`);
+      if (opt.distanceMatch) parts.push(`${opt.distanceMatch.deltaM >= 0 ? '+' : ''}${(opt.distanceMatch.deltaM / 1000).toFixed(1)} km`);
       if (opt.ascentMatch) parts.push(`D+ ${opt.ascentMatch.deltaM >= 0 ? '+' : ''}${opt.ascentMatch.deltaM} m`);
       const titleParts = [];
       if (opt.durationMatch) titleParts.push(`Durée visée : ${Math.floor(opt.durationMatch.targetMin / 60)}h${String(opt.durationMatch.targetMin % 60).padStart(2, '0')}`);
+      if (opt.distanceMatch) titleParts.push(`Distance visée : ${(opt.distanceMatch.targetM / 1000).toFixed(1)} km`);
       if (opt.ascentMatch) titleParts.push(`D+ visé : ${opt.ascentMatch.targetM} m`);
       matchBadge = `<span class="routes-match-badge routes-match-badge--${opt.matchLabel.toLowerCase()}" title="${titleParts.join(' — ')}">${opt.matchLabel} (${parts.join(', ')})</span>`;
     }
@@ -792,7 +794,11 @@ function renderRoutesResults(data) {
         </div>` : ''}
         <div class="routes-elev-container"><canvas id="routes-elev-${idx}"></canvas></div>
         <div class="routes-result-map" id="routes-map-${idx}"></div>
-        ${hasRepeatZone ? '<div class="routes-hint routes-map-legend"><span class="routes-legend-swatch routes-legend-swatch--repeat"></span> Portion(s) répétée(s) (aller-retour) &nbsp; <span class="routes-legend-swatch routes-legend-swatch--normal"></span> Reste du parcours</div>' : ''}
+        ${hasRepeatZone || opt.shape === 'outback' ? `<div class="routes-hint routes-map-legend">
+          ${hasRepeatZone ? '<span class="routes-legend-swatch routes-legend-swatch--repeat"></span> Côte(s) répétée(s) pour le D+ &nbsp;' : ''}
+          ${opt.shape === 'outback' ? '<span class="routes-legend-swatch routes-legend-swatch--return"></span> Retour (même tracé que l\'aller) &nbsp;' : ''}
+          <span class="routes-legend-swatch routes-legend-swatch--normal"></span> Reste du parcours
+        </div>` : ''}
         <button class="btn-plans-restart routes-download-btn" id="routes-download-${idx}">⬇ Télécharger le GPX</button>
       </div>
     `;
@@ -858,7 +864,8 @@ function routesHasRepeatZone(opt) {
 // espaces/accents/slash, pas exploitables tels quels comme suffixe de classe.
 function routesSurfaceSlug(label) {
   if (label.includes('cyclable')) return 'cycle';
-  if (label.includes('Route')) return 'road';
+  if (label.includes('fort trafic')) return 'road-busy';
+  if (label.includes('calme')) return 'road-calm';
   if (label.includes('Chemin')) return 'path';
   return 'other';
 }
@@ -915,22 +922,41 @@ function renderRouteMap(mapDivId, opt, context = {}) {
     maxZoom: 19, attribution: '&copy; <a href="https://openstreetmap.org">OSM</a> &copy; <a href="https://carto.com">CARTO</a>',
   }).addTo(map);
 
+  // Alterne vert (parcours normal) / orange (zone repetee), une paire par
+  // côte sollicitée - genéralise le cas a une seule côte (comportement
+  // inchangé) comme a plusieurs.
+  function drawWithRepeatZones(latLngsSlice, zones) {
+    if (zones.length > 0) {
+      let cursor = 0;
+      zones.forEach(zone => {
+        const before = latLngsSlice.slice(cursor, zone.startIdx + 1);
+        if (before.length > 1) L.polyline(before, { color: '#2f6f3e', weight: 3.5 }).addTo(map);
+        L.polyline(latLngsSlice.slice(zone.startIdx, zone.endIdx + 1), { color: '#e8590c', weight: 4 }).addTo(map);
+        cursor = zone.endIdx;
+      });
+      const after = latLngsSlice.slice(cursor);
+      if (after.length > 1) L.polyline(after, { color: '#2f6f3e', weight: 3.5 }).addTo(map);
+    } else {
+      L.polyline(latLngsSlice, { color: '#2f6f3e', weight: 3.5 }).addTo(map);
+    }
+  }
+
   const repeatZones = routesRepeatZones(opt).slice().sort((a, b) => a.startIdx - b.startIdx);
-  if (repeatZones.length > 0) {
-    // Alterne vert (parcours normal) / orange (zone repetee), une paire par
-    // côte sollicitée - genéralise le cas a une seule côte (comportement
-    // inchangé) comme a plusieurs.
-    let cursor = 0;
-    repeatZones.forEach(zone => {
-      const before = latLngs.slice(cursor, zone.startIdx + 1);
-      if (before.length > 1) L.polyline(before, { color: '#2f6f3e', weight: 3.5 }).addTo(map);
-      L.polyline(latLngs.slice(zone.startIdx, zone.endIdx + 1), { color: '#e8590c', weight: 4 }).addTo(map);
-      cursor = zone.endIdx;
-    });
-    const after = latLngs.slice(cursor);
-    if (after.length > 1) L.polyline(after, { color: '#2f6f3e', weight: 3.5 }).addTo(map);
+  // Aller-retour : le retour est TOUJOURS le meme trace que l'aller (par
+  // definition de la forme), jamais une repetition de côte pour le D+ - deux
+  // notions distinctes que l'affichage confondait (retour utilisateur
+  // explicite) puisque les deux pouvaient apparaitre en vert uniforme sans
+  // distinction. Le retour est donc trace en pointilles, separement des
+  // eventuelles zones repetees (toujours situees dans la portion aller,
+  // cf boostOutAndBackViaRepeats) qui gardent leur code couleur habituel.
+  const outLegPointCount = opt.shape === 'outback' && Number.isInteger(opt.outLegPointCount) && opt.outLegPointCount > 1 && opt.outLegPointCount < latLngs.length
+    ? opt.outLegPointCount : null;
+  if (outLegPointCount) {
+    drawWithRepeatZones(latLngs.slice(0, outLegPointCount), repeatZones);
+    // Chevauche le dernier point de l'aller pour la continuite visuelle.
+    L.polyline(latLngs.slice(outLegPointCount - 1), { color: '#2f6f3e', weight: 3, dashArray: '2,10', opacity: 0.75 }).addTo(map);
   } else {
-    L.polyline(latLngs, { color: '#2f6f3e', weight: 3.5 }).addTo(map);
+    drawWithRepeatZones(latLngs, repeatZones);
   }
   L.marker(latLngs[0]).addTo(map).bindTooltip('Départ du tracé');
 

@@ -431,6 +431,14 @@ async function boostOutAndBackViaRepeats(outAndBack, targetAscentM, profile, pac
     // par Geoportail sur le trace complet, comme partout ailleurs.
     filteredAscendM: boost.repeated.filteredAscendM + (outAndBack.filteredAscendM / 2),
     repeatedSegments: boost.repeatedSegments,
+    // Index du dernier point de l'aller (avec repetitions) dans `points` -
+    // cf outLegPointCount plus bas (buildOutAndBackOptionsAtSinglePoint) :
+    // permet a l'UI de distinguer visuellement le retour (meme trace que
+    // l'aller, par definition d'un aller-retour) des repetitions de cote
+    // (portion de l'aller reellement reparcourue plusieurs fois pour le D+) -
+    // retour utilisateur explicite : ces deux notions etaient visuellement
+    // confondues (les deux en orange), alors qu'elles n'ont pas le meme sens.
+    outLegPointCount: boost.repeated.points.length,
   };
 }
 
@@ -870,6 +878,22 @@ function ascentMatchInfo(ascentM, targetAscentM) {
   return { targetM: targetAscentM, deltaM, label };
 }
 
+// Meme principe pour la distance, quand c'est ELLE le critere choisi par
+// l'utilisateur (mode "distance", pas de duree visee) - retour utilisateur
+// explicite : en mode route/distance, aucune correspondance n'etait jamais
+// affichee (durationMatch ne se declenchait qu'avec une cible de duree).
+// Memes seuils que la duree (cf DURATION_MATCH_*), meme logique.
+const DISTANCE_MATCH_EXCELLENT_RATIO = 0.05;
+const DISTANCE_MATCH_GOOD_RATIO = 0.10;
+function distanceMatchInfoOption(distanceM, targetDistanceM) {
+  const deltaM = Math.round(distanceM - targetDistanceM);
+  const relDelta = Math.abs(distanceM - targetDistanceM) / targetDistanceM;
+  const label = relDelta <= DISTANCE_MATCH_EXCELLENT_RATIO ? 'Excellente'
+    : relDelta <= DISTANCE_MATCH_GOOD_RATIO ? 'Bonne'
+    : 'Compromis';
+  return { targetM: targetDistanceM, deltaM, label };
+}
+
 const MATCH_LABEL_RANK = { Excellente: 0, Bonne: 1, Compromis: 2 };
 function worseMatchLabel(a, b) {
   if (!a) return b;
@@ -888,11 +912,22 @@ function worseMatchLabel(a, b) {
 // interesse l'utilisateur ("les routes pour voitures sont le dernier
 // recours"), peu importe que ce soit techniquement une route secondaire
 // avec bande cyclable ou une vraie piste separee.
+// Route "a fort trafic" separee de "calme/residentielle" - regroupement
+// initial trop grossier (bug reel constate : 89% "route" affiche sur un
+// test reel, alors qu'une inspection des WayTags a montre que 72 points de
+// pourcentage etaient en fait highway=residential/unclassified/service -
+// des rues locales calmes par nature en France, PAS le meme risque qu'une
+// route secondaire/primaire a fort trafic. BRouter lui-meme distingue les
+// deux (cf trackerpenalty/estimated_traffic_class dans fastbike-lowtraffic.brf,
+// qui ne s'applique qu'a partir de tertiary) - notre classification les
+// confondait, donnant une image bien plus alarmante que la realite.
 const SURFACE_CATEGORY_CYCLE = 'Piste cyclable / voie mixte';
-const SURFACE_CATEGORY_ROAD = 'Route ouverte à la circulation';
+const SURFACE_CATEGORY_ROAD_BUSY = 'Route à fort trafic';
+const SURFACE_CATEGORY_ROAD_CALM = 'Route calme / résidentielle';
 const SURFACE_CATEGORY_PATH = 'Chemin / sentier';
 const SURFACE_CATEGORY_OTHER = 'Autre';
-const SURFACE_ROAD_HIGHWAYS = new Set(['motorway', 'motorway_link', 'trunk', 'trunk_link', 'primary', 'primary_link', 'secondary', 'secondary_link', 'tertiary', 'tertiary_link', 'unclassified', 'residential', 'living_street', 'service']);
+const SURFACE_ROAD_BUSY_HIGHWAYS = new Set(['motorway', 'motorway_link', 'trunk', 'trunk_link', 'primary', 'primary_link', 'secondary', 'secondary_link']);
+const SURFACE_ROAD_CALM_HIGHWAYS = new Set(['tertiary', 'tertiary_link', 'unclassified', 'residential', 'living_street', 'service']);
 const SURFACE_PATH_HIGHWAYS = new Set(['path', 'track', 'footway', 'bridleway', 'pedestrian', 'steps']);
 function classifyWayTags(wayTags) {
   if (!wayTags) return SURFACE_CATEGORY_OTHER;
@@ -902,7 +937,8 @@ function classifyWayTags(wayTags) {
     || /bicycle=designated/.test(wayTags)
     || highway === 'cycleway';
   if (hasCycleInfra) return SURFACE_CATEGORY_CYCLE;
-  if (highway && SURFACE_ROAD_HIGHWAYS.has(highway)) return SURFACE_CATEGORY_ROAD;
+  if (highway && SURFACE_ROAD_BUSY_HIGHWAYS.has(highway)) return SURFACE_CATEGORY_ROAD_BUSY;
+  if (highway && SURFACE_ROAD_CALM_HIGHWAYS.has(highway)) return SURFACE_CATEGORY_ROAD_CALM;
   if (highway && SURFACE_PATH_HIGHWAYS.has(highway)) return SURFACE_CATEGORY_PATH;
   return SURFACE_CATEGORY_OTHER;
 }
@@ -1206,11 +1242,15 @@ async function generateOptionsAcrossSearchRadius({ start, targetDistanceM, targe
         ? ` Le D+ naturel de ce secteur ne suffisait pas seul — une ou plusieurs côtes sont répétées à l'aller uniquement, le retour reste direct.`
         : ` Le D+ naturel de ce secteur ne suffisait pas seul, complété par répétition d'une côte.`;
     }
+    const outLegPointCount = c.shape === 'outback'
+      ? (c.result.outLegPointCount ?? (c.result.outLegPoints ? c.result.outLegPoints.length : null))
+      : null;
     return {
       type: c.shape === 'outback' ? 'aller-retour' : (c.repeatedSegments ? 'boucle-repetitions' : 'boucle-naturelle'),
       shape: c.shape,
       label,
       points,
+      outLegPointCount,
       distanceM: c.result.distanceM,
       ascentM: c.ascentM,
       repeatedSegments: c.repeatedSegments,
@@ -1478,6 +1518,12 @@ async function buildOutAndBackOptionsAtSinglePoint({ start, targetDistanceM, tar
     if (i > 0 && altCloseness(result.distanceM, outbackDurationMin, targetDistanceM, targetDurationMin) < ALT_MIN_CLOSENESS) continue;
 
     const toward = towardCompassPhrase(bearing);
+    // outLegPointCount : `result` est soit le retour brut de generateOutAndBack
+    // (outLegPoints expose), soit celui de boostOutAndBackViaRepeats
+    // (outLegPointCount deja calcule) - cf leurs commentaires respectifs.
+    // Permet a l'UI de distinguer le retour (meme trace que l'aller) des
+    // repetitions de cote.
+    const outLegPointCount = result.outLegPointCount ?? (result.outLegPoints ? result.outLegPoints.length : null);
     options.push({
       type: repeatedSegments ? 'aller-retour-repetitions' : 'aller-retour',
       shape: 'outback',
@@ -1485,6 +1531,7 @@ async function buildOutAndBackOptionsAtSinglePoint({ start, targetDistanceM, tar
         ? `Aller-retour ${toward}${repeatedSegments ? ' (avec répétitions)' : ''}`
         : `Aller-retour alternatif ${i} — ${toward}${repeatedSegments ? ' (avec répétitions)' : ''}`,
       points: result.points,
+      outLegPointCount,
       distanceM: result.distanceM,
       ascentM,
       repeatedSegments,
@@ -1571,12 +1618,21 @@ async function generateRouteOptions({ start, targetDistanceM, targetAscentM, tar
     const measured = await getRouteAscent(opt.points);
     if (measured) opt.ascentM = measured.ascentM;
     if (targetDurationMin) opt.durationMatch = durationMatchInfo(opt.predictedDurationMin, targetDurationMin);
+    // Mode "distance" (pas de duree visee) : targetDistanceM est alors le
+    // VRAI critere choisi par l'utilisateur (en mode duree, ce parametre
+    // n'est qu'une estimation interne deduite de la duree, pas une cible
+    // reelle) - retour utilisateur explicite : en mode route/distance,
+    // aucune correspondance n'etait jamais affichee jusqu'ici.
+    if (!targetDurationMin && targetDistanceM) opt.distanceMatch = distanceMatchInfoOption(opt.distanceM, targetDistanceM);
     if (terrain === 'trail' && targetAscentM) opt.ascentMatch = ascentMatchInfo(opt.ascentM, targetAscentM);
-    // Correspondance globale = la pire des deux (cf worseMatchLabel) - une
-    // option ne peut pas etre "Excellente" globalement si l'un des deux
-    // criteres vises est loin de la cible.
-    if (opt.durationMatch || opt.ascentMatch) {
-      opt.matchLabel = worseMatchLabel(opt.durationMatch && opt.durationMatch.label, opt.ascentMatch && opt.ascentMatch.label);
+    // Correspondance globale = la pire des correspondances applicables (cf
+    // worseMatchLabel) - une option ne peut pas etre "Excellente" globalement
+    // si l'un des criteres vises est loin de la cible.
+    if (opt.durationMatch || opt.distanceMatch || opt.ascentMatch) {
+      opt.matchLabel = worseMatchLabel(
+        worseMatchLabel(opt.durationMatch && opt.durationMatch.label, opt.distanceMatch && opt.distanceMatch.label),
+        opt.ascentMatch && opt.ascentMatch.label
+      );
     }
     // % route / chemin / piste cyclable - meme philosophie que la correction
     // IGN ci-dessus (une fois par option finale, jamais bloquant si echec).

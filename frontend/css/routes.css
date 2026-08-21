@@ -366,14 +366,16 @@
 .routes-surface-breakdown { margin-bottom: 12px; }
 .routes-surface-bar { display: flex; width: 100%; height: 8px; border-radius: 4px; overflow: hidden; background: var(--bg-hover); }
 .routes-surface-seg { height: 100%; min-width: 2px; }
-.routes-surface-seg--road { background: #ef4444; }
+.routes-surface-seg--road-busy { background: #ef4444; }
+.routes-surface-seg--road-calm { background: #f59e0b; }
 .routes-surface-seg--path { background: #16a34a; }
 .routes-surface-seg--cycle { background: #3b82f6; }
 .routes-surface-seg--other { background: var(--text-muted); }
 .routes-surface-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 6px; }
 .routes-surface-legend-item { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text-secondary); }
 .routes-surface-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-.routes-surface-dot--road { background: #ef4444; }
+.routes-surface-dot--road-busy { background: #ef4444; }
+.routes-surface-dot--road-calm { background: #f59e0b; }
 .routes-surface-dot--path { background: #16a34a; }
 .routes-surface-dot--cycle { background: #3b82f6; }
 .routes-surface-dot--other { background: var(--text-muted); }
@@ -399,6 +401,7 @@
 .routes-map-legend {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 6px;
   margin-top: 0;
   margin-bottom: 12px;
@@ -412,6 +415,7 @@
 }
 .routes-legend-swatch--repeat { background: #e8590c; }
 .routes-legend-swatch--normal { background: #2f6f3e; }
+.routes-legend-swatch--return { background: repeating-linear-gradient(90deg, #2f6f3e 0 4px, transparent 4px 8px); opacity: 0.75; }
 
 .routes-download-btn {
   font-size: 12px;

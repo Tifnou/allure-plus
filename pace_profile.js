@@ -4,6 +4,7 @@ const path = require('path');
 const AdmZip = require('adm-zip');
 const FitParser = require('fit-file-parser').default || require('fit-file-parser');
 const { getGarminClient, getActivities } = require('./garmin_client');
+const { getZoneRange } = require('./zones');
 
 const DATA_DIR = path.join(__dirname, 'data');
 try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch (e) {}
@@ -211,6 +212,44 @@ function migratePaceProfileToScoped(envEmail) {
   writeJsonSafe(PACE_PROFILE_FILE, { [envEmail.toLowerCase()]: raw });
 }
 
+// VMA (km/h) depuis le VO2max - meme formule que le reste de l'app
+// (server.js /api/fitness-zones, health.js) : VMA = (VO2max - 3.5) / 0.2
+// (mL/kg/min -> m/min), converti en km/h.
+function vmaFromVo2max(vo2max) {
+  return vo2max ? (vo2max - 3.5) / 0.2 * 60 / 1000 : null;
+}
+
+// Allure la plus RAPIDE de la zone EF (borne haute de %VMA, cf
+// ALLURE_PLUS_ZONES.EF dans zones.js) - retour utilisateur explicite (aout
+// 2026, sur ses generations d'itineraires) : "pour l'allure, toujours
+// prendre la plus rapide de l'utilisateur en EF" (ex: EF 6'18-7'07/km ->
+// prendre 6'18/km), l'EF etant deja par definition une allure d'endurance
+// facile a laquelle l'utilisateur peut courir longtemps, pas la peine de la
+// sous-estimer davantage. Retourne en min/km (unite de paceMinPerKm).
+function efFastPaceMinPerKm(vo2max) {
+  const vma = vmaFromVo2max(vo2max);
+  if (!vma) return null;
+  const ef = getZoneRange('EF');
+  return (3600 / (vma * ef.pctHigh)) / 60;
+}
+
+// Recale un profil d'allure par tranche de pente (paceMinPerKm, cf
+// GRADIENT_BUCKETS) sur l'allure EF rapide de l'utilisateur : conserve les
+// ECARTS RELATIFS entre tranches (issus de ses sorties reelles - une pente a
+// 8% lui prend structurellement plus de temps qu'un plat, quel que soit son
+// niveau de forme du moment), mais ancre l'allure absolue sur son EF rapide
+// ACTUEL plutot que sur la moyenne tous-efforts-confondus de ses dernieres
+// sorties analysees (qui peut melanger allure facile et allure de course).
+// Repli silencieux sur le profil non modifie si `efPace` indisponible (VO2max
+// jamais capture) ou si le profil n'a pas de tranche "flat" exploitable.
+function applyEfPaceAnchor(paceMinPerKm, efPace) {
+  if (!efPace || !paceMinPerKm || !paceMinPerKm.flat) return paceMinPerKm;
+  const scale = efPace / paceMinPerKm.flat;
+  const out = {};
+  for (const key of Object.keys(paceMinPerKm)) out[key] = paceMinPerKm[key] * scale;
+  return out;
+}
+
 module.exports = {
   bucketForGrade,
   getPaceProfile,
@@ -218,4 +257,7 @@ module.exports = {
   migratePaceProfileToScoped,
   GRADIENT_BUCKETS,
   GENERIC_FALLBACK_PACE,
+  vmaFromVo2max,
+  efFastPaceMinPerKm,
+  applyEfPaceAnchor,
 };

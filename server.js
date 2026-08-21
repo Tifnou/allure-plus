@@ -59,7 +59,7 @@ const {
 const { getZoneRange, annotatePaceZones, ZONE_LABELS } = require('./zones');
 const { isBrouterConfigured, isTilePresent, getTileRemoteSize, downloadTile } = require('./brouter_manager');
 const { geocode, getCommunesForPostcode, getCommunesForDepartment, searchStreet, getTownHall, generateRouteOptions, buildGpxXml, trailLevelMidKmh } = require('./route_generator');
-const { getPaceProfile, refreshPaceProfile, migratePaceProfileToScoped } = require('./pace_profile');
+const { getPaceProfile, refreshPaceProfile, migratePaceProfileToScoped, efFastPaceMinPerKm, applyEfPaceAnchor } = require('./pace_profile');
 const { scheduleSync, runFullReconciliation, getSyncStatus, syncBinaryFile, deleteBinaryFile, syncAvatarFile, SYNC_TYPES } = require('./sync');
 const syncClient = require('./sync_client');
 const { buildPlanWorkbook } = require('./xlsx_export');
@@ -1474,6 +1474,17 @@ app.post('/api/routes/generate', requireSession, async (req, res) => {
       return res.status(400).json({ error: 'Distance ou durée cible invalide' });
     }
     const paceProfile = getPaceProfile(req.session.email);
+    // Ancre le profil d'allure par tranche de pente sur l'allure EF rapide de
+    // l'utilisateur plutot que sur la moyenne (tous efforts confondus) de ses
+    // dernieres sorties analysees - cf pace_profile.js applyEfPaceAnchor.
+    // VO2max lu depuis le dernier instantane deja capture (health_snapshots,
+    // cf captureHealthSnapshot appele a chaque chargement du dashboard) -
+    // aucun appel Garmin supplementaire ici. Repli silencieux sur le profil
+    // non modifie si aucun instantane n'existe encore (premier lancement).
+    const vo2maxSnapshots = getHealthSnapshots('vo2max', null, req.session.email);
+    const latestVo2max = vo2maxSnapshots.length ? vo2maxSnapshots[vo2maxSnapshots.length - 1].value?.vo2max : null;
+    const efPace = efFastPaceMinPerKm(latestVo2max);
+    const paceMinPerKm = applyEfPaceAnchor(paceProfile.paceMinPerKm, efPace);
     const isTrail = terrain !== 'route';
     const levelMidKmh = isTrail ? trailLevelMidKmh(trailLevel) : null;
     // Si seule la duree est fournie, estimation de depart pour la forme de la
@@ -1490,14 +1501,14 @@ app.post('/api/routes/generate', requireSession, async (req, res) => {
     const distanceEstimateM = targetDistanceM
       || (levelMidKmh
         ? Math.max(500, (levelMidKmh * (targetDurationMin / 60) - (targetAscentM || 0) / 100) * 1000)
-        : (targetDurationMin * 1000) / paceProfile.paceMinPerKm.flat);
+        : (targetDurationMin * 1000) / paceMinPerKm.flat);
     const result = await generateRouteOptions({
       start,
       targetDistanceM: distanceEstimateM,
       targetDurationMin: targetDurationMin || null,
       targetAscentM: targetAscentM || null,
       terrain: isTrail ? 'trail' : 'route',
-      paceMinPerKm: paceProfile.paceMinPerKm,
+      paceMinPerKm,
       searchRadiusM: (searchRadiusKm && searchRadiusKm > 0) ? searchRadiusKm * 1000 : null,
       routeShape: ['loop', 'outback', 'both'].includes(routeShape) ? routeShape : 'loop',
       trailLevel: levelMidKmh ? trailLevel : null,
