@@ -17,6 +17,7 @@ function routesDefaultState() {
     routeShape: 'loop',      // 'loop' | 'outback' | 'both'
     ascentM: 300,
     trailLevel: 'moyenplus', // niveau de traileur (trail uniquement) - voir ROUTES_TRAIL_LEVELS
+    trailStyle: 'mixte',     // style de chemin en trail (roulant/mixte/technique) - voir ROUTES_TRAIL_STYLES
     searchWider: false,
     searchRadiusKm: 5,
     lastResult: null,
@@ -44,6 +45,17 @@ const ROUTES_TRAIL_LEVELS = {
   moyen:      { label: 'Moyen',                  minKmh: 4.5,  maxKmh: 6.0 },
   moyenmoins: { label: 'Moyen -',                minKmh: 3.5,  maxKmh: 5.0 },
   debutant:   { label: 'Débutant',               minKmh: 2.5,  maxKmh: 4.0 },
+};
+
+// Style de chemin en trail (retour utilisateur, aout 2026) : quel TYPE de
+// voie BRouter privilegie DANS la direction choisie par la recherche - a ne
+// pas confondre avec le niveau de traileur (vitesse) ci-dessus. MIROIR des
+// libelles de TRAIL_STYLE_PARAMS (route_generator.js, cote serveur) ; la
+// cle envoyee au serveur suffit, ce tableau ne sert qu'a l'affichage.
+const ROUTES_TRAIL_STYLES = {
+  roulant:   { label: 'Roulant',   hint: 'Privilégie les chemins/pistes larges déjà bien tracés — évite les détours vers un sentier étroit quand une alternative plus large existe à proximité.' },
+  mixte:     { label: 'Mixte',     hint: 'Comportement équilibré (par défaut) — mélange de chemins larges et de sentiers selon ce que le terrain propose naturellement.' },
+  technique: { label: 'Technique', hint: 'Recherche davantage les sentiers étroits et le hors-piste — quitte à emprunter un tracé plus sinueux qu\'un chemin large voisin.' },
 };
 
 function routesTrailLevelMidKmh(level) {
@@ -203,6 +215,16 @@ function renderRoutesForm() {
       <div id="routes-level-table" style="display:none;margin-top:8px"></div>
     </div>
 
+    <div class="routes-field routes-field--full" id="routes-style-field" style="display:${routesHasAscentField() ? '' : 'none'}">
+      <div class="routes-field-label">Style de chemin</div>
+      <div class="routes-hint">${(ROUTES_TRAIL_STYLES[routesState.trailStyle] || {}).hint || ''}</div>
+      <div class="routes-toggle" style="margin-top:6px">
+        ${Object.entries(ROUTES_TRAIL_STYLES).map(([key, s]) =>
+          `<button type="button" class="routes-toggle-btn ${routesState.trailStyle === key ? 'active' : ''}" data-style="${key}">${s.label}</button>`
+        ).join('')}
+      </div>
+    </div>
+
     <div class="routes-field routes-field--full">
       <div class="routes-field-label">Recherche élargie</div>
       <div class="routes-hint">${routesHasAscentField()
@@ -227,6 +249,9 @@ function renderRoutesForm() {
   });
   content.querySelectorAll('[data-shape]').forEach(btn => {
     btn.onclick = () => { routesState.routeShape = btn.dataset.shape; renderRoutesForm(); };
+  });
+  content.querySelectorAll('[data-style]').forEach(btn => {
+    btn.onclick = () => { routesState.trailStyle = btn.dataset.style; renderRoutesForm(); };
   });
 
   const modeInput = el('routes-mode-input');
@@ -671,6 +696,7 @@ async function routesGenerateClicked() {
       terrain: routesState.terrain,
       routeShape: routesState.routeShape,
       trailLevel: routesHasAscentField() ? routesState.trailLevel : null,
+      trailStyle: routesHasAscentField() ? routesState.trailStyle : null,
     };
     if (routesState.mode === 'distance') body.targetDistanceM = routesState.distanceKm * 1000;
     else body.targetDurationMin = routesState.durationMin;

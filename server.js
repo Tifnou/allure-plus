@@ -58,7 +58,7 @@ const {
 } = require('./garmin_client');
 const { getZoneRange, annotatePaceZones, ZONE_LABELS } = require('./zones');
 const { isBrouterConfigured, isTilePresent, getTileRemoteSize, downloadTile } = require('./brouter_manager');
-const { geocode, getCommunesForPostcode, getCommunesForDepartment, searchStreet, getTownHall, generateRouteOptions, buildGpxXml, trailLevelMidKmh } = require('./route_generator');
+const { geocode, getCommunesForPostcode, getCommunesForDepartment, searchStreet, getTownHall, generateRouteOptions, buildGpxXml, trailLevelMidKmh, TRAIL_STYLE_PARAMS } = require('./route_generator');
 const { getPaceProfile, refreshPaceProfile, migratePaceProfileToScoped, efFastPaceMinPerKm, applyEfPaceAnchor } = require('./pace_profile');
 const { analyzeGpx, computeElevationProfile } = require('./gpx_parser');
 const { getElevations } = require('./geoportail_client');
@@ -1469,7 +1469,7 @@ app.post('/api/routes/tile-download', requireSession, async (req, res) => {
 
 app.post('/api/routes/generate', requireSession, async (req, res) => {
   try {
-    const { start, targetDistanceM, targetDurationMin, targetAscentM, terrain, searchRadiusKm, routeShape, trailLevel } = req.body || {};
+    const { start, targetDistanceM, targetDurationMin, targetAscentM, terrain, searchRadiusKm, routeShape, trailLevel, trailStyle } = req.body || {};
     if (!start || typeof start.lat !== 'number' || typeof start.lon !== 'number') {
       return res.status(400).json({ error: 'Point de départ invalide (adresse non confirmée ?)' });
     }
@@ -1515,6 +1515,7 @@ app.post('/api/routes/generate', requireSession, async (req, res) => {
       searchRadiusM: (searchRadiusKm && searchRadiusKm > 0) ? searchRadiusKm * 1000 : null,
       routeShape: ['loop', 'outback', 'both'].includes(routeShape) ? routeShape : 'loop',
       trailLevel: levelMidKmh ? trailLevel : null,
+      trailStyle: isTrail && Object.prototype.hasOwnProperty.call(TRAIL_STYLE_PARAMS, trailStyle) ? trailStyle : null,
     });
     res.json({ ...result, paceProfileIsGeneric: paceProfile.isGeneric });
   } catch (err) { handleError(res, err); }
