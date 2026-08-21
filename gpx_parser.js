@@ -57,6 +57,62 @@ const CLIMB_GRADE_PCT = 3;
 const DESCENT_GRADE_PCT = -3;
 const BIN_SIZE_M = 50;
 
+// Seuil minimal (m) avant de valider une montee/descente comme "reelle" -
+// meme principe (algorithme a hysteresis/seuil) que la plupart des outils
+// GPS/fitness grand public (Garmin, Strava...) pour calculer un D+ total :
+// une ondulation de moins de ce seuil depuis le dernier extremum confirme
+// est ignoree plutot que comptee, pour ne pas cumuler le bruit GPS/DEM (ou
+// le micro-relief naturel) comme du denivele. Valeur conventionnelle (3 m),
+// approximative faute de connaitre l'algorithme exact de Garmin - a affiner
+// si l'ecart persiste sur d'autres fichiers reels.
+const ELEV_GAIN_THRESHOLD_M = 3;
+
+// Parcourt une serie d'altitudes (dans l'ordre du trace) et cumule montee/
+// descente uniquement au-dela de `threshold` depuis le dernier extremum
+// CONFIRME (pivot) - une petite ondulation qui ne depasse pas le seuil ne
+// declenche pas de changement de sens, elle est absorbee dans la montee/
+// descente en cours. Algorithme standard ("threshold elevation gain"),
+// volontairement independant du decoupage en tronçons de BIN_SIZE_M
+// (computeElevationProfile) : le lissage par distance (bins) et le seuil de
+// bruit (ici) répondent a deux problemes différents (respectivement "sur
+// quelle distance mesurer la pente" et "a partir de quand une variation
+// compte comme du D+ reel").
+function thresholdElevationGain(elevations, threshold) {
+  if (!Array.isArray(elevations) || elevations.length < 2) return { ascent: 0, descent: 0 };
+  let pivot = elevations[0];
+  let extreme = elevations[0];
+  let direction = 0; // 0=inconnu, 1=montee en cours, -1=descente en cours
+  let ascent = 0, descent = 0;
+
+  for (let i = 1; i < elevations.length; i++) {
+    const ele = elevations[i];
+    if (direction !== -1) {
+      if (ele >= extreme) {
+        extreme = ele;
+        direction = 1;
+      } else if (extreme - ele >= threshold) {
+        ascent += Math.max(0, extreme - pivot);
+        pivot = extreme;
+        extreme = ele;
+        direction = -1;
+      }
+    } else {
+      if (ele <= extreme) {
+        extreme = ele;
+      } else if (ele - extreme >= threshold) {
+        descent += Math.max(0, pivot - extreme);
+        pivot = extreme;
+        extreme = ele;
+        direction = 1;
+      }
+    }
+  }
+  if (direction === 1) ascent += Math.max(0, extreme - pivot);
+  else if (direction === -1) descent += Math.max(0, pivot - extreme);
+
+  return { ascent: Math.round(ascent), descent: Math.round(descent) };
+}
+
 // Regroupe le trace en tronçons de ~BIN_SIZE_M, calcule la pente de chacun,
 // puis agrege en statistiques globales (D+/D-, % plat/montee/descente,
 // pente moyenne en montee, pente la plus marquee) - meme principe que
@@ -92,11 +148,18 @@ function computeElevationProfile(points) {
   };
   const sumDist = arr => arr.reduce((s, b) => s + b.distM, 0);
 
-  let ascentM = 0, descentM = 0;
-  bins.forEach(b => {
-    const deltaEle = (b.gradePct / 100) * b.distM;
-    if (deltaEle > 0) ascentM += deltaEle; else descentM += -deltaEle;
-  });
+  // D+/D- par algorithme a seuil (hysteresis), pas par simple somme des
+  // deltas de chaque tronçon de 50m. Retour utilisateur reel : meme apres
+  // recalage des altitudes via l'API IGN (getRouteAscent/getElevations,
+  // server.js), le D+ affiche restait surestime par rapport a Garmin sur le
+  // MEME fichier (1646 m vs 1562 m) - la source des altitudes n'etait donc
+  // pas le probleme, l'absence de seuil de bruit l'etait : sommer chaque
+  // tronçon de 50m sans minimum compte la moindre ondulation (bruit GPS/DEM
+  // ou relief naturel a petite echelle) comme du D+ reel, ce qu'aucun outil
+  // grand public (Garmin, Strava...) ne fait - tous appliquent un seuil
+  // minimal avant de valider une montee/descente comme "reelle".
+  const elevSeries = [points[0].ele, ...bins.map(b => points[b.endIdx].ele)];
+  const { ascent: ascentM, descent: descentM } = thresholdElevationGain(elevSeries, ELEV_GAIN_THRESHOLD_M);
 
   const maxClimbBin = climbBins.reduce((best, b) => (!best || b.gradePct > best.gradePct) ? b : best, null);
   const maxDescentBin = descentBins.reduce((best, b) => (!best || b.gradePct < best.gradePct) ? b : best, null);
@@ -139,4 +202,4 @@ function analyzeGpx(gpxText) {
   return { points, stats };
 }
 
-module.exports = { parseGpxTrack, computeElevationProfile, analyzeGpx, downsample, haversine, CLIMB_GRADE_PCT, DESCENT_GRADE_PCT };
+module.exports = { parseGpxTrack, computeElevationProfile, analyzeGpx, downsample, haversine, thresholdElevationGain, CLIMB_GRADE_PCT, DESCENT_GRADE_PCT, ELEV_GAIN_THRESHOLD_M };

@@ -60,7 +60,8 @@ const { getZoneRange, annotatePaceZones, ZONE_LABELS } = require('./zones');
 const { isBrouterConfigured, isTilePresent, getTileRemoteSize, downloadTile } = require('./brouter_manager');
 const { geocode, getCommunesForPostcode, getCommunesForDepartment, searchStreet, getTownHall, generateRouteOptions, buildGpxXml, trailLevelMidKmh } = require('./route_generator');
 const { getPaceProfile, refreshPaceProfile, migratePaceProfileToScoped, efFastPaceMinPerKm, applyEfPaceAnchor } = require('./pace_profile');
-const { analyzeGpx } = require('./gpx_parser');
+const { analyzeGpx, computeElevationProfile } = require('./gpx_parser');
+const { getElevations } = require('./geoportail_client');
 const { scheduleSync, runFullReconciliation, getSyncStatus, syncBinaryFile, deleteBinaryFile, syncAvatarFile, SYNC_TYPES } = require('./sync');
 const syncClient = require('./sync_client');
 const { buildPlanWorkbook } = require('./xlsx_export');
@@ -2796,6 +2797,33 @@ app.post('/api/goals/gpx', requireSession, upload.single('gpx'), async (req, res
     const gpxText = req.file.buffer.toString('utf8');
     const result = analyzeGpx(gpxText);
     if (!result) return res.status(400).json({ error: 'GPX illisible ou sans trace exploitable (moins de 2 points).' });
+
+    // Corrige les altitudes du trace (deja sous-echantillonne par analyzeGpx,
+    // <=1200 points) via l'API Altimetrie IGN (RGE ALTI, precision LIDAR) -
+    // meme logique deja appliquee aux itineraires generes (route_generator.js,
+    // getRouteAscent) : les altitudes brutes d'un GPX externe (souvent issues
+    // d'un MNT plus grossier, ou d'une capture GPS bruitee) peuvent surestimer
+    // le D+. Retour utilisateur reel confirmant l'ecart : 1642 m affiches par
+    // Allure+ contre 1562 m annonces par Garmin pour le MEME fichier (Garmin
+    // applique sa propre correction a l'import). La distance, elle, vient du
+    // trace BRUT (deja fiable, cf analyzeGpx/downsample) et n'est jamais
+    // touchee ici - seules les altitudes (D+/D-, % plat/montee/descente,
+    // pentes moyennes) beneficient de la correction. Repli silencieux sur les
+    // altitudes brutes du GPX si Geoportail est indisponible ou hors
+    // couverture (fonctionnalite d'appoint, jamais bloquante).
+    try {
+      const correctedElevations = await getElevations(result.points);
+      if (correctedElevations) {
+        const correctedPoints = result.points.map((p, i) => ({
+          ...p, ele: correctedElevations[i] != null ? correctedElevations[i] : p.ele,
+        }));
+        const correctedStats = computeElevationProfile(correctedPoints);
+        if (correctedStats) {
+          result.stats = { ...correctedStats, totalDistM: result.stats.totalDistM };
+          result.points = correctedPoints;
+        }
+      }
+    } catch (err) { /* correction IGN indisponible - on garde les altitudes brutes du GPX */ }
 
     const store = readScoped(GOAL_GPX_FILE, req.session.email, {});
     store[planId] = {
