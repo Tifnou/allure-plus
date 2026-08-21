@@ -538,6 +538,31 @@ async function generateLoopWithAlternates(start, targetDistanceM, profile, opts 
   return { best, bestBearing: primary.bearing, alternates };
 }
 
+// Cout (minutes) d'un aller-retour sur CHAQUE segment consecutif du trace,
+// cumule en deux tableaux prefix-sum : cumUp[k] = cout pour parcourir
+// points[0..k] dans le sens naturel (montee = allure de montee), cumDown[k]
+// = cout pour parcourir CES MEMES segments mais en sens inverse (pente
+// negee - c'est la descente qu'on ferait en repartant de k vers 0). Le cout
+// aller-retour d'un segment [i,j] est alors (cumUp[j]-cumUp[i]) [montee] +
+// (cumDown[j]-cumDown[i]) [descente du retour] - lookup O(1) au lieu de
+// recalculer predictDurationMin (couteux) a chaque fenetre candidate du
+// double-boucle de findSteepestSegments. Uniquement pour le mode
+// paceMinPerKm (tranches de pente) - le mode trailLevel a une formule directe
+// plus simple (equivalentFlatKm), geree a part dans findSteepestSegments.
+function buildRoundTripCostCumulative(points, paceMinPerKm) {
+  const n = points.length;
+  const cumUp = new Array(n).fill(0);
+  const cumDown = new Array(n).fill(0);
+  for (let k = 1; k < n; k++) {
+    const segDist = haversineDistance(points[k - 1], points[k]);
+    const eleDelta = points[k].ele - points[k - 1].ele;
+    const grade = segDist > 0 ? eleDelta / segDist : 0;
+    cumUp[k] = cumUp[k - 1] + (segDist / 1000) * paceMinPerKm[bucketForGrade(grade)];
+    cumDown[k] = cumDown[k - 1] + (segDist / 1000) * paceMinPerKm[bucketForGrade(-grade)];
+  }
+  return { cumUp, cumDown };
+}
+
 // Recherche par fenetre glissante du/des segment(s) les plus efficaces en D+
 // sur une distance courte (candidats a la repetition). Logique validee sur
 // les vrais GPX de la session de recherche (course Trifouillette,
@@ -550,11 +575,25 @@ async function generateLoopWithAlternates(start, targetDistanceM, profile, opts 
 // A chaque tour, la meilleure fenetre est cherchee en excluant les indices
 // deja retenus (et les fenetres qui les traversent), pour ne jamais choisir
 // deux variantes du même passage.
-function findSteepestSegments(points, { minDistM = 150, maxDistM = 1000, maxSegments = 3 } = {}) {
+// Classement par "rentabilite verticale" (m D+ par minute de repetition,
+// etude externe aout 2026, section 6.4) quand paceMinPerKm/trailLevel sont
+// fournis, plutot que par gain brut - une cote longue mais peu raide peut
+// avoir plus de gain absolu qu'une cote courte et raide, mais couter bien
+// plus de temps a repeter pour ce meme gain ; preferer la plus efficace,
+// pas la plus haute. Repli sur le gain brut (comportement d'origine) si
+// aucune info d'allure n'est fournie. Le seuil MIN_VIABLE_SEGMENT_GAIN_M est
+// verifie DES la comparaison (pas seulement sur le resultat final) : sans ca,
+// un micro-rebond de 2m sur 10m afficherait une "rentabilite" enorme et
+// gagnerait a tort face a une vraie cote.
+function findSteepestSegments(points, { minDistM = 150, maxDistM = 1000, maxSegments = 3, paceMinPerKm = null, trailLevel = null } = {}) {
+  const useEfficiency = !!(paceMinPerKm || trailLevel);
+  const cum = (useEfficiency && !trailLevel) ? buildRoundTripCostCumulative(points, paceMinPerKm) : null;
+  const midKmh = trailLevel ? trailLevelMidKmh(trailLevel) : null;
+
   const excluded = new Array(points.length).fill(false);
   const found = [];
   for (let s = 0; s < maxSegments; s++) {
-    let best = { gainM: 0 };
+    let best = { gainM: 0, efficiency: -Infinity };
     for (let i = 0; i < points.length; i++) {
       if (excluded[i]) continue;
       let dist = 0;
@@ -562,8 +601,17 @@ function findSteepestSegments(points, { minDistM = 150, maxDistM = 1000, maxSegm
         if (excluded[j]) break; // ne traverse pas une zone deja retenue
         dist += haversineDistance(points[j - 1], points[j]);
         const gain = points[j].ele - points[i].ele;
-        if (dist >= minDistM && gain > best.gainM) {
-          best = { gainM: gain, distM: dist, startIdx: i, endIdx: j, from: points[i], to: points[j] };
+        if (dist < minDistM || gain < MIN_VIABLE_SEGMENT_GAIN_M) continue;
+
+        let efficiency = gain; // repli : gain brut si pas d'info d'allure
+        if (useEfficiency) {
+          const costMin = midKmh
+            ? (equivalentFlatKm((2 * dist) / 1000, gain) / midKmh) * 60
+            : (cum.cumUp[j] - cum.cumUp[i]) + (cum.cumDown[j] - cum.cumDown[i]);
+          efficiency = costMin > 0 ? gain / costMin : 0;
+        }
+        if (efficiency > best.efficiency) {
+          best = { gainM: gain, distM: dist, startIdx: i, endIdx: j, from: points[i], to: points[j], efficiency };
         }
       }
     }
@@ -589,7 +637,7 @@ function findSteepestSegment(points, opts = {}) {
 // utilisateur reelle, ex. 600 m vises, 154-280 m sur les alternatives).
 // Retourne null si aucun segment exploitable n'a ete trouve.
 async function boostAscentViaRepeats(basePoints, targetAscentM, profile, paceMinPerKm, targetDurationMin, targetDistanceM, trailLevel) {
-  const segments = findSteepestSegments(basePoints, { maxSegments: MAX_REPEAT_SEGMENTS });
+  const segments = findSteepestSegments(basePoints, { maxSegments: MAX_REPEAT_SEGMENTS, paceMinPerKm, trailLevel });
   if (segments.length === 0) return null;
 
   const overshootBudgetMin = targetDurationMin ? targetDurationMin * MAX_DURATION_OVERSHOOT_RATIO : null;
