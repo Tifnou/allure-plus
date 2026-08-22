@@ -2888,6 +2888,23 @@ app.post('/api/route-editor/import', requireSession, upload.single('gpx'), async
   } catch (err) { handleError(res, err); }
 });
 
+// Recalcule les stats (distance/D+/D-/côtes...) d'un tableau de points deja
+// connu du navigateur - reutilise pour deux besoins : stats globales apres
+// une repetition de section, et previsualisation d'une section A->B avant
+// application. Meme source de verite que l'import (computeElevationProfile),
+// jamais reimplementee cote client.
+app.post('/api/route-editor/analyze', requireSession, (req, res) => {
+  try {
+    const { points } = req.body || {};
+    if (!Array.isArray(points) || points.length < 2) {
+      return res.status(400).json({ error: 'Points de tracé manquants' });
+    }
+    const stats = computeElevationProfile(points);
+    if (!stats) return res.status(400).json({ error: 'Analyse impossible (tracé trop court)' });
+    res.json({ stats });
+  } catch (err) { handleError(res, err); }
+});
+
 // ─── Export / import des records + courses (changement de PC, reinstall) ──
 app.get('/api/records-export', requireSession, (req, res) => {
   const records_overrides = readScoped(RECORDS_OVERRIDES_FILE, req.session.email, {});
