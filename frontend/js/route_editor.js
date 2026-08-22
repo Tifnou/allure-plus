@@ -503,24 +503,40 @@ function renderRouteEditorObjectiveSuggestion(sel) {
   }).catch(() => { box.remove(); });
 }
 
-// Classe les côtes détectées par "rentabilité verticale" (m de D+ par
-// metre de trajet ajouté par un aller-retour) quand un D+ cible est fixé -
-// même principe que findSteepestSegments (route_generator.js) pour le
-// générateur d'itinéraires, réutilisé ici en repli local (aucun appel
-// serveur) pour identifier la MEILLEURE côte sans devoir simuler les 30+
-// côtes d'un parcours une par une. Si seule une distance cible est fixée
-// (pas de D+), la rentabilité D+ n'a pas de sens - on privilégie alors la
-// côte la plus courte, pour une granularité plus fine (moins de risque de
-// dépasser largement la distance visée en ajoutant un passage entier).
-function pickBestClimbForObjective(climbs, obj) {
+// Classe les côtes détectées par nombre de passages ESTIMÉ pour atteindre
+// l'objectif (pas par simple ratio de rentabilité D+/distance) : une petite
+// côte très pentue peut avoir un excellent ratio mais rester bien en-dessous
+// de l'objectif même à 10 répétitions (le plafond), alors qu'une côte plus
+// grande l'atteindrait en quelques passages - bug réel constaté (retour
+// utilisateur) où l'ancien classement par ratio proposait systématiquement
+// la même petite côte, plafonnée à 10 montées sans jamais atteindre la
+// cible. Estimation locale (aucun appel serveur, juste climb.gainM/distM
+// déjà connus) : un passage supplémentaire ajoute environ climb.gainM de D+
+// et 2×climb.distM de distance (aller-retour) - approximatif mais suffisant
+// pour CLASSER les côtes entre elles ; la simulation précise
+// (computeRouteEditorObjectiveSuggestion, un seul appel réseau) s'applique
+// ensuite uniquement à la côte choisie ici pour les chiffres affichés.
+function pickBestClimbForObjective(climbs, obj, currentStats) {
   if (!climbs.length) return null;
-  if (obj.targetDplusM != null) {
-    return climbs.reduce((best, c) => {
-      const efficiency = c.gainM / (2 * c.distM || 1);
-      return (!best || efficiency > best.efficiency) ? { ...c, efficiency } : best;
-    }, null);
-  }
-  return climbs.reduce((best, c) => (!best || c.distM < best.distM) ? c : best, null);
+  const scored = climbs.map(c => {
+    let estimatedPasses = 2;
+    if (obj.targetDplusM != null) {
+      estimatedPasses = c.gainM > 0
+        ? Math.max(estimatedPasses, 1 + Math.ceil((obj.targetDplusM - currentStats.ascentM) / c.gainM))
+        : Infinity; // cette côte n'apporte pas de D+, inutile pour un objectif D+
+    }
+    if (obj.targetDistM != null) {
+      estimatedPasses = c.distM > 0
+        ? Math.max(estimatedPasses, 1 + Math.ceil((obj.targetDistM * 1000 - currentStats.totalDistM) / (2 * c.distM)))
+        : Infinity;
+    }
+    const efficiency = c.gainM / (2 * c.distM || 1);
+    return { ...c, estimatedPasses, efficiency };
+  });
+  // Le moins de passages d'abord ; en cas d'égalité, la côte la plus
+  // "rentable" (plus de D+ pour la distance ajoutée).
+  scored.sort((a, b) => a.estimatedPasses - b.estimatedPasses || b.efficiency - a.efficiency);
+  return scored[0];
 }
 
 // Suggestion automatique (pas de clic requis) : dès qu'un objectif D+/
@@ -537,7 +553,7 @@ function renderRouteEditorObjectiveAutoSuggestion() {
     return;
   }
   const climbs = _routeEditorData?.stats?.climbs || [];
-  const best = pickBestClimbForObjective(climbs, obj);
+  const best = pickBestClimbForObjective(climbs, obj, _routeEditorData.stats);
   if (!best) {
     box.innerHTML = `<div class="route-editor-section-card route-editor-objective-suggestion">Aucune côte détectée sur ce parcours pour proposer une répétition automatique — sélectionnez une section vous-même (carte ou profil).</div>`;
     return;
