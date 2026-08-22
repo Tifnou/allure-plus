@@ -30,6 +30,7 @@ let _routeEditorObjective = { targetDplusM: null, targetDistM: null }; // object
 let _routeEditorMode = 'select'; // 'select' | 'move-point' | 'add-waypoint' - PDF §7/§25
 let _routeEditorMovePickIdx = null; // index du point choisi en mode 'move-point', en attente de sa nouvelle position
 let _routeEditorPreviewLayer = null; // layerGroup Leaflet (ancien tracé pointillé vs nouveau) pendant une prévisualisation de recalcul
+let _routeEditorVariants = []; // [{id, name, points, stats, pois}] - versions nommées (PDF §10), distinctes de la pile Annuler/Rétablir linéaire
 
 function initRouteEditorPage() {
   const input = el('route-editor-file-input');
@@ -80,6 +81,7 @@ function routeEditorStartCreation() {
   _routeEditorOriginal = null;
   _routeEditorHistory = [];
   _routeEditorFuture = [];
+  _routeEditorVariants = [];
   _routeEditorSelection = { aIdx: null, bIdx: null };
   _routeEditorObjective = { targetDplusM: null, targetDistM: null };
   _routeEditorMode = 'extend';
@@ -96,6 +98,7 @@ function routeEditorClose() {
   _routeEditorOriginal = null;
   _routeEditorHistory = [];
   _routeEditorFuture = [];
+  _routeEditorVariants = [];
   _routeEditorSelection = { aIdx: null, bIdx: null };
   _routeEditorObjective = { targetDplusM: null, targetDistM: null };
   if (_routeEditorMap) { _routeEditorMap.remove(); _routeEditorMap = null; }
@@ -123,6 +126,7 @@ async function handleRouteEditorFileSelected(file) {
     _routeEditorOriginal = { points: data.points, stats: data.stats, pois: [] };
     _routeEditorHistory = [];
     _routeEditorFuture = [];
+    _routeEditorVariants = [];
     _routeEditorSelection = { aIdx: null, bIdx: null };
     _routeEditorObjective = { targetDplusM: null, targetDistM: null };
     renderRouteEditorImportStatus();
@@ -296,6 +300,11 @@ function renderRouteEditorWorkspace() {
         </table>`
       : `<div class="route-editor-climbs-empty">Aucune côte significative détectée sur ce parcours.</div>`}
     <div id="route-editor-poi-table-wrap"></div>
+    <div class="route-editor-section-title">Variantes</div>
+    <div class="route-editor-actions" style="margin-top:0">
+      <button type="button" class="route-editor-btn-secondary" id="route-editor-save-variant-btn">💾 Enregistrer la version actuelle</button>
+    </div>
+    <div id="route-editor-variants-table-wrap"></div>
     <div class="route-editor-section-title">Stratégie de course</div>
     <div class="route-editor-strategy-card">
       <label>Objectif de temps (optionnel) <input type="time" id="route-editor-strategy-target" class="routes-text-input" style="width:110px" /></label>
@@ -326,6 +335,9 @@ function renderRouteEditorWorkspace() {
   wireRouteEditorModeToolbar(ws);
   renderRouteEditorExtendControls();
   renderRouteEditorPoiTable();
+  const saveVariantBtn = el('route-editor-save-variant-btn');
+  if (saveVariantBtn) saveVariantBtn.onclick = onRouteEditorSaveVariantClick;
+  renderRouteEditorVariantsTable();
   const objDplusInput = el('route-editor-obj-dplus');
   const objDistInput = el('route-editor-obj-dist');
   const onObjectiveChange = () => {
@@ -908,6 +920,97 @@ function renderRouteEditorPoiTable() {
     </table>`;
   box.querySelectorAll('[data-poi-idx]').forEach(btn => {
     btn.onclick = () => routeEditorRemovePoi(parseInt(btn.dataset.poiIdx, 10));
+  });
+}
+
+// Variantes et historique de versions (PDF §10) : collection NOMMÉE,
+// distincte de la pile Annuler/Rétablir linéaire (_routeEditorHistory) déjà
+// en place - l'utilisateur choisit explicitement quels états mériter d'être
+// gardés et comparés (nom, distance, D+), plutôt que de dérouler les
+// modifications une par une.
+let _routeEditorVariantSeq = 0;
+
+function onRouteEditorSaveVariantClick() {
+  if (!_routeEditorData?.stats) return;
+  const defaultName = `Variante ${_routeEditorVariants.length + 1}`;
+  const modal = document.createElement('div');
+  modal.className = 'confirm-modal-backdrop';
+  modal.innerHTML = `
+    <div class="confirm-modal">
+      <div class="confirm-modal-title">💾 Enregistrer cette version</div>
+      <div class="route-editor-section-form" style="margin:14px 0">
+        <input type="text" id="route-editor-variant-name" class="routes-text-input" value="${defaultName}" style="width:100%" />
+      </div>
+      <div class="route-editor-section-form">
+        <button type="button" class="btn-plans-restart" id="route-editor-variant-confirm">Enregistrer</button>
+        <button type="button" class="route-editor-btn-secondary" id="route-editor-variant-cancel">Annuler</button>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+  const close = () => modal.remove();
+  attachBackdropClose(modal, close);
+  el('route-editor-variant-cancel').onclick = close;
+  const nameInput = el('route-editor-variant-name');
+  nameInput.focus();
+  nameInput.select();
+  el('route-editor-variant-confirm').onclick = () => {
+    const name = nameInput.value.trim() || defaultName;
+    _routeEditorVariants = [..._routeEditorVariants, {
+      id: ++_routeEditorVariantSeq,
+      name,
+      points: _routeEditorData.points,
+      stats: _routeEditorData.stats,
+      pois: _routeEditorData.pois || [],
+    }];
+    close();
+    renderRouteEditorVariantsTable();
+  };
+}
+
+function routeEditorLoadVariant(id) {
+  const variant = id === 'original'
+    ? { points: _routeEditorOriginal.points, stats: _routeEditorOriginal.stats, pois: _routeEditorOriginal.pois || [] }
+    : _routeEditorVariants.find(v => v.id === id);
+  if (!variant || variant.points === _routeEditorData.points) return;
+  _routeEditorHistory.push({ points: _routeEditorData.points, stats: _routeEditorData.stats, pois: _routeEditorData.pois || [] });
+  _routeEditorFuture = [];
+  _routeEditorData = { ..._routeEditorData, points: variant.points, stats: variant.stats, pois: variant.pois };
+  _routeEditorSelection = { aIdx: null, bIdx: null };
+  renderRouteEditorWorkspace();
+}
+
+function routeEditorDeleteVariant(id) {
+  _routeEditorVariants = _routeEditorVariants.filter(v => v.id !== id);
+  renderRouteEditorVariantsTable();
+}
+
+function renderRouteEditorVariantsTable() {
+  const box = el('route-editor-variants-table-wrap');
+  if (!box || !_routeEditorOriginal) return;
+  const rowHtml = (id, name, stats, current, deletable) => `
+    <tr>
+      <td>${name}</td>
+      <td>${(stats.totalDistM / 1000).toFixed(1)} km</td>
+      <td>+${stats.ascentM} m</td>
+      <td>
+        <button type="button" class="route-editor-climb-repeat-btn" data-load-variant="${id}" ${current ? 'disabled' : ''}>${current ? 'Version actuelle' : 'Charger'}</button>
+        ${deletable ? `<button type="button" class="route-editor-imported-remove" data-delete-variant="${id}">✕</button>` : ''}
+      </td>
+    </tr>`;
+  const rows = [
+    rowHtml('original', 'Original', _routeEditorOriginal.stats, _routeEditorData.points === _routeEditorOriginal.points, false),
+    ..._routeEditorVariants.map(v => rowHtml(v.id, v.name, v.stats, v.points === _routeEditorData.points, true)),
+  ].join('');
+  box.innerHTML = `
+    <table class="route-editor-climbs-table">
+      <thead><tr><th>Variante</th><th>Distance</th><th>D+</th><th></th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+  box.querySelectorAll('[data-load-variant]').forEach(btn => {
+    btn.onclick = () => routeEditorLoadVariant(btn.dataset.loadVariant === 'original' ? 'original' : parseInt(btn.dataset.loadVariant, 10));
+  });
+  box.querySelectorAll('[data-delete-variant]').forEach(btn => {
+    btn.onclick = () => routeEditorDeleteVariant(parseInt(btn.dataset.deleteVariant, 10));
   });
 }
 
