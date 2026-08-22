@@ -1133,6 +1133,15 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
 .weight-loss-items{display:flex;flex-wrap:wrap;gap:8px 24px;}
 .weight-loss-item{font-family:var(--font-body);font-size:12px;color:var(--text-secondary);white-space:nowrap;}
 .weight-loss-item span{font-weight:600;color:var(--text-primary);}
+/* Variante utilisee par le rappel de pesee (page Profil) : phrase longue et
+   unique, doit pouvoir revenir a la ligne (contrairement aux badges courts
+   ci-dessus, volontairement en nowrap). */
+.weight-loss-item--wrap{white-space:normal;}
+
+/* Encadre "Pensez a vous peser" (page Profil) : clignote tant que la derniere
+   pesee a 7 jours ou plus, pour attirer l'oeil sans etre agressif. */
+.weight-loss-advice--blink{animation:weightReminderBlink 2s ease-in-out infinite;}
+@keyframes weightReminderBlink{0%,100%{box-shadow:0 0 0 0 rgba(217,119,6,0.35);}50%{box-shadow:0 0 0 6px rgba(217,119,6,0);}}
 
 /* Zones FC — grille a colonnes fixes (au lieu de flex+min-width) : la
    largeur de chaque colonne ne depend plus de la longueur du texte d'une

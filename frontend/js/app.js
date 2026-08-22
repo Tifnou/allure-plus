@@ -402,11 +402,8 @@ async function checkStatus() {
     // Tampon "Pref 2" (case a cocher reservee a un compte, dans Mes informations)
     loadPref2State();
 
-    // Badge profil incomplet
-    const profile = JSON.parse(localStorage.getItem('suivi_sport_profile') || '{}');
-    const profileBadge = el('nav-profile-badge');
-    if (profileBadge) profileBadge.style.display =
-      (!(profile.birthDate || profile.age) || !profile.height || !profile.weight) ? 'inline-flex' : 'none';
+    // Badge profil : profil incomplet OU pesée à jour manquante (cloche)
+    updateProfileBadge();
 
     // Numéro de version de l'appli
     const versionEl = el('app-version');
@@ -3039,13 +3036,34 @@ function saveProfileData(data) {
 
 // ─── Historique du poids (serveur, pour suivi dans le temps + page Santé) ─
 let _weightHistory = [];
-const WEIGHT_REMINDER_SHOWN_KEY = 'weight_reminder_shown_date';
 
 async function loadWeightHistory() {
   try {
     const res = await fetch(`${API}/api/weight-history`);
     if (res.ok) _weightHistory = await res.json();
   } catch (e) { console.error('loadWeightHistory:', e); }
+}
+
+// Vrai si la dernière pesée date de 7 jours ou plus (ou si aucune pesée) —
+// pilote a la fois la cloche de notification du menu Profil et l'encadré
+// clignotant dans la page Profil (renderWeightReminder).
+function isWeightReminderDue() {
+  if (!_weightHistory.length) return false;
+  const last = _weightHistory[_weightHistory.length - 1];
+  const daysSince = Math.floor((Date.now() - new Date(last.date).getTime()) / 86400000);
+  return daysSince >= 7;
+}
+
+// Cloche de notification sur le menu Profil (sidebar) : profil incomplet OU
+// pesée à mettre à jour. Appelée au chargement (checkStatus) et juste après
+// une sauvegarde du profil, pour que la cloche disparaisse immédiatement.
+function updateProfileBadge() {
+  const profile = JSON.parse(localStorage.getItem('suivi_sport_profile') || '{}');
+  const profileBadge = el('nav-profile-badge');
+  if (!profileBadge) return;
+  profileBadge.style.display =
+    (!(profile.birthDate || profile.age) || !profile.height || !profile.weight || isWeightReminderDue())
+      ? 'inline-flex' : 'none';
 }
 
 function renderWeightReminder() {
@@ -3061,26 +3079,13 @@ function renderWeightReminder() {
   if (lastDateEl) lastDateEl.textContent = `(dernière saisie : ${formatDate(last.date)})`;
   if (reminderEl) {
     reminderEl.innerHTML = daysSince >= 7 ? `
-      <div class="weight-loss-advice" style="margin-top:10px">
+      <div class="weight-loss-advice weight-loss-advice--blink" style="margin-top:10px">
         <div class="weight-loss-title">⚖️ Pensez à vous peser</div>
         <div class="weight-loss-items">
-          <div class="weight-loss-item">Dernière saisie il y a <span>${daysSince} jours</span> (${formatDate(last.date)}) — mettez à jour votre poids pour suivre son évolution</div>
+          <div class="weight-loss-item weight-loss-item--wrap">Dernière saisie il y a <span>${daysSince} jours</span> (${formatDate(last.date)}) — mettez à jour votre poids pour suivre son évolution</div>
         </div>
       </div>` : '';
   }
-}
-
-// Toast au démarrage de l'appli si la dernière pesée date de 7 jours ou plus
-// (une seule fois par jour, pas à chaque rechargement de page)
-function checkWeightReminderToast() {
-  if (!_weightHistory.length) return;
-  const last = _weightHistory[_weightHistory.length - 1];
-  const daysSince = Math.floor((Date.now() - new Date(last.date).getTime()) / 86400000);
-  if (daysSince < 7) return;
-  const today = new Date().toISOString().slice(0, 10);
-  if (localStorage.getItem(WEIGHT_REMINDER_SHOWN_KEY) === today) return;
-  localStorage.setItem(WEIGHT_REMINDER_SHOWN_KEY, today);
-  showToast(`⚖️ Avez-vous pensé à vous peser ? Dernière saisie le ${formatDate(last.date)}.`, 'info', 8000);
 }
 
 // \u2500\u2500\u2500 Calculs \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
@@ -3563,6 +3568,7 @@ function initProfileForm() {
       }
       renderProfile();
       applyGenderedEmojis();
+      updateProfileBadge();
       // Mini feedback visuel
       const btn = form.querySelector('.btn-save-profile');
       const orig = btn.innerHTML;
@@ -4693,7 +4699,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   try { initThemeToggle(); } catch(e) { console.error('initThemeToggle failed:', e); }
   initBgSlideshow(); // async, pas de throw critique
   try { initProfileForm(); } catch(e) { console.error('initProfileForm failed:', e); }
-  try { await loadWeightHistory(); checkWeightReminderToast(); } catch(e) { console.error('loadWeightHistory failed:', e); }
+  try { await loadWeightHistory(); } catch(e) { console.error('loadWeightHistory failed:', e); }
   try { initAvatarUpload(); loadAvatar(); } catch(e) { console.error('initAvatarUpload failed:', e); }
   try { initPpsButtons(); loadPpsList(); } catch(e) { console.error('initPpsButtons failed:', e); }
   try { initBgManagerButton(); } catch(e) { console.error('initBgManagerButton failed:', e); }
