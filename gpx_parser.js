@@ -128,10 +128,12 @@ function computeElevationProfile(points) {
   if (!Array.isArray(points) || points.length < 2) return null;
 
   const bins = [];
+  const cumKm = [0]; // distance cumulee (km) a chaque index de points, pour localiser une cote (startKm/endKm)
   let cursor = 0, cursorDist = 0;
   let binStart = points[0], binDist = 0;
   for (let i = 1; i < points.length; i++) {
     const segDist = haversine(points[i - 1], points[i]);
+    cumKm.push(cumKm[i - 1] + segDist / 1000);
     binDist += segDist;
     if (binDist >= BIN_SIZE_M || i === points.length - 1) {
       if (binDist > 5) { // ignore les tronçons quasi nuls (bruit GPS/altimetrique)
@@ -170,10 +172,15 @@ function computeElevationProfile(points) {
   const maxClimbBin = climbBins.reduce((best, b) => (!best || b.gradePct > best.gradePct) ? b : best, null);
   const maxDescentBin = descentBins.reduce((best, b) => (!best || b.gradePct < best.gradePct) ? b : best, null);
 
+  const altitudes = points.map(p => p.ele);
+  const climbs = groupClimbs(bins, points, cumKm);
+
   return {
     totalDistM: Math.round(totalDistM),
     ascentM: Math.round(ascentM),
     descentM: Math.round(descentM),
+    altMinM: Math.round(Math.min(...altitudes)),
+    altMaxM: Math.round(Math.max(...altitudes)),
     pctFlat: Math.round((sumDist(flatBins) / totalDistM) * 100),
     pctClimb: Math.round((sumDist(climbBins) / totalDistM) * 100),
     pctDescent: Math.round((sumDist(descentBins) / totalDistM) * 100),
@@ -181,12 +188,53 @@ function computeElevationProfile(points) {
     avgDescentGradePct: descentBins.length ? Math.round(wAvgGrade(descentBins) * 10) / 10 : 0,
     maxClimbGradePct: maxClimbBin ? Math.round(maxClimbBin.gradePct * 10) / 10 : 0,
     maxDescentGradePct: maxDescentBin ? Math.round(maxDescentBin.gradePct * 10) / 10 : 0,
+    climbs,
     // Bins conserves (index dans le trace sous-echantillonne, pas le trace
     // brut original) pour la coloration par pente de la carte/du graphique
     // cote client (cf renderGoalProfileModal, campus.js) - recalcules par
     // l'appelant sur le trace DEJA sous-echantillonne pour rester coherents
     // avec les points effectivement affiches.
   };
+}
+
+// Regroupe les bins de pente contigus consideres "en cote" (gradePct >=
+// CLIMB_GRADE_PCT) en montees distinctes, pour la table "cotes detectees"
+// de l'Editeur Parcours (PDF, section 6). Le D+ d'une cote est le delta
+// d'altitude brut entre son premier et son dernier point (pas la somme des
+// micro-bins) pour rester coherent avec le meme principe anti-bruit que
+// thresholdElevationGain ci-dessus ; les cotes sous ELEV_GAIN_THRESHOLD_M
+// sont ecartees (memes seuil que le D+ global, pour ne pas faire apparaitre
+// une "cote" que le calcul de D+ total ne compte meme pas comme reelle).
+function groupClimbs(bins, points, cumKm) {
+  const climbs = [];
+  let run = null;
+  bins.forEach(bin => {
+    if (bin.gradePct >= CLIMB_GRADE_PCT) {
+      if (!run) run = { startIdx: bin.startIdx, endIdx: bin.endIdx, bins: [bin] };
+      else { run.endIdx = bin.endIdx; run.bins.push(bin); }
+    } else if (run) {
+      climbs.push(run);
+      run = null;
+    }
+  });
+  if (run) climbs.push(run);
+
+  return climbs.map(run => {
+    const distM = run.bins.reduce((s, b) => s + b.distM, 0);
+    const gainM = Math.max(0, points[run.endIdx].ele - points[run.startIdx].ele);
+    const avgGradePct = distM > 0 ? run.bins.reduce((s, b) => s + b.gradePct * b.distM, 0) / distM : 0;
+    const maxGradePct = run.bins.reduce((m, b) => Math.max(m, b.gradePct), 0);
+    return {
+      startIdx: run.startIdx,
+      endIdx: run.endIdx,
+      startKm: Math.round(cumKm[run.startIdx] * 10) / 10,
+      endKm: Math.round(cumKm[run.endIdx] * 10) / 10,
+      distM: Math.round(distM),
+      gainM: Math.round(gainM),
+      avgGradePct: Math.round(avgGradePct * 10) / 10,
+      maxGradePct: Math.round(maxGradePct * 10) / 10,
+    };
+  }).filter(c => c.gainM >= ELEV_GAIN_THRESHOLD_M);
 }
 
 // Point d'entree : parse + calcule les stats sur le trace BRUT complet, PUIS

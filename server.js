@@ -2854,6 +2854,40 @@ app.delete('/api/goals/gpx/:planId', requireSession, (req, res) => {
   res.json({ success: true });
 });
 
+// ─── Éditeur Parcours (MVP : import + analyse, pas d'édition/persistance) ──
+// Meme parsing/correction d'altitude que /api/goals/gpx ci-dessus, mais sans
+// stockage disque : la "copie de travail" (PDF Éditeur Parcours, section 2)
+// vit uniquement en mémoire navigateur pour cette première itération - un
+// rechargement de page perd l'import, limitation assumee (pas de chantier de
+// persistance tant que l'édition de tracé elle-même n'existe pas encore).
+app.post('/api/route-editor/import', requireSession, upload.single('gpx'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'Aucun fichier reçu' });
+    if (!/\.gpx$/i.test(req.file.originalname || '') && !/<gpx[\s>]/i.test(req.file.buffer.slice(0, 500).toString('utf8'))) {
+      return res.status(400).json({ error: 'Le fichier doit être un GPX' });
+    }
+    const gpxText = req.file.buffer.toString('utf8');
+    const result = analyzeGpx(gpxText);
+    if (!result) return res.status(400).json({ error: 'GPX illisible ou sans trace exploitable (moins de 2 points).' });
+
+    try {
+      const correctedElevations = await getElevations(result.points);
+      if (correctedElevations) {
+        const correctedPoints = result.points.map((p, i) => ({
+          ...p, ele: correctedElevations[i] != null ? correctedElevations[i] : p.ele,
+        }));
+        const correctedStats = computeElevationProfile(correctedPoints);
+        if (correctedStats) {
+          result.stats = { ...correctedStats, totalDistM: result.stats.totalDistM };
+          result.points = correctedPoints;
+        }
+      }
+    } catch (err) { /* correction IGN indisponible - on garde les altitudes brutes du GPX */ }
+
+    res.json({ filename: req.file.originalname || 'parcours.gpx', points: result.points, stats: result.stats });
+  } catch (err) { handleError(res, err); }
+});
+
 // ─── Export / import des records + courses (changement de PC, reinstall) ──
 app.get('/api/records-export', requireSession, (req, res) => {
   const records_overrides = readScoped(RECORDS_OVERRIDES_FILE, req.session.email, {});

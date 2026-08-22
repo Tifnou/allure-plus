@@ -18,6 +18,7 @@
   <link rel="stylesheet" href="css/style.css?v=1787411213021" />
   <link rel="stylesheet" href="css/plans.css?v=1787132767394" />
   <link rel="stylesheet" href="css/routes.css?v=1787310810731" />
+  <link rel="stylesheet" href="css/route_editor.css?v=1787411213021" />
 </head>
 <body>
 <!-- ✨ SPLASH SCREEN ✨ -->
@@ -131,6 +132,13 @@
           <path d="M9 20l-5.447-2.724A1 1 0 0 1 3 16.382V5.618a1 1 0 0 1 1.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0 0 21 18.382V7.618a1 1 0 0 0-.553-.894L15 4m0 13V4m0 0L9 7"/>
         </svg>
         Itinéraires
+        <span class="nav-badge-beta">Bêta</span>
+      </a>
+      <a class="nav-item" data-page="route-editor" id="nav-route-editor">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/>
+        </svg>
+        Éditeur Parcours
         <span class="nav-badge-beta">Bêta</span>
       </a>
       <a class="nav-item nav-item--admin" data-page="admin" id="nav-admin">
@@ -1251,6 +1259,32 @@
       </div>
     </div>
 
+    <!-- PAGE : ÉDITEUR PARCOURS -->
+    <div class="page" id="page-route-editor">
+      <div class="page-header">
+        <div>
+          <h1 class="page-title">Éditeur Parcours</h1>
+          <div class="page-subtitle">Importez un GPX pour l'analyser : carte, profil altimétrique, côtes détectées</div>
+        </div>
+      </div>
+
+      <div class="routes-beta-banner">
+        <span class="routes-beta-banner-icon">🧪</span>
+        <div>
+          <strong>Première version — analyse seule.</strong>
+          Cette itération permet d'importer et d'analyser un parcours GPX (carte, profil, côtes, export). L'édition
+          du tracé (déplacer un point, répéter une côte, etc.) arrivera dans une prochaine mise à jour.
+        </div>
+      </div>
+
+      <div id="route-editor-import">
+        <input type="file" id="route-editor-file-input" accept=".gpx" style="display:none" />
+        <div id="route-editor-import-status"></div>
+      </div>
+
+      <div id="route-editor-workspace" style="display:none"></div>
+    </div>
+
     <!-- 📌 PAGE : ADMIN 📌 -->
     <div class="page" id="page-admin">
       <div class="page-header">
@@ -1388,6 +1422,7 @@
   <script src="js/health.js?v=1787231562110"></script>
   <script src="js/plans.js?v=1787050930665"></script>
   <script src="js/routes.js?v=1787320000000"></script>
+  <script src="js/route_editor.js?v=1787411213021"></script>
   <script src="js/support.js?v=1786966950464"></script>
   <script src="js/globe.js?v=1787147104923"></script>
   <!-- ... MODAL LOGS ........................... -->

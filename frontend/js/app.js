@@ -281,6 +281,7 @@ function navigateTo(pageId) {
   if (pageId === 'support-admin' && typeof loadSupportAdminPage === 'function') loadSupportAdminPage();
   if (pageId === 'goals')      { if (typeof loadGoalsPage === 'function') loadGoalsPage(); }
   if (pageId === 'routes')     { if (typeof initRoutesPage === 'function') initRoutesPage(); }
+  if (pageId === 'route-editor') { if (typeof initRouteEditorPage === 'function') initRouteEditorPage(); }
   // Fond transparent uniquement sur la page Plans
   document.body.classList.toggle('plans-active', pageId === 'plans');
 }
