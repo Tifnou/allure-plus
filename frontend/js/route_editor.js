@@ -26,6 +26,7 @@ let _routeEditorMap = null;
 let _routeEditorChart = null;
 let _routeEditorLatLngs = null; // [lat,lon] du tracé courant, réutilisé par la sélection A/B
 let _routeEditorSelectionLayer = null; // layerGroup Leaflet (marqueurs A/B + surbrillance)
+let _routeEditorObjective = { targetDplusM: null, targetDistM: null }; // objectif D+/distance (PDF §9)
 
 function initRouteEditorPage() {
   const input = el('route-editor-file-input');
@@ -73,6 +74,7 @@ function routeEditorClose() {
   _routeEditorHistory = [];
   _routeEditorFuture = [];
   _routeEditorSelection = { aIdx: null, bIdx: null };
+  _routeEditorObjective = { targetDplusM: null, targetDistM: null };
   if (_routeEditorMap) { _routeEditorMap.remove(); _routeEditorMap = null; }
   if (_routeEditorChart) { _routeEditorChart.destroy(); _routeEditorChart = null; }
   _routeEditorLatLngs = null;
@@ -96,6 +98,7 @@ async function handleRouteEditorFileSelected(file) {
     _routeEditorHistory = [];
     _routeEditorFuture = [];
     _routeEditorSelection = { aIdx: null, bIdx: null };
+    _routeEditorObjective = { targetDplusM: null, targetDistM: null };
     renderRouteEditorImportStatus();
     renderRouteEditorWorkspace();
   } catch (err) {
@@ -139,6 +142,13 @@ function renderRouteEditorWorkspace() {
     <div class="gpx-profile-legend">
       ${GPX_GRADE_BANDS.map(b => `<span class="gpx-profile-legend-item"><span class="gpx-profile-legend-dot" style="background:${b.color}"></span>${b.label}</span>`).join('')}
     </div>
+    <div class="route-editor-objective-card">
+      <span class="route-editor-objective-title">🎯 Objectif (optionnel)</span>
+      <label>D+ cible <input type="number" id="route-editor-obj-dplus" class="routes-number-input" min="0" step="10" placeholder="m" value="${_routeEditorObjective.targetDplusM ?? ''}" /> m</label>
+      <label>Distance cible <input type="number" id="route-editor-obj-dist" class="routes-number-input" min="0" step="0.5" placeholder="km" value="${_routeEditorObjective.targetDistM ?? ''}" /> km</label>
+      <button type="button" class="route-editor-btn-secondary" id="route-editor-obj-clear">Effacer</button>
+      <span class="route-editor-objective-hint">Sélectionnez ensuite une section (carte, profil ou "🔁 Répéter") : Allure+ calcule combien de fois la parcourir pour s'en approcher.</span>
+    </div>
     <div id="route-editor-hint" class="route-editor-hint">Cliquez sur deux points du tracé (carte ou profil) pour choisir une section à répéter.</div>
     <div id="route-editor-section-panel"></div>
     <div class="route-editor-section-title">Côtes détectées</div>
@@ -166,6 +176,24 @@ function renderRouteEditorWorkspace() {
   ws.querySelectorAll('.route-editor-climb-repeat-btn').forEach(btn => {
     btn.onclick = () => selectClimbForRepeat(parseInt(btn.dataset.climbIdx, 10));
   });
+  const objDplusInput = el('route-editor-obj-dplus');
+  const objDistInput = el('route-editor-obj-dist');
+  const onObjectiveChange = () => {
+    _routeEditorObjective = {
+      targetDplusM: objDplusInput?.value ? parseInt(objDplusInput.value, 10) : null,
+      targetDistM: objDistInput?.value ? parseFloat(objDistInput.value) : null,
+    };
+    renderRouteEditorSectionPanel();
+  };
+  if (objDplusInput) objDplusInput.oninput = onObjectiveChange;
+  if (objDistInput) objDistInput.oninput = onObjectiveChange;
+  const objClearBtn = el('route-editor-obj-clear');
+  if (objClearBtn) objClearBtn.onclick = () => {
+    _routeEditorObjective = { targetDplusM: null, targetDistM: null };
+    if (objDplusInput) objDplusInput.value = '';
+    if (objDistInput) objDistInput.value = '';
+    renderRouteEditorSectionPanel();
+  };
 
   if (_routeEditorMap) { _routeEditorMap.remove(); _routeEditorMap = null; }
   if (_routeEditorChart) { _routeEditorChart.destroy(); _routeEditorChart = null; }
@@ -384,10 +412,79 @@ function renderRouteEditorSectionPanel() {
     if (applyBtn) applyBtn.onclick = applyRouteEditorRepeat;
     const clearBtn = el('route-editor-clear-selection-btn');
     if (clearBtn) clearBtn.onclick = clearRouteEditorSelection;
+    renderRouteEditorObjectiveSuggestion(sel);
   }).catch(err => {
     if (_routeEditorSelection.aIdx !== sel.aIdx || _routeEditorSelection.bIdx !== sel.bIdx) return;
     panel.innerHTML = `<div class="route-editor-section-card">Erreur : ${err.message}</div>`;
   });
+}
+
+// Objectif D+/distance (PDF §9) : calcule combien de fois parcourir la
+// section sélectionnée pour s'approcher de la cible, à partir d'un seul
+// passage supplémentaire mesuré réellement (pas une formule approximative -
+// une section qui n'est pas un aller-retour parfaitement symétrique en
+// pente n'a pas forcément le même D+ à l'aller qu'au retour). Combine D+ ET
+// distance quand les deux sont fixés : comme chaque passage supplémentaire
+// augmente TOUJOURS les deux ensemble, prendre le nombre de passages le
+// plus grand des deux besoins garantit d'atteindre (ou dépasser) les deux
+// cibles - pas une vraie optimisation combinée avec tolérances (§9.3,
+// hors périmètre), mais correct pour l'outil dont on dispose (répétition).
+async function computeRouteEditorObjectiveSuggestion(aIdx, bIdx) {
+  const obj = _routeEditorObjective;
+  if (obj.targetDplusM == null && obj.targetDistM == null) return null;
+  const original = _routeEditorData.stats;
+  const points = _routeEditorData.points;
+
+  const twoPassPoints = buildRepeatedPoints(points, aIdx, bIdx, 2);
+  const twoPassStats = await routeEditorAnalyzePoints(twoPassPoints);
+  const deltaDplusPerPass = twoPassStats.ascentM - original.ascentM;
+  const deltaDistPerPass = twoPassStats.totalDistM - original.totalDistM;
+
+  let neededPasses = 2;
+  if (obj.targetDplusM != null && deltaDplusPerPass > 0) {
+    neededPasses = Math.max(neededPasses, 1 + Math.ceil((obj.targetDplusM - original.ascentM) / deltaDplusPerPass));
+  }
+  if (obj.targetDistM != null && deltaDistPerPass > 0) {
+    neededPasses = Math.max(neededPasses, 1 + Math.ceil((obj.targetDistM * 1000 - original.totalDistM) / deltaDistPerPass));
+  }
+  neededPasses = Math.min(10, Math.max(2, neededPasses));
+
+  const finalStats = neededPasses === 2 ? twoPassStats
+    : await routeEditorAnalyzePoints(buildRepeatedPoints(points, aIdx, bIdx, neededPasses));
+  const reached = (obj.targetDplusM == null || finalStats.ascentM >= obj.targetDplusM - 1)
+    && (obj.targetDistM == null || finalStats.totalDistM >= obj.targetDistM * 1000 - 50);
+
+  return { neededPasses, finalStats, reached, capped: neededPasses >= 10 };
+}
+
+function renderRouteEditorObjectiveSuggestion(sel) {
+  const container = document.getElementById('route-editor-objective-suggestion');
+  if (container) container.remove();
+  const obj = _routeEditorObjective;
+  if (obj.targetDplusM == null && obj.targetDistM == null) return;
+  const panel = el('route-editor-section-panel');
+  if (!panel) return;
+  const box = document.createElement('div');
+  box.id = 'route-editor-objective-suggestion';
+  box.className = 'route-editor-section-card route-editor-objective-suggestion';
+  box.innerHTML = '⏳ Calcul de la suggestion…';
+  panel.appendChild(box);
+  computeRouteEditorObjectiveSuggestion(sel.aIdx, sel.bIdx).then(res => {
+    if (_routeEditorSelection.aIdx !== sel.aIdx || _routeEditorSelection.bIdx !== sel.bIdx) return;
+    if (!document.getElementById('route-editor-objective-suggestion')) return; // panel refermé entre-temps
+    if (!res) { box.remove(); return; }
+    const passesLabel = res.neededPasses === 2 ? '1 passage supplémentaire' : `${res.neededPasses - 1} passages supplémentaires`;
+    const capNote = res.capped && !res.reached
+      ? `<div class="route-editor-objective-capnote">Objectif non atteint même au maximum de 10 montées — essayez une autre section ou une section plus haute.</div>`
+      : '';
+    box.innerHTML = `
+      <div>🎯 ${passesLabel} (${res.neededPasses} montées au total) ${res.reached ? "permettront d'atteindre l'objectif" : "rapprocheront de l'objectif"} :
+      nouveau parcours estimé <b>${(res.finalStats.totalDistM / 1000).toFixed(1)} km</b> / <b>+${res.finalStats.ascentM} m D+</b>.</div>
+      ${capNote}
+      <button type="button" class="btn-plans-restart" id="route-editor-apply-objective-btn">Appliquer ${res.neededPasses} montées</button>`;
+    const btn = document.getElementById('route-editor-apply-objective-btn');
+    if (btn) btn.onclick = () => applyRouteEditorRepeat(res.neededPasses);
+  }).catch(() => { box.remove(); });
 }
 
 // Construit A..B, N fois, avec les allers-retours B->A intermédiaires -
@@ -407,12 +504,19 @@ function buildRepeatedPoints(points, aIdx, bIdx, totalPasses) {
   return [...before, ...middle, ...after];
 }
 
-async function applyRouteEditorRepeat() {
+// explicitCount : passé par le bouton "Appliquer X montées (objectif)" pour
+// contourner le champ manuel - sinon on lit route-editor-repeat-count.
+async function applyRouteEditorRepeat(explicitCount) {
   const sel = _routeEditorSelection;
   if (sel.aIdx == null || sel.bIdx == null) return;
-  const countInput = el('route-editor-repeat-count');
-  const count = Math.min(10, Math.max(2, parseInt(countInput?.value, 10) || 2));
-  const applyBtn = el('route-editor-apply-repeat-btn');
+  let count;
+  if (Number.isInteger(explicitCount)) {
+    count = Math.min(10, Math.max(2, explicitCount));
+  } else {
+    const countInput = el('route-editor-repeat-count');
+    count = Math.min(10, Math.max(2, parseInt(countInput?.value, 10) || 2));
+  }
+  const applyBtn = el('route-editor-apply-repeat-btn') || el('route-editor-apply-objective-btn');
   if (applyBtn) { applyBtn.disabled = true; applyBtn.textContent = '⏳ Application…'; }
   try {
     const newPoints = buildRepeatedPoints(_routeEditorData.points, sel.aIdx, sel.bIdx, count);
