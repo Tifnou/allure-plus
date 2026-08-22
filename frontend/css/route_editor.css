@@ -60,7 +60,17 @@
   box-shadow: var(--shadow-sm);
   padding: 10px 12px 4px;
 }
-#route-editor-workspace .gpx-profile-stats { margin-bottom: 4px; }
+/* Même souci de fond transparent que .gpx-profile-elev-container ci-dessus
+   (retour utilisateur, capture d'écran) : le bandeau de stats aussi est
+   affiché à même la page, sans fond propre hérité d'une modale. */
+#route-editor-workspace .gpx-profile-stats {
+  margin-bottom: 14px;
+  background: var(--bg-white);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+  padding: 12px 16px;
+}
 
 .route-editor-section-title {
   font-family: var(--font);
