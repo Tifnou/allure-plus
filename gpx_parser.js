@@ -119,17 +119,15 @@ function thresholdElevationGain(elevations, threshold) {
   return { ascent: Math.round(ascent), descent: Math.round(descent) };
 }
 
-// Regroupe le trace en tronçons de ~BIN_SIZE_M, calcule la pente de chacun,
-// puis agrege en statistiques globales (D+/D-, % plat/montee/descente,
-// pente moyenne en montee, pente la plus marquee) - meme principe que
-// computeGradeSegments cote client (session-analysis.js), adapte a un GPX de
-// parcours (pas d'activite reelle, donc pas de FC).
-function computeElevationProfile(points) {
-  if (!Array.isArray(points) || points.length < 2) return null;
-
+// Regroupe le trace en tronçons de ~BIN_SIZE_M et calcule la pente de
+// chacun - base commune a computeElevationProfile (stats + cotes) et
+// computeSections (decoupage complet du parcours pour la strategie de
+// course, cf strategy.js) : un seul endroit calcule les bins, pour ne
+// jamais laisser deriver deux implementations du meme decoupage.
+function computeBins(points) {
   const bins = [];
-  const cumKm = [0]; // distance cumulee (km) a chaque index de points, pour localiser une cote (startKm/endKm)
-  let cursor = 0, cursorDist = 0;
+  const cumKm = [0]; // distance cumulee (km) a chaque index de points, pour localiser une cote/section (startKm/endKm)
+  let cursor = 0;
   let binStart = points[0], binDist = 0;
   for (let i = 1; i < points.length; i++) {
     const segDist = haversine(points[i - 1], points[i]);
@@ -143,6 +141,18 @@ function computeElevationProfile(points) {
       binStart = points[i]; binDist = 0; cursor = i;
     }
   }
+  return { bins, cumKm };
+}
+
+// Regroupe le trace en tronçons de ~BIN_SIZE_M, calcule la pente de chacun,
+// puis agrege en statistiques globales (D+/D-, % plat/montee/descente,
+// pente moyenne en montee, pente la plus marquee) - meme principe que
+// computeGradeSegments cote client (session-analysis.js), adapte a un GPX de
+// parcours (pas d'activite reelle, donc pas de FC).
+function computeElevationProfile(points) {
+  if (!Array.isArray(points) || points.length < 2) return null;
+
+  const { bins, cumKm } = computeBins(points);
   if (!bins.length) return null;
 
   const totalDistM = bins.reduce((s, b) => s + b.distM, 0);
@@ -237,6 +247,85 @@ function groupClimbs(bins, points, cumKm) {
   }).filter(c => c.gainM >= ELEV_GAIN_THRESHOLD_M);
 }
 
+// Distance minimale (m) d'une section avant d'etre fusionnee dans la
+// section voisine - meme esprit anti-bruit que le reste du fichier : sur un
+// profil GPS/altimetrique agite, un decoupage strict par bin de 50m produit
+// une multitude de micro-sections plat/montee/descente qui alternent en
+// quelques dizaines de metres, illisible dans un tableau de strategie de
+// course (PDF section 13).
+const MIN_SECTION_DIST_M = 150;
+
+function sectionTypeForGrade(gradePct) {
+  if (gradePct >= CLIMB_GRADE_PCT) return 'climb';
+  if (gradePct <= DESCENT_GRADE_PCT) return 'descent';
+  return 'flat';
+}
+
+// Decoupe le parcours ENTIER (pas seulement les cotes, contrairement a
+// groupClimbs) en sections typees plat/montee/descente, pour le
+// calculateur de strategie de course (PDF section 13) : chaque section y
+// recoit une allure/temps conseille via le profil de pente personnel de
+// l'utilisateur (pace_profile.js). Les sections trop courtes (<
+// MIN_SECTION_DIST_M) sont fusionnees dans la section precedente plutot que
+// affichees a part, pour eviter un tableau a rallonge sur un trace bruite.
+function computeSections(points) {
+  if (!Array.isArray(points) || points.length < 2) return [];
+  const { bins, cumKm } = computeBins(points);
+  if (!bins.length) return [];
+
+  const raw = [];
+  let run = null;
+  bins.forEach(bin => {
+    const type = sectionTypeForGrade(bin.gradePct);
+    if (run && run.type === type) { run.endIdx = bin.endIdx; run.bins.push(bin); }
+    else { if (run) raw.push(run); run = { type, startIdx: bin.startIdx, endIdx: bin.endIdx, bins: [bin] }; }
+  });
+  if (run) raw.push(run);
+
+  // Fusionne les sections courtes dans la precedente (ou, en tete de trace,
+  // dans la suivante) - garde le type de la section qui absorbe, pas une
+  // moyenne des deux types.
+  const merged = [];
+  raw.forEach(section => {
+    const distM = section.bins.reduce((s, b) => s + b.distM, 0);
+    if (distM < MIN_SECTION_DIST_M && merged.length) {
+      const prev = merged[merged.length - 1];
+      prev.endIdx = section.endIdx;
+      prev.bins.push(...section.bins);
+    } else {
+      merged.push(section);
+    }
+  });
+  if (merged.length > 1) {
+    const first = merged[0];
+    const firstDistM = first.bins.reduce((s, b) => s + b.distM, 0);
+    if (firstDistM < MIN_SECTION_DIST_M) {
+      const next = merged[1];
+      next.startIdx = first.startIdx;
+      next.bins = [...first.bins, ...next.bins];
+      merged.shift();
+    }
+  }
+
+  return merged.map(section => {
+    const distM = section.bins.reduce((s, b) => s + b.distM, 0);
+    const gainM = Math.max(0, points[section.endIdx].ele - points[section.startIdx].ele);
+    const lossM = Math.max(0, points[section.startIdx].ele - points[section.endIdx].ele);
+    const avgGradePct = distM > 0 ? section.bins.reduce((s, b) => s + b.gradePct * b.distM, 0) / distM : 0;
+    return {
+      type: section.type,
+      startIdx: section.startIdx,
+      endIdx: section.endIdx,
+      startKm: Math.round(cumKm[section.startIdx] * 10) / 10,
+      endKm: Math.round(cumKm[section.endIdx] * 10) / 10,
+      distM: Math.round(distM),
+      gainM: Math.round(gainM),
+      lossM: Math.round(lossM),
+      avgGradePct: Math.round(avgGradePct * 10) / 10,
+    };
+  });
+}
+
 // Point d'entree : parse + calcule les stats sur le trace BRUT complet, PUIS
 // sous-echantillonne pour le stockage/affichage. Bug reel constate (retour
 // utilisateur : distance/D+ differents de l'import du meme GPX dans Garmin) :
@@ -256,4 +345,4 @@ function analyzeGpx(gpxText) {
   return { points, stats };
 }
 
-module.exports = { parseGpxTrack, computeElevationProfile, analyzeGpx, downsample, haversine, thresholdElevationGain, CLIMB_GRADE_PCT, DESCENT_GRADE_PCT, ELEV_GAIN_THRESHOLD_M };
+module.exports = { parseGpxTrack, computeElevationProfile, computeSections, analyzeGpx, downsample, haversine, thresholdElevationGain, CLIMB_GRADE_PCT, DESCENT_GRADE_PCT, ELEV_GAIN_THRESHOLD_M };

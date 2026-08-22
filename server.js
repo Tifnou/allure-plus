@@ -59,8 +59,8 @@ const {
 const { getZoneRange, annotatePaceZones, ZONE_LABELS } = require('./zones');
 const { isBrouterConfigured, isTilePresent, getTileRemoteSize, downloadTile } = require('./brouter_manager');
 const { geocode, getCommunesForPostcode, getCommunesForDepartment, searchStreet, getTownHall, generateRouteOptions, buildGpxXml, trailLevelMidKmh, TRAIL_STYLE_PARAMS } = require('./route_generator');
-const { getPaceProfile, refreshPaceProfile, migratePaceProfileToScoped, efFastPaceMinPerKm, applyEfPaceAnchor } = require('./pace_profile');
-const { analyzeGpx, computeElevationProfile } = require('./gpx_parser');
+const { getPaceProfile, refreshPaceProfile, migratePaceProfileToScoped, efFastPaceMinPerKm, applyEfPaceAnchor, bucketForGrade } = require('./pace_profile');
+const { analyzeGpx, computeElevationProfile, computeSections } = require('./gpx_parser');
 const { getElevations } = require('./geoportail_client');
 const { scheduleSync, runFullReconciliation, getSyncStatus, syncBinaryFile, deleteBinaryFile, syncAvatarFile, SYNC_TYPES } = require('./sync');
 const syncClient = require('./sync_client');
@@ -2902,6 +2902,81 @@ app.post('/api/route-editor/analyze', requireSession, (req, res) => {
     const stats = computeElevationProfile(points);
     if (!stats) return res.status(400).json({ error: 'Analyse impossible (tracé trop court)' });
     res.json({ stats });
+  } catch (err) { handleError(res, err); }
+});
+
+// Calculateur de stratégie de course (PDF Éditeur Parcours, section 13-14) :
+// répartit un objectif de temps (optionnel) section par section selon le
+// relief réel du tracé, plutôt qu'une allure unique. Réutilise tel quel le
+// profil d'allure personnel par tranche de pente déjà calibré sur les
+// sorties Garmin de l'utilisateur (pace_profile.js, même bloc que
+// /api/routes/generate ci-dessus) - aucun nouveau moteur de prédiction.
+app.post('/api/route-editor/strategy', requireSession, (req, res) => {
+  try {
+    const { points, targetTimeMin } = req.body || {};
+    if (!Array.isArray(points) || points.length < 2) {
+      return res.status(400).json({ error: 'Points de tracé manquants' });
+    }
+    const sections = computeSections(points);
+    if (!sections.length) return res.status(400).json({ error: 'Analyse impossible (tracé trop court)' });
+
+    const paceProfile = getPaceProfile(req.session.email);
+    const vo2maxSnapshots = getHealthSnapshots('vo2max', null, req.session.email);
+    const latestVo2max = vo2maxSnapshots.length ? vo2maxSnapshots[vo2maxSnapshots.length - 1].value?.vo2max : null;
+    const efPace = efFastPaceMinPerKm(latestVo2max);
+    const paceMinPerKm = applyEfPaceAnchor(paceProfile.paceMinPerKm, efPace);
+
+    // Seuil "marche active" (PDF §13.1) - au-dela, l'etiquette bascule mais
+    // le temps continue de venir du bucket "steep" du profil personnel (deja
+    // representatif d'un melange course/marche sur ce type de pente pour cet
+    // utilisateur), pas une vitesse de marche generique inventee.
+    const MARCHE_ACTIVE_GRADE_PCT = 15;
+    const withPace = sections.map(s => {
+      const bucket = bucketForGrade(s.avgGradePct / 100);
+      const naturalTimeMin = (s.distM / 1000) * paceMinPerKm[bucket];
+      return { ...s, naturalTimeMin, marcheActive: s.type === 'climb' && s.avgGradePct >= MARCHE_ACTIVE_GRADE_PCT };
+    });
+
+    const naturalTotalMin = withPace.reduce((sum, s) => sum + s.naturalTimeMin, 0);
+    const hasTarget = typeof targetTimeMin === 'number' && targetTimeMin > 0;
+    // Facteur d'echelle unique applique a chaque section : conserve les
+    // ecarts relatifs entre sections (une cote reste structurellement plus
+    // lente qu'un plat) tout en faisant coincider le total avec l'objectif -
+    // principe illustre par l'exemple du PDF §13 (allure brute != strategie).
+    const scale = hasTarget && naturalTotalMin > 0 ? targetTimeMin / naturalTotalMin : 1;
+
+    let cumMin = 0;
+    const finalSections = withPace.map(s => {
+      const timeMin = s.naturalTimeMin * scale;
+      cumMin += timeMin;
+      const distKm = s.distM / 1000;
+      return {
+        type: s.type,
+        startKm: s.startKm,
+        endKm: s.endKm,
+        distM: s.distM,
+        gainM: s.gainM,
+        lossM: s.lossM,
+        avgGradePct: s.avgGradePct,
+        marcheActive: s.marcheActive,
+        timeMin: Math.round(timeMin * 10) / 10,
+        paceMinPerKm: distKm > 0 ? Math.round((timeMin / distKm) * 100) / 100 : 0,
+        cumulativeTimeMin: Math.round(cumMin * 10) / 10,
+      };
+    });
+
+    // Cohérence de l'objectif (PDF §13.3) - seuils simples et assumés
+    // (ajustables si retour utilisateur), pas une classification savante.
+    const coherence = hasTarget ? (scale < 0.85 ? 'ambitieux' : (scale > 1.15 ? 'prudent' : 'realiste')) : null;
+
+    res.json({
+      sections: finalSections,
+      naturalTotalMin: Math.round(naturalTotalMin * 10) / 10,
+      targetTimeMin: hasTarget ? targetTimeMin : null,
+      scale: Math.round(scale * 1000) / 1000,
+      coherence,
+      paceProfileIsGeneric: paceProfile.isGeneric,
+    });
   } catch (err) { handleError(res, err); }
 });
 

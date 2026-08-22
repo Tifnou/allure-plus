@@ -158,6 +158,13 @@ function renderRouteEditorWorkspace() {
           <tbody>${climbsRows}</tbody>
         </table>`
       : `<div class="route-editor-climbs-empty">Aucune côte significative détectée sur ce parcours.</div>`}
+    <div class="route-editor-section-title">Stratégie de course</div>
+    <div class="route-editor-strategy-card">
+      <label>Objectif de temps (optionnel) <input type="text" id="route-editor-strategy-target" class="routes-text-input" placeholder="hh:mm (ex: 3:30)" style="width:100px" /></label>
+      <button type="button" class="btn-plans-restart" id="route-editor-strategy-btn">Calculer la stratégie</button>
+      <span class="route-editor-objective-hint">Répartit l'effort section par section selon votre profil d'allure personnel (calibré sur vos sorties Garmin), avec marche active sur les pentes très fortes — pas une allure unique partout.</span>
+    </div>
+    <div id="route-editor-strategy-result"></div>
     <div class="route-editor-actions">
       <button type="button" class="route-editor-btn-secondary" id="route-editor-undo-btn" ${_routeEditorHistory.length ? '' : 'disabled'}>↶ Annuler</button>
       <button type="button" class="route-editor-btn-secondary" id="route-editor-redo-btn" ${_routeEditorFuture.length ? '' : 'disabled'}>↷ Rétablir</button>
@@ -167,6 +174,8 @@ function renderRouteEditorWorkspace() {
 
   const exportBtn = el('route-editor-export-btn');
   if (exportBtn) exportBtn.onclick = routeEditorExportGpx;
+  const strategyBtn = el('route-editor-strategy-btn');
+  if (strategyBtn) strategyBtn.onclick = computeRouteEditorStrategy;
   const undoBtn = el('route-editor-undo-btn');
   if (undoBtn) undoBtn.onclick = routeEditorUndo;
   const redoBtn = el('route-editor-redo-btn');
@@ -581,4 +590,75 @@ async function routeEditorExportGpx() {
   } catch (err) {
     showToast('Erreur : ' + err.message, 'error');
   }
+}
+
+// Accepte "3:30" (h:mm), "3h30" ou un nombre brut de minutes ("90") - le
+// PDF donne des exemples en "1 h 30", plus naturel a saisir que des minutes
+// pures pour un objectif de course.
+function parseRouteEditorTargetTime(raw) {
+  const s = (raw || '').trim();
+  if (!s) return null;
+  const hm = s.match(/^(\d{1,2})[:h](\d{1,2})$/);
+  if (hm) return parseInt(hm[1], 10) * 60 + parseInt(hm[2], 10);
+  const n = parseFloat(s.replace(',', '.'));
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+const STRATEGY_TYPE_LABELS = { climb: 'Montée', descent: 'Descente', flat: 'Plat' };
+const STRATEGY_COHERENCE = {
+  ambitieux: { label: 'Objectif très ambitieux', className: 'route-editor-coherence--ambitieux' },
+  realiste: { label: 'Objectif réaliste', className: 'route-editor-coherence--realiste' },
+  prudent: { label: 'Objectif prudent', className: 'route-editor-coherence--prudent' },
+};
+
+async function computeRouteEditorStrategy() {
+  if (!_routeEditorData) return;
+  const btn = el('route-editor-strategy-btn');
+  const targetMin = parseRouteEditorTargetTime(el('route-editor-strategy-target')?.value);
+  const resultBox = el('route-editor-strategy-result');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Calcul…'; }
+  try {
+    const res = await fetch(`${API}/api/route-editor/strategy`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ points: _routeEditorData.points, targetTimeMin: targetMin }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Calcul impossible');
+    renderRouteEditorStrategyResult(data);
+  } catch (err) {
+    showToast('Erreur : ' + err.message, 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Calculer la stratégie'; }
+  }
+}
+
+function renderRouteEditorStrategyResult(data) {
+  const box = el('route-editor-strategy-result');
+  if (!box) return;
+  const coherence = data.coherence ? STRATEGY_COHERENCE[data.coherence] : null;
+  const rows = data.sections.map(s => `
+    <tr>
+      <td>${STRATEGY_TYPE_LABELS[s.type] || s.type}${s.marcheActive ? ' <span class="route-editor-marche-active">🚶 marche active</span>' : ''}</td>
+      <td>KM ${s.startKm.toFixed(1)} → ${s.endKm.toFixed(1)}</td>
+      <td>${(s.distM / 1000).toFixed(2)} km</td>
+      <td>${s.type === 'flat' ? '—' : (s.avgGradePct > 0 ? '+' : '') + s.avgGradePct.toFixed(1) + ' %'}</td>
+      <td>${s.marcheActive ? (s.distM > 0 ? ((s.distM / 1000) / (s.timeMin / 60)).toFixed(1) + ' km/h' : '—') : formatPace(s.paceMinPerKm * 60)}</td>
+      <td>${formatDuration(s.timeMin * 60)}</td>
+      <td>${formatDuration(s.cumulativeTimeMin * 60)}</td>
+    </tr>`).join('');
+
+  box.innerHTML = `
+    ${coherence ? `<div class="route-editor-coherence-badge ${coherence.className}">${coherence.label}</div>` : ''}
+    <div class="route-editor-strategy-summary">
+      Temps ${data.targetTimeMin ? 'objectif' : 'naturel estimé'} : <b>${formatDuration((data.targetTimeMin || data.naturalTotalMin) * 60)}</b>
+      ${data.targetTimeMin ? ` (temps naturel sans objectif : ${formatDuration(data.naturalTotalMin * 60)})` : ''}
+      ${data.paceProfileIsGeneric ? '<div class="route-editor-objective-hint">⚠️ Profil d\'allure générique (pas encore assez de sorties Garmin analysées) — les temps sont indicatifs.</div>' : ''}
+    </div>
+    <div class="route-editor-strategy-table-wrap">
+      <table class="route-editor-climbs-table route-editor-strategy-table">
+        <thead><tr><th>Section</th><th>Position</th><th>Distance</th><th>Pente</th><th>Allure conseillée</th><th>Temps</th><th>Passage cumulé</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
 }
