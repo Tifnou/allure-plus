@@ -27,6 +27,9 @@ let _routeEditorChart = null;
 let _routeEditorLatLngs = null; // [lat,lon] du tracé courant, réutilisé par la sélection A/B
 let _routeEditorSelectionLayer = null; // layerGroup Leaflet (marqueurs A/B + surbrillance)
 let _routeEditorObjective = { targetDplusM: null, targetDistM: null }; // objectif D+/distance (PDF §9)
+let _routeEditorMode = 'select'; // 'select' | 'move-point' | 'add-waypoint' - PDF §7/§25
+let _routeEditorMovePickIdx = null; // index du point choisi en mode 'move-point', en attente de sa nouvelle position
+let _routeEditorPreviewLayer = null; // layerGroup Leaflet (ancien tracé pointillé vs nouveau) pendant une prévisualisation de recalcul
 
 function initRouteEditorPage() {
   const input = el('route-editor-file-input');
@@ -79,6 +82,9 @@ function routeEditorClose() {
   if (_routeEditorChart) { _routeEditorChart.destroy(); _routeEditorChart = null; }
   _routeEditorLatLngs = null;
   _routeEditorSelectionLayer = null;
+  _routeEditorPreviewLayer = null;
+  _routeEditorMode = 'select';
+  _routeEditorMovePickIdx = null;
   const ws = el('route-editor-workspace');
   if (ws) { ws.style.display = 'none'; ws.innerHTML = ''; }
   renderRouteEditorImportStatus();
@@ -138,10 +144,17 @@ function renderRouteEditorWorkspace() {
       <div class="gpx-profile-stat"><b>${climbs.length}</b> côte(s) détectée(s)</div>
     </div>
     <div class="gpx-profile-elev-container"><canvas id="route-editor-elev-chart"></canvas></div>
+    <div class="route-editor-mode-toolbar routes-toggle">
+      <button type="button" class="routes-toggle-btn route-editor-mode-btn ${_routeEditorMode === 'select' ? 'active' : ''}" data-mode="select">🖱️ Sélectionner A→B</button>
+      <button type="button" class="routes-toggle-btn route-editor-mode-btn ${_routeEditorMode === 'move-point' ? 'active' : ''}" data-mode="move-point">✏️ Déplacer un point</button>
+      <button type="button" class="routes-toggle-btn route-editor-mode-btn ${_routeEditorMode === 'add-waypoint' ? 'active' : ''}" data-mode="add-waypoint">📍 Ajouter un point de passage</button>
+    </div>
     <div class="gpx-profile-map" id="route-editor-map"></div>
     <div class="gpx-profile-legend">
       ${GPX_GRADE_BANDS.map(b => `<span class="gpx-profile-legend-item"><span class="gpx-profile-legend-dot" style="background:${b.color}"></span>${b.label}</span>`).join('')}
     </div>
+    <div id="route-editor-mode-hint" class="route-editor-hint"></div>
+    <div id="route-editor-reroute-preview"></div>
     <div class="route-editor-objective-card">
       <span class="route-editor-objective-title">🎯 Objectif (optionnel)</span>
       <label>D+ cible <input type="number" id="route-editor-obj-dplus" class="routes-number-input" min="0" step="10" placeholder="m" value="${_routeEditorObjective.targetDplusM ?? ''}" /> m</label>
@@ -186,6 +199,10 @@ function renderRouteEditorWorkspace() {
   ws.querySelectorAll('.route-editor-climb-repeat-btn').forEach(btn => {
     btn.onclick = () => selectClimbForRepeat(parseInt(btn.dataset.climbIdx, 10));
   });
+  ws.querySelectorAll('.route-editor-mode-btn').forEach(btn => {
+    btn.onclick = () => setRouteEditorMode(btn.dataset.mode);
+  });
+  renderRouteEditorModeHint();
   const objDplusInput = el('route-editor-obj-dplus');
   const objDistInput = el('route-editor-obj-dist');
   const onObjectiveChange = () => {
@@ -209,6 +226,15 @@ function renderRouteEditorWorkspace() {
 
   if (_routeEditorMap) { _routeEditorMap.remove(); _routeEditorMap = null; }
   if (_routeEditorChart) { _routeEditorChart.destroy(); _routeEditorChart = null; }
+  // La carte/les calques qui viennent d'être détruits emportent avec eux
+  // toute référence de calque encore tenue - repartir d'un mode d'édition
+  // propre plutôt que de laisser un point "en attente de déplacement"
+  // survivre à un tracé qui vient de changer (indices potentiellement plus
+  // valides après une répétition/un recalcul).
+  _routeEditorSelectionLayer = null;
+  _routeEditorPreviewLayer = null;
+  _routeEditorMode = 'select';
+  _routeEditorMovePickIdx = null;
   // Appel synchrone (pas de setTimeout) : ws.style.display a deja ete
   // remis a '' juste au-dessus et les conteneurs viennent d'etre crees par
   // le innerHTML ci-dessus, donc leurs dimensions sont deja mesurables.
@@ -248,7 +274,7 @@ function renderRouteEditorVisuals() {
     L.marker(latLngs[0]).addTo(map).bindTooltip('Départ');
     L.marker(latLngs[latLngs.length - 1]).addTo(map).bindTooltip('Arrivée');
     map.fitBounds(L.latLngBounds(latLngs), { padding: [12, 12] });
-    map.on('click', e => onRouteEditorPointClick(findNearestRouteEditorPointIndex(e.latlng, points)));
+    map.on('click', e => onRouteEditorMapClick(e.latlng, points));
     _routeEditorMap = map;
     renderRouteEditorSelectionOverlay();
   }
@@ -333,6 +359,204 @@ function renderRouteEditorSelectionOverlay() {
   }
   group.addTo(_routeEditorMap);
   _routeEditorSelectionLayer = group;
+}
+
+// Change de mode d'interaction carte/profil (PDF §7/§25) - "select" pose
+// A/B pour répétition/objectif/recalcul de section (comportement d'origine,
+// inchangé) ; "move-point"/"add-waypoint" branchent le clic carte vers
+// onRouteEditorMapClick ci-dessous. Change de mode = repartir de zéro
+// (efface toute sélection/point en attente pour éviter un état incohérent
+// entre deux modes différents).
+function setRouteEditorMode(mode) {
+  if (mode === _routeEditorMode) return;
+  _routeEditorMode = mode;
+  _routeEditorMovePickIdx = null;
+  clearRouteEditorReroutePreview();
+  document.querySelectorAll('.route-editor-mode-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.mode === mode));
+  renderRouteEditorModeHint();
+}
+
+function renderRouteEditorModeHint() {
+  const hint = el('route-editor-mode-hint');
+  if (!hint) return;
+  if (_routeEditorMode === 'move-point') {
+    hint.textContent = _routeEditorMovePickIdx == null
+      ? 'Cliquez sur le point du tracé à déplacer.'
+      : 'Cliquez sur la carte à l\'endroit où déplacer ce point.';
+  } else if (_routeEditorMode === 'add-waypoint') {
+    hint.textContent = _routeEditorSelection.aIdx == null || _routeEditorSelection.bIdx == null
+      ? 'Sélectionnez d\'abord une section A→B (mode "Sélectionner A→B"), puis revenez ici.'
+      : 'Cliquez sur la carte à l\'endroit par où le tracé doit obligatoirement passer.';
+  } else {
+    hint.textContent = '';
+  }
+}
+
+// Dispatcher unique pour le clic carte, selon le mode actif.
+function onRouteEditorMapClick(latlng, points) {
+  if (_routeEditorMode === 'move-point') { onRouteEditorMovePointClick(latlng, points); return; }
+  if (_routeEditorMode === 'add-waypoint') { onRouteEditorAddWaypointClick(latlng); return; }
+  onRouteEditorPointClick(findNearestRouteEditorPointIndex(latlng, points));
+}
+
+// 1er clic (mode "move-point") = point le plus proche à déplacer (jamais le
+// premier/dernier point du tracé, qui n'a pas de voisin des deux côtés) ;
+// 2e clic = position CIBLE brute (pas de snapping - contrairement à la
+// sélection A/B, ici l'utilisateur choisit un emplacement libre sur la
+// carte) → recalcule uniquement la liaison autour de ce point (PDF §7.1 :
+// A→B→C devient A→nouveau→C).
+function onRouteEditorMovePointClick(latlng, points) {
+  if (_routeEditorMovePickIdx == null) {
+    const idx = findNearestRouteEditorPointIndex(latlng, points);
+    if (idx <= 0 || idx >= points.length - 1) {
+      showToast('Le premier et le dernier point du tracé ne peuvent pas être déplacés.', 'error');
+      return;
+    }
+    _routeEditorMovePickIdx = idx;
+    renderRouteEditorModeHint();
+    if (_routeEditorLatLngs) {
+      if (_routeEditorSelectionLayer) _routeEditorMap.removeLayer(_routeEditorSelectionLayer);
+      _routeEditorSelectionLayer = L.circleMarker(_routeEditorLatLngs[idx], { radius: 8, color: '#fff', weight: 2, fillColor: '#f59e0b', fillOpacity: 1 }).addTo(_routeEditorMap);
+    }
+    return;
+  }
+  const idx = _routeEditorMovePickIdx;
+  _routeEditorMovePickIdx = null;
+  const before = points[idx - 1], after = points[idx + 1];
+  routeEditorPreviewReroute({
+    startIdx: idx - 1,
+    endIdx: idx + 1,
+    waypoints: [{ lat: before.lat, lon: before.lon }, { lat: latlng.lat, lon: latlng.lng }, { lat: after.lat, lon: after.lon }],
+  });
+}
+
+// Nécessite une sélection A→B déjà posée (mode "select") : le clic ajoute
+// un point de passage OBLIGATOIRE entre A et B (PDF §7.2/§7.3 - "ajouter un
+// point de passage" et "forcer un passage" sont la même opération, un point
+// intermédiaire imposé au recalcul).
+function onRouteEditorAddWaypointClick(latlng) {
+  const sel = _routeEditorSelection;
+  if (sel.aIdx == null || sel.bIdx == null) {
+    showToast('Sélectionnez d\'abord une section A→B (mode "Sélectionner A→B").', 'error');
+    return;
+  }
+  const points = _routeEditorData.points;
+  const a = points[sel.aIdx], b = points[sel.bIdx];
+  routeEditorPreviewReroute({
+    startIdx: sel.aIdx,
+    endIdx: sel.bIdx,
+    waypoints: [{ lat: a.lat, lon: a.lon }, { lat: latlng.lat, lon: latlng.lng }, { lat: b.lat, lon: b.lon }],
+  });
+}
+
+// Vérifie que la tuile OSM couvrant ce point est présente localement, sinon
+// propose le téléchargement (taille réelle affichée) avant de poursuivre -
+// adapté de routesEnsureTileAvailable (routes.js:462-488), même séquence
+// d'appels (/api/routes/tile-check puis /api/routes/tile-download, déjà
+// génériques et réutilisées telles quelles). Un GPX importé dans l'Éditeur
+// Parcours peut venir de n'importe où, pas forcément une région déjà
+// couverte pour le générateur d'itinéraires.
+async function routeEditorEnsureTileAvailable(point) {
+  const res = await fetch(`${API}/api/routes/tile-check?lat=${point.lat}&lon=${point.lon}`);
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Vérification des données cartographiques impossible');
+  if (data.present) return true;
+
+  const sizeLabel = data.sizeBytes ? `${Math.round(data.sizeBytes / 1024 / 1024)} Mo` : 'taille inconnue';
+  const ok = await showConfirmModal({
+    title: 'Données cartographiques manquantes',
+    message: `Cette zone (tuile ${data.tileName}) n'est pas encore téléchargée sur cette machine (~${sizeLabel}). Télécharger maintenant ? Cela peut prendre plusieurs minutes.`,
+    confirmLabel: 'Télécharger', cancelLabel: 'Annuler', icon: '🗺️',
+  });
+  if (!ok) return false;
+
+  const dlRes = await fetch(`${API}/api/routes/tile-download`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ lat: point.lat, lon: point.lon }),
+  });
+  const dlData = await dlRes.json();
+  if (!dlRes.ok) throw new Error(dlData.error || 'Téléchargement des données cartographiques échoué');
+  showToast('Données cartographiques téléchargées', 'success');
+  return true;
+}
+
+function clearRouteEditorReroutePreview() {
+  const box = el('route-editor-reroute-preview');
+  if (box) box.innerHTML = '';
+  if (_routeEditorPreviewLayer && _routeEditorMap) { _routeEditorMap.removeLayer(_routeEditorPreviewLayer); _routeEditorPreviewLayer = null; }
+}
+
+// Prévisualise un recalcul (déplacer un point / ajouter un point de passage
+// / recalculer une section) AVANT de l'appliquer (PDF §25.1 : toute
+// proposition de recalcul doit être prévisualisée). {startIdx, endIdx}
+// bornent la portion remplacée dans le tracé courant ; {waypoints}
+// optionnel (défaut [points[startIdx], points[endIdx]] côté serveur).
+async function routeEditorPreviewReroute({ startIdx, endIdx, waypoints, terrain = 'trail', trailStyle = 'mixte' }) {
+  const box = el('route-editor-reroute-preview');
+  if (!box || !_routeEditorData) return;
+  box.innerHTML = `<div class="route-editor-section-card">⏳ Vérification des données cartographiques…</div>`;
+  const firstWaypoint = waypoints ? waypoints[0] : _routeEditorData.points[startIdx];
+  try {
+    const tileOk = await routeEditorEnsureTileAvailable(firstWaypoint);
+    if (!tileOk) { box.innerHTML = ''; return; }
+
+    box.innerHTML = `<div class="route-editor-section-card">⏳ Calcul du nouvel itinéraire…</div>`;
+    const points = _routeEditorData.points;
+    const rerouteRes = await fetch(`${API}/api/route-editor/reroute`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ points, startIdx, endIdx, waypoints, terrain, trailStyle }),
+    });
+    const rerouteData = await rerouteRes.json();
+    if (!rerouteRes.ok) throw new Error(rerouteData.error || 'Recalcul impossible');
+
+    const beforeStats = _routeEditorData.stats; // déjà connu, pas besoin de le recalculer
+    const afterStats = await routeEditorAnalyzePoints(rerouteData.points);
+
+    const oldSegment = points.slice(startIdx, endIdx + 1).map(p => [p.lat, p.lon]);
+    const newSegment = rerouteData.segmentPoints.map(p => [p.lat, p.lon]);
+    if (_routeEditorMap) {
+      if (_routeEditorPreviewLayer) _routeEditorMap.removeLayer(_routeEditorPreviewLayer);
+      const group = L.layerGroup();
+      L.polyline(oldSegment, { color: '#94a3b8', weight: 4, dashArray: '4,8' }).addTo(group);
+      L.polyline(newSegment, { color: '#f59e0b', weight: 5 }).addTo(group);
+      group.addTo(_routeEditorMap);
+      _routeEditorPreviewLayer = group;
+      _routeEditorMap.fitBounds(L.latLngBounds([...oldSegment, ...newSegment]), { padding: [24, 24] });
+    }
+
+    // Impact sur le parcours complet (avant/après), même esprit que la
+    // prévisualisation d'exemple du PDF §25.1 ("Impact parcours complet :
+    // -2,4 km, -190 m D+...") plutôt que la distance de la seule section
+    // (moins parlante isolément).
+    const deltaDist = afterStats.totalDistM - beforeStats.totalDistM;
+    const deltaAscent = afterStats.ascentM - beforeStats.ascentM;
+    const fmtDelta = (v, unit) => `${v >= 0 ? '+' : ''}${v}${unit}`;
+    box.innerHTML = `
+      <div class="route-editor-section-card">
+        <div class="route-editor-section-stats">
+          <span>Nouveau parcours complet : <b>${(afterStats.totalDistM / 1000).toFixed(1)} km</b> (${fmtDelta((deltaDist / 1000).toFixed(2), ' km')})</span>
+          <span><b>+${afterStats.ascentM} m D+</b> (${fmtDelta(deltaAscent, ' m')})</span>
+        </div>
+        <div class="route-editor-section-form">
+          <button type="button" class="btn-plans-restart" id="route-editor-apply-reroute-btn">Appliquer</button>
+          <button type="button" class="route-editor-btn-secondary" id="route-editor-cancel-reroute-btn">Annuler</button>
+        </div>
+      </div>`;
+    const applyBtn = el('route-editor-apply-reroute-btn');
+    if (applyBtn) applyBtn.onclick = () => applyRouteEditorReroute(rerouteData.points, afterStats);
+    const cancelBtn = el('route-editor-cancel-reroute-btn');
+    if (cancelBtn) cancelBtn.onclick = clearRouteEditorReroutePreview;
+  } catch (err) {
+    box.innerHTML = `<div class="route-editor-section-card">Erreur : ${err.message}</div>`;
+  }
+}
+
+async function applyRouteEditorReroute(newPoints, newStats) {
+  _routeEditorHistory.push({ points: _routeEditorData.points, stats: _routeEditorData.stats });
+  _routeEditorFuture = [];
+  _routeEditorData = { ..._routeEditorData, points: newPoints, stats: newStats };
+  _routeEditorSelection = { aIdx: null, bIdx: null };
+  renderRouteEditorWorkspace();
 }
 
 // 1er clic = pose A ; 2e clic = pose B (auto-ordonné, A=min/B=max) ou
@@ -423,11 +647,26 @@ function renderRouteEditorSectionPanel() {
           <button type="button" class="btn-plans-restart" id="route-editor-apply-repeat-btn">Appliquer</button>
           <button type="button" class="route-editor-btn-secondary" id="route-editor-clear-selection-btn">Effacer la sélection</button>
         </div>
+        <div class="route-editor-section-form" style="margin-top:8px">
+          <label for="route-editor-reroute-profile">Recalculer cette section via</label>
+          <select id="route-editor-reroute-profile" class="routes-select" style="width:auto">
+            <option value="trail:mixte">Trail (mixte)</option>
+            <option value="trail:roulant">Trail (roulant)</option>
+            <option value="trail:technique">Trail (technique)</option>
+            <option value="route">Route</option>
+          </select>
+          <button type="button" class="route-editor-btn-secondary" id="route-editor-reroute-btn">🔀 Recalculer</button>
+        </div>
       </div>`;
     const applyBtn = el('route-editor-apply-repeat-btn');
     if (applyBtn) applyBtn.onclick = applyRouteEditorRepeat;
     const clearBtn = el('route-editor-clear-selection-btn');
     if (clearBtn) clearBtn.onclick = clearRouteEditorSelection;
+    const rerouteBtn = el('route-editor-reroute-btn');
+    if (rerouteBtn) rerouteBtn.onclick = () => {
+      const [terrain, trailStyle] = (el('route-editor-reroute-profile')?.value || 'trail:mixte').split(':');
+      routeEditorPreviewReroute({ startIdx: sel.aIdx, endIdx: sel.bIdx, terrain, trailStyle });
+    };
     renderRouteEditorObjectiveSuggestion(sel);
   }).catch(err => {
     if (_routeEditorSelection.aIdx !== sel.aIdx || _routeEditorSelection.bIdx !== sel.bIdx) return;

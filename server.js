@@ -58,7 +58,7 @@ const {
 } = require('./garmin_client');
 const { getZoneRange, annotatePaceZones, ZONE_LABELS } = require('./zones');
 const { isBrouterConfigured, isTilePresent, getTileRemoteSize, downloadTile } = require('./brouter_manager');
-const { geocode, getCommunesForPostcode, getCommunesForDepartment, searchStreet, getTownHall, generateRouteOptions, buildGpxXml, trailLevelMidKmh, TRAIL_STYLE_PARAMS } = require('./route_generator');
+const { geocode, getCommunesForPostcode, getCommunesForDepartment, searchStreet, getTownHall, generateRouteOptions, buildGpxXml, trailLevelMidKmh, TRAIL_STYLE_PARAMS, routeThroughPoints, TERRAIN_PROFILES } = require('./route_generator');
 const { getPaceProfile, refreshPaceProfile, migratePaceProfileToScoped, efFastPaceMinPerKm, applyEfPaceAnchor, bucketForGrade } = require('./pace_profile');
 const { analyzeGpx, computeElevationProfile, computeSections } = require('./gpx_parser');
 const { getElevations } = require('./geoportail_client');
@@ -2977,6 +2977,59 @@ app.post('/api/route-editor/strategy', requireSession, (req, res) => {
       coherence,
       paceProfileIsGeneric: paceProfile.isGeneric,
     });
+  } catch (err) { handleError(res, err); }
+});
+
+// Recalcule une portion du tracé via BRouter, en passant par un ou
+// plusieurs points imposés (PDF §7/§25) - un seul mécanisme couvre
+// "déplacer un point" (waypoints = [avant, nouvelle position, après]),
+// "ajouter un point de passage/forcer un passage" (waypoints = [A,
+// nouveau point, B]) et "recalculer/raccourcir une section" (waypoints =
+// [A, B], la valeur par défaut). Réutilise routeThroughPoints
+// (route_generator.js, qui injecte déjà TRAIL_STYLE_PARAMS pour le profil
+// trail) - même moteur que le générateur d'itinéraires, aucune nouvelle
+// logique de routage. La vérification/téléchargement de la tuile OSM se
+// fait côté client AVANT cet appel (mêmes routes /api/routes/tile-check et
+// /api/routes/tile-download que le générateur d'itinéraires, déjà prêtes à
+// être réutilisées telles quelles).
+app.post('/api/route-editor/reroute', requireSession, async (req, res) => {
+  try {
+    const { points, startIdx, endIdx, waypoints, terrain, trailStyle } = req.body || {};
+    if (!Array.isArray(points) || !Number.isInteger(startIdx) || !Number.isInteger(endIdx)
+      || startIdx < 0 || endIdx >= points.length || startIdx >= endIdx) {
+      return res.status(400).json({ error: 'Section invalide' });
+    }
+    const routeWaypoints = Array.isArray(waypoints) && waypoints.length >= 2
+      ? waypoints
+      : [points[startIdx], points[endIdx]];
+
+    const profile = TERRAIN_PROFILES[terrain] || TERRAIN_PROFILES.trail;
+    let rerouted;
+    try {
+      rerouted = await routeThroughPoints(routeWaypoints, profile, { trailStyle });
+    } catch (err) {
+      return res.status(400).json({ error: 'Recalcul impossible : ' + err.message });
+    }
+    let reroutedPoints = rerouted.points.map(p => ({ lat: p.lat, lon: p.lon, ele: p.ele ?? 0 }));
+
+    // Correction d'altitude IGN (RGE ALTI) - meme traitement que l'import
+    // GPX (/api/route-editor/import) et les parcours generes ; repli
+    // silencieux sur les altitudes BRouter si IGN indisponible.
+    try {
+      const correctedElevations = await getElevations(reroutedPoints);
+      if (correctedElevations) {
+        reroutedPoints = reroutedPoints.map((p, i) => ({
+          ...p, ele: correctedElevations[i] != null ? correctedElevations[i] : p.ele,
+        }));
+      }
+    } catch (err) { /* correction IGN indisponible - on garde les altitudes BRouter */ }
+
+    const mergedPoints = [...points.slice(0, startIdx), ...reroutedPoints, ...points.slice(endIdx + 1)];
+    // segmentPoints renvoyé séparément (en plus du tracé fusionné) pour que
+    // le client puisse afficher l'ancien tracé vs le nouveau en
+    // prévisualisation sans avoir à recalculer les bornes par arithmétique
+    // de longueurs (fragile).
+    res.json({ points: mergedPoints, segmentPoints: reroutedPoints });
   } catch (err) { handleError(res, err); }
 });
 

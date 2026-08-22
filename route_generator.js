@@ -1782,6 +1782,7 @@ module.exports = {
   computeSurfaceBreakdown,
   generateRouteOptions,
   buildGpxXml,
+  routeThroughPoints,
   TERRAIN_PROFILES,
   TRAIL_STYLE_PARAMS,
   DEFAULT_TRAIL_STYLE,
