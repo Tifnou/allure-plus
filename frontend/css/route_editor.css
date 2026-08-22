@@ -212,6 +212,9 @@
 .route-editor-objective-suggestion b { color: var(--text-primary); }
 .route-editor-objective-suggestion .btn-plans-restart { margin-top: 10px; }
 .route-editor-objective-capnote { color: var(--red); font-size: 12px; margin-top: 6px; }
+.route-editor-objective-plan-list { margin: 6px 0 10px; padding-left: 20px; }
+.route-editor-objective-plan-list li { margin-bottom: 3px; }
+.route-editor-objective-plan-list b { color: var(--text-primary); }
 
 /* Stratégie de course (PDF §13-14) */
 .route-editor-strategy-card {

@@ -503,47 +503,62 @@ function renderRouteEditorObjectiveSuggestion(sel) {
   }).catch(() => { box.remove(); });
 }
 
-// Classe les côtes détectées par nombre de passages ESTIMÉ pour atteindre
-// l'objectif (pas par simple ratio de rentabilité D+/distance) : une petite
-// côte très pentue peut avoir un excellent ratio mais rester bien en-dessous
-// de l'objectif même à 10 répétitions (le plafond), alors qu'une côte plus
-// grande l'atteindrait en quelques passages - bug réel constaté (retour
-// utilisateur) où l'ancien classement par ratio proposait systématiquement
-// la même petite côte, plafonnée à 10 montées sans jamais atteindre la
-// cible. Estimation locale (aucun appel serveur, juste climb.gainM/distM
-// déjà connus) : un passage supplémentaire ajoute environ climb.gainM de D+
-// et 2×climb.distM de distance (aller-retour) - approximatif mais suffisant
-// pour CLASSER les côtes entre elles ; la simulation précise
-// (computeRouteEditorObjectiveSuggestion, un seul appel réseau) s'applique
-// ensuite uniquement à la côte choisie ici pour les chiffres affichés.
-function pickBestClimbForObjective(climbs, obj, currentStats) {
-  if (!climbs.length) return null;
-  const scored = climbs.map(c => {
-    let estimatedPasses = 2;
-    if (obj.targetDplusM != null) {
-      estimatedPasses = c.gainM > 0
-        ? Math.max(estimatedPasses, 1 + Math.ceil((obj.targetDplusM - currentStats.ascentM) / c.gainM))
-        : Infinity; // cette côte n'apporte pas de D+, inutile pour un objectif D+
+// Répartit l'objectif D+/distance sur PLUSIEURS côtes différentes plutôt
+// que de tout concentrer sur une seule (retour utilisateur explicite :
+// "il ne saurait pas dire 4 fois celle-ci et 3 fois celle-là ?") - allocation
+// gloutonne locale (aucun appel réseau), un passage à la fois : à chaque
+// étape, choisit la côte offrant le meilleur rapport D+/distance actualisé,
+// PONDÉRÉ par le nombre de fois déjà utilisée dans ce plan (REUSE_DISCOUNT
+// ci-dessous) - sans cette pénalité, l'algorithme reprendrait toujours la
+// même côte (la plus "rentable") indéfiniment, exactement le problème
+// signalé. La pénalité diminue progressivement l'attrait d'une côte déjà
+// choisie plutôt que de fixer un plafond arbitraire par côte : une côte
+// nettement meilleure que les autres peut donc légitimement être reprise
+// plusieurs fois, mais pas indéfiniment.
+const OBJECTIVE_PLAN_MAX_TOTAL_PASSES = 15; // garde-fou (temps de calcul + taille du tracé), au-dela d'une seule cote (10)
+
+function planRouteEditorObjectiveRepeats(climbs, obj, currentStats) {
+  if (!climbs.length) return { plan: [], reached: false };
+  let remainingDplus = obj.targetDplusM != null ? obj.targetDplusM - currentStats.ascentM : null;
+  let remainingDist = obj.targetDistM != null ? obj.targetDistM * 1000 - currentStats.totalDistM : null;
+  if ((remainingDplus == null || remainingDplus <= 0) && (remainingDist == null || remainingDist <= 0)) {
+    return { plan: [], reached: true }; // objectif déjà atteint par le parcours actuel
+  }
+
+  const usage = new Map(); // climb -> nombre de passages EXTRA déjà alloués dans ce plan
+  let totalExtraPasses = 0;
+  while (
+    totalExtraPasses < OBJECTIVE_PLAN_MAX_TOTAL_PASSES
+    && ((remainingDplus != null && remainingDplus > 0) || (remainingDist != null && remainingDist > 0))
+  ) {
+    let bestClimb = null, bestScore = -Infinity;
+    for (const c of climbs) {
+      if (obj.targetDplusM != null && c.gainM <= 0) continue; // n'aide pas l'objectif D+
+      if (obj.targetDplusM == null && obj.targetDistM != null && c.distM <= 0) continue;
+      const used = usage.get(c) || 0;
+      const efficiency = c.gainM / (2 * c.distM || 1);
+      const score = efficiency / (1 + used); // pénalité de réutilisation
+      if (score > bestScore) { bestScore = score; bestClimb = c; }
     }
-    if (obj.targetDistM != null) {
-      estimatedPasses = c.distM > 0
-        ? Math.max(estimatedPasses, 1 + Math.ceil((obj.targetDistM * 1000 - currentStats.totalDistM) / (2 * c.distM)))
-        : Infinity;
-    }
-    const efficiency = c.gainM / (2 * c.distM || 1);
-    return { ...c, estimatedPasses, efficiency };
-  });
-  // Le moins de passages d'abord ; en cas d'égalité, la côte la plus
-  // "rentable" (plus de D+ pour la distance ajoutée).
-  scored.sort((a, b) => a.estimatedPasses - b.estimatedPasses || b.efficiency - a.efficiency);
-  return scored[0];
+    if (!bestClimb) break; // aucune côte exploitable pour cet objectif
+    usage.set(bestClimb, (usage.get(bestClimb) || 0) + 1);
+    totalExtraPasses++;
+    if (remainingDplus != null) remainingDplus -= bestClimb.gainM;
+    if (remainingDist != null) remainingDist -= 2 * bestClimb.distM;
+  }
+
+  const reached = (remainingDplus == null || remainingDplus <= 0) && (remainingDist == null || remainingDist <= 0);
+  // +1 : le passage d'origine, déjà présent dans le tracé, compte comme la 1ère "montée".
+  const plan = [...usage.entries()].map(([climb, extraPasses]) => ({ climb, passes: extraPasses + 1 }));
+  plan.sort((a, b) => a.climb.startIdx - b.climb.startIdx);
+  return { plan, reached, capped: totalExtraPasses >= OBJECTIVE_PLAN_MAX_TOTAL_PASSES };
 }
 
 // Suggestion automatique (pas de clic requis) : dès qu'un objectif D+/
 // distance est fixé et qu'aucune section n'est sélectionnée manuellement,
-// propose directement la meilleure côte à répéter - le clic manuel
-// (carte/profil/"🔁 Répéter") reste possible et prend le dessus tant qu'une
-// sélection est active (cf renderRouteEditorSectionPanel).
+// propose directement un plan combiné (une ou plusieurs côtes) à répéter -
+// le clic manuel (carte/profil/"🔁 Répéter") reste possible et prend le
+// dessus tant qu'une sélection est active (cf renderRouteEditorSectionPanel).
 function renderRouteEditorObjectiveAutoSuggestion() {
   const box = el('route-editor-objective-auto');
   if (!box) return;
@@ -553,53 +568,89 @@ function renderRouteEditorObjectiveAutoSuggestion() {
     return;
   }
   const climbs = _routeEditorData?.stats?.climbs || [];
-  const best = pickBestClimbForObjective(climbs, obj, _routeEditorData.stats);
-  if (!best) {
-    box.innerHTML = `<div class="route-editor-section-card route-editor-objective-suggestion">Aucune côte détectée sur ce parcours pour proposer une répétition automatique — sélectionnez une section vous-même (carte ou profil).</div>`;
+  const { plan, reached, capped } = planRouteEditorObjectiveRepeats(climbs, obj, _routeEditorData.stats);
+  if (!plan.length) {
+    box.innerHTML = reached
+      ? `<div class="route-editor-section-card route-editor-objective-suggestion">✅ L'objectif est déjà atteint par le parcours actuel.</div>`
+      : `<div class="route-editor-section-card route-editor-objective-suggestion">Aucune côte détectée sur ce parcours pour proposer une répétition automatique — sélectionnez une section vous-même (carte ou profil).</div>`;
     return;
   }
   const objSnapshot = { ...obj };
-  box.innerHTML = `<div class="route-editor-section-card route-editor-objective-suggestion">⏳ Recherche de la meilleure côte…</div>`;
-  computeRouteEditorObjectiveSuggestion(best.startIdx, best.endIdx).then(res => {
+  box.innerHTML = `<div class="route-editor-section-card route-editor-objective-suggestion">⏳ Calcul du plan combiné…</div>`;
+  const newPoints = buildMultiRepeatedPoints(_routeEditorData.points, plan.map(p => ({ startIdx: p.climb.startIdx, endIdx: p.climb.endIdx, passes: p.passes })));
+  routeEditorAnalyzePoints(newPoints).then(finalStats => {
     // L'objectif ou la sélection ont pu changer pendant l'attente réseau.
     if (_routeEditorObjective.targetDplusM !== objSnapshot.targetDplusM || _routeEditorObjective.targetDistM !== objSnapshot.targetDistM) return;
     if (_routeEditorSelection.aIdx != null) return;
-    if (!res) { box.innerHTML = ''; return; }
-    const passesLabel = res.neededPasses === 2 ? '1 passage supplémentaire' : `${res.neededPasses - 1} passages supplémentaires`;
-    const capNote = res.capped && !res.reached
-      ? `<div class="route-editor-objective-capnote">Objectif non atteint même au maximum de 10 montées sur cette côte.</div>`
+    const planRows = plan.map(p => `<li>Côte KM ${p.climb.startKm.toFixed(1)} → ${p.climb.endKm.toFixed(1)} (+${p.climb.gainM} m D+/passage) : <b>${p.passes} montées</b> (+${p.passes - 1} passage${p.passes - 1 > 1 ? 's' : ''} supplémentaire${p.passes - 1 > 1 ? 's' : ''})</li>`).join('');
+    const capNote = capped && !reached
+      ? `<div class="route-editor-objective-capnote">Objectif non atteint même au plafond de ${OBJECTIVE_PLAN_MAX_TOTAL_PASSES} passages combinés — essayez d'importer un parcours plus vallonné.</div>`
       : '';
     box.innerHTML = `
       <div class="route-editor-section-card route-editor-objective-suggestion">
-        <div>🏆 Meilleure option automatique — côte KM ${best.startKm.toFixed(1)} → ${best.endKm.toFixed(1)} (+${best.gainM} m D+ par passage) :
-        ${passesLabel} (${res.neededPasses} montées au total) ${res.reached ? "permettront d'atteindre l'objectif" : "rapprocheront de l'objectif"} :
-        nouveau parcours estimé <b>${(res.finalStats.totalDistM / 1000).toFixed(1)} km</b> / <b>+${res.finalStats.ascentM} m D+</b>.</div>
+        <div>🏆 Plan combiné ${reached ? "pour atteindre l'objectif" : "pour s'en rapprocher"} :</div>
+        <ul class="route-editor-objective-plan-list">${planRows}</ul>
+        <div>Nouveau parcours estimé : <b>${(finalStats.totalDistM / 1000).toFixed(1)} km</b> / <b>+${finalStats.ascentM} m D+</b>.</div>
         ${capNote}
-        <button type="button" class="btn-plans-restart" id="route-editor-apply-auto-btn">Appliquer ${res.neededPasses} montées</button>
+        <button type="button" class="btn-plans-restart" id="route-editor-apply-auto-btn">Appliquer ce plan</button>
       </div>`;
     const btn = document.getElementById('route-editor-apply-auto-btn');
-    if (btn) btn.onclick = () => {
-      _routeEditorSelection = { aIdx: best.startIdx, bIdx: best.endIdx };
-      applyRouteEditorRepeat(res.neededPasses);
-    };
-  }).catch(() => { box.innerHTML = ''; });
+    if (btn) btn.onclick = () => applyRouteEditorObjectivePlan(plan, newPoints, finalStats);
+  }).catch(err => {
+    box.innerHTML = `<div class="route-editor-section-card route-editor-objective-suggestion">Erreur : ${err.message}</div>`;
+  });
 }
 
-// Construit A..B, N fois, avec les allers-retours B->A intermédiaires -
-// même principe que le PDF (4 montées = A→B→A→B→A→B→A→B), sans point
-// dupliqué aux jonctions. Le retour B→A réutilise exactement les
-// coordonnées existantes (aucun nouvel appel de routage nécessaire).
-function buildRepeatedPoints(points, aIdx, bIdx, totalPasses) {
-  const before = points.slice(0, aIdx);
-  const forward = points.slice(aIdx, bIdx + 1); // A..B inclusif
-  const backward = forward.slice().reverse();   // B..A inclusif
-  const after = points.slice(bIdx + 1);
-  const middle = [];
-  for (let pass = 0; pass < totalPasses; pass++) {
-    middle.push(...(pass === 0 ? forward : forward.slice(1)));
-    if (pass < totalPasses - 1) middle.push(...backward.slice(1));
+async function applyRouteEditorObjectivePlan(plan, newPoints, finalStats) {
+  const btn = document.getElementById('route-editor-apply-auto-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Application…'; }
+  try {
+    _routeEditorHistory.push({ points: _routeEditorData.points, stats: _routeEditorData.stats });
+    _routeEditorFuture = [];
+    _routeEditorData = { ..._routeEditorData, points: newPoints, stats: finalStats };
+    _routeEditorSelection = { aIdx: null, bIdx: null };
+    // Plan issu de l'objectif : vient d'être appliqué, on l'efface pour ne
+    // pas re-suggérer immédiatement une nouvelle répétition (cf même logique
+    // dans applyRouteEditorRepeat pour la répétition manuelle sur objectif).
+    _routeEditorObjective = { targetDplusM: null, targetDistM: null };
+    renderRouteEditorWorkspace();
+  } catch (err) {
+    showToast('Erreur : ' + err.message, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = 'Appliquer ce plan'; }
   }
-  return [...before, ...middle, ...after];
+}
+
+// Répète UNE section A..B, N fois - cas particulier de
+// buildMultiRepeatedPoints (une seule entrée de plan), conservé tel quel
+// pour la répétition manuelle (sélection A/B à la main).
+function buildRepeatedPoints(points, aIdx, bIdx, totalPasses) {
+  return buildMultiRepeatedPoints(points, [{ startIdx: aIdx, endIdx: bIdx, passes: totalPasses }]);
+}
+
+// Applique un plan de répétitions sur PLUSIEURS sections non chevauchantes
+// en un seul passage sur le tracé d'origine (pas de recalcul d'index après
+// chaque insertion) - utilisé pour la suggestion automatique combinée
+// (plusieurs côtes différentes, cf planRouteEditorObjectiveRepeats) autant
+// que pour la répétition manuelle d'une seule section (buildRepeatedPoints
+// ci-dessus). Pour chaque section : même principe que le PDF (4 montées =
+// A→B→A→B→A→B→A→B), sans point dupliqué aux jonctions - le retour B→A
+// réutilise exactement les coordonnées existantes (aucun appel de routage).
+function buildMultiRepeatedPoints(points, plan) {
+  const sorted = [...plan].sort((a, b) => a.startIdx - b.startIdx);
+  const out = [];
+  let cursor = 0;
+  sorted.forEach(({ startIdx, endIdx, passes }) => {
+    out.push(...points.slice(cursor, startIdx)); // portion inchangée avant cette section
+    const forward = points.slice(startIdx, endIdx + 1); // A..B inclusif
+    const backward = forward.slice().reverse();          // B..A inclusif
+    for (let pass = 0; pass < passes; pass++) {
+      out.push(...(pass === 0 ? forward : forward.slice(1)));
+      if (pass < passes - 1) out.push(...backward.slice(1));
+    }
+    cursor = endIdx + 1;
+  });
+  out.push(...points.slice(cursor)); // fin du parcours après la dernière section
+  return out;
 }
 
 // explicitCount : passé par le bouton "Appliquer X montées (objectif)" pour
