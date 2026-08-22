@@ -46,7 +46,20 @@
 
 #route-editor-workspace { margin-top: 18px; }
 #route-editor-workspace .gpx-profile-map { height: 420px; margin-bottom: 14px; }
-#route-editor-workspace .gpx-profile-elev-container { height: 220px; margin-bottom: 14px; }
+/* Fond opaque obligatoire : contrairement à la modale GPX de la page
+   Objectifs (où .gpx-profile-elev-container hérite du fond plein de la
+   modale), ce graphique est affiché directement sur la page — sans fond à
+   lui, le diaporama-photo en arrière-plan de l'app transparaît derrière le
+   Chart.js (canvas nativement transparent) et rend le profil illisible. */
+#route-editor-workspace .gpx-profile-elev-container {
+  height: 220px;
+  margin-bottom: 14px;
+  background: var(--bg-white);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+  padding: 10px 12px 4px;
+}
 #route-editor-workspace .gpx-profile-stats { margin-bottom: 4px; }
 
 .route-editor-section-title {

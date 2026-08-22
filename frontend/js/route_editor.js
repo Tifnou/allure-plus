@@ -55,9 +55,31 @@ function renderRouteEditorImportStatus() {
     <div class="route-editor-imported">
       <span title="${_routeEditorData.filename}">✅ <b>${_routeEditorData.filename}</b></span>
       <button type="button" class="route-editor-imported-remove" id="route-editor-import-another">Importer un autre GPX</button>
+      <button type="button" class="route-editor-imported-remove" id="route-editor-close-btn">✕ Fermer</button>
     </div>`;
   const again = el('route-editor-import-another');
   if (again) again.onclick = () => el('route-editor-file-input')?.click();
+  const closeBtn = el('route-editor-close-btn');
+  if (closeBtn) closeBtn.onclick = routeEditorClose;
+}
+
+// Referme le GPX en cours (sans en réimporter un) : revient à l'écran
+// d'import vide - jusqu'ici seul "Importer un autre GPX" existait, il
+// fallait donc obligatoirement choisir un nouveau fichier pour quitter
+// l'analyse en cours (retour utilisateur).
+function routeEditorClose() {
+  _routeEditorData = null;
+  _routeEditorOriginal = null;
+  _routeEditorHistory = [];
+  _routeEditorFuture = [];
+  _routeEditorSelection = { aIdx: null, bIdx: null };
+  if (_routeEditorMap) { _routeEditorMap.remove(); _routeEditorMap = null; }
+  if (_routeEditorChart) { _routeEditorChart.destroy(); _routeEditorChart = null; }
+  _routeEditorLatLngs = null;
+  _routeEditorSelectionLayer = null;
+  const ws = el('route-editor-workspace');
+  if (ws) { ws.style.display = 'none'; ws.innerHTML = ''; }
+  renderRouteEditorImportStatus();
 }
 
 async function handleRouteEditorFileSelected(file) {
