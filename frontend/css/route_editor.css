@@ -264,3 +264,34 @@
 .route-editor-marche-active { font-size: 11px; color: var(--text-muted); white-space: nowrap; }
 .route-editor-strategy-table-wrap { overflow-x: auto; }
 .route-editor-strategy-table { min-width: 640px; }
+
+/* Points d'intérêt (PDF §14) */
+.route-editor-poi-marker {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  font-size: 16px;
+  background: var(--bg-white);
+  border: 2px solid var(--accent);
+  border-radius: 50%;
+  box-shadow: var(--shadow-sm);
+}
+.route-editor-poi-times { margin-top: 10px; padding-left: 20px; }
+.route-editor-poi-times li { font-size: 13px; color: var(--text-secondary); margin-bottom: 3px; }
+.route-editor-poi-times b { color: var(--text-primary); }
+
+/* Résumé intelligent (PDF §19) */
+.route-editor-summary-card {
+  background: var(--bg-white);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+  padding: 14px 16px;
+  margin-bottom: 14px;
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+.route-editor-summary-card b { color: var(--text-primary); }

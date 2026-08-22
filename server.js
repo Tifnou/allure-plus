@@ -2913,7 +2913,7 @@ app.post('/api/route-editor/analyze', requireSession, (req, res) => {
 // /api/routes/generate ci-dessus) - aucun nouveau moteur de prédiction.
 app.post('/api/route-editor/strategy', requireSession, (req, res) => {
   try {
-    const { points, targetTimeMin } = req.body || {};
+    const { points, targetTimeMin, pois } = req.body || {};
     if (!Array.isArray(points) || points.length < 2) {
       return res.status(400).json({ error: 'Points de tracé manquants' });
     }
@@ -2969,12 +2969,37 @@ app.post('/api/route-editor/strategy', requireSession, (req, res) => {
     // (ajustables si retour utilisateur), pas une classification savante.
     const coherence = hasTarget ? (scale < 0.85 ? 'ambitieux' : (scale > 1.15 ? 'prudent' : 'realiste')) : null;
 
+    // Temps de passage aux points d'intérêt (PDF §14) : interpolation
+    // linéaire à l'intérieur de la section qui contient chaque POI (pas de
+    // nouveau calcul de fond - réutilise withPace, qui porte encore
+    // startIdx/endIdx hérités de computeSections, et la même échelle que
+    // finalSections ci-dessus).
+    let poiTimes = [];
+    if (Array.isArray(pois) && pois.length) {
+      let cumBeforeSection = 0;
+      const sectionCumStart = withPace.map(s => {
+        const start = cumBeforeSection;
+        cumBeforeSection += s.naturalTimeMin * scale;
+        return start;
+      });
+      poiTimes = pois.map(poi => {
+        const sIdx = withPace.findIndex(s => poi.idx >= s.startIdx && poi.idx <= s.endIdx);
+        if (sIdx === -1) return { idx: poi.idx, label: poi.label, cumulativeTimeMin: null };
+        const s = withPace[sIdx];
+        const span = s.endIdx - s.startIdx || 1;
+        const fraction = (poi.idx - s.startIdx) / span;
+        const timeAtPoi = sectionCumStart[sIdx] + fraction * (s.naturalTimeMin * scale);
+        return { idx: poi.idx, label: poi.label, cumulativeTimeMin: Math.round(timeAtPoi * 10) / 10 };
+      });
+    }
+
     res.json({
       sections: finalSections,
       naturalTotalMin: Math.round(naturalTotalMin * 10) / 10,
       targetTimeMin: hasTarget ? targetTimeMin : null,
       scale: Math.round(scale * 1000) / 1000,
       coherence,
+      poiTimes,
       paceProfileIsGeneric: paceProfile.isGeneric,
     });
   } catch (err) { handleError(res, err); }

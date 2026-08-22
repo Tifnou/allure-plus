@@ -76,7 +76,7 @@ function renderRouteEditorImportStatus() {
 // gère nativement le cas stats===null (moins de 2 points, rien à
 // analyser/afficher encore).
 function routeEditorStartCreation() {
-  _routeEditorData = { filename: 'Nouveau parcours', points: [], stats: null };
+  _routeEditorData = { filename: 'Nouveau parcours', points: [], stats: null, pois: [] };
   _routeEditorOriginal = null;
   _routeEditorHistory = [];
   _routeEditorFuture = [];
@@ -119,8 +119,8 @@ async function handleRouteEditorFileSelected(file) {
     const res = await fetch(`${API}/api/route-editor/import`, { method: 'POST', body: fd });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Import impossible');
-    _routeEditorData = data;
-    _routeEditorOriginal = { points: data.points, stats: data.stats };
+    _routeEditorData = { ...data, pois: [] };
+    _routeEditorOriginal = { points: data.points, stats: data.stats, pois: [] };
     _routeEditorHistory = [];
     _routeEditorFuture = [];
     _routeEditorSelection = { aIdx: null, bIdx: null };
@@ -143,6 +143,7 @@ function routeEditorModeToolbarHtml() {
       <button type="button" class="routes-toggle-btn route-editor-mode-btn ${_routeEditorMode === 'move-point' ? 'active' : ''}" data-mode="move-point">✏️ Déplacer un point</button>
       <button type="button" class="routes-toggle-btn route-editor-mode-btn ${_routeEditorMode === 'add-waypoint' ? 'active' : ''}" data-mode="add-waypoint">📍 Ajouter un point de passage</button>
       <button type="button" class="routes-toggle-btn route-editor-mode-btn ${_routeEditorMode === 'extend' ? 'active' : ''}" data-mode="extend">➕ Prolonger le tracé</button>
+      <button type="button" class="routes-toggle-btn route-editor-mode-btn ${_routeEditorMode === 'poi' ? 'active' : ''}" data-mode="poi">📌 Point d'intérêt</button>
       <label class="route-editor-profile-select-label">Profil de routage
         <select id="route-editor-profile-select" class="routes-select">
           <option value="trail:mixte">Trail (mixte)</option>
@@ -210,6 +211,32 @@ function renderRouteEditorExtendControls() {
   if (btn) btn.onclick = () => routeEditorExtendTrack(points[points.length - 1], { lat: points[0].lat, lon: points[0].lon });
 }
 
+// Résumé intelligent (PDF §19) : texte templé à partir des stats déjà
+// calculées (aucun appel serveur, aucun LLM) - même esprit que l'exemple
+// du PDF ("difficulté concentrée entre les km X et Y, qui regroupent Z% du
+// D+"). La côte au plus fort gainM sert à la fois de "zone de
+// concentration" et de "montée la plus exigeante" (le PDF les traite comme
+// un seul exemple cohérent). La phrase marche active ne s'affiche que si
+// une stratégie a déjà été calculée pour CE tracé (cf reset de
+// _routeEditorLastStrategy à chaque changement de points).
+function buildRouteEditorSummary(stats) {
+  if (!stats) return '';
+  const distKm = (stats.totalDistM / 1000).toFixed(1);
+  const climbs = stats.climbs || [];
+  let text = `Ce parcours de <b>${distKm} km</b> comporte <b>${stats.ascentM} m D+</b>.`;
+  if (climbs.length && stats.ascentM > 0) {
+    const biggest = climbs.reduce((best, c) => (!best || c.gainM > best.gainM) ? c : best, null);
+    const pct = Math.round((biggest.gainM / stats.ascentM) * 100);
+    text += ` La difficulté est principalement concentrée entre les kilomètres ${biggest.startKm.toFixed(1)} et ${biggest.endKm.toFixed(1)}, qui regroupent près de ${pct}% du dénivelé positif. La montée la plus exigeante mesure ${(biggest.distM / 1000).toFixed(1)} km pour +${biggest.gainM} m, soit ${biggest.avgGradePct.toFixed(1)}% de moyenne.`;
+  } else {
+    text += ` Aucune côte significative détectée sur ce tracé.`;
+  }
+  if (_routeEditorLastStrategy && _routeEditorLastStrategyPoints === _routeEditorData.points && _routeEditorLastStrategy.sections?.some(s => s.marcheActive)) {
+    text += ` Pour l'objectif renseigné, il sera probablement préférable de gérer les premières montées et de privilégier la marche active sur les portions les plus pentues.`;
+  }
+  return text;
+}
+
 function renderRouteEditorWorkspace() {
   const ws = el('route-editor-workspace');
   if (!ws || !_routeEditorData) return;
@@ -241,6 +268,7 @@ function renderRouteEditorWorkspace() {
       <div class="gpx-profile-stat"><b>${stats.maxClimbGradePct}%</b> pente max</div>
       <div class="gpx-profile-stat"><b>${climbs.length}</b> côte(s) détectée(s)</div>
     </div>
+    <div class="route-editor-summary-card">📝 ${buildRouteEditorSummary(stats)}</div>
     <div class="gpx-profile-elev-container"><canvas id="route-editor-elev-chart"></canvas></div>
     ${routeEditorModeToolbarHtml()}
     <div class="gpx-profile-map" id="route-editor-map"></div>
@@ -267,6 +295,7 @@ function renderRouteEditorWorkspace() {
           <tbody>${climbsRows}</tbody>
         </table>`
       : `<div class="route-editor-climbs-empty">Aucune côte significative détectée sur ce parcours.</div>`}
+    <div id="route-editor-poi-table-wrap"></div>
     <div class="route-editor-section-title">Stratégie de course</div>
     <div class="route-editor-strategy-card">
       <label>Objectif de temps (optionnel) <input type="time" id="route-editor-strategy-target" class="routes-text-input" style="width:110px" /></label>
@@ -296,6 +325,7 @@ function renderRouteEditorWorkspace() {
   });
   wireRouteEditorModeToolbar(ws);
   renderRouteEditorExtendControls();
+  renderRouteEditorPoiTable();
   const objDplusInput = el('route-editor-obj-dplus');
   const objDistInput = el('route-editor-obj-dist');
   const onObjectiveChange = () => {
@@ -387,6 +417,7 @@ function renderRouteEditorVisuals() {
     map.on('click', e => onRouteEditorMapClick(e.latlng, points));
     _routeEditorMap = map;
     renderRouteEditorSelectionOverlay();
+    renderRouteEditorPoiOverlay();
   }
 
   const canvas = el('route-editor-elev-chart');
@@ -503,6 +534,8 @@ function renderRouteEditorModeHint() {
     hint.textContent = points.length === 0
       ? 'Cliquez sur la carte pour poser le premier point du parcours.'
       : 'Cliquez sur la carte pour prolonger le tracé jusqu\'à ce point.';
+  } else if (_routeEditorMode === 'poi') {
+    hint.textContent = 'Cliquez sur un point du tracé pour y ajouter un point d\'intérêt (ravitaillement, eau, sommet…).';
   } else {
     hint.textContent = '';
   }
@@ -513,6 +546,7 @@ function onRouteEditorMapClick(latlng, points) {
   if (_routeEditorMode === 'move-point') { onRouteEditorMovePointClick(latlng, points); return; }
   if (_routeEditorMode === 'add-waypoint') { onRouteEditorAddWaypointClick(latlng); return; }
   if (_routeEditorMode === 'extend') { onRouteEditorExtendClick(latlng); return; }
+  if (_routeEditorMode === 'poi') { onRouteEditorPoiClick(findNearestRouteEditorPointIndex(latlng, points)); return; }
   onRouteEditorPointClick(findNearestRouteEditorPointIndex(latlng, points));
 }
 
@@ -525,9 +559,9 @@ function onRouteEditorMapClick(latlng, points) {
 function onRouteEditorExtendClick(latlng) {
   const points = _routeEditorData.points;
   if (!points.length) {
-    _routeEditorHistory.push({ points: [], stats: null });
+    _routeEditorHistory.push({ points: [], stats: null, pois: [] });
     _routeEditorFuture = [];
-    _routeEditorData = { ..._routeEditorData, points: [{ lat: latlng.lat, lon: latlng.lng, ele: 0 }] };
+    _routeEditorData = { ..._routeEditorData, points: [{ lat: latlng.lat, lon: latlng.lng, ele: 0 }], pois: [] };
     renderRouteEditorWorkspace();
     return;
   }
@@ -550,17 +584,18 @@ async function routeEditorExtendTrack(fromPoint, toPoint) {
 
     const prevPoints = _routeEditorData.points;
     const prevStats = _routeEditorData.stats;
+    const prevPois = _routeEditorData.pois || [];
     const newPoints = [...prevPoints, ...data.segmentPoints.slice(1)]; // slice(1) : le 1er point du tronçon double le dernier point déjà présent
     const newStats = newPoints.length >= 2 ? await routeEditorAnalyzePoints(newPoints) : null;
 
-    _routeEditorHistory.push({ points: prevPoints, stats: prevStats });
+    _routeEditorHistory.push({ points: prevPoints, stats: prevStats, pois: prevPois });
     _routeEditorFuture = [];
-    _routeEditorData = { ..._routeEditorData, points: newPoints, stats: newStats };
+    _routeEditorData = { ..._routeEditorData, points: newPoints, stats: newStats, pois: [] };
     // Figé une seule fois (la 1ère fois que le tracé devient analysable) -
     // pas réécrit à chaque point ajouté ensuite, pour que "Restaurer le GPX
     // original" garde son sens habituel (revenir au début, pas au dernier
     // point posé).
-    if (!_routeEditorOriginal && newStats) _routeEditorOriginal = { points: newPoints, stats: newStats };
+    if (!_routeEditorOriginal && newStats) _routeEditorOriginal = { points: newPoints, stats: newStats, pois: [] };
     renderRouteEditorWorkspace();
   } catch (err) {
     showToast('Erreur : ' + err.message, 'error');
@@ -722,9 +757,9 @@ async function routeEditorPreviewReroute({ startIdx, endIdx, waypoints, terrain,
 }
 
 async function applyRouteEditorReroute(newPoints, newStats) {
-  _routeEditorHistory.push({ points: _routeEditorData.points, stats: _routeEditorData.stats });
+  _routeEditorHistory.push({ points: _routeEditorData.points, stats: _routeEditorData.stats, pois: _routeEditorData.pois || [] });
   _routeEditorFuture = [];
-  _routeEditorData = { ..._routeEditorData, points: newPoints, stats: newStats };
+  _routeEditorData = { ..._routeEditorData, points: newPoints, stats: newStats, pois: [] };
   _routeEditorSelection = { aIdx: null, bIdx: null };
   renderRouteEditorWorkspace();
 }
@@ -766,6 +801,114 @@ function selectClimbForRepeat(climbIdx) {
   renderRouteEditorSectionPanel();
   renderRouteEditorObjectiveAutoSuggestion();
   el('route-editor-section-panel')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+// Points d'intérêt (PDF §14) : ravitaillement/eau/sommet/point de vue/
+// parking/refuge/passage technique/point personnel. Liés à un index du
+// tracé COURANT - toute opération qui change la structure du tableau de
+// points (répétition, recalcul, extension) les réinitialise (cf les points
+// d'ajout _routeEditorData = {..., pois: []} dans ce fichier), Annuler/
+// Rétablir les restaurent en revanche puisqu'ils reviennent à un état déjà
+// connu (pois voyage avec points/stats dans l'historique).
+const ROUTE_EDITOR_POI_TYPES = [
+  { key: 'ravito', icon: '🍫', label: 'Ravitaillement' },
+  { key: 'eau', icon: '💧', label: 'Eau' },
+  { key: 'sommet', icon: '🏔️', label: 'Sommet' },
+  { key: 'vue', icon: '👁️', label: 'Point de vue' },
+  { key: 'parking', icon: '🅿️', label: 'Parking' },
+  { key: 'refuge', icon: '🏠', label: 'Refuge' },
+  { key: 'technique', icon: '⚠️', label: 'Passage technique' },
+  { key: 'perso', icon: '📌', label: 'Point personnel' },
+];
+function routeEditorPoiTypeInfo(key) {
+  return ROUTE_EDITOR_POI_TYPES.find(t => t.key === key) || ROUTE_EDITOR_POI_TYPES[ROUTE_EDITOR_POI_TYPES.length - 1];
+}
+
+function onRouteEditorPoiClick(idx) {
+  const modal = document.createElement('div');
+  modal.className = 'confirm-modal-backdrop';
+  modal.innerHTML = `
+    <div class="confirm-modal">
+      <div class="confirm-modal-title">📌 Ajouter un point d'intérêt</div>
+      <div class="route-editor-section-form" style="margin:14px 0">
+        <select id="route-editor-poi-type" class="routes-select">
+          ${ROUTE_EDITOR_POI_TYPES.map(t => `<option value="${t.key}">${t.icon} ${t.label}</option>`).join('')}
+        </select>
+        <input type="text" id="route-editor-poi-label" class="routes-text-input" placeholder="Nom (optionnel)" />
+      </div>
+      <div class="route-editor-section-form">
+        <button type="button" class="btn-plans-restart" id="route-editor-poi-confirm">Ajouter</button>
+        <button type="button" class="route-editor-btn-secondary" id="route-editor-poi-cancel">Annuler</button>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+  const close = () => modal.remove();
+  attachBackdropClose(modal, close);
+  el('route-editor-poi-cancel').onclick = close;
+  el('route-editor-poi-confirm').onclick = () => {
+    const type = el('route-editor-poi-type').value;
+    const label = el('route-editor-poi-label').value.trim();
+    _routeEditorData.pois = [...(_routeEditorData.pois || []), { idx, type, label }];
+    close();
+    renderRouteEditorPoiOverlay();
+    renderRouteEditorPoiTable();
+  };
+}
+
+function routeEditorRemovePoi(poiIdx) {
+  _routeEditorData.pois = (_routeEditorData.pois || []).filter((_, i) => i !== poiIdx);
+  renderRouteEditorPoiOverlay();
+  renderRouteEditorPoiTable();
+}
+
+// Marqueurs POI sur la carte - calque dédié (comme la sélection A/B et
+// l'aperçu de recalcul), mis à jour sans reconstruire toute la carte.
+let _routeEditorPoiLayer = null;
+function renderRouteEditorPoiOverlay() {
+  if (_routeEditorPoiLayer && _routeEditorMap) { _routeEditorMap.removeLayer(_routeEditorPoiLayer); _routeEditorPoiLayer = null; }
+  const pois = _routeEditorData?.pois || [];
+  if (!_routeEditorMap || !_routeEditorLatLngs || !pois.length) return;
+  const group = L.layerGroup();
+  pois.forEach(poi => {
+    const latlng = _routeEditorLatLngs[poi.idx];
+    if (!latlng) return;
+    const info = routeEditorPoiTypeInfo(poi.type);
+    L.marker(latlng, { icon: L.divIcon({ html: `<span class="route-editor-poi-marker">${info.icon}</span>`, className: '', iconSize: [26, 26], iconAnchor: [13, 13] }) })
+      .bindTooltip(poi.label || info.label)
+      .addTo(group);
+  });
+  group.addTo(_routeEditorMap);
+  _routeEditorPoiLayer = group;
+}
+
+function renderRouteEditorPoiTable() {
+  const box = el('route-editor-poi-table-wrap');
+  if (!box) return;
+  const pois = _routeEditorData?.pois || [];
+  if (!pois.length) { box.innerHTML = ''; return; }
+  const points = _routeEditorData.points;
+  // Distance cumulée au point idx - calcul direct (pas besoin des bins de
+  // computeGpxDisplayBins, juste la position kilométrique de chaque POI).
+  const cumKm = [0];
+  for (let i = 1; i < points.length; i++) cumKm.push(cumKm[i - 1] + haversineKm(points[i - 1], points[i]));
+  const rows = pois.map((poi, i) => {
+    const info = routeEditorPoiTypeInfo(poi.type);
+    return `<tr>
+      <td>${info.icon} ${poi.label || info.label}</td>
+      <td>${info.label}</td>
+      <td>KM ${(cumKm[poi.idx] || 0).toFixed(1)}</td>
+      <td><button type="button" class="route-editor-imported-remove" data-poi-idx="${i}">✕</button></td>
+    </tr>`;
+  }).join('');
+  box.innerHTML = `
+    <div class="route-editor-section-title">Points d'intérêt</div>
+    <table class="route-editor-climbs-table">
+      <thead><tr><th>Point</th><th>Type</th><th>Position</th><th></th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+  box.querySelectorAll('[data-poi-idx]').forEach(btn => {
+    btn.onclick = () => routeEditorRemovePoi(parseInt(btn.dataset.poiIdx, 10));
+  });
 }
 
 async function routeEditorAnalyzePoints(points) {
@@ -1007,9 +1150,9 @@ async function applyRouteEditorObjectivePlan(plan, newPoints, finalStats) {
   const btn = document.getElementById('route-editor-apply-auto-btn');
   if (btn) { btn.disabled = true; btn.textContent = '⏳ Application…'; }
   try {
-    _routeEditorHistory.push({ points: _routeEditorData.points, stats: _routeEditorData.stats });
+    _routeEditorHistory.push({ points: _routeEditorData.points, stats: _routeEditorData.stats, pois: _routeEditorData.pois || [] });
     _routeEditorFuture = [];
-    _routeEditorData = { ..._routeEditorData, points: newPoints, stats: finalStats };
+    _routeEditorData = { ..._routeEditorData, points: newPoints, stats: finalStats, pois: [] };
     _routeEditorSelection = { aIdx: null, bIdx: null };
     // Plan issu de l'objectif : vient d'être appliqué, on l'efface pour ne
     // pas re-suggérer immédiatement une nouvelle répétition (cf même logique
@@ -1072,9 +1215,9 @@ async function applyRouteEditorRepeat(explicitCount) {
   try {
     const newPoints = buildRepeatedPoints(_routeEditorData.points, sel.aIdx, sel.bIdx, count);
     const stats = await routeEditorAnalyzePoints(newPoints);
-    _routeEditorHistory.push({ points: _routeEditorData.points, stats: _routeEditorData.stats });
+    _routeEditorHistory.push({ points: _routeEditorData.points, stats: _routeEditorData.stats, pois: _routeEditorData.pois || [] });
     _routeEditorFuture = [];
-    _routeEditorData = { ..._routeEditorData, points: newPoints, stats };
+    _routeEditorData = { ..._routeEditorData, points: newPoints, stats, pois: [] };
     _routeEditorSelection = { aIdx: null, bIdx: null };
     // Repetition declenchee par un objectif (D+/distance) : l'objectif vient
     // d'etre applique, on l'efface pour ne pas re-suggerer immediatement une
@@ -1089,27 +1232,27 @@ async function applyRouteEditorRepeat(explicitCount) {
 
 function routeEditorUndo() {
   if (!_routeEditorHistory.length) return;
-  _routeEditorFuture.push({ points: _routeEditorData.points, stats: _routeEditorData.stats });
+  _routeEditorFuture.push({ points: _routeEditorData.points, stats: _routeEditorData.stats, pois: _routeEditorData.pois || [] });
   const prev = _routeEditorHistory.pop();
-  _routeEditorData = { ..._routeEditorData, points: prev.points, stats: prev.stats };
+  _routeEditorData = { ..._routeEditorData, points: prev.points, stats: prev.stats, pois: prev.pois || [] };
   _routeEditorSelection = { aIdx: null, bIdx: null };
   renderRouteEditorWorkspace();
 }
 
 function routeEditorRedo() {
   if (!_routeEditorFuture.length) return;
-  _routeEditorHistory.push({ points: _routeEditorData.points, stats: _routeEditorData.stats });
+  _routeEditorHistory.push({ points: _routeEditorData.points, stats: _routeEditorData.stats, pois: _routeEditorData.pois || [] });
   const next = _routeEditorFuture.pop();
-  _routeEditorData = { ..._routeEditorData, points: next.points, stats: next.stats };
+  _routeEditorData = { ..._routeEditorData, points: next.points, stats: next.stats, pois: next.pois || [] };
   _routeEditorSelection = { aIdx: null, bIdx: null };
   renderRouteEditorWorkspace();
 }
 
 function routeEditorRestoreOriginal() {
   if (!_routeEditorOriginal || _routeEditorData.points === _routeEditorOriginal.points) return;
-  _routeEditorHistory.push({ points: _routeEditorData.points, stats: _routeEditorData.stats });
+  _routeEditorHistory.push({ points: _routeEditorData.points, stats: _routeEditorData.stats, pois: _routeEditorData.pois || [] });
   _routeEditorFuture = [];
-  _routeEditorData = { ..._routeEditorData, points: _routeEditorOriginal.points, stats: _routeEditorOriginal.stats };
+  _routeEditorData = { ..._routeEditorData, points: _routeEditorOriginal.points, stats: _routeEditorOriginal.stats, pois: _routeEditorOriginal.pois || [] };
   _routeEditorSelection = { aIdx: null, bIdx: null };
   renderRouteEditorWorkspace();
 }
@@ -1154,6 +1297,8 @@ function parseRouteEditorTargetTime(raw) {
   return minutes > 0 ? minutes : null;
 }
 
+let _routeEditorLastStrategy = null; // dernier résultat de /api/route-editor/strategy, réutilisé par le résumé intelligent
+let _routeEditorLastStrategyPoints = null; // référence du tableau de points pour lequel _routeEditorLastStrategy a été calculé - détecte la péremption sans avoir à réinitialiser explicitement à chaque édition (on ne remplace jamais un tableau de points en place, toujours par un nouveau)
 const STRATEGY_TYPE_LABELS = { climb: 'Montée', descent: 'Descente', flat: 'Plat' };
 const STRATEGY_COHERENCE = {
   ambitieux: { label: 'Objectif très ambitieux', className: 'route-editor-coherence--ambitieux' },
@@ -1168,13 +1313,16 @@ async function computeRouteEditorStrategy() {
   const resultBox = el('route-editor-strategy-result');
   if (btn) { btn.disabled = true; btn.textContent = '⏳ Calcul…'; }
   try {
+    const pois = (_routeEditorData.pois || []).map(p => ({ idx: p.idx, label: p.label || routeEditorPoiTypeInfo(p.type).label }));
     const res = await fetch(`${API}/api/route-editor/strategy`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ points: _routeEditorData.points, targetTimeMin: targetMin }),
+      body: JSON.stringify({ points: _routeEditorData.points, targetTimeMin: targetMin, pois }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Calcul impossible');
+    _routeEditorLastStrategy = data; // réutilisé par le résumé intelligent (phrase "marche active")
+    _routeEditorLastStrategyPoints = _routeEditorData.points;
     renderRouteEditorStrategyResult(data);
   } catch (err) {
     showToast('Erreur : ' + err.message, 'error');
@@ -1210,5 +1358,10 @@ function renderRouteEditorStrategyResult(data) {
         <thead><tr><th>Section</th><th>Position</th><th>Distance</th><th>Pente</th><th>Allure conseillée</th><th>Temps</th><th>Passage cumulé</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
-    </div>`;
+    </div>
+    ${data.poiTimes && data.poiTimes.length ? `
+      <div class="route-editor-section-title">Temps de passage aux points d'intérêt</div>
+      <ul class="route-editor-poi-times">
+        ${data.poiTimes.map(pt => `<li>${pt.label} : <b>${pt.cumulativeTimeMin != null ? formatDuration(pt.cumulativeTimeMin * 60) : '—'}</b></li>`).join('')}
+      </ul>` : ''}`;
 }
