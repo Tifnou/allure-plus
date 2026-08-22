@@ -2985,23 +2985,35 @@ app.post('/api/route-editor/strategy', requireSession, (req, res) => {
 // "déplacer un point" (waypoints = [avant, nouvelle position, après]),
 // "ajouter un point de passage/forcer un passage" (waypoints = [A,
 // nouveau point, B]) et "recalculer/raccourcir une section" (waypoints =
-// [A, B], la valeur par défaut). Réutilise routeThroughPoints
-// (route_generator.js, qui injecte déjà TRAIL_STYLE_PARAMS pour le profil
-// trail) - même moteur que le générateur d'itinéraires, aucune nouvelle
-// logique de routage. La vérification/téléchargement de la tuile OSM se
-// fait côté client AVANT cet appel (mêmes routes /api/routes/tile-check et
-// /api/routes/tile-download que le générateur d'itinéraires, déjà prêtes à
-// être réutilisées telles quelles).
+// [A, B], la valeur par défaut). Si `points`/`startIdx`/`endIdx` sont
+// absents, route simplement les `waypoints` fournis SANS fusionner dans un
+// tracé existant - utilisé par le mode "Prolonger le tracé"/"Créer un
+// parcours de zéro" (PDF §26) pour router un nouveau tronçon ajouté en fin
+// de parcours (ou fermer la boucle), même mécanisme, pas de route dédiée.
+// Réutilise routeThroughPoints (route_generator.js, qui injecte déjà
+// TRAIL_STYLE_PARAMS pour le profil trail) - même moteur que le générateur
+// d'itinéraires, aucune nouvelle logique de routage. La vérification/
+// téléchargement de la tuile OSM se fait côté client AVANT cet appel
+// (mêmes routes /api/routes/tile-check et /api/routes/tile-download que le
+// générateur d'itinéraires, déjà prêtes à être réutilisées telles quelles).
 app.post('/api/route-editor/reroute', requireSession, async (req, res) => {
   try {
     const { points, startIdx, endIdx, waypoints, terrain, trailStyle } = req.body || {};
-    if (!Array.isArray(points) || !Number.isInteger(startIdx) || !Number.isInteger(endIdx)
-      || startIdx < 0 || endIdx >= points.length || startIdx >= endIdx) {
-      return res.status(400).json({ error: 'Section invalide' });
+    const hasSplice = Array.isArray(points) && Number.isInteger(startIdx) && Number.isInteger(endIdx);
+    let routeWaypoints;
+    if (hasSplice) {
+      if (startIdx < 0 || endIdx >= points.length || startIdx >= endIdx) {
+        return res.status(400).json({ error: 'Section invalide' });
+      }
+      routeWaypoints = Array.isArray(waypoints) && waypoints.length >= 2
+        ? waypoints
+        : [points[startIdx], points[endIdx]];
+    } else {
+      if (!Array.isArray(waypoints) || waypoints.length < 2) {
+        return res.status(400).json({ error: 'Points de passage manquants' });
+      }
+      routeWaypoints = waypoints;
     }
-    const routeWaypoints = Array.isArray(waypoints) && waypoints.length >= 2
-      ? waypoints
-      : [points[startIdx], points[endIdx]];
 
     const profile = TERRAIN_PROFILES[terrain] || TERRAIN_PROFILES.trail;
     let rerouted;
@@ -3024,6 +3036,12 @@ app.post('/api/route-editor/reroute', requireSession, async (req, res) => {
       }
     } catch (err) { /* correction IGN indisponible - on garde les altitudes BRouter */ }
 
+    if (!hasSplice) {
+      // Mode "prolonger/fermer la boucle" : rien à fusionner, l'appelant
+      // ajoute lui-même segmentPoints en fin de son tracé en cours de
+      // construction.
+      return res.json({ segmentPoints: reroutedPoints });
+    }
     const mergedPoints = [...points.slice(0, startIdx), ...reroutedPoints, ...points.slice(endIdx + 1)];
     // segmentPoints renvoyé séparément (en plus du tracé fusionné) pour que
     // le client puisse afficher l'ancien tracé vs le nouveau en
