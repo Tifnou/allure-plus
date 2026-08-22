@@ -147,8 +147,9 @@ function renderRouteEditorWorkspace() {
       <label>D+ cible <input type="number" id="route-editor-obj-dplus" class="routes-number-input" min="0" step="10" placeholder="m" value="${_routeEditorObjective.targetDplusM ?? ''}" /> m</label>
       <label>Distance cible <input type="number" id="route-editor-obj-dist" class="routes-number-input" min="0" step="0.5" placeholder="km" value="${_routeEditorObjective.targetDistM ?? ''}" /> km</label>
       <button type="button" class="route-editor-btn-secondary" id="route-editor-obj-clear">Effacer</button>
-      <span class="route-editor-objective-hint">Sélectionnez ensuite une section (carte, profil ou "🔁 Répéter") : Allure+ calcule combien de fois la parcourir pour s'en approcher.</span>
+      <span class="route-editor-objective-hint">Allure+ propose automatiquement la côte la plus efficace à répéter pour s'en approcher — ou sélectionnez vous-même une autre section (carte, profil, "🔁 Répéter").</span>
     </div>
+    <div id="route-editor-objective-auto"></div>
     <div id="route-editor-hint" class="route-editor-hint">Cliquez sur deux points du tracé (carte ou profil) pour choisir une section à répéter.</div>
     <div id="route-editor-section-panel"></div>
     <div class="route-editor-section-title">Côtes détectées</div>
@@ -160,7 +161,7 @@ function renderRouteEditorWorkspace() {
       : `<div class="route-editor-climbs-empty">Aucune côte significative détectée sur ce parcours.</div>`}
     <div class="route-editor-section-title">Stratégie de course</div>
     <div class="route-editor-strategy-card">
-      <label>Objectif de temps (optionnel) <input type="text" id="route-editor-strategy-target" class="routes-text-input" placeholder="hh:mm (ex: 3:30)" style="width:100px" /></label>
+      <label>Objectif de temps (optionnel) <input type="time" id="route-editor-strategy-target" class="routes-text-input" style="width:110px" /></label>
       <button type="button" class="btn-plans-restart" id="route-editor-strategy-btn">Calculer la stratégie</button>
       <span class="route-editor-objective-hint">Répartit l'effort section par section selon votre profil d'allure personnel (calibré sur vos sorties Garmin), avec marche active sur les pentes très fortes — pas une allure unique partout.</span>
     </div>
@@ -193,6 +194,7 @@ function renderRouteEditorWorkspace() {
       targetDistM: objDistInput?.value ? parseFloat(objDistInput.value) : null,
     };
     renderRouteEditorSectionPanel();
+    renderRouteEditorObjectiveAutoSuggestion();
   };
   if (objDplusInput) objDplusInput.oninput = onObjectiveChange;
   if (objDistInput) objDistInput.oninput = onObjectiveChange;
@@ -202,6 +204,7 @@ function renderRouteEditorWorkspace() {
     if (objDplusInput) objDplusInput.value = '';
     if (objDistInput) objDistInput.value = '';
     renderRouteEditorSectionPanel();
+    renderRouteEditorObjectiveAutoSuggestion();
   };
 
   if (_routeEditorMap) { _routeEditorMap.remove(); _routeEditorMap = null; }
@@ -215,6 +218,7 @@ function renderRouteEditorWorkspace() {
   // Leaflet en parallele ("Map container is already initialized").
   renderRouteEditorVisuals();
   renderRouteEditorSectionPanel();
+  renderRouteEditorObjectiveAutoSuggestion();
 }
 
 // Carte (tracé coloré par pente) + profil altimétrique (même code couleur),
@@ -346,6 +350,7 @@ function onRouteEditorPointClick(idx) {
   renderRouteEditorSelectionOverlay();
   if (_routeEditorChart) _routeEditorChart.update();
   renderRouteEditorSectionPanel();
+  renderRouteEditorObjectiveAutoSuggestion();
 }
 
 function clearRouteEditorSelection() {
@@ -353,6 +358,7 @@ function clearRouteEditorSelection() {
   renderRouteEditorSelectionOverlay();
   if (_routeEditorChart) _routeEditorChart.update();
   renderRouteEditorSectionPanel();
+  renderRouteEditorObjectiveAutoSuggestion();
 }
 
 // Raccourci depuis le tableau des côtes : pose directement A/B sur les
@@ -364,6 +370,7 @@ function selectClimbForRepeat(climbIdx) {
   renderRouteEditorSelectionOverlay();
   if (_routeEditorChart) _routeEditorChart.update();
   renderRouteEditorSectionPanel();
+  renderRouteEditorObjectiveAutoSuggestion();
   el('route-editor-section-panel')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
@@ -496,6 +503,72 @@ function renderRouteEditorObjectiveSuggestion(sel) {
   }).catch(() => { box.remove(); });
 }
 
+// Classe les côtes détectées par "rentabilité verticale" (m de D+ par
+// metre de trajet ajouté par un aller-retour) quand un D+ cible est fixé -
+// même principe que findSteepestSegments (route_generator.js) pour le
+// générateur d'itinéraires, réutilisé ici en repli local (aucun appel
+// serveur) pour identifier la MEILLEURE côte sans devoir simuler les 30+
+// côtes d'un parcours une par une. Si seule une distance cible est fixée
+// (pas de D+), la rentabilité D+ n'a pas de sens - on privilégie alors la
+// côte la plus courte, pour une granularité plus fine (moins de risque de
+// dépasser largement la distance visée en ajoutant un passage entier).
+function pickBestClimbForObjective(climbs, obj) {
+  if (!climbs.length) return null;
+  if (obj.targetDplusM != null) {
+    return climbs.reduce((best, c) => {
+      const efficiency = c.gainM / (2 * c.distM || 1);
+      return (!best || efficiency > best.efficiency) ? { ...c, efficiency } : best;
+    }, null);
+  }
+  return climbs.reduce((best, c) => (!best || c.distM < best.distM) ? c : best, null);
+}
+
+// Suggestion automatique (pas de clic requis) : dès qu'un objectif D+/
+// distance est fixé et qu'aucune section n'est sélectionnée manuellement,
+// propose directement la meilleure côte à répéter - le clic manuel
+// (carte/profil/"🔁 Répéter") reste possible et prend le dessus tant qu'une
+// sélection est active (cf renderRouteEditorSectionPanel).
+function renderRouteEditorObjectiveAutoSuggestion() {
+  const box = el('route-editor-objective-auto');
+  if (!box) return;
+  const obj = _routeEditorObjective;
+  if (_routeEditorSelection.aIdx != null || (obj.targetDplusM == null && obj.targetDistM == null)) {
+    box.innerHTML = '';
+    return;
+  }
+  const climbs = _routeEditorData?.stats?.climbs || [];
+  const best = pickBestClimbForObjective(climbs, obj);
+  if (!best) {
+    box.innerHTML = `<div class="route-editor-section-card route-editor-objective-suggestion">Aucune côte détectée sur ce parcours pour proposer une répétition automatique — sélectionnez une section vous-même (carte ou profil).</div>`;
+    return;
+  }
+  const objSnapshot = { ...obj };
+  box.innerHTML = `<div class="route-editor-section-card route-editor-objective-suggestion">⏳ Recherche de la meilleure côte…</div>`;
+  computeRouteEditorObjectiveSuggestion(best.startIdx, best.endIdx).then(res => {
+    // L'objectif ou la sélection ont pu changer pendant l'attente réseau.
+    if (_routeEditorObjective.targetDplusM !== objSnapshot.targetDplusM || _routeEditorObjective.targetDistM !== objSnapshot.targetDistM) return;
+    if (_routeEditorSelection.aIdx != null) return;
+    if (!res) { box.innerHTML = ''; return; }
+    const passesLabel = res.neededPasses === 2 ? '1 passage supplémentaire' : `${res.neededPasses - 1} passages supplémentaires`;
+    const capNote = res.capped && !res.reached
+      ? `<div class="route-editor-objective-capnote">Objectif non atteint même au maximum de 10 montées sur cette côte.</div>`
+      : '';
+    box.innerHTML = `
+      <div class="route-editor-section-card route-editor-objective-suggestion">
+        <div>🏆 Meilleure option automatique — côte KM ${best.startKm.toFixed(1)} → ${best.endKm.toFixed(1)} (+${best.gainM} m D+ par passage) :
+        ${passesLabel} (${res.neededPasses} montées au total) ${res.reached ? "permettront d'atteindre l'objectif" : "rapprocheront de l'objectif"} :
+        nouveau parcours estimé <b>${(res.finalStats.totalDistM / 1000).toFixed(1)} km</b> / <b>+${res.finalStats.ascentM} m D+</b>.</div>
+        ${capNote}
+        <button type="button" class="btn-plans-restart" id="route-editor-apply-auto-btn">Appliquer ${res.neededPasses} montées</button>
+      </div>`;
+    const btn = document.getElementById('route-editor-apply-auto-btn');
+    if (btn) btn.onclick = () => {
+      _routeEditorSelection = { aIdx: best.startIdx, bIdx: best.endIdx };
+      applyRouteEditorRepeat(res.neededPasses);
+    };
+  }).catch(() => { box.innerHTML = ''; });
+}
+
 // Construit A..B, N fois, avec les allers-retours B->A intermédiaires -
 // même principe que le PDF (4 montées = A→B→A→B→A→B→A→B), sans point
 // dupliqué aux jonctions. Le retour B→A réutilise exactement les
@@ -525,7 +598,7 @@ async function applyRouteEditorRepeat(explicitCount) {
     const countInput = el('route-editor-repeat-count');
     count = Math.min(10, Math.max(2, parseInt(countInput?.value, 10) || 2));
   }
-  const applyBtn = el('route-editor-apply-repeat-btn') || el('route-editor-apply-objective-btn');
+  const applyBtn = el('route-editor-apply-repeat-btn') || el('route-editor-apply-objective-btn') || el('route-editor-apply-auto-btn');
   if (applyBtn) { applyBtn.disabled = true; applyBtn.textContent = '⏳ Application…'; }
   try {
     const newPoints = buildRepeatedPoints(_routeEditorData.points, sel.aIdx, sel.bIdx, count);
@@ -534,6 +607,10 @@ async function applyRouteEditorRepeat(explicitCount) {
     _routeEditorFuture = [];
     _routeEditorData = { ..._routeEditorData, points: newPoints, stats };
     _routeEditorSelection = { aIdx: null, bIdx: null };
+    // Repetition declenchee par un objectif (D+/distance) : l'objectif vient
+    // d'etre applique, on l'efface pour ne pas re-suggerer immediatement une
+    // nouvelle repetition sur le parcours qui vient tout juste d'etre mis a jour.
+    if (Number.isInteger(explicitCount)) _routeEditorObjective = { targetDplusM: null, targetDistM: null };
     renderRouteEditorWorkspace();
   } catch (err) {
     showToast('Erreur : ' + err.message, 'error');
@@ -592,16 +669,20 @@ async function routeEditorExportGpx() {
   }
 }
 
-// Accepte "3:30" (h:mm), "3h30" ou un nombre brut de minutes ("90") - le
-// PDF donne des exemples en "1 h 30", plus naturel a saisir que des minutes
-// pures pour un objectif de course.
+// input type="time" renvoie toujours "HH:MM" (ou "HH:MM:SS" si l'attribut
+// step autorise les secondes, absent ici) en 24h - format strict et non
+// ambigu, contrairement a un champ texte libre : plus besoin de tolerer/
+// deviner plusieurs formats (bug reel constate avec un champ texte : saisir
+// "01:55:00" avec les secondes n'etait pas reconnu par l'ancien regex
+// hh:mm et retombait silencieusement sur un parseFloat qui ne gardait que
+// le "01" avant le premier ":", soit un objectif de... 1 minute).
 function parseRouteEditorTargetTime(raw) {
   const s = (raw || '').trim();
   if (!s) return null;
-  const hm = s.match(/^(\d{1,2})[:h](\d{1,2})$/);
-  if (hm) return parseInt(hm[1], 10) * 60 + parseInt(hm[2], 10);
-  const n = parseFloat(s.replace(',', '.'));
-  return Number.isFinite(n) && n > 0 ? n : null;
+  const m = s.match(/^(\d{1,2}):(\d{2})/);
+  if (!m) return null;
+  const minutes = parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
+  return minutes > 0 ? minutes : null;
 }
 
 const STRATEGY_TYPE_LABELS = { climb: 'Montée', descent: 'Descente', flat: 'Plat' };
