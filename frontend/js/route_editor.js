@@ -139,16 +139,38 @@ async function handleRouteEditorFileSelected(file) {
 
 // Barre d'outils de mode, commune aux deux gabarits (tracé "en
 // construction" sans stats, et workspace complet) - un seul endroit pour
-// ces 4 boutons plutôt que de les dupliquer dans les deux templates.
+// ces 5 boutons plutôt que de les dupliquer dans les deux templates.
+// Chaque bouton est désactivé tant que le tracé n'a pas assez de points pour
+// que le mode ait un sens (minPoints) - avant ça, rien n'empêchait de
+// cliquer "Sélectionner A→B" et de crasher sur la carte vide (cf
+// onRouteEditorMapClick) ; en plus d'être une 2e ligne de défense contre ce
+// crash, ça rend le flux "que faire en premier ?" évident au lieu de
+// proposer 5 boutons d'apparence égale dès l'écran vide (retour
+// utilisateur). Un title (tooltip natif) sur chaque bouton explique son
+// usage - demande explicite ("des infos sur les menus... qu'on sache à quoi
+// ça correspond").
+const ROUTE_EDITOR_MODES = [
+  { mode: 'extend', icon: '➕', label: 'Prolonger le tracé', minPoints: 0,
+    title: 'Cliquez sur la carte pour ajouter des points à la suite du tracé (ou pour poser le tout premier point).' },
+  { mode: 'select', icon: '🖱️', label: 'Sélectionner A→B', minPoints: 2,
+    title: 'Cliquez deux points du tracé (carte ou profil) pour choisir une section : la répéter, lui appliquer un objectif D+/distance...' },
+  { mode: 'move-point', icon: '✏️', label: 'Déplacer un point', minPoints: 3,
+    title: 'Cliquez un point du tracé à déplacer, puis cliquez son nouvel emplacement. Astuce : les points de départ/arrivée et ceux posés en « Prolonger le tracé » se déplacent aussi directement à la souris (glisser-déposer).' },
+  { mode: 'add-waypoint', icon: '📍', label: 'Ajouter un point de passage', minPoints: 2,
+    title: 'Force le tracé à passer par un endroit précis entre A et B - sélectionnez d\'abord une section avec « Sélectionner A→B ».' },
+  { mode: 'poi', icon: '📌', label: 'Point d\'intérêt', minPoints: 1,
+    title: 'Cliquez un point du tracé pour y ajouter un ravitaillement, un point d\'eau, un sommet...' },
+];
 function routeEditorModeToolbarHtml() {
+  const count = (_routeEditorData?.points || []).length;
+  const buttons = ROUTE_EDITOR_MODES.map(m => {
+    const disabled = count < m.minPoints;
+    return `<button type="button" class="routes-toggle-btn route-editor-mode-btn ${_routeEditorMode === m.mode ? 'active' : ''}" data-mode="${m.mode}" title="${escapeHtml(m.title)}" ${disabled ? 'disabled' : ''}>${m.icon} ${escapeHtml(m.label)}</button>`;
+  }).join('');
   return `
     <div class="route-editor-mode-toolbar routes-toggle">
-      <button type="button" class="routes-toggle-btn route-editor-mode-btn ${_routeEditorMode === 'select' ? 'active' : ''}" data-mode="select">🖱️ Sélectionner A→B</button>
-      <button type="button" class="routes-toggle-btn route-editor-mode-btn ${_routeEditorMode === 'move-point' ? 'active' : ''}" data-mode="move-point">✏️ Déplacer un point</button>
-      <button type="button" class="routes-toggle-btn route-editor-mode-btn ${_routeEditorMode === 'add-waypoint' ? 'active' : ''}" data-mode="add-waypoint">📍 Ajouter un point de passage</button>
-      <button type="button" class="routes-toggle-btn route-editor-mode-btn ${_routeEditorMode === 'extend' ? 'active' : ''}" data-mode="extend">➕ Prolonger le tracé</button>
-      <button type="button" class="routes-toggle-btn route-editor-mode-btn ${_routeEditorMode === 'poi' ? 'active' : ''}" data-mode="poi">📌 Point d'intérêt</button>
-      <label class="route-editor-profile-select-label">Profil de routage
+      ${buttons}
+      <label class="route-editor-profile-select-label" title="Type de terrain utilisé pour calculer les tronçons (Prolonger le tracé, Déplacer un point...).">Profil de routage
         <select id="route-editor-profile-select" class="routes-select">
           <option value="trail:mixte">Trail (mixte)</option>
           <option value="trail:roulant">Trail (roulant)</option>
@@ -184,21 +206,90 @@ function wireRouteEditorModeToolbar(ws) {
 function renderRouteEditorWorkspaceInProgress() {
   const ws = el('route-editor-workspace');
   ws.style.display = '';
+  const points = _routeEditorData?.points || [];
+  // Avant le tout 1er point, l'ancien indice discret ("Cliquez sur la carte
+  // pour poser le premier point...", sous la carte) passait facilement
+  // inaperçu (retour utilisateur : flux "pas intuitif") - une carte
+  // d'accroche explicite au-dessus, + la recherche d'adresse comme
+  // alternative au clic direct sur la carte (utile pour démarrer un
+  // parcours loin de la position affichée par défaut).
+  const startCta = points.length === 0 ? `
+    <div class="route-editor-start-cta">
+      <div class="route-editor-start-cta-title">📍 Placez le point de départ</div>
+      <div class="route-editor-start-cta-text">Cliquez sur la carte ci-dessous, ou recherchez une adresse.</div>
+      ${routeEditorStartFinderHtml()}
+    </div>` : '';
   ws.innerHTML = `
     ${routeEditorModeToolbarHtml()}
+    ${startCta}
     <div class="gpx-profile-map" id="route-editor-map"></div>
     <div id="route-editor-mode-hint" class="route-editor-hint"></div>
     <div id="route-editor-extend-controls"></div>
     <div class="route-editor-actions">
+      ${points.length ? `<button type="button" class="route-editor-btn-secondary" id="route-editor-undo-inprogress-btn">↶ Annuler le dernier point</button>` : ''}
       <button type="button" class="route-editor-btn-secondary" id="route-editor-close-creation-btn">✕ Annuler la création</button>
     </div>`;
   wireRouteEditorModeToolbar(ws);
   renderRouteEditorExtendControls();
+  if (points.length === 0) wireRouteEditorStartFinder();
   const closeBtn = el('route-editor-close-creation-btn');
   if (closeBtn) closeBtn.onclick = routeEditorClose;
+  const undoBtn = el('route-editor-undo-inprogress-btn');
+  if (undoBtn) undoBtn.onclick = routeEditorUndo;
   if (_routeEditorMap) { _routeEditorMap.remove(); _routeEditorMap = null; }
   if (_routeEditorChart) { _routeEditorChart.destroy(); _routeEditorChart = null; }
   renderRouteEditorVisuals();
+}
+
+// Recherche d'adresse pour placer le point de départ sans avoir à le
+// repérer à l'œil sur la carte (retour utilisateur) - réutilise
+// /api/routes/geocode (Nominatim), déjà utilisé par le générateur
+// d'itinéraires pour la même raison. Volontairement limité au tout premier
+// point (avant, la carte part dézoomée sur la France entière) : une fois le
+// tracé commencé, se déplacer dessus se fait naturellement en zoomant/
+// déplaçant la carte normale.
+function routeEditorStartFinderHtml() {
+  return `
+    <div class="route-editor-start-finder">
+      <input type="text" id="route-editor-start-address" class="routes-text-input" placeholder="Rechercher une adresse, une ville..." />
+      <button type="button" id="route-editor-start-address-btn" class="route-editor-btn-secondary">🔍 Rechercher</button>
+    </div>
+    <div id="route-editor-start-address-results"></div>`;
+}
+
+function wireRouteEditorStartFinder() {
+  const input = el('route-editor-start-address');
+  const btn = el('route-editor-start-address-btn');
+  const results = el('route-editor-start-address-results');
+  if (!input || !btn || !results) return;
+  const runSearch = async () => {
+    const address = input.value.trim();
+    if (!address) return;
+    results.innerHTML = '<div class="route-editor-start-finder-status">⏳ Recherche…</div>';
+    try {
+      const res = await fetch(`${API}/api/routes/geocode?address=${encodeURIComponent(address)}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Recherche impossible');
+      const candidates = data.candidates || [];
+      if (!candidates.length) {
+        results.innerHTML = '<div class="route-editor-start-finder-status">Aucun résultat.</div>';
+        return;
+      }
+      results.innerHTML = `<div class="route-editor-start-finder-list">${candidates.map((c, i) =>
+        `<button type="button" class="route-editor-start-finder-item" data-idx="${i}">📍 ${escapeHtml(c.label)}</button>`).join('')}</div>`;
+      results.querySelectorAll('.route-editor-start-finder-item').forEach(item => {
+        item.onclick = () => {
+          const c = candidates[parseInt(item.dataset.idx, 10)];
+          if (_routeEditorMap) _routeEditorMap.setView([c.lat, c.lon], 15);
+          routeEditorPlaceStartPoint(c.lat, c.lon);
+        };
+      });
+    } catch (err) {
+      results.innerHTML = `<div class="route-editor-start-finder-status">Erreur : ${escapeHtml(err.message)}</div>`;
+    }
+  };
+  btn.onclick = runSearch;
+  input.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); runSearch(); } };
 }
 
 // Bouton "Fermer la boucle" (PDF §26.5) : affiché uniquement en mode
@@ -282,6 +373,12 @@ function renderRouteEditorWorkspace() {
     <div id="route-editor-mode-hint" class="route-editor-hint"></div>
     <div id="route-editor-extend-controls"></div>
     <div id="route-editor-reroute-preview"></div>
+    <div class="route-editor-actions route-editor-actions--top">
+      <button type="button" class="route-editor-btn-secondary" id="route-editor-undo-btn" ${_routeEditorHistory.length ? '' : 'disabled'}>↶ Annuler</button>
+      <button type="button" class="route-editor-btn-secondary" id="route-editor-redo-btn" ${_routeEditorFuture.length ? '' : 'disabled'}>↷ Rétablir</button>
+      <button type="button" class="route-editor-btn-secondary" id="route-editor-restore-btn" ${isOriginal ? 'disabled' : ''}>Restaurer l'original</button>
+      <button type="button" class="btn-plans-restart" id="route-editor-export-btn">⬇️ Exporter le GPX</button>
+    </div>
     <div class="route-editor-objective-card">
       <span class="route-editor-objective-title">🎯 Objectif (optionnel)</span>
       <label>D+ cible <input type="number" id="route-editor-obj-dplus" class="routes-number-input" min="0" step="10" placeholder="m" value="${_routeEditorObjective.targetDplusM ?? ''}" /> m</label>
@@ -311,13 +408,7 @@ function renderRouteEditorWorkspace() {
       <button type="button" class="btn-plans-restart" id="route-editor-strategy-btn">Calculer la stratégie</button>
       <span class="route-editor-objective-hint">Répartit l'effort section par section selon votre profil d'allure personnel (calibré sur vos sorties Garmin), avec marche active sur les pentes très fortes — pas une allure unique partout.</span>
     </div>
-    <div id="route-editor-strategy-result"></div>
-    <div class="route-editor-actions">
-      <button type="button" class="route-editor-btn-secondary" id="route-editor-undo-btn" ${_routeEditorHistory.length ? '' : 'disabled'}>↶ Annuler</button>
-      <button type="button" class="route-editor-btn-secondary" id="route-editor-redo-btn" ${_routeEditorFuture.length ? '' : 'disabled'}>↷ Rétablir</button>
-      <button type="button" class="route-editor-btn-secondary" id="route-editor-restore-btn" ${isOriginal ? 'disabled' : ''}>Restaurer l'original</button>
-      <button type="button" class="btn-plans-restart" id="route-editor-export-btn">⬇️ Exporter le GPX</button>
-    </div>`;
+    <div id="route-editor-strategy-result"></div>`;
 
   const exportBtn = el('route-editor-export-btn');
   if (exportBtn) exportBtn.onclick = routeEditorExportGpx;
@@ -424,17 +515,15 @@ function renderRouteEditorVisuals() {
     } else if (latLngs.length === 1) {
       // Un seul point posé : rien à router encore (2e clic requis), juste
       // le marqueur de départ.
-      L.marker(latLngs[0]).addTo(map).bindTooltip('Départ');
       map.setView(latLngs[0], 14);
     } else {
       bins.forEach(bin => {
         const seg = latLngs.slice(bin.startIdx, bin.endIdx + 1);
         if (seg.length > 1) L.polyline(seg, { color: gpxGradeBand(bin.gradePct).color, weight: 4 }).addTo(map);
       });
-      L.marker(latLngs[0]).addTo(map).bindTooltip('Départ');
-      L.marker(latLngs[latLngs.length - 1]).addTo(map).bindTooltip('Arrivée');
       map.fitBounds(L.latLngBounds(latLngs), { padding: [12, 12] });
     }
+    renderRouteEditorAnchorMarkers(map, points);
     map.on('click', e => onRouteEditorMapClick(e.latlng, points));
     _routeEditorMap = map;
     renderRouteEditorSelectionOverlay();
@@ -486,6 +575,116 @@ function renderRouteEditorVisuals() {
     canvas.addEventListener('mouseleave', () => {
       if (cursorMarker && _routeEditorMap) { _routeEditorMap.removeLayer(cursorMarker); cursorMarker = null; }
     });
+  }
+}
+
+// Marqueurs déplaçables par glisser-déposer (retour utilisateur : la seule
+// façon de déplacer un point était le mode "Déplacer un point", 2 clics -
+// pas assez direct). Limité au départ, à l'arrivée, et aux points posés
+// explicitement par un clic en mode "Prolonger le tracé" (flag
+// points[i].anchor, cf onRouteEditorExtendClick/routeEditorPlaceStartPoint)
+// - PAS tous les points bruts du tracé (souvent des centaines, issus du
+// routage BRouter entre deux clics : les afficher tous en marqueurs
+// déplaçables noierait la carte). Le mode "Déplacer un point" reste
+// disponible pour ces points intermédiaires (et pour un GPX importé, qui
+// n'a aucun point "anchor").
+function renderRouteEditorAnchorMarkers(map, points) {
+  if (!points.length) return;
+  const group = L.layerGroup();
+  points.forEach((p, idx) => {
+    const isStart = idx === 0;
+    const isEnd = idx === points.length - 1;
+    if (!isStart && !isEnd && !p.anchor) return;
+    // icon omis (pas juste mis à `undefined`) pour départ/arrivée : Leaflet
+    // n'utilise son icône par défaut que si la clé "icon" est absente des
+    // options, une valeur explicitement undefined écrase quand même le
+    // défaut et fait planter le marqueur (this.options.icon.createIcon()).
+    const markerOpts = { draggable: true };
+    if (!isStart && !isEnd) {
+      markerOpts.icon = L.divIcon({ html: '<span class="route-editor-anchor-marker"></span>', className: '', iconSize: [16, 16], iconAnchor: [8, 8] });
+    }
+    const marker = L.marker([p.lat, p.lon], markerOpts).addTo(group);
+    marker.bindTooltip(isStart ? 'Départ (glisser pour déplacer)' : isEnd ? 'Arrivée (glisser pour déplacer)' : 'Glisser pour déplacer ce point');
+    marker.on('dragend', () => onRouteEditorAnchorDragEnd(idx, marker.getLatLng()));
+  });
+  group.addTo(map);
+}
+
+// Glisser-déposer d'un point ancre (départ/arrivée/point posé en mode
+// "Prolonger le tracé") : recalcule directement l'itinéraire autour du
+// nouvel emplacement (pas d'étape "Appliquer" intermédiaire comme le mode
+// "Déplacer un point" - le geste de glisser-déposer EST déjà la
+// confirmation, et Annuler est maintenant juste au-dessus de la carte en
+// cas d'erreur). Un seul point sur le tracé : rien à router, juste
+// déplacer + rafraîchir l'altitude IGN. Départ/arrivée : un seul côté à
+// reancrer. Point intermédiaire : les deux côtés (voisins immédiats dans le
+// tableau `points`, pas le point ancre précédent/suivant - BRouter route
+// depuis leurs coordonnées exactes quoi qu'il arrive, peu importe qu'ils
+// soient eux-mêmes une ancre ou un point intermédiaire déjà routé).
+async function onRouteEditorAnchorDragEnd(idx, latlng) {
+  const points = _routeEditorData.points;
+  if (points.length === 1) {
+    _routeEditorHistory.push({ points: [...points], stats: null, pois: [] });
+    _routeEditorFuture = [];
+    let ele = points[0].ele || 0;
+    try {
+      const res = await fetch(`${API}/api/route-editor/elevation`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lat: latlng.lat, lon: latlng.lng }),
+      });
+      const data = await res.json();
+      if (res.ok && typeof data.ele === 'number') ele = data.ele;
+    } catch (err) { /* repli silencieux sur l'ancienne altitude */ }
+    _routeEditorData = { ..._routeEditorData, points: [{ lat: latlng.lat, lon: latlng.lng, ele, anchor: true }] };
+    renderRouteEditorWorkspace();
+    return;
+  }
+
+  let startIdx, endIdx, waypoints;
+  if (idx === 0) {
+    startIdx = 0; endIdx = 1;
+    waypoints = [{ lat: latlng.lat, lon: latlng.lng }, { lat: points[1].lat, lon: points[1].lon }];
+  } else if (idx === points.length - 1) {
+    startIdx = idx - 1; endIdx = idx;
+    waypoints = [{ lat: points[idx - 1].lat, lon: points[idx - 1].lon }, { lat: latlng.lat, lon: latlng.lng }];
+  } else {
+    startIdx = idx - 1; endIdx = idx + 1;
+    waypoints = [
+      { lat: points[idx - 1].lat, lon: points[idx - 1].lon },
+      { lat: latlng.lat, lon: latlng.lng },
+      { lat: points[idx + 1].lat, lon: points[idx + 1].lon },
+    ];
+  }
+
+  try {
+    const tileOk = await routeEditorEnsureTileAvailable({ lat: latlng.lat, lon: latlng.lng });
+    if (!tileOk) { renderRouteEditorVisuals(); return; } // remet le marqueur à sa place (rien n'a changé)
+    const { terrain, trailStyle } = routeEditorCurrentProfile();
+    const res = await fetch(`${API}/api/route-editor/reroute`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ points, startIdx, endIdx, waypoints, terrain, trailStyle }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Recalcul impossible');
+
+    // Retrouve, dans le tronçon recalculé, le point le plus proche du
+    // nouvel emplacement pour lui reporter le flag anchor (le tronçon
+    // renvoyé par le serveur est fait de coordonnées fraîches, sans lien
+    // d'identité avec l'ancien point déplacé).
+    let newPoints = data.points;
+    const segStart = startIdx, segEnd = startIdx + data.segmentPoints.length - 1;
+    let bestI = segStart, bestD = Infinity;
+    for (let i = segStart; i <= segEnd; i++) {
+      const dLat = newPoints[i].lat - latlng.lat, dLon = newPoints[i].lon - latlng.lng;
+      const d = dLat * dLat + dLon * dLon;
+      if (d < bestD) { bestD = d; bestI = i; }
+    }
+    newPoints = newPoints.map((p, i) => i === bestI ? { ...p, anchor: true } : p);
+    const newStats = await routeEditorAnalyzePoints(newPoints);
+    applyRouteEditorReroute(newPoints, newStats);
+  } catch (err) {
+    showToast('Erreur : ' + err.message, 'error');
+    renderRouteEditorVisuals(); // remet le marqueur à sa place (rien n'a changé)
   }
 }
 
@@ -562,11 +761,26 @@ function renderRouteEditorModeHint() {
   }
 }
 
-// Dispatcher unique pour le clic carte, selon le mode actif.
+// Dispatcher unique pour le clic carte, selon le mode actif. Tous les modes
+// sauf "extend" supposent un tracé déjà commencé (ils sélectionnent/déplacent/
+// annotent un point EXISTANT) - sans ce garde-fou, cliquer la carte en mode
+// "Sélectionner A→B" (ou tout autre mode) avant d'avoir posé le premier point
+// plantait : _routeEditorLatLngs est vide, L.circleMarker(undefined) leve une
+// exception dans Leaflet (chargé en cross-origin depuis unpkg.com, d'où le
+// message générique "Script error." sans détail côté bandeau d'erreur JS) -
+// bug réel constaté (retour utilisateur, capture d'écran). Plutôt qu'un
+// crash silencieux, un message clair renvoie vers le mode "Prolonger le
+// tracé" (les boutons de mode sont eux-mêmes désactivés tant qu'il n'y a pas
+// assez de points, cf routeEditorModeToolbarHtml - ce garde-fou reste une
+// 2e ligne de défense, ex: clic sur le profil altimétrique via onClick).
 function onRouteEditorMapClick(latlng, points) {
+  if (_routeEditorMode === 'extend') { onRouteEditorExtendClick(latlng); return; }
+  if (!points.length) {
+    showToast('Placez d\'abord un point de départ (mode "➕ Prolonger le tracé").', 'error');
+    return;
+  }
   if (_routeEditorMode === 'move-point') { onRouteEditorMovePointClick(latlng, points); return; }
   if (_routeEditorMode === 'add-waypoint') { onRouteEditorAddWaypointClick(latlng); return; }
-  if (_routeEditorMode === 'extend') { onRouteEditorExtendClick(latlng); return; }
   if (_routeEditorMode === 'poi') { onRouteEditorPoiClick(findNearestRouteEditorPointIndex(latlng, points)); return; }
   onRouteEditorPointClick(findNearestRouteEditorPointIndex(latlng, points));
 }
@@ -580,13 +794,35 @@ function onRouteEditorMapClick(latlng, points) {
 function onRouteEditorExtendClick(latlng) {
   const points = _routeEditorData.points;
   if (!points.length) {
-    _routeEditorHistory.push({ points: [], stats: null, pois: [] });
-    _routeEditorFuture = [];
-    _routeEditorData = { ..._routeEditorData, points: [{ lat: latlng.lat, lon: latlng.lng, ele: 0 }], pois: [] };
-    renderRouteEditorWorkspace();
+    routeEditorPlaceStartPoint(latlng.lat, latlng.lng);
     return;
   }
   routeEditorExtendTrack(points[points.length - 1], { lat: latlng.lat, lon: latlng.lng });
+}
+
+// Pose le tout premier point du tracé (clic carte OU recherche d'adresse,
+// cf routeEditorStartFinderHtml) - factorisé pour que les deux chemins
+// recuperent la VRAIE altitude IGN (/api/route-editor/elevation) au lieu de
+// la figer a 0m : avec un seul point, rien a router (BRouter ne s'applique
+// qu'a partir de 2 points), donc rien ne corrigeait cette altitude avant que
+// le 2e point ne soit pose - un D+ absurde entre les deux (bug reel, ex:
+// +152m sur 100m) puisque ce 2e point, lui, recevait sa vraie altitude via
+// routeThroughPoints/getElevations cote serveur. anchor:true marque ce point
+// comme deplacable par glisser-deposer sur la carte (renderRouteEditorAnchorMarkers).
+async function routeEditorPlaceStartPoint(lat, lon) {
+  _routeEditorHistory.push({ points: [], stats: null, pois: [] });
+  _routeEditorFuture = [];
+  let ele = 0;
+  try {
+    const res = await fetch(`${API}/api/route-editor/elevation`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ lat, lon }),
+    });
+    const data = await res.json();
+    if (res.ok && typeof data.ele === 'number') ele = data.ele;
+  } catch (err) { /* repli silencieux sur 0 - pas bloquant pour poser le depart */ }
+  _routeEditorData = { ..._routeEditorData, points: [{ lat, lon, ele, anchor: true }], pois: [] };
+  renderRouteEditorWorkspace();
 }
 
 async function routeEditorExtendTrack(fromPoint, toPoint) {
@@ -607,6 +843,11 @@ async function routeEditorExtendTrack(fromPoint, toPoint) {
     const prevStats = _routeEditorData.stats;
     const prevPois = _routeEditorData.pois || [];
     const newPoints = [...prevPoints, ...data.segmentPoints.slice(1)]; // slice(1) : le 1er point du tronçon double le dernier point déjà présent
+    // Le dernier point du tronçon est celui que l'utilisateur vient de
+    // cliquer (la cible du routage) - marqué déplaçable par glisser-déposer
+    // (cf renderRouteEditorAnchorMarkers), contrairement aux points
+    // intermédiaires calculés par BRouter entre deux clics.
+    if (newPoints.length) newPoints[newPoints.length - 1] = { ...newPoints[newPoints.length - 1], anchor: true };
     const newStats = newPoints.length >= 2 ? await routeEditorAnalyzePoints(newPoints) : null;
 
     _routeEditorHistory.push({ points: prevPoints, stats: prevStats, pois: prevPois });

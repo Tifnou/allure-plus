@@ -3076,6 +3076,24 @@ app.post('/api/route-editor/reroute', requireSession, async (req, res) => {
   } catch (err) { handleError(res, err); }
 });
 
+// Altitude reelle (IGN RGE ALTI) d'un point isole - utilise pour le tout
+// premier point pose en mode "Creer un parcours de zero" (onRouteEditorExtendClick,
+// route_editor.js), qui n'a encore rien a router (BRouter ne s'applique qu'a
+// partir de 2 points) et se retrouvait fige a 0m d'altitude - un D+ absurde
+// des le point suivant (ex: +152m sur 100m) des que ce point suivant, lui,
+// recevait sa vraie altitude via routeThroughPoints. Repli sur 0 si hors
+// couverture IGN (mer, etranger) ou service indisponible, jamais bloquant.
+app.post('/api/route-editor/elevation', requireSession, async (req, res) => {
+  try {
+    const { lat, lon } = req.body || {};
+    if (typeof lat !== 'number' || typeof lon !== 'number') {
+      return res.status(400).json({ error: 'lat/lon manquants' });
+    }
+    const elevations = await getElevations([{ lat, lon }]);
+    res.json({ ele: (elevations && elevations[0] != null) ? elevations[0] : 0 });
+  } catch (err) { handleError(res, err); }
+});
+
 // ─── Export / import des records + courses (changement de PC, reinstall) ──
 app.get('/api/records-export', requireSession, (req, res) => {
   const records_overrides = readScoped(RECORDS_OVERRIDES_FILE, req.session.email, {});
