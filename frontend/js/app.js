@@ -2667,18 +2667,21 @@ const SLEEP_QUALIFIER_FR = { POOR: 'Mauvais', FAIR: 'Passable', GOOD: 'Bon', EXC
 // "Effort trop soutenu" en rouge alors que le code correspondait a
 // "Maintien"), donc on indexe desormais uniquement par le prefixe de la
 // phrase (avant le "_N" final) - jamais par le code numerique, qui n'est
-// pas fiable pour l'affichage. Couleurs non documentees officiellement,
-// calees au plus pres des captures fournies pour STRAINED et OVERREACHING.
+// pas fiable pour l'affichage. Couleurs calees sur la legende officielle
+// de l'app Garmin Connect (capture fournie par l'utilisateur, 23/08) -
+// avant cela Maintien et Productif etaient tous deux verts (quasi
+// indiscernables sur la bande "Statut d'entrainement"), et Desentrainement
+// etait bleu (confondu avec Recuperation, bleu egalement).
 const TRAINING_STATUS_MAP = {
-  NO_STATUS:    { label: 'Aucun statut',        color: '#9CA3AF', tier: 'neutral' },
-  DETRAINING:   { label: 'Désentraînement',      color: '#60A5FA', tier: 'attention' },
+  NO_STATUS:    { label: 'Aucun statut',        color: '#B0B4B8', tier: 'neutral' },
+  DETRAINING:   { label: 'Désentraînement',      color: '#8B9299', tier: 'attention' },
   RECOVERY:     { label: 'Récupération',         color: '#3B82F6', tier: 'neutral' },
-  MAINTAINING:  { label: 'Maintien',             color: '#22C55E', tier: 'neutral' },
-  PRODUCTIVE:   { label: 'Productif',            color: '#16A34A', tier: 'good' },
-  PEAKING:      { label: 'Pic de forme',         color: '#06B6D4', tier: 'good' },
-  OVERREACHING: { label: 'Effort trop soutenu',  color: '#DC2626', tier: 'attention' },
-  UNPRODUCTIVE: { label: 'Improductif',          color: '#EF4444', tier: 'attention' },
-  STRAINED:     { label: 'Sous tension',         color: '#DB2777', tier: 'attention' },
+  MAINTAINING:  { label: 'Maintien',             color: '#F2C94C', tier: 'neutral' },
+  PRODUCTIVE:   { label: 'Productif',            color: '#22C55E', tier: 'good' },
+  PEAKING:      { label: 'Pic',                  color: '#8B5FBF', tier: 'good' },
+  OVERREACHING: { label: 'Effort trop soutenu',  color: '#E8433A', tier: 'attention' },
+  UNPRODUCTIVE: { label: 'Non productif',        color: '#E8833A', tier: 'attention' },
+  STRAINED:     { label: 'Sous tension',         color: '#C2469C', tier: 'attention' },
 };
 function trainingStatusCategory(phrase) {
   // .trim().toUpperCase() : DETRAINING est bien dans TRAINING_STATUS_MAP,
