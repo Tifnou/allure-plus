@@ -405,8 +405,17 @@ function renderRouteEditorVisuals() {
     _routeEditorLatLngs = points.map(p => [p.lat, p.lon]);
     const latLngs = _routeEditorLatLngs;
     const map = L.map(mapDiv, { zoomControl: true, attributionControl: true });
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-      maxZoom: 19, attribution: '&copy; <a href="https://openstreetmap.org">OSM</a> &copy; <a href="https://carto.com">CARTO</a>',
+    // Tuiles OSM standard (pas CARTO Voyager comme ailleurs dans l'app) :
+    // en mode "Creer un parcours de zero", la vue par defaut est tres
+    // dezoomee (France entiere, aucun point pose) - a ce niveau de zoom,
+    // les tuiles CARTO Voyager affichent les noms de mers/pays via leur
+    // calque Natural Earth, qui est fige en anglais ("Bay of Biscay",
+    // "English Channel"...) contrairement aux tuiles OSM standard qui
+    // suivent toujours le tag "name" local. Non visible sur les autres
+    // cartes CARTO de l'app car elles sont toujours zoomees sur un trace
+    // GPS precis (fitBounds), jamais sur un pays entier.
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19, attribution: '&copy; <a href="https://openstreetmap.org">OSM</a>',
     }).addTo(map);
     if (latLngs.length === 0) {
       // Tracé vide (mode "extend", création de zéro pas encore commencée) -
