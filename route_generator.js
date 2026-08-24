@@ -138,32 +138,66 @@ function pathLengthM(points) {
   for (let i = 1; i < points.length; i++) d += haversineDistance(points[i - 1], points[i]);
   return d;
 }
+
+// Fraction des points de `points` qui retombent a moins de thresholdM d'un
+// point de `reference` - detecte un chevauchement/zigzag que le seul
+// garde-fou de distance (cf routeThroughViaPoint) laissait passer : une
+// alternative peut rester assez courte en distance totale tout en repassant
+// tres pres du 1er troncon par un sentier parallele voisin (quelques
+// metres a cote), ce qui produit visuellement le meme effet d'aller-retour
+// resserre qu'un vrai retracage (retour utilisateur, 3e capture d'ecran).
+function pathOverlapFraction(points, reference, thresholdM = 6) {
+  if (!points.length) return 0;
+  let close = 0;
+  for (const p of points) {
+    let best = Infinity;
+    for (const q of reference) {
+      const d = haversineDistance(p, q);
+      if (d < best) best = d;
+      if (best < thresholdM) break;
+    }
+    if (best < thresholdM) close++;
+  }
+  return close / points.length;
+}
+
+// Rayons essayes dans l'ordre pour la zone interdite (cf
+// buildNogoZonesNearEnd) : un rayon trop petit (12m) laisse parfois BRouter
+// se rabattre sur un sentier parallele a quelques metres a peine (zigzag
+// resserre, toujours visuellement un aller-retour) ; un rayon trop grand
+// (30m+) peut au contraire sceller completement une zone etroite et rendre
+// le 2e troncon totalement impossible a router. Plutot que de figer une
+// seule valeur (qui ne convient jamais a toutes les densites de sentiers
+// reelles), on essaie ces 3 rayons dans l'ordre et on garde le premier
+// resultat a la fois routable, pas demesure (cf oldLenM) et qui ne repasse
+// pas pres du 1er troncon (cf pathOverlapFraction).
+const VIA_POINT_NOGO_RADII_M = [12, 20, 30];
 async function routeThroughViaPoint(before, via, after, profile, opts = {}) {
   const leg1 = await routeThroughPoints([before, via], profile, opts);
-  const nogos = buildNogoZonesNearEnd(leg1.points);
   // Calcule systematiquement l'ancien troncon (avec aller-retour eventuel) :
-  // sert a la fois de repli si aucune alternative n'est routable, ET de
-  // reference pour le garde-fou ci-dessous - comparer a LUI plutot qu'a une
-  // distance a vol d'oiseau, qui n'a aucun rapport avec un vrai reseau de
-  // sentiers en foret (jamais rectiligne) et rejetait a tort de vrais
-  // contournements raisonnables (retour utilisateur, 2e capture d'ecran :
-  // un contour par des sentiers bien reels, visibles sur la carte, refuse
-  // au profit du court aller-retour).
+  // sert a la fois de repli si aucune alternative n'est routable/propre, ET
+  // de reference pour le garde-fou de distance - comparer a LUI plutot qu'a
+  // une distance a vol d'oiseau, qui n'a aucun rapport avec un vrai reseau
+  // de sentiers en foret (jamais rectiligne) et rejetait a tort de vrais
+  // contournements raisonnables (retour utilisateur, 2e capture d'ecran).
   const legOld = await routeThroughPoints([via, after], profile, opts);
-  let leg2 = legOld;
-  if (nogos.length) {
+  const oldLenM = pathLengthM(legOld.points);
+  for (const radius of VIA_POINT_NOGO_RADII_M) {
+    const nogos = buildNogoZonesNearEnd(leg1.points, { radius });
+    if (!nogos.length) break; // troncon trop court pour qu'un rayon plus grand change quoi que ce soit
     try {
       const candidate = await routeThroughPoints([via, after], profile, { ...opts, nogos });
-      const oldLenM = pathLengthM(legOld.points);
-      // Garde-fou : accepte l'alternative sans aller-retour tant qu'elle ne
-      // represente pas un detour demesure par rapport a ce que l'ancien
-      // troncon mesurait deja - mieux vaut le court aller-retour original
-      // qu'un grand crochet sans rapport si aucune alternative raisonnable
-      // n'existe reellement sur le terrain.
-      if (pathLengthM(candidate.points) <= Math.max(oldLenM * 3, oldLenM + 200)) leg2 = candidate;
-    } catch (err) { /* pas d'alternative routable, on garde legOld */ }
+      const withinDistanceCap = pathLengthM(candidate.points) <= Math.max(oldLenM * 3, oldLenM + 200);
+      const stillOverlapping = pathOverlapFraction(candidate.points, leg1.points) >= 0.15;
+      if (withinDistanceCap && !stillOverlapping) {
+        return { points: [...leg1.points, ...candidate.points.slice(1)] };
+      }
+    } catch (err) { /* ce rayon rend le troncon impossible a router, essai suivant */ }
   }
-  return { points: [...leg1.points, ...leg2.points.slice(1)] };
+  // Aucun rayon n'a produit une alternative a la fois routable, raisonnable
+  // et propre - mieux vaut le court aller-retour original qu'un grand
+  // crochet ou un zigzag sans rapport.
+  return { points: [...leg1.points, ...legOld.points.slice(1)] };
 }
 
 // Sous-estimation observee du D+ BRouter (filtre) par rapport a ce
@@ -1843,6 +1877,7 @@ module.exports = {
   farthestPoint,
   haversineDistance,
   routeThroughViaPoint,
+  buildNogoZonesNearEnd,
   generateLoop,
   generateLoopWithAlternates,
   generateOutAndBack,
