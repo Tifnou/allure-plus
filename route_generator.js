@@ -20,6 +20,8 @@ const { isBrouterConfigured } = require('./brouter_manager');
 const { bucketForGrade } = require('./pace_profile');
 const { getRouteAscent, getElevations } = require('./geoportail_client');
 const { queryNaturalAreas, isPointInAnyPolygon } = require('./overpass_client');
+const fs = require('fs');
+const path = require('path');
 
 // Le profil 'trekking' (mode "route", utilise jusqu'en aout 2026) est un
 // profil velo generique qui exclut bien les autoroutes mais ne compare les
@@ -172,6 +174,21 @@ function pathOverlapFraction(points, reference, thresholdM = 6) {
 // resultat a la fois routable, pas demesure (cf oldLenM) et qui ne repasse
 // pas pres du 1er troncon (cf pathOverlapFraction).
 const VIA_POINT_NOGO_RADII_M = [12, 20, 30];
+// Trace de diagnostic temporaire (fichier sur disque, PAS la console - un
+// autre processus que celui lance manuellement pendant le diagnostic peut
+// repondre a la requete, cf redemarrage automatique constate, et sa sortie
+// console n'est pas forcement visible) pour comprendre en conditions
+// reelles pourquoi certains deplacements de point retombent quand meme sur
+// l'aller-retour - plusieurs iterations a l'aveugle sur des coordonnees de
+// synthese n'ont pas reussi a reproduire exactement les cas signales par
+// l'utilisateur (aout 2026). A retirer une fois le reglage (rayons/seuils)
+// confirme correct sur des cas reels.
+const VIA_POINT_DEBUG = true;
+const VIA_POINT_DEBUG_FILE = path.join(__dirname, 'data', 'via_point_debug.log');
+function viaPointDebugLog(line) {
+  if (!VIA_POINT_DEBUG) return;
+  try { fs.appendFileSync(VIA_POINT_DEBUG_FILE, `${new Date().toISOString()} ${line}\n`); } catch (err) { /* diagnostic best-effort */ }
+}
 async function routeThroughViaPoint(before, via, after, profile, opts = {}) {
   const leg1 = await routeThroughPoints([before, via], profile, opts);
   // Calcule systematiquement l'ancien troncon (avec aller-retour eventuel) :
@@ -182,21 +199,26 @@ async function routeThroughViaPoint(before, via, after, profile, opts = {}) {
   // contournements raisonnables (retour utilisateur, 2e capture d'ecran).
   const legOld = await routeThroughPoints([via, after], profile, opts);
   const oldLenM = pathLengthM(legOld.points);
+  viaPointDebugLog(`before=${before.lat},${before.lon} via=${via.lat},${via.lon} after=${after.lat},${after.lon} leg1Len=${Math.round(pathLengthM(leg1.points))} oldLenM=${Math.round(oldLenM)}`);
   for (const radius of VIA_POINT_NOGO_RADII_M) {
     const nogos = buildNogoZonesNearEnd(leg1.points, { radius });
-    if (!nogos.length) break; // troncon trop court pour qu'un rayon plus grand change quoi que ce soit
+    if (!nogos.length) { viaPointDebugLog(`radius=${radius}: pas de zone (troncon trop court), arret`); break; }
     try {
       const candidate = await routeThroughPoints([via, after], profile, { ...opts, nogos });
-      const withinDistanceCap = pathLengthM(candidate.points) <= Math.max(oldLenM * 3, oldLenM + 200);
-      const stillOverlapping = pathOverlapFraction(candidate.points, leg1.points) >= 0.15;
+      const candLenM = pathLengthM(candidate.points);
+      const withinDistanceCap = candLenM <= Math.max(oldLenM * 3, oldLenM + 200);
+      const overlap = pathOverlapFraction(candidate.points, leg1.points);
+      const stillOverlapping = overlap >= 0.15;
+      viaPointDebugLog(`radius=${radius}: candLenM=${Math.round(candLenM)} cap=${Math.round(Math.max(oldLenM * 3, oldLenM + 200))} withinCap=${withinDistanceCap} overlap=${overlap.toFixed(2)} ${withinDistanceCap && !stillOverlapping ? '-> ACCEPTE' : '-> rejete'}`);
       if (withinDistanceCap && !stillOverlapping) {
         return { points: [...leg1.points, ...candidate.points.slice(1)] };
       }
-    } catch (err) { /* ce rayon rend le troncon impossible a router, essai suivant */ }
+    } catch (err) { viaPointDebugLog(`radius=${radius}: non routable (${err.message})`); }
   }
   // Aucun rayon n'a produit une alternative a la fois routable, raisonnable
   // et propre - mieux vaut le court aller-retour original qu'un grand
   // crochet ou un zigzag sans rapport.
+  viaPointDebugLog('repli sur aller-retour original');
   return { points: [...leg1.points, ...legOld.points.slice(1)] };
 }
 

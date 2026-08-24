@@ -740,18 +740,33 @@ function findNearestRouteEditorPointIndex(latlng, points) {
 // de rebrousser chemin. Utilisé par onRouteEditorMovePointClick et
 // onRouteEditorAnchorDragEnd (glisser-déposer), les deux endroits qui
 // recalculaient jusqu'ici sur les voisins immédiats idx-1/idx+1.
-function routeEditorWidenBackward(points, fromIdx, minDistKm = 0.12) {
+// maxDistKm : un troncon de trace peut avoir des points bruts tres espacés
+// par endroits (long segment droit posé en un seul clic "Prolonger le
+// tracé", peu de points intermédiaires renvoyés par BRouter) - sans ce
+// plafond, un SEUL pas de la boucle ci-dessous peut à lui seul faire
+// exploser la fenêtre bien au-delà des ~120m visés (bug réel constaté,
+// retour utilisateur : avant/après retrouvés à 760-960m du point déplacé
+// au lieu de ~120m, ce qui a fait échouer le recalcul en 2 tronçons plus
+// bas dans la chaîne - le vrai avant/après du point n'a pas de raison
+// d'être aussi loin). Mieux vaut s'arrêter net à l'ancre la plus proche
+// déjà atteinte que de sauter à un point sans rapport à cause d'un simple
+// trou dans la densité des points bruts.
+function routeEditorWidenBackward(points, fromIdx, minDistKm = 0.12, maxDistKm = minDistKm * 2.5) {
   let i = fromIdx, dist = 0;
   while (i > 0 && dist < minDistKm) {
-    dist += haversineKm(points[i - 1], points[i]);
+    const step = haversineKm(points[i - 1], points[i]);
+    if (dist + step > maxDistKm) break;
+    dist += step;
     i--;
   }
   return i;
 }
-function routeEditorWidenForward(points, fromIdx, minDistKm = 0.12) {
+function routeEditorWidenForward(points, fromIdx, minDistKm = 0.12, maxDistKm = minDistKm * 2.5) {
   let i = fromIdx, dist = 0;
   while (i < points.length - 1 && dist < minDistKm) {
-    dist += haversineKm(points[i], points[i + 1]);
+    const step = haversineKm(points[i], points[i + 1]);
+    if (dist + step > maxDistKm) break;
+    dist += step;
     i++;
   }
   return i;
@@ -964,6 +979,14 @@ function onRouteEditorMovePointClick(latlng, points) {
     startIdx,
     endIdx,
     waypoints: [{ lat: before.lat, lon: before.lon }, { lat: latlng.lat, lon: latlng.lng }, { lat: after.lat, lon: after.lon }],
+    // Diagnostic temporaire (aout 2026) : avant/après se retrouvaient bien
+    // plus loin que prévu (jusqu'à ~970m au lieu des ~120m visés) sans
+    // qu'on sache si c'est le plafonnage du pas qui échoue ou l'arrêt en
+    // butée de tableau (idx proche de 0/length-1) - transmis au serveur
+    // pour finir tracé dans le même fichier que routeThroughViaPoint (cf
+    // VIA_POINT_DEBUG_FILE, route_generator.js) plutôt que de multiplier
+    // les allers-retours de test.
+    debugMeta: { idx, startIdx, endIdx, totalPoints: points.length },
   });
 }
 
@@ -1028,7 +1051,7 @@ function clearRouteEditorReroutePreview() {
 // proposition de recalcul doit être prévisualisée). {startIdx, endIdx}
 // bornent la portion remplacée dans le tracé courant ; {waypoints}
 // optionnel (défaut [points[startIdx], points[endIdx]] côté serveur).
-async function routeEditorPreviewReroute({ startIdx, endIdx, waypoints, terrain, trailStyle }) {
+async function routeEditorPreviewReroute({ startIdx, endIdx, waypoints, terrain, trailStyle, debugMeta }) {
   const box = el('route-editor-reroute-preview');
   if (!box || !_routeEditorData) return;
   if (!terrain) ({ terrain, trailStyle } = routeEditorCurrentProfile());
@@ -1042,7 +1065,7 @@ async function routeEditorPreviewReroute({ startIdx, endIdx, waypoints, terrain,
     const points = _routeEditorData.points;
     const rerouteRes = await fetch(`${API}/api/route-editor/reroute`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ points, startIdx, endIdx, waypoints, terrain, trailStyle }),
+      body: JSON.stringify({ points, startIdx, endIdx, waypoints, terrain, trailStyle, debugMeta }),
     });
     const rerouteData = await rerouteRes.json();
     if (!rerouteRes.ok) throw new Error(rerouteData.error || 'Recalcul impossible');
