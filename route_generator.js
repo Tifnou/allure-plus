@@ -486,14 +486,24 @@ function computeLoopSelfOverlapFraction(points, { thresholdM = 8, minIndexGap = 
 }
 // Au-dela de ce taux, une boucle garde un avertissement honnete plutot que
 // d'etre presentee comme "sans repetition" sans nuance (cf commentaire
-// haut de fichier : "jamais un resultat unique force silencieusement").
+// haut de fichier : "jamais un resultat unique force silencieusement") - et
+// c'est AUSSI le seuil utilise pour ecarter une direction candidate au
+// profit d'une autre des SEARCH_DIRECTIONS quand au moins une est plus
+// propre (meme valeur, un seul seuil : cf note ci-dessous). Un rayon
+// d'affinage donne une distance/duree finale qui peut differer sensiblement
+// du scan initial (a rayon fixe) - une direction "un peu repliee mais quand
+// meme raisonnable" (dans cette bande) peut avoir un scan DEJA tres proche
+// de la cible alors qu'une direction "propre" au sens strict a un reseau
+// routier local qui oscille et ne converge jamais bien en affinant (bug reel
+// constate : seuil de rejet distinct et plus bas que WARNING, 0.12, ecartait
+// une direction a 12.0% de repli - scan a 10.9km, tres proche de la cible -
+// au profit d'une direction "propre" a 10.0% mais dont le rayon oscillait
+// sur 3 iterations sans jamais approcher la cible, 9.0km au lieu de 10km).
+// Un seul seuil evite cet ecart : toute direction sous ce seuil est deja
+// assez propre pour ne PAS meriter l'avertissement, donc assez propre pour
+// etre choisie normalement selon les autres criteres (D+, puis distance/duree).
 const LOOP_OVERLAP_WARNING_THRESHOLD = 0.20;
-// Au-dela de ce taux (plus strict), une direction candidate est ecartee au
-// profit d'une autre des SEARCH_DIRECTIONS si au moins une est plus propre -
-// seuil volontairement plus bas que WARNING : mieux vaut proposer une
-// direction legerement moins riche en D+ mais propre, qu'une direction
-// "meilleure sur le papier" à moitie repliee sur elle-meme.
-const LOOP_OVERLAP_REJECT_THRESHOLD = 0.12;
+const LOOP_OVERLAP_REJECT_THRESHOLD = LOOP_OVERLAP_WARNING_THRESHOLD;
 
 // Reordonne les candidats de scanDirections en ecartant ceux dont la boucle
 // repasse trop sur elle-meme (cf computeLoopSelfOverlapFraction), SANS
@@ -566,6 +576,12 @@ async function scanDirections(start, targetDistanceM, profile, targetAscentM, tr
 // Affine iterativement le rayon d'une boucle dans une direction fixee pour
 // converger vers targetDistanceM (le scan initial, a rayon uniforme pour
 // toutes les directions, tombe rarement pile sur la distance visee).
+// Journal de diagnostic optionnel (process.env.ROUTE_GEN_DEBUG, ex:
+// `ROUTE_GEN_DEBUG=1 node server.js`) : imprime le scan des 8 directions
+// (D+/repli de chacune) et chaque iteration d'affinage (rayon/distance/
+// ratio) - a servi a diagnostiquer un ecart de convergence reel (rayon
+// oscillant sans jamais approcher la cible sur une direction donnee, cf
+// LOOP_OVERLAP_WARNING_THRESHOLD), garde pour un usage futur similaire.
 // Si l'utilisateur a vise une DUREE (opts.targetDurationMin + opts.paceMinPerKm
 // fournis), converge sur la duree PREDITE (predictDurationMin, deja calculee
 // par tranche de pente/pente reelle du trace) plutot que sur la distance -
@@ -584,6 +600,7 @@ async function refineLoopFromBearing(start, bearing, initialResult, initialRadiu
     const ratio = (targetDurationMin && (paceMinPerKm || trailLevel))
       ? targetDurationMin / predictDurationMin(best.points, paceMinPerKm, trailLevel)
       : targetDistanceM / best.distanceM;
+    if (process.env.ROUTE_GEN_DEBUG) console.log(`[refine] iter=${iter} bearing=${bearing} radius=${bestRadius.toFixed(0)} distM=${best.distanceM} ratio=${ratio.toFixed(3)}`);
     if (Math.abs(ratio - 1) < REFINE_CONVERGENCE_TOLERANCE) break;
     // Clamp defensif : une estimation de duree bruitee sur un trace court/peu
     // detaille peut produire un ratio extreme (constate reel sur un aller-retour
@@ -593,9 +610,11 @@ async function refineLoopFromBearing(start, bearing, initialResult, initialRadiu
     try {
       best = await routeThroughPoints(loopWaypointsForBearing(start, bearing, bestRadius), profile, { trackname: `refine_${bearing}_${iter}`, trailStyle });
     } catch (err) {
+      if (process.env.ROUTE_GEN_DEBUG) console.log(`[refine] iter=${iter} bearing=${bearing} radius=${bestRadius.toFixed(0)} ECHEC: ${err.message}`);
       break; // le rayon affine n'est plus routable, on garde le meilleur resultat connu
     }
   }
+  if (process.env.ROUTE_GEN_DEBUG) console.log(`[refine] FINAL bearing=${bearing} radius=${bestRadius.toFixed(0)} distM=${best.distanceM}`);
   return best;
 }
 
@@ -774,9 +793,14 @@ async function generateLoopWithAlternates(start, targetDistanceM, profile, opts 
     throw new Error('Impossible de generer une boucle exploitable autour de ce depart.');
   }
   const candidates = preferLowOverlapCandidates(rawCandidates);
+  if (process.env.ROUTE_GEN_DEBUG) {
+    console.log('[scan] radius(scan)=', radius.toFixed(0));
+    for (const c of rawCandidates) console.log(`[scan] bearing=${c.bearing} distM=${c.result.distanceM} ascentM=${c.result.filteredAscendM} overlap=${computeLoopSelfOverlapFraction(c.result.points).toFixed(3)}`);
+  }
 
   const primary = candidates[0];
   const primaryBudget = reserveRepairBudget(primary.result, targetDistanceM, opts.targetDurationMin, opts.targetAscentM);
+  if (process.env.ROUTE_GEN_DEBUG) console.log(`[primary] bearing=${primary.bearing} budget.targetDistanceM=${primaryBudget.targetDistanceM.toFixed(0)}`);
   const best = await refineLoopFromBearing(start, primary.bearing, primary.result, radius, primaryBudget.targetDistanceM, profile, maxRefineIterations, { ...opts, targetDurationMin: primaryBudget.targetDurationMin });
   // Reevalue sur le resultat APRES affinage (le rayon a change depuis le
   // scan initial, cf refineLoopFromBearing) - preferLowOverlapCandidates
