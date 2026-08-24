@@ -381,6 +381,12 @@
    utilisateur : trop bas, il fallait défiler toute la fiche côtes/POI/
    variantes/stratégie pour l'atteindre). */
 .route-editor-actions--top { margin-top: 0; margin-bottom: 16px; }
+/* Quand "Fermer la boucle" (mode "extend") est affiché juste au-dessus, il
+   collait directement à cette barre - route-editor-actions--top a un
+   margin-top:0 volontaire (cf ci-dessus) car ce conteneur est vide la
+   plupart du temps, donc l'écart doit venir de lui plutôt que d'annuler ce
+   margin-top:0 globalement (retour utilisateur, capture d'écran). */
+#route-editor-extend-controls:not(:empty) { margin-bottom: 14px; }
 
 /* Points ancres déplaçables par glisser-déposer (départ/arrivée/points posés
    en mode "Prolonger le tracé") - petit disque net, distinct des étiquettes

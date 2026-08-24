@@ -263,7 +263,7 @@ function renderRouteEditorWorkspaceInProgress() {
 function routeEditorStartFinderHtml() {
   return `
     <div class="route-editor-start-finder">
-      <input type="text" id="route-editor-start-address" class="routes-text-input" placeholder="Rechercher une adresse, une ville..." />
+      <input type="text" id="route-editor-start-address" class="routes-text-input" placeholder="Adresse, ville ou code postal..." />
       <button type="button" id="route-editor-start-address-btn" class="route-editor-btn-secondary">🔍 Rechercher</button>
     </div>
     <div id="route-editor-start-address-results"></div>`;
