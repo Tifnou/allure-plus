@@ -642,12 +642,15 @@ function renderRouteEditorAnchorMarkers(map, points) {
 // confirmation, et Annuler est maintenant juste au-dessus de la carte en
 // cas d'erreur). Un seul point sur le tracé : rien à router, juste
 // déplacer + rafraîchir l'altitude IGN. Départ/arrivée : un seul côté à
-// reancrer, élargi (routeEditorWidenBackward/Forward) plutôt que le simple
-// voisin immédiat, même raison que onRouteEditorMovePointClick (marge
-// géométrique insuffisante pour BRouter sinon, aller-retour visible). Point
-// intermédiaire : les deux côtés élargis - BRouter route depuis leurs
-// coordonnées exactes quoi qu'il arrive, peu importe qu'ils soient eux-mêmes
-// une ancre ou un point intermédiaire déjà routé.
+// reancrer, à une distance interpolée (routeEditorPointAtDistanceBackward/
+// Forward) plutôt que le simple voisin immédiat, même raison que
+// onRouteEditorMovePointClick (marge géométrique insuffisante pour BRouter
+// sinon, aller-retour visible) - les ancres marquant systématiquement une
+// frontière entre deux tronçons "Prolonger le tracé", le voisin immédiat
+// PEUT être extrêmement loin si ce tronçon voisin est un long segment peu
+// dense en points bruts. Point intermédiaire : les deux côtés - BRouter
+// route depuis leurs coordonnées exactes quoi qu'il arrive, peu importe
+// qu'ils soient eux-mêmes une ancre ou un point intermédiaire déjà routé.
 async function onRouteEditorAnchorDragEnd(idx, latlng) {
   const points = _routeEditorData.points;
   if (points.length === 1) {
@@ -669,18 +672,18 @@ async function onRouteEditorAnchorDragEnd(idx, latlng) {
 
   let startIdx, endIdx, waypoints;
   if (idx === 0) {
-    startIdx = 0; endIdx = routeEditorWidenForward(points, 1);
-    waypoints = [{ lat: latlng.lat, lon: latlng.lng }, { lat: points[endIdx].lat, lon: points[endIdx].lon }];
+    const fwd = routeEditorPointAtDistanceForward(points, 0);
+    startIdx = 0; endIdx = fwd.keepIdx - 1;
+    waypoints = [{ lat: latlng.lat, lon: latlng.lng }, fwd.point];
   } else if (idx === points.length - 1) {
-    startIdx = routeEditorWidenBackward(points, idx - 1); endIdx = idx;
-    waypoints = [{ lat: points[startIdx].lat, lon: points[startIdx].lon }, { lat: latlng.lat, lon: latlng.lng }];
+    const back = routeEditorPointAtDistanceBackward(points, idx);
+    startIdx = back.keepIdx + 1; endIdx = points.length - 1;
+    waypoints = [back.point, { lat: latlng.lat, lon: latlng.lng }];
   } else {
-    startIdx = routeEditorWidenBackward(points, idx - 1); endIdx = routeEditorWidenForward(points, idx + 1);
-    waypoints = [
-      { lat: points[startIdx].lat, lon: points[startIdx].lon },
-      { lat: latlng.lat, lon: latlng.lng },
-      { lat: points[endIdx].lat, lon: points[endIdx].lon },
-    ];
+    const back = routeEditorPointAtDistanceBackward(points, idx);
+    const fwd = routeEditorPointAtDistanceForward(points, idx);
+    startIdx = back.keepIdx + 1; endIdx = fwd.keepIdx - 1;
+    waypoints = [back.point, { lat: latlng.lat, lon: latlng.lng }, fwd.point];
   }
 
   try {
@@ -689,7 +692,7 @@ async function onRouteEditorAnchorDragEnd(idx, latlng) {
     const { terrain, trailStyle } = routeEditorCurrentProfile();
     const res = await fetch(`${API}/api/route-editor/reroute`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ points, startIdx, endIdx, waypoints, terrain, trailStyle }),
+      body: JSON.stringify({ points, startIdx, endIdx, waypoints, terrain, trailStyle, debugMeta: { idx, startIdx, endIdx, totalPoints: points.length, via: 'anchor-drag' } }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Recalcul impossible');
@@ -725,51 +728,57 @@ function findNearestRouteEditorPointIndex(latlng, points) {
   return best;
 }
 
-// Recule/avance depuis un index donné jusqu'à ce que la distance cumulée sur
-// le tracé atteigne minDistKm (par défaut 120 m), au lieu de s'arrêter au
-// tout premier voisin du tableau `points` - sur un GPX importé (ou un
-// tronçon déjà routé par BRouter), deux points consécutifs peuvent n'être
-// espacés que de quelques mètres (résolution d'enregistrement/lissage). Aller
-// chercher une liaison entre des ancres aussi rapprochées ne laisse quasiment
-// aucune marge géométrique à BRouter pour rejoindre un nouvel emplacement
-// autrement qu'en aller-retour (avant/après le point déplacé sont presque au
-// même endroit) - bug réel constaté (retour utilisateur, capture d'écran :
-// aller-retour visible sur la carte et pic en V sur le profil). Reculer/
-// avancer jusqu'à une distance minimale redonne assez d'espace pour que
-// BRouter reforme une vraie boucle passant par le nouveau point plutôt que
-// de rebrousser chemin. Utilisé par onRouteEditorMovePointClick et
-// onRouteEditorAnchorDragEnd (glisser-déposer), les deux endroits qui
-// recalculaient jusqu'ici sur les voisins immédiats idx-1/idx+1.
-// maxDistKm : un troncon de trace peut avoir des points bruts tres espacés
-// par endroits (long segment droit posé en un seul clic "Prolonger le
-// tracé", peu de points intermédiaires renvoyés par BRouter) - sans ce
-// plafond, un SEUL pas de la boucle ci-dessous peut à lui seul faire
-// exploser la fenêtre bien au-delà des ~120m visés (bug réel constaté,
-// retour utilisateur : avant/après retrouvés à 760-960m du point déplacé
-// au lieu de ~120m, ce qui a fait échouer le recalcul en 2 tronçons plus
-// bas dans la chaîne - le vrai avant/après du point n'a pas de raison
-// d'être aussi loin). Mieux vaut s'arrêter net à l'ancre la plus proche
-// déjà atteinte que de sauter à un point sans rapport à cause d'un simple
-// trou dans la densité des points bruts.
-function routeEditorWidenBackward(points, fromIdx, minDistKm = 0.12, maxDistKm = minDistKm * 2.5) {
-  let i = fromIdx, dist = 0;
-  while (i > 0 && dist < minDistKm) {
+// Point exact situé à targetDistKm (défaut 120 m) EN ARRIÈRE de viaIdx le
+// long du tracé, en INTERPOLANT sur le dernier tronçon plutôt qu'en sautant
+// au point brut suivant. Deux tentatives précédentes (marcher par index de
+// points bruts, avec puis sans plafond sur un seul pas) échouaient toutes
+// les deux pour la même raison de fond, identifiée via un diagnostic en
+// conditions réelles (fichier data/via_point_debug.log, retour
+// utilisateur) : un tronçon posé en un seul clic "Prolonger le tracé" (ou,
+// pire, la distance entre deux ancres consécutives quand ce tronçon n'a
+// QUASIMENT AUCUN point brut intermédiaire) peut faire plus d'1 km avec
+// seulement 2-3 points bruts au total - le "voisin le plus proche" est
+// alors déjà à 800-1000m, quel que soit le plafond appliqué à un
+// déplacement par index. Interpoler un point EXACTEMENT à la distance
+// visée (au lieu de forcément retomber sur un point brut existant) est la
+// seule façon de garantir une fenêtre de taille raisonnable indépendamment
+// de la densité de points du tronçon. `keepIdx` indique le dernier point
+// ORIGINAL à conserver tel quel avant ce point interpolé (l'appelant doit
+// utiliser startIdx = keepIdx + 1 pour le recalcul/la fusion du tracé).
+function routeEditorPointAtDistanceBackward(points, viaIdx, targetDistKm = 0.12) {
+  let i = viaIdx, dist = 0;
+  while (i > 0) {
     const step = haversineKm(points[i - 1], points[i]);
-    if (dist + step > maxDistKm) break;
+    if (dist + step >= targetDistKm) {
+      const frac = step > 0 ? (targetDistKm - dist) / step : 0;
+      return {
+        point: { lat: points[i].lat + (points[i - 1].lat - points[i].lat) * frac, lon: points[i].lon + (points[i - 1].lon - points[i].lon) * frac },
+        keepIdx: i - 1,
+      };
+    }
     dist += step;
     i--;
   }
-  return i;
+  return { point: { lat: points[0].lat, lon: points[0].lon }, keepIdx: -1 };
 }
-function routeEditorWidenForward(points, fromIdx, minDistKm = 0.12, maxDistKm = minDistKm * 2.5) {
-  let i = fromIdx, dist = 0;
-  while (i < points.length - 1 && dist < minDistKm) {
+// Symétrique de routeEditorPointAtDistanceBackward, vers l'avant.
+// `keepIdx` : premier point ORIGINAL conservé tel quel après ce point
+// interpolé (l'appelant doit utiliser endIdx = keepIdx - 1).
+function routeEditorPointAtDistanceForward(points, viaIdx, targetDistKm = 0.12) {
+  let i = viaIdx, dist = 0;
+  while (i < points.length - 1) {
     const step = haversineKm(points[i], points[i + 1]);
-    if (dist + step > maxDistKm) break;
+    if (dist + step >= targetDistKm) {
+      const frac = step > 0 ? (targetDistKm - dist) / step : 0;
+      return {
+        point: { lat: points[i].lat + (points[i + 1].lat - points[i].lat) * frac, lon: points[i].lon + (points[i + 1].lon - points[i].lon) * frac },
+        keepIdx: i + 1,
+      };
+    }
     dist += step;
     i++;
   }
-  return i;
+  return { point: { lat: points[points.length - 1].lat, lon: points[points.length - 1].lon }, keepIdx: points.length };
 }
 
 // Surbrillance de la sélection A/B sur la carte : marqueurs A (vert) / B
@@ -948,13 +957,15 @@ async function routeEditorExtendTrack(fromPoint, toPoint) {
 // 1er clic (mode "move-point") = point le plus proche à déplacer (jamais le
 // premier/dernier point du tracé, qui n'a pas de voisin des deux côtés) ;
 // 2e clic = position CIBLE brute (pas de snapping - contrairement à la
-// sélection A/B, ici l'utilisateur choisit un emplacement libre sur la
-// carte) → recalcule la liaison entre deux ancres élargies de part et
-// d'autre du point déplacé (routeEditorWidenBackward/Forward), pas juste
-// entre ses deux voisins immédiats du tableau `points` - sinon, sur un GPX
-// importé où deux points consécutifs ne sont espacés que de quelques mètres,
-// BRouter n'a quasiment aucune marge pour rejoindre le nouvel emplacement
-// autrement qu'en aller-retour (retour utilisateur, capture d'écran).
+// sélection A→B, ici l'utilisateur choisit un emplacement libre sur la
+// carte) → recalcule la liaison entre deux ancres à une distance interpolée
+// de part et d'autre du point déplacé (routeEditorPointAtDistanceBackward/
+// Forward), pas juste entre ses deux voisins immédiats du tableau `points`
+// - sinon, sur un tronçon peu dense en points bruts (ex: long segment posé
+// en un seul clic "Prolonger le tracé"), le voisin immédiat peut se
+// retrouver à plusieurs centaines de mètres, laissant à BRouter quasiment
+// aucune marge pour rejoindre le nouvel emplacement autrement qu'en
+// aller-retour (retour utilisateur, plusieurs captures d'écran).
 function onRouteEditorMovePointClick(latlng, points) {
   if (_routeEditorMovePickIdx == null) {
     const idx = findNearestRouteEditorPointIndex(latlng, points);
@@ -972,20 +983,13 @@ function onRouteEditorMovePointClick(latlng, points) {
   }
   const idx = _routeEditorMovePickIdx;
   _routeEditorMovePickIdx = null;
-  const startIdx = routeEditorWidenBackward(points, idx - 1);
-  const endIdx = routeEditorWidenForward(points, idx + 1);
-  const before = points[startIdx], after = points[endIdx];
+  const back = routeEditorPointAtDistanceBackward(points, idx);
+  const fwd = routeEditorPointAtDistanceForward(points, idx);
+  const startIdx = back.keepIdx + 1, endIdx = fwd.keepIdx - 1;
   routeEditorPreviewReroute({
     startIdx,
     endIdx,
-    waypoints: [{ lat: before.lat, lon: before.lon }, { lat: latlng.lat, lon: latlng.lng }, { lat: after.lat, lon: after.lon }],
-    // Diagnostic temporaire (aout 2026) : avant/après se retrouvaient bien
-    // plus loin que prévu (jusqu'à ~970m au lieu des ~120m visés) sans
-    // qu'on sache si c'est le plafonnage du pas qui échoue ou l'arrêt en
-    // butée de tableau (idx proche de 0/length-1) - transmis au serveur
-    // pour finir tracé dans le même fichier que routeThroughViaPoint (cf
-    // VIA_POINT_DEBUG_FILE, route_generator.js) plutôt que de multiplier
-    // les allers-retours de test.
+    waypoints: [back.point, { lat: latlng.lat, lon: latlng.lng }, fwd.point],
     debugMeta: { idx, startIdx, endIdx, totalPoints: points.length },
   });
 }
