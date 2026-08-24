@@ -58,7 +58,7 @@ const {
 } = require('./garmin_client');
 const { getZoneRange, annotatePaceZones, ZONE_LABELS } = require('./zones');
 const { isBrouterConfigured, isTilePresent, getTileRemoteSize, downloadTile } = require('./brouter_manager');
-const { geocode, getCommunesForPostcode, getCommunesForDepartment, searchStreet, getTownHall, generateRouteOptions, buildGpxXml, trailLevelMidKmh, TRAIL_STYLE_PARAMS, routeThroughPoints, routeThroughViaPoint, TERRAIN_PROFILES } = require('./route_generator');
+const { geocode, getCommunesForPostcode, getCommunesForDepartment, searchStreet, getTownHall, getPlacesForPostcodeIntl, searchStreetIntl, generateRouteOptions, buildGpxXml, trailLevelMidKmh, TRAIL_STYLE_PARAMS, routeThroughPoints, routeThroughViaPoint, TERRAIN_PROFILES } = require('./route_generator');
 const { getPaceProfile, refreshPaceProfile, migratePaceProfileToScoped, efFastPaceMinPerKm, applyEfPaceAnchor, bucketForGrade } = require('./pace_profile');
 const { analyzeGpx, computeElevationProfile, computeSections } = require('./gpx_parser');
 const { getElevations } = require('./geoportail_client');
@@ -1395,15 +1395,27 @@ app.get('/api/routes/geocode', requireSession, async (req, res) => {
 });
 
 // Recherche en cascade (code postal -> ville -> rue) via les API officielles
-// francaises, pour la saisie du depart sur la page Itineraires. Accepte
+// francaises, pour la saisie du depart sur la page Itineraires ET (memes
+// routes, reutilisees telles quelles) sur la page Editeur Parcours. Accepte
 // aussi un code departement seul (2 chiffres, 2A/2B, ou 971-976 outre-mer)
 // quand le code postal complet n'est pas connu - liste alors toutes les
-// communes du departement, triees par ordre alphabetique.
+// communes du departement, triees par ordre alphabetique. `country` absent
+// (Itineraires, qui ne l'envoie jamais) ou 'FR' preserve exactement ce
+// chemin francais ; tout autre code pays relaie sur Nominatim
+// (getPlacesForPostcodeIntl, Editeur Parcours uniquement pour l'instant -
+// retour utilisateur : cascade pays/CP/ville/rue avec plusieurs pays
+// fonctionnels).
 const DEPARTMENT_CODE_RE = /^(\d{2}|2[AB]|97[1-6])$/i;
 app.get('/api/routes/communes', requireSession, async (req, res) => {
   try {
     const postcode = (req.query.postcode || '').trim();
     const department = (req.query.department || '').trim();
+    const country = (req.query.country || 'FR').trim().toUpperCase();
+    if (country !== 'FR') {
+      if (!postcode) return res.status(400).json({ error: 'Code postal manquant' });
+      const communes = await getPlacesForPostcodeIntl(postcode, country);
+      return res.json({ communes });
+    }
     if (/^\d{5}$/.test(postcode)) {
       const communes = await getCommunesForPostcode(postcode);
       return res.json({ communes });
@@ -1420,7 +1432,15 @@ app.get('/api/routes/street-suggestions', requireSession, async (req, res) => {
   try {
     const q = (req.query.q || '').trim();
     const citycode = (req.query.citycode || '').trim();
-    if (q.length < 2 || !citycode) return res.json({ suggestions: [] });
+    const country = (req.query.country || 'FR').trim().toUpperCase();
+    const city = (req.query.city || '').trim();
+    if (q.length < 2) return res.json({ suggestions: [] });
+    if (country !== 'FR') {
+      if (!city) return res.json({ suggestions: [] });
+      const suggestions = await searchStreetIntl(q, city, country);
+      return res.json({ suggestions });
+    }
+    if (!citycode) return res.json({ suggestions: [] });
     const suggestions = await searchStreet(q, citycode);
     res.json({ suggestions });
   } catch (err) { handleError(res, err); }

@@ -378,6 +378,43 @@ async function getTownHall(citycode) {
   return { label: f.properties.label, lat: f.geometry.coordinates[1], lon: f.geometry.coordinates[0] };
 }
 
+// Equivalents non-francais de getCommunesForPostcode/searchStreet
+// ci-dessus (Editeur Parcours, saisie du depart en cascade pays/CP/ville/
+// rue - retour utilisateur : "plusieurs pays fonctionnels"). Les API
+// gouvernementales francaises (geo.api.gouv.fr / api-adresse.data.gouv.fr)
+// ne couvrent que la France ; Nominatim (OpenStreetMap, couverture
+// mondiale) prend le relais pour les autres pays - moins precis et pas
+// concu pour un flux CP->liste de villes (pas d'endpoint dedie, on deduit
+// la liste des villes distinctes parmi les resultats d'une recherche par
+// code postal), mais evite d'ajouter un service de geocodage payant pour
+// une poignee de pays voisins.
+async function getPlacesForPostcodeIntl(postcode, countryCode) {
+  const url = 'https://nominatim.openstreetmap.org/search?' + new URLSearchParams({
+    postalcode: postcode, country: countryCode, format: 'jsonv2', addressdetails: '1', limit: '20',
+  });
+  const res = await fetch(url, { headers: { 'User-Agent': 'AllurePlus/1.0 (app perso, cf. github.com)' } });
+  if (!res.ok) throw new Error(`Recherche de ville échouée (HTTP ${res.status})`);
+  const data = await res.json();
+  const seen = new Map();
+  for (const r of data) {
+    const addr = r.address || {};
+    const name = addr.city || addr.town || addr.village || addr.municipality || addr.county || (r.display_name || '').split(',')[0];
+    if (!name || seen.has(name)) continue;
+    seen.set(name, { nom: name, code: name, lat: parseFloat(r.lat), lon: parseFloat(r.lon) });
+  }
+  return sortCommunes(Array.from(seen.values()));
+}
+
+async function searchStreetIntl(query, cityName, countryCode) {
+  const url = 'https://nominatim.openstreetmap.org/search?' + new URLSearchParams({
+    street: query, city: cityName, country: countryCode, format: 'jsonv2', addressdetails: '1', limit: '6',
+  });
+  const res = await fetch(url, { headers: { 'User-Agent': 'AllurePlus/1.0 (app perso, cf. github.com)' } });
+  if (!res.ok) throw new Error(`Recherche de rue échouée (HTTP ${res.status})`);
+  const data = await res.json();
+  return data.map(r => ({ label: r.display_name, lat: parseFloat(r.lat), lon: parseFloat(r.lon) }));
+}
+
 function loopWaypointsForBearing(start, bearing, radius) {
   // Boucle asymetrique (pas un simple aller-retour) : pousse vers `bearing`
   // puis revient par un angle legerement different, pour suivre un vrai
@@ -1893,6 +1930,8 @@ module.exports = {
   getCommunesForDepartment,
   searchStreet,
   getTownHall,
+  getPlacesForPostcodeIntl,
+  searchStreetIntl,
   destinationPoint,
   bearingBetween,
   farthestPoint,

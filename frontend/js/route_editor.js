@@ -89,6 +89,7 @@ function routeEditorStartCreation() {
   _routeEditorMode = 'extend';
   _routeEditorMapView = null;
   _routeEditorSkipMapViewCapture = false;
+  _routeEditorStartFinder = { country: 'FR', postcode: '', places: [], selectedPlace: null, street: '', selectedStreet: null };
   renderRouteEditorImportStatus();
   renderRouteEditorWorkspace();
 }
@@ -253,55 +254,198 @@ function renderRouteEditorWorkspaceInProgress() {
   renderRouteEditorVisuals();
 }
 
-// Recherche d'adresse pour placer le point de départ sans avoir à le
-// repérer à l'œil sur la carte (retour utilisateur) - réutilise
-// /api/routes/geocode (Nominatim), déjà utilisé par le générateur
-// d'itinéraires pour la même raison. Volontairement limité au tout premier
-// point (avant, la carte part dézoomée sur la France entière) : une fois le
-// tracé commencé, se déplacer dessus se fait naturellement en zoomant/
-// déplaçant la carte normale.
+// Recherche du point de départ en cascade (pays -> code postal -> ville ->
+// rue), même principe et mêmes endpoints que la saisie du départ sur la
+// page Itinéraires (routes.js: wireRoutesAddressFields/renderRoutesForm) -
+// réutilise telles quelles les classes CSS .routes-* (routes.css, déjà
+// chargé globalement) plutôt que d'en dupliquer. Pour la France, mêmes API
+// gouvernementales (geo.api.gouv.fr / api-adresse.data.gouv.fr) que
+// Itinéraires - country absent/'FR' côté serveur préserve exactement ce
+// chemin. Pour les autres pays (retour utilisateur : "plusieurs pays
+// fonctionnels"), relai sur Nominatim (couverture mondiale) côté serveur,
+// moins précis mais sans nouvelle dépendance externe. Contrairement à
+// Itinéraires (qui part de la mairie par défaut, plus précise), ici le
+// centre de la ville/commune suffit largement - juste un point de départ
+// approximatif sur la carte, affinable ensuite à la souris. Volontairement
+// limité au tout premier point (avant, la carte part dézoomée sur la
+// France entière) : une fois le tracé commencé, se déplacer dessus se fait
+// naturellement en zoomant/déplaçant la carte normale.
+const ROUTE_EDITOR_COUNTRIES = [
+  { code: 'FR', label: 'France' },
+  { code: 'BE', label: 'Belgique' },
+  { code: 'CH', label: 'Suisse' },
+  { code: 'LU', label: 'Luxembourg' },
+  { code: 'DE', label: 'Allemagne' },
+  { code: 'IT', label: 'Italie' },
+  { code: 'ES', label: 'Espagne' },
+  { code: 'AD', label: 'Andorre' },
+  { code: 'MC', label: 'Monaco' },
+  { code: 'GB', label: 'Royaume-Uni' },
+  { code: 'PT', label: 'Portugal' },
+  { code: 'NL', label: 'Pays-Bas' },
+];
+// Etat propre à ce widget (distinct de routesState, page Itinéraires) -
+// remis à zéro par routeEditorPlaceStartPoint une fois un départ posé,
+// puisque le widget disparaît alors (limité au tout premier point).
+let _routeEditorStartFinder = { country: 'FR', postcode: '', places: [], selectedPlace: null, street: '', selectedStreet: null };
+
 function routeEditorStartFinderHtml() {
+  const f = _routeEditorStartFinder;
   return `
     <div class="route-editor-start-finder">
-      <input type="text" id="route-editor-start-address" class="routes-text-input" placeholder="Adresse, ville ou code postal..." />
-      <button type="button" id="route-editor-start-address-btn" class="route-editor-btn-secondary">🔍 Rechercher</button>
-    </div>
-    <div id="route-editor-start-address-results"></div>`;
+      <div class="route-editor-address-row">
+        <div>
+          <div class="routes-microlabel">Pays</div>
+          <select id="route-editor-start-country" class="routes-select">
+            ${ROUTE_EDITOR_COUNTRIES.map(c => `<option value="${c.code}" ${f.country === c.code ? 'selected' : ''}>${escapeHtml(c.label)}</option>`).join('')}
+          </select>
+        </div>
+        <div>
+          <div class="routes-microlabel">Code postal</div>
+          <input type="text" id="route-editor-start-postcode" class="routes-text-input" inputmode="text" maxlength="10" placeholder="${f.country === 'FR' ? 'ex: 75015 ou 33' : 'ex: 1000'}" autocomplete="off" readonly onfocus="this.removeAttribute('readonly')" value="${escapeHtml(f.postcode)}">
+        </div>
+        <div>
+          <div class="routes-microlabel">Ville</div>
+          <select id="route-editor-start-city" class="routes-select" ${f.places.length ? '' : 'disabled'}></select>
+        </div>
+      </div>
+      <div class="routes-address-street">
+        <div class="routes-microlabel">Rue (optionnel — vide = centre-ville)</div>
+        <input type="text" id="route-editor-start-street" class="routes-text-input" autocomplete="off" readonly onfocus="this.removeAttribute('readonly')" value="${escapeHtml(f.street)}" ${f.selectedPlace ? '' : 'disabled'}>
+        <div id="route-editor-start-street-suggestions" class="routes-suggestions" style="display:none"></div>
+      </div>
+      <div id="route-editor-start-confirm" class="routes-start-confirm" style="display:none"></div>
+    </div>`;
 }
 
 function wireRouteEditorStartFinder() {
-  const input = el('route-editor-start-address');
-  const btn = el('route-editor-start-address-btn');
-  const results = el('route-editor-start-address-results');
-  if (!input || !btn || !results) return;
-  const runSearch = async () => {
-    const address = input.value.trim();
-    if (!address) return;
-    results.innerHTML = '<div class="route-editor-start-finder-status">⏳ Recherche…</div>';
+  const f = _routeEditorStartFinder;
+  const countryInput = el('route-editor-start-country');
+  const postcodeInput = el('route-editor-start-postcode');
+  const cityInput = el('route-editor-start-city');
+  const streetInput = el('route-editor-start-street');
+  const confirmLine = el('route-editor-start-confirm');
+  if (!countryInput || !postcodeInput || !cityInput || !streetInput || !confirmLine) return;
+
+  function updateConfirmLine() {
+    if (!f.selectedPlace) { confirmLine.style.display = 'none'; return; }
+    const label = f.selectedStreet ? f.selectedStreet.label : `Centre de ${f.selectedPlace.nom} (par défaut)`;
+    confirmLine.style.display = '';
+    confirmLine.innerHTML = `📍 Départ : ${escapeHtml(label)} <button type="button" class="route-editor-btn-secondary" id="route-editor-start-use-btn" style="margin-left:8px">Utiliser ce point</button>`;
+    const useBtn = el('route-editor-start-use-btn');
+    if (useBtn) useBtn.onclick = () => {
+      const target = f.selectedStreet || f.selectedPlace;
+      if (_routeEditorMap) _routeEditorMap.setView([target.lat, target.lon], 15);
+      routeEditorPlaceStartPoint(target.lat, target.lon);
+    };
+  }
+
+  // Ne touche jamais postcodeInput lui-même (perte de focus/curseur en
+  // pleine frappe sinon, cf même piège documenté dans wireRoutesAddressFields
+  // de routes.js) - ne reconstruit que ville/rue.
+  function syncCityAndStreetFields() {
+    const placeholder = f.selectedPlace ? '' : '<option value="" selected disabled>— Choisir —</option>';
+    cityInput.innerHTML = placeholder + f.places.map((p, i) =>
+      `<option value="${i}" ${f.selectedPlace && f.selectedPlace.code === p.code ? 'selected' : ''}>${escapeHtml(p.nom)}</option>`).join('');
+    cityInput.disabled = f.places.length === 0;
+    streetInput.value = f.street;
+    streetInput.disabled = !f.selectedPlace;
+    el('route-editor-start-street-suggestions').style.display = 'none';
+    updateConfirmLine();
+  }
+
+  countryInput.onchange = () => {
+    f.country = countryInput.value;
+    f.postcode = ''; f.places = []; f.selectedPlace = null; f.street = ''; f.selectedStreet = null;
+    postcodeInput.value = '';
+    postcodeInput.placeholder = f.country === 'FR' ? 'ex: 75015 ou 33' : 'ex: 1000';
+    syncCityAndStreetFields();
+  };
+
+  const DEPARTMENT_CODE_RE = /^(\d{2}|2[ab]|97[1-6])$/i;
+  let placesRequestToken = 0;
+  postcodeInput.oninput = debounce(async (e) => {
+    f.postcode = e.target.value.trim();
+    f.places = []; f.selectedPlace = null; f.street = ''; f.selectedStreet = null;
+    const value = f.postcode;
+    const myToken = ++placesRequestToken;
+    if (f.country === 'FR') {
+      const isPostcode = /^\d{5}$/.test(value);
+      const isDepartment = !isPostcode && DEPARTMENT_CODE_RE.test(value);
+      if (!isPostcode && !isDepartment) { syncCityAndStreetFields(); return; }
+      try {
+        const param = isPostcode ? `postcode=${value}` : `department=${value}`;
+        const res = await fetch(`${API}/api/routes/communes?${param}`);
+        const data = await res.json();
+        if (myToken !== placesRequestToken) return;
+        if (!res.ok) throw new Error(data.error || 'Code introuvable');
+        if (!data.communes || data.communes.length === 0) {
+          showToast(isPostcode ? 'Aucune ville trouvée pour ce code postal' : 'Aucune ville trouvée pour ce département', 'error');
+          return;
+        }
+        f.places = data.communes;
+        f.selectedPlace = data.communes.length === 1 ? data.communes[0] : null;
+        syncCityAndStreetFields();
+      } catch (err) {
+        if (myToken === placesRequestToken) showToast('Erreur : ' + err.message, 'error');
+      }
+      return;
+    }
+    // Pays hors France : Nominatim (relai serveur), pas de repli
+    // "département" (concept spécifiquement français) - un code postal non
+    // vide suffit à tenter la recherche.
+    if (!value) { syncCityAndStreetFields(); return; }
     try {
-      const res = await fetch(`${API}/api/routes/geocode?address=${encodeURIComponent(address)}`);
+      const res = await fetch(`${API}/api/routes/communes?postcode=${encodeURIComponent(value)}&country=${f.country}`);
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Recherche impossible');
-      const candidates = data.candidates || [];
-      if (!candidates.length) {
-        results.innerHTML = '<div class="route-editor-start-finder-status">Aucun résultat.</div>';
+      if (myToken !== placesRequestToken) return;
+      if (!res.ok) throw new Error(data.error || 'Code introuvable');
+      if (!data.communes || data.communes.length === 0) {
+        showToast('Aucune ville trouvée pour ce code postal', 'error');
         return;
       }
-      results.innerHTML = `<div class="route-editor-start-finder-list">${candidates.map((c, i) =>
-        `<button type="button" class="route-editor-start-finder-item" data-idx="${i}">📍 ${escapeHtml(c.label)}</button>`).join('')}</div>`;
-      results.querySelectorAll('.route-editor-start-finder-item').forEach(item => {
+      f.places = data.communes;
+      f.selectedPlace = data.communes.length === 1 ? data.communes[0] : null;
+      syncCityAndStreetFields();
+    } catch (err) {
+      if (myToken === placesRequestToken) showToast('Erreur : ' + err.message, 'error');
+    }
+  }, 400);
+
+  syncCityAndStreetFields();
+  cityInput.onchange = () => {
+    f.selectedPlace = f.places[parseInt(cityInput.value, 10)] || null;
+    f.selectedStreet = null; f.street = '';
+    syncCityAndStreetFields();
+  };
+
+  streetInput.oninput = debounce(async (e) => {
+    f.street = e.target.value;
+    f.selectedStreet = null;
+    updateConfirmLine();
+    const box = el('route-editor-start-street-suggestions');
+    if (!f.selectedPlace || f.street.trim().length < 3) { box.style.display = 'none'; return; }
+    try {
+      const url = f.country === 'FR'
+        ? `${API}/api/routes/street-suggestions?q=${encodeURIComponent(f.street)}&citycode=${f.selectedPlace.code}`
+        : `${API}/api/routes/street-suggestions?q=${encodeURIComponent(f.street)}&country=${f.country}&city=${encodeURIComponent(f.selectedPlace.nom)}`;
+      const res = await fetch(url);
+      const data = await res.json();
+      if (!data.suggestions || data.suggestions.length === 0) { box.style.display = 'none'; return; }
+      box.innerHTML = data.suggestions.map((s, i) => `<div class="routes-suggestion-item" data-idx="${i}">${escapeHtml(s.label)}</div>`).join('');
+      box.style.display = '';
+      box.querySelectorAll('.routes-suggestion-item').forEach(item => {
         item.onclick = () => {
-          const c = candidates[parseInt(item.dataset.idx, 10)];
-          if (_routeEditorMap) _routeEditorMap.setView([c.lat, c.lon], 15);
-          routeEditorPlaceStartPoint(c.lat, c.lon);
+          const s = data.suggestions[parseInt(item.dataset.idx, 10)];
+          f.selectedStreet = s;
+          f.street = s.label;
+          streetInput.value = s.label;
+          box.style.display = 'none';
+          updateConfirmLine();
         };
       });
-    } catch (err) {
-      results.innerHTML = `<div class="route-editor-start-finder-status">Erreur : ${escapeHtml(err.message)}</div>`;
-    }
-  };
-  btn.onclick = runSearch;
-  input.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); runSearch(); } };
+    } catch (err) { box.style.display = 'none'; }
+  }, 300);
 }
 
 // Bouton "Fermer la boucle" (PDF §26.5) : affiché uniquement en mode

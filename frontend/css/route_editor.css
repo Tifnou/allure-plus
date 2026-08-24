@@ -357,25 +357,13 @@
 [data-theme="dark"] .route-editor-start-cta { background: rgba(59,130,246,0.1); border-color: rgba(59,130,246,0.3); }
 .route-editor-start-cta-title { font-size: 15px; font-weight: 700; color: var(--text-primary); margin-bottom: 4px; }
 .route-editor-start-cta-text { font-size: 12.5px; color: var(--text-secondary); margin-bottom: 12px; }
-.route-editor-start-finder { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
-.route-editor-start-finder input { max-width: 320px; }
-.route-editor-start-finder-status { font-size: 12.5px; color: var(--text-muted); margin-top: 8px; }
-.route-editor-start-finder-list {
-  display: flex; flex-direction: column; gap: 4px; align-items: center; margin-top: 10px;
-}
-.route-editor-start-finder-item {
-  font-family: var(--font-body);
-  font-size: 12.5px;
-  color: var(--text-secondary);
-  background: var(--bg-white);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 6px 12px;
-  cursor: pointer;
-  max-width: 480px;
-  text-align: left;
-}
-.route-editor-start-finder-item:hover { border-color: var(--accent); color: var(--accent); }
+/* Recherche du départ en cascade (pays/CP/ville/rue) - réutilise les
+   classes .routes-* de routes.css (Itinéraires) pour les champs eux-mêmes,
+   seule cette ligne à 3 colonnes (pays en plus de CP/ville) est propre à
+   l'Éditeur Parcours. */
+.route-editor-start-finder { max-width: 480px; margin: 0 auto; text-align: left; }
+.route-editor-address-row { display: grid; grid-template-columns: 130px 100px 1fr; gap: 8px; margin-bottom: 8px; }
+@media (max-width: 560px) { .route-editor-address-row { grid-template-columns: 1fr; } }
 
 /* Barre Annuler/Rétablir/Exporter remontée juste sous la carte (retour
    utilisateur : trop bas, il fallait défiler toute la fiche côtes/POI/
