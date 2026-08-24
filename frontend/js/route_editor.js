@@ -23,6 +23,8 @@ let _routeEditorHistory = []; // pile de {points, stats} précédents (pour Annu
 let _routeEditorFuture = [];  // pile de {points, stats} annulés (pour Rétablir)
 let _routeEditorSelection = { aIdx: null, bIdx: null };
 let _routeEditorMap = null;
+let _routeEditorMapView = null; // {center, zoom} captures la vue courante avant chaque re-création de la carte Leaflet, pour ne pas la réinitialiser (fitBounds/dézoom) à chaque point posé/déplacé - remis à null uniquement sur un nouvel import/une nouvelle création/une fermeture, cf routeEditorClose/routeEditorStartCreation/handleRouteEditorFileSelected.
+let _routeEditorSkipMapViewCapture = false; // cf routeEditorPlaceStartPoint : force UNE fois le fitBounds/setView automatique (tout premier point posé) au lieu de figer la vue par défaut "France entière" qui précède ce premier point.
 let _routeEditorChart = null;
 let _routeEditorLatLngs = null; // [lat,lon] du tracé courant, réutilisé par la sélection A/B
 let _routeEditorSelectionLayer = null; // layerGroup Leaflet (marqueurs A/B + surbrillance)
@@ -85,6 +87,8 @@ function routeEditorStartCreation() {
   _routeEditorSelection = { aIdx: null, bIdx: null };
   _routeEditorObjective = { targetDplusM: null, targetDistM: null };
   _routeEditorMode = 'extend';
+  _routeEditorMapView = null;
+  _routeEditorSkipMapViewCapture = false;
   renderRouteEditorImportStatus();
   renderRouteEditorWorkspace();
 }
@@ -103,6 +107,8 @@ function routeEditorClose() {
   _routeEditorObjective = { targetDplusM: null, targetDistM: null };
   if (_routeEditorMap) { _routeEditorMap.remove(); _routeEditorMap = null; }
   if (_routeEditorChart) { _routeEditorChart.destroy(); _routeEditorChart = null; }
+  _routeEditorMapView = null;
+  _routeEditorSkipMapViewCapture = false;
   _routeEditorLatLngs = null;
   _routeEditorSelectionLayer = null;
   _routeEditorPreviewLayer = null;
@@ -129,6 +135,8 @@ async function handleRouteEditorFileSelected(file) {
     _routeEditorVariants = [];
     _routeEditorSelection = { aIdx: null, bIdx: null };
     _routeEditorObjective = { targetDplusM: null, targetDistM: null };
+    _routeEditorMapView = null;
+    _routeEditorSkipMapViewCapture = false;
     renderRouteEditorImportStatus();
     renderRouteEditorWorkspace();
   } catch (err) {
@@ -165,12 +173,12 @@ function routeEditorModeToolbarHtml() {
   const count = (_routeEditorData?.points || []).length;
   const buttons = ROUTE_EDITOR_MODES.map(m => {
     const disabled = count < m.minPoints;
-    return `<button type="button" class="routes-toggle-btn route-editor-mode-btn ${_routeEditorMode === m.mode ? 'active' : ''}" data-mode="${m.mode}" title="${escapeHtml(m.title)}" ${disabled ? 'disabled' : ''}>${m.icon} ${escapeHtml(m.label)}</button>`;
+    return `<button type="button" class="routes-toggle-btn route-editor-mode-btn route-editor-tip ${_routeEditorMode === m.mode ? 'active' : ''}" data-mode="${m.mode}" data-tip="${escapeHtml(m.title)}" ${disabled ? 'disabled' : ''}>${m.icon} ${escapeHtml(m.label)}</button>`;
   }).join('');
   return `
     <div class="route-editor-mode-toolbar routes-toggle">
       ${buttons}
-      <label class="route-editor-profile-select-label" title="Type de terrain utilisé pour calculer les tronçons (Prolonger le tracé, Déplacer un point...).">Profil de routage
+      <label class="route-editor-profile-select-label route-editor-tip" data-tip="Type de terrain utilisé pour calculer les tronçons (Prolonger le tracé, Déplacer un point...).">Profil de routage
         <select id="route-editor-profile-select" class="routes-select">
           <option value="trail:mixte">Trail (mixte)</option>
           <option value="trail:roulant">Trail (roulant)</option>
@@ -236,7 +244,11 @@ function renderRouteEditorWorkspaceInProgress() {
   if (closeBtn) closeBtn.onclick = routeEditorClose;
   const undoBtn = el('route-editor-undo-inprogress-btn');
   if (undoBtn) undoBtn.onclick = routeEditorUndo;
-  if (_routeEditorMap) { _routeEditorMap.remove(); _routeEditorMap = null; }
+  if (_routeEditorMap) {
+    if (_routeEditorSkipMapViewCapture) { _routeEditorMapView = null; _routeEditorSkipMapViewCapture = false; }
+    else _routeEditorMapView = { center: _routeEditorMap.getCenter(), zoom: _routeEditorMap.getZoom() };
+    _routeEditorMap.remove(); _routeEditorMap = null;
+  }
   if (_routeEditorChart) { _routeEditorChart.destroy(); _routeEditorChart = null; }
   renderRouteEditorVisuals();
 }
@@ -364,12 +376,12 @@ function renderRouteEditorWorkspace() {
       <div class="gpx-profile-stat"><b>${climbs.length}</b> côte(s) détectée(s)</div>
     </div>
     <div class="route-editor-summary-card">📝 ${buildRouteEditorSummary(stats)}</div>
-    <div class="gpx-profile-elev-container"><canvas id="route-editor-elev-chart"></canvas></div>
     ${routeEditorModeToolbarHtml()}
     <div class="gpx-profile-map" id="route-editor-map"></div>
     <div class="gpx-profile-legend">
       ${GPX_GRADE_BANDS.map(b => `<span class="gpx-profile-legend-item"><span class="gpx-profile-legend-dot" style="background:${b.color}"></span>${b.label}</span>`).join('')}
     </div>
+    <div class="gpx-profile-elev-container"><canvas id="route-editor-elev-chart"></canvas></div>
     <div id="route-editor-mode-hint" class="route-editor-hint"></div>
     <div id="route-editor-extend-controls"></div>
     <div id="route-editor-reroute-preview"></div>
@@ -450,7 +462,11 @@ function renderRouteEditorWorkspace() {
     renderRouteEditorObjectiveAutoSuggestion();
   };
 
-  if (_routeEditorMap) { _routeEditorMap.remove(); _routeEditorMap = null; }
+  if (_routeEditorMap) {
+    if (_routeEditorSkipMapViewCapture) { _routeEditorMapView = null; _routeEditorSkipMapViewCapture = false; }
+    else _routeEditorMapView = { center: _routeEditorMap.getCenter(), zoom: _routeEditorMap.getZoom() };
+    _routeEditorMap.remove(); _routeEditorMap = null;
+  }
   if (_routeEditorChart) { _routeEditorChart.destroy(); _routeEditorChart = null; }
   // La carte/les calques qui viennent d'être détruits emportent avec eux
   // toute référence de calque encore tenue - repartir d'un mode d'édition
@@ -508,7 +524,20 @@ function renderRouteEditorVisuals() {
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19, attribution: '&copy; <a href="https://openstreetmap.org">OSM</a>',
     }).addTo(map);
-    if (latLngs.length === 0) {
+    if (latLngs.length > 1) {
+      bins.forEach(bin => {
+        const seg = latLngs.slice(bin.startIdx, bin.endIdx + 1);
+        if (seg.length > 1) L.polyline(seg, { color: gpxGradeBand(bin.gradePct).color, weight: 4 }).addTo(map);
+      });
+    }
+    if (_routeEditorMapView) {
+      // Un zoom/pan a déjà été choisi par l'utilisateur lors d'un rendu
+      // précédent de cette même session d'édition (cf capture juste avant
+      // .remove() dans renderRouteEditorWorkspace*) - le restaurer tel quel
+      // plutôt que de recadrer automatiquement à chaque point posé/déplacé
+      // (retour utilisateur : "ça dézoome automatiquement" à chaque clic).
+      map.setView(_routeEditorMapView.center, _routeEditorMapView.zoom);
+    } else if (latLngs.length === 0) {
       // Tracé vide (mode "extend", création de zéro pas encore commencée) -
       // vue par défaut sur la France, pas de fitBounds possible sans point.
       map.setView([46.6, 2.5], 6);
@@ -517,10 +546,6 @@ function renderRouteEditorVisuals() {
       // le marqueur de départ.
       map.setView(latLngs[0], 14);
     } else {
-      bins.forEach(bin => {
-        const seg = latLngs.slice(bin.startIdx, bin.endIdx + 1);
-        if (seg.length > 1) L.polyline(seg, { color: gpxGradeBand(bin.gradePct).color, weight: 4 }).addTo(map);
-      });
       map.fitBounds(L.latLngBounds(latLngs), { padding: [12, 12] });
     }
     renderRouteEditorAnchorMarkers(map, points);
@@ -617,10 +642,12 @@ function renderRouteEditorAnchorMarkers(map, points) {
 // confirmation, et Annuler est maintenant juste au-dessus de la carte en
 // cas d'erreur). Un seul point sur le tracé : rien à router, juste
 // déplacer + rafraîchir l'altitude IGN. Départ/arrivée : un seul côté à
-// reancrer. Point intermédiaire : les deux côtés (voisins immédiats dans le
-// tableau `points`, pas le point ancre précédent/suivant - BRouter route
-// depuis leurs coordonnées exactes quoi qu'il arrive, peu importe qu'ils
-// soient eux-mêmes une ancre ou un point intermédiaire déjà routé).
+// reancrer, élargi (routeEditorWidenBackward/Forward) plutôt que le simple
+// voisin immédiat, même raison que onRouteEditorMovePointClick (marge
+// géométrique insuffisante pour BRouter sinon, aller-retour visible). Point
+// intermédiaire : les deux côtés élargis - BRouter route depuis leurs
+// coordonnées exactes quoi qu'il arrive, peu importe qu'ils soient eux-mêmes
+// une ancre ou un point intermédiaire déjà routé.
 async function onRouteEditorAnchorDragEnd(idx, latlng) {
   const points = _routeEditorData.points;
   if (points.length === 1) {
@@ -642,17 +669,17 @@ async function onRouteEditorAnchorDragEnd(idx, latlng) {
 
   let startIdx, endIdx, waypoints;
   if (idx === 0) {
-    startIdx = 0; endIdx = 1;
-    waypoints = [{ lat: latlng.lat, lon: latlng.lng }, { lat: points[1].lat, lon: points[1].lon }];
+    startIdx = 0; endIdx = routeEditorWidenForward(points, 1);
+    waypoints = [{ lat: latlng.lat, lon: latlng.lng }, { lat: points[endIdx].lat, lon: points[endIdx].lon }];
   } else if (idx === points.length - 1) {
-    startIdx = idx - 1; endIdx = idx;
-    waypoints = [{ lat: points[idx - 1].lat, lon: points[idx - 1].lon }, { lat: latlng.lat, lon: latlng.lng }];
+    startIdx = routeEditorWidenBackward(points, idx - 1); endIdx = idx;
+    waypoints = [{ lat: points[startIdx].lat, lon: points[startIdx].lon }, { lat: latlng.lat, lon: latlng.lng }];
   } else {
-    startIdx = idx - 1; endIdx = idx + 1;
+    startIdx = routeEditorWidenBackward(points, idx - 1); endIdx = routeEditorWidenForward(points, idx + 1);
     waypoints = [
-      { lat: points[idx - 1].lat, lon: points[idx - 1].lon },
+      { lat: points[startIdx].lat, lon: points[startIdx].lon },
       { lat: latlng.lat, lon: latlng.lng },
-      { lat: points[idx + 1].lat, lon: points[idx + 1].lon },
+      { lat: points[endIdx].lat, lon: points[endIdx].lon },
     ];
   }
 
@@ -696,6 +723,38 @@ function findNearestRouteEditorPointIndex(latlng, points) {
     if (d < bestD) { bestD = d; best = i; }
   }
   return best;
+}
+
+// Recule/avance depuis un index donné jusqu'à ce que la distance cumulée sur
+// le tracé atteigne minDistKm (par défaut 120 m), au lieu de s'arrêter au
+// tout premier voisin du tableau `points` - sur un GPX importé (ou un
+// tronçon déjà routé par BRouter), deux points consécutifs peuvent n'être
+// espacés que de quelques mètres (résolution d'enregistrement/lissage). Aller
+// chercher une liaison entre des ancres aussi rapprochées ne laisse quasiment
+// aucune marge géométrique à BRouter pour rejoindre un nouvel emplacement
+// autrement qu'en aller-retour (avant/après le point déplacé sont presque au
+// même endroit) - bug réel constaté (retour utilisateur, capture d'écran :
+// aller-retour visible sur la carte et pic en V sur le profil). Reculer/
+// avancer jusqu'à une distance minimale redonne assez d'espace pour que
+// BRouter reforme une vraie boucle passant par le nouveau point plutôt que
+// de rebrousser chemin. Utilisé par onRouteEditorMovePointClick et
+// onRouteEditorAnchorDragEnd (glisser-déposer), les deux endroits qui
+// recalculaient jusqu'ici sur les voisins immédiats idx-1/idx+1.
+function routeEditorWidenBackward(points, fromIdx, minDistKm = 0.12) {
+  let i = fromIdx, dist = 0;
+  while (i > 0 && dist < minDistKm) {
+    dist += haversineKm(points[i - 1], points[i]);
+    i--;
+  }
+  return i;
+}
+function routeEditorWidenForward(points, fromIdx, minDistKm = 0.12) {
+  let i = fromIdx, dist = 0;
+  while (i < points.length - 1 && dist < minDistKm) {
+    dist += haversineKm(points[i], points[i + 1]);
+    i++;
+  }
+  return i;
 }
 
 // Surbrillance de la sélection A/B sur la carte : marqueurs A (vert) / B
@@ -822,6 +881,12 @@ async function routeEditorPlaceStartPoint(lat, lon) {
     if (res.ok && typeof data.ele === 'number') ele = data.ele;
   } catch (err) { /* repli silencieux sur 0 - pas bloquant pour poser le depart */ }
   _routeEditorData = { ..._routeEditorData, points: [{ lat, lon, ele, anchor: true }], pois: [] };
+  // Seule exception à la préservation du zoom (cf _routeEditorMapView) : le
+  // tout premier point posé doit encore zoomer automatiquement dessus, la
+  // vue par défaut avant ça (France entière) n'étant d'aucune utilité une
+  // fois un point posé - la préservation ne doit s'appliquer qu'à partir du
+  // point suivant, une fois que l'utilisateur a une vue déjà pertinente.
+  _routeEditorSkipMapViewCapture = true;
   renderRouteEditorWorkspace();
 }
 
@@ -869,8 +934,12 @@ async function routeEditorExtendTrack(fromPoint, toPoint) {
 // premier/dernier point du tracé, qui n'a pas de voisin des deux côtés) ;
 // 2e clic = position CIBLE brute (pas de snapping - contrairement à la
 // sélection A/B, ici l'utilisateur choisit un emplacement libre sur la
-// carte) → recalcule uniquement la liaison autour de ce point (PDF §7.1 :
-// A→B→C devient A→nouveau→C).
+// carte) → recalcule la liaison entre deux ancres élargies de part et
+// d'autre du point déplacé (routeEditorWidenBackward/Forward), pas juste
+// entre ses deux voisins immédiats du tableau `points` - sinon, sur un GPX
+// importé où deux points consécutifs ne sont espacés que de quelques mètres,
+// BRouter n'a quasiment aucune marge pour rejoindre le nouvel emplacement
+// autrement qu'en aller-retour (retour utilisateur, capture d'écran).
 function onRouteEditorMovePointClick(latlng, points) {
   if (_routeEditorMovePickIdx == null) {
     const idx = findNearestRouteEditorPointIndex(latlng, points);
@@ -888,10 +957,12 @@ function onRouteEditorMovePointClick(latlng, points) {
   }
   const idx = _routeEditorMovePickIdx;
   _routeEditorMovePickIdx = null;
-  const before = points[idx - 1], after = points[idx + 1];
+  const startIdx = routeEditorWidenBackward(points, idx - 1);
+  const endIdx = routeEditorWidenForward(points, idx + 1);
+  const before = points[startIdx], after = points[endIdx];
   routeEditorPreviewReroute({
-    startIdx: idx - 1,
-    endIdx: idx + 1,
+    startIdx,
+    endIdx,
     waypoints: [{ lat: before.lat, lon: before.lon }, { lat: latlng.lat, lon: latlng.lng }, { lat: after.lat, lon: after.lon }],
   });
 }

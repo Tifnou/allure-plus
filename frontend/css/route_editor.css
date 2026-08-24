@@ -53,6 +53,7 @@
    Chart.js (canvas nativement transparent) et rend le profil illisible. */
 #route-editor-workspace .gpx-profile-elev-container {
   height: 220px;
+  margin-top: 14px;
   margin-bottom: 14px;
   background: var(--bg-white);
   border: 1px solid var(--border);
@@ -222,6 +223,66 @@
   margin-left: auto;
 }
 .route-editor-profile-select-label select { width: auto; }
+
+/* Infobulles "à quoi ça sert" des boutons de mode + du sélecteur de profil -
+   remplace les title= natifs (apparence OS, lenteur/incohérence d'un
+   navigateur à l'autre) par une carte au style Allure+ (même carte
+   bg-white/border/shadow-md que .cal-chip-tooltip), en CSS pur via
+   attr(data-tip) - pas besoin de suivre la souris, ces déclencheurs sont de
+   simples boutons de taille fixe dans une barre horizontale. Un léger délai
+   à l'apparition (transition-delay) évite un flash au survol rapide de
+   plusieurs boutons d'affilée. */
+.route-editor-tip { position: relative; }
+.route-editor-tip::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: calc(100% + 10px);
+  left: 50%;
+  transform: translateX(-50%) translateY(4px);
+  width: max-content;
+  max-width: 260px;
+  white-space: normal;
+  text-align: left;
+  background: var(--bg-white);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow-md);
+  padding: 9px 11px;
+  font-family: var(--font-body);
+  font-size: 11.5px;
+  font-weight: 400;
+  line-height: 1.45;
+  z-index: 30;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .12s ease, transform .12s ease;
+  transition-delay: .1s;
+}
+.route-editor-tip::before {
+  content: '';
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 50%;
+  transform: translateX(-50%) translateY(4px);
+  border: 6px solid transparent;
+  border-top-color: var(--bg-white);
+  filter: drop-shadow(0 1px 0 var(--border));
+  z-index: 31;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .12s ease, transform .12s ease;
+  transition-delay: .1s;
+}
+.route-editor-tip:hover::after, .route-editor-tip:focus-visible::after,
+.route-editor-tip:hover::before, .route-editor-tip:focus-visible::before {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+.route-editor-tip:disabled::after, .route-editor-tip:disabled::before { display: none; }
+.route-editor-tip:first-child::after, .route-editor-tip:first-child::before { left: 0; transform: translateX(0) translateY(4px); }
+.route-editor-tip:first-child:hover::after, .route-editor-tip:first-child:hover::before { transform: translateX(0) translateY(0); }
+
 .route-editor-create-btn { margin-top: 12px; }
 .route-editor-objective-plan-list { margin: 6px 0 10px; padding-left: 20px; }
 .route-editor-objective-plan-list li { margin-bottom: 3px; }
