@@ -177,13 +177,12 @@ const VIA_POINT_NOGO_RADII_M = [12, 20, 30];
 // Trace de diagnostic temporaire (fichier sur disque, PAS la console - un
 // autre processus que celui lance manuellement pendant le diagnostic peut
 // repondre a la requete, cf redemarrage automatique constate, et sa sortie
-// console n'est pas forcement visible) pour comprendre en conditions
-// reelles pourquoi certains deplacements de point retombent quand meme sur
-// l'aller-retour - plusieurs iterations a l'aveugle sur des coordonnees de
-// synthese n'ont pas reussi a reproduire exactement les cas signales par
-// l'utilisateur (aout 2026). A retirer une fois le reglage (rayons/seuils)
-// confirme correct sur des cas reels.
-const VIA_POINT_DEBUG = true;
+// console n'est pas forcement visible) qui a servi a diagnostiquer et
+// confirmer le correctif de routeThroughViaPoint (aout 2026, cause racine :
+// glisser une ancre loin de sa position d'origine, cf onRouteEditorMovePointClick
+// dans route_editor.js). Desactive par defaut - repasser a true en cas de
+// nouveau signalement d'aller-retour pour ce mecanisme.
+const VIA_POINT_DEBUG = false;
 const VIA_POINT_DEBUG_FILE = path.join(__dirname, 'data', 'via_point_debug.log');
 function viaPointDebugLog(line) {
   if (!VIA_POINT_DEBUG) return;

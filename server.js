@@ -3023,7 +3023,7 @@ app.post('/api/route-editor/strategy', requireSession, (req, res) => {
 // générateur d'itinéraires, déjà prêtes à être réutilisées telles quelles).
 app.post('/api/route-editor/reroute', requireSession, async (req, res) => {
   try {
-    const { points, startIdx, endIdx, waypoints, terrain, trailStyle, debugMeta } = req.body || {};
+    const { points, startIdx, endIdx, waypoints, terrain, trailStyle } = req.body || {};
     const hasSplice = Array.isArray(points) && Number.isInteger(startIdx) && Number.isInteger(endIdx);
     let routeWaypoints;
     if (hasSplice) {
@@ -3041,12 +3041,6 @@ app.post('/api/route-editor/reroute', requireSession, async (req, res) => {
     }
 
     const profile = TERRAIN_PROFILES[terrain] || TERRAIN_PROFILES.trail;
-    // Trace de diagnostic temporaire (fichier, pas la console - cf
-    // routeThroughViaPoint dans route_generator.js) : confirme que la
-    // requete atteint bien CE process, quel que soit celui qui repond
-    // reellement (redemarrage automatique constate en parallele du
-    // redemarrage manuel pendant le diagnostic, aout 2026).
-    try { fs.appendFileSync(path.join(__dirname, 'data', 'via_point_debug.log'), `${new Date().toISOString()} [reroute-endpoint] pid=${process.pid} waypointsLen=${routeWaypoints.length} debugMeta=${JSON.stringify(debugMeta || null)}\n`); } catch (e) {}
     let rerouted;
     try {
       // 3 points de passage (avant, nouveau point, apres) = insertion d'un

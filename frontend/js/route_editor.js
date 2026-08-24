@@ -1024,7 +1024,6 @@ function onRouteEditorMovePointClick(latlng, points) {
     startIdx,
     endIdx,
     waypoints: [back.point, { lat: latlng.lat, lon: latlng.lng }, fwd.point],
-    debugMeta: { idx, startIdx, endIdx, totalPoints: points.length },
   });
 }
 
@@ -1089,7 +1088,7 @@ function clearRouteEditorReroutePreview() {
 // proposition de recalcul doit être prévisualisée). {startIdx, endIdx}
 // bornent la portion remplacée dans le tracé courant ; {waypoints}
 // optionnel (défaut [points[startIdx], points[endIdx]] côté serveur).
-async function routeEditorPreviewReroute({ startIdx, endIdx, waypoints, terrain, trailStyle, debugMeta }) {
+async function routeEditorPreviewReroute({ startIdx, endIdx, waypoints, terrain, trailStyle }) {
   const box = el('route-editor-reroute-preview');
   if (!box || !_routeEditorData) return;
   if (!terrain) ({ terrain, trailStyle } = routeEditorCurrentProfile());
@@ -1103,7 +1102,7 @@ async function routeEditorPreviewReroute({ startIdx, endIdx, waypoints, terrain,
     const points = _routeEditorData.points;
     const rerouteRes = await fetch(`${API}/api/route-editor/reroute`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ points, startIdx, endIdx, waypoints, terrain, trailStyle, debugMeta }),
+      body: JSON.stringify({ points, startIdx, endIdx, waypoints, terrain, trailStyle }),
     });
     const rerouteData = await rerouteRes.json();
     if (!rerouteRes.ok) throw new Error(rerouteData.error || 'Recalcul impossible');
