@@ -141,20 +141,28 @@ function pathLengthM(points) {
 async function routeThroughViaPoint(before, via, after, profile, opts = {}) {
   const leg1 = await routeThroughPoints([before, via], profile, opts);
   const nogos = buildNogoZonesNearEnd(leg1.points);
-  let leg2 = null;
+  // Calcule systematiquement l'ancien troncon (avec aller-retour eventuel) :
+  // sert a la fois de repli si aucune alternative n'est routable, ET de
+  // reference pour le garde-fou ci-dessous - comparer a LUI plutot qu'a une
+  // distance a vol d'oiseau, qui n'a aucun rapport avec un vrai reseau de
+  // sentiers en foret (jamais rectiligne) et rejetait a tort de vrais
+  // contournements raisonnables (retour utilisateur, 2e capture d'ecran :
+  // un contour par des sentiers bien reels, visibles sur la carte, refuse
+  // au profit du court aller-retour).
+  const legOld = await routeThroughPoints([via, after], profile, opts);
+  let leg2 = legOld;
   if (nogos.length) {
     try {
       const candidate = await routeThroughPoints([via, after], profile, { ...opts, nogos });
-      // Garde-fou : si l'alternative sans aller-retour est un enorme detour
-      // par rapport a la distance directe via->apres, ce n'est plus une
-      // "vraie boucle" raisonnable mais un chemin sans rapport passant par
-      // des sentiers eloignes (retour utilisateur, capture d'ecran) - mieux
-      // vaut le court aller-retour original dans ce cas.
-      const directM = haversineDistance(via, after);
-      if (pathLengthM(candidate.points) <= Math.max(150, directM * 4)) leg2 = candidate;
-    } catch (err) { /* pas d'alternative routable, repli ci-dessous */ }
+      const oldLenM = pathLengthM(legOld.points);
+      // Garde-fou : accepte l'alternative sans aller-retour tant qu'elle ne
+      // represente pas un detour demesure par rapport a ce que l'ancien
+      // troncon mesurait deja - mieux vaut le court aller-retour original
+      // qu'un grand crochet sans rapport si aucune alternative raisonnable
+      // n'existe reellement sur le terrain.
+      if (pathLengthM(candidate.points) <= Math.max(oldLenM * 3, oldLenM + 200)) leg2 = candidate;
+    } catch (err) { /* pas d'alternative routable, on garde legOld */ }
   }
-  if (!leg2) leg2 = await routeThroughPoints([via, after], profile, opts);
   return { points: [...leg1.points, ...leg2.points.slice(1)] };
 }
 
