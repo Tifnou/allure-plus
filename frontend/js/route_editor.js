@@ -593,7 +593,7 @@ function renderRouteEditorVisuals() {
         },
         onClick: (evt, activeElements, chart) => {
           const els = chart.getElementsAtEventForMode(evt, 'nearest', { intersect: false }, true);
-          if (els.length) onRouteEditorPointClick(els[0].index);
+          if (els.length) onRouteEditorPointClick(snapRouteEditorIndexToAnchor(els[0].index, points));
         },
       },
     });
@@ -762,6 +762,29 @@ function findNearestRouteEditorPointIndex(latlng, points) {
   return best;
 }
 
+// Comme findNearestRouteEditorPointIndex, mais "accroche" le résultat sur
+// une ancre existante (point posé via "Prolonger le tracé", départ,
+// arrivée) si elle est à proximité immédiate (15m) - sinon, sélectionner A
+// ou B à quelques mètres à peine d'une ancre déjà présente sur le tracé
+// laisse un minuscule bout de tracé ORIGINAL non remplacé entre les deux,
+// qui produit son propre petit aller-retour une fois le nouveau tronçon
+// inséré entre A et B (retour utilisateur, capture d'écran : "A et B sont
+// placés près de deux points de passage"). Utilisé uniquement pour la
+// sélection A→B (le point de passage lui-même, "Ajouter un point de
+// passage", n'a pas ce problème : il n'implique aucune fusion de tronçon).
+function snapRouteEditorIndexToAnchor(idx, points, snapDistKm = 0.015) {
+  let bestAnchor = -1, bestAnchorD = Infinity;
+  points.forEach((p, i) => {
+    if (i !== 0 && i !== points.length - 1 && !p.anchor) return;
+    const d = haversineKm(points[idx], p);
+    if (d < bestAnchorD) { bestAnchorD = d; bestAnchor = i; }
+  });
+  return bestAnchor >= 0 && bestAnchorD <= snapDistKm ? bestAnchor : idx;
+}
+function findNearestRouteEditorAnchorSnapped(latlng, points, snapDistKm = 0.015) {
+  return snapRouteEditorIndexToAnchor(findNearestRouteEditorPointIndex(latlng, points), points, snapDistKm);
+}
+
 // Point exact situé à targetDistKm (défaut 120 m) EN ARRIÈRE de viaIdx le
 // long du tracé, en INTERPOLANT sur le dernier tronçon plutôt qu'en sautant
 // au point brut suivant. Deux tentatives précédentes (marcher par index de
@@ -899,7 +922,7 @@ function onRouteEditorMapClick(latlng, points) {
   if (_routeEditorMode === 'move-point') { onRouteEditorMovePointClick(latlng, points); return; }
   if (_routeEditorMode === 'add-waypoint') { onRouteEditorAddWaypointClick(latlng); return; }
   if (_routeEditorMode === 'poi') { onRouteEditorPoiClick(findNearestRouteEditorPointIndex(latlng, points)); return; }
-  onRouteEditorPointClick(findNearestRouteEditorPointIndex(latlng, points));
+  onRouteEditorPointClick(findNearestRouteEditorAnchorSnapped(latlng, points));
 }
 
 // Mode "extend" (PDF §26 - créer de zéro / prolonger un tracé existant) :
