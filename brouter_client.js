@@ -42,7 +42,13 @@ function parseGeoJson(jsonText) {
 // profileParams: overrides des variables `assign %nom%` exposees par le
 // profil .brf (ex: { avoid_unsafe: 'true' }) - passes tels quels en query
 // params, BRouter les substitue aux valeurs par defaut du profil.
-async function routeThroughPoints(waypoints, profile, { trackname, profileParams } = {}) {
+// nogos: [{lat, lon, radius}, ...] optionnel - zones circulaires interdites
+// (parametre standard du serveur BRouter, confirme en desassemblant
+// brouter.jar : RoutingParamCollector lit nogoLats/nogoLons/nogoRadi depuis
+// un param `nogos=lon,lat,rayon|lon,lat,rayon...`). Utilise par
+// routeEditorRerouteViaPoint (route_generator.js) pour empecher BRouter de
+// rebrousser chemin sur le 2e tronçon d'un recalcul en 2 etapes.
+async function routeThroughPoints(waypoints, profile, { trackname, profileParams, nogos } = {}) {
   if (!Array.isArray(waypoints) || waypoints.length < 2) {
     throw new Error('routeThroughPoints necessite au moins 2 points de passage.');
   }
@@ -56,6 +62,7 @@ async function routeThroughPoints(waypoints, profile, { trackname, profileParams
     format: 'geojson',
   });
   if (trackname) params.set('trackname', trackname);
+  if (nogos && nogos.length) params.set('nogos', nogos.map(n => `${n.lon},${n.lat},${n.radius}`).join('|'));
   if (profileParams) Object.entries(profileParams).forEach(([k, v]) => params.set(k, v));
 
   const url = `http://localhost:${getPort()}/brouter?${params.toString()}`;

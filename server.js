@@ -58,7 +58,7 @@ const {
 } = require('./garmin_client');
 const { getZoneRange, annotatePaceZones, ZONE_LABELS } = require('./zones');
 const { isBrouterConfigured, isTilePresent, getTileRemoteSize, downloadTile } = require('./brouter_manager');
-const { geocode, getCommunesForPostcode, getCommunesForDepartment, searchStreet, getTownHall, generateRouteOptions, buildGpxXml, trailLevelMidKmh, TRAIL_STYLE_PARAMS, routeThroughPoints, TERRAIN_PROFILES } = require('./route_generator');
+const { geocode, getCommunesForPostcode, getCommunesForDepartment, searchStreet, getTownHall, generateRouteOptions, buildGpxXml, trailLevelMidKmh, TRAIL_STYLE_PARAMS, routeThroughPoints, routeThroughViaPoint, TERRAIN_PROFILES } = require('./route_generator');
 const { getPaceProfile, refreshPaceProfile, migratePaceProfileToScoped, efFastPaceMinPerKm, applyEfPaceAnchor, bucketForGrade } = require('./pace_profile');
 const { analyzeGpx, computeElevationProfile, computeSections } = require('./gpx_parser');
 const { getElevations } = require('./geoportail_client');
@@ -3043,7 +3043,14 @@ app.post('/api/route-editor/reroute', requireSession, async (req, res) => {
     const profile = TERRAIN_PROFILES[terrain] || TERRAIN_PROFILES.trail;
     let rerouted;
     try {
-      rerouted = await routeThroughPoints(routeWaypoints, profile, { trailStyle });
+      // 3 points de passage (avant, nouveau point, apres) = insertion d'un
+      // point unique (deplacer un point / ajouter un point de passage) :
+      // route en 2 etapes avec zones interdites plutot qu'un seul appel a 3
+      // points, sinon BRouter rebrousse presque toujours chemin sur le 2e
+      // troncon (retour utilisateur, cf routeThroughViaPoint).
+      rerouted = routeWaypoints.length === 3
+        ? await routeThroughViaPoint(routeWaypoints[0], routeWaypoints[1], routeWaypoints[2], profile, { trailStyle })
+        : await routeThroughPoints(routeWaypoints, profile, { trailStyle });
     } catch (err) {
       return res.status(400).json({ error: 'Recalcul impossible : ' + err.message });
     }
