@@ -83,22 +83,32 @@ function routeThroughPoints(waypoints, profile, opts = {}) {
   return routeThroughPointsRaw(waypoints, profile, { ...opts, profileParams });
 }
 
-// Zones interdites (cf `nogos` dans brouter_client.js) echelonnees le long
-// d'un troncon deja calcule, en laissant une marge non bloquee de
-// edgeBufferM a chaque extremite (sinon le point de depart/arrivee du
-// troncon SUIVANT, qui demarre exactement sur l'une de ces extremites,
-// pourrait lui-meme se retrouver dans une zone interdite). Un troncon plus
-// court que 2×edgeBufferM ne laisse aucune marge utile - retourne aucune
-// zone plutot que d'interdire n'importe quoi.
-function buildNogoZonesAlongPath(points, { stepM = 20, radius = 15, edgeBufferM = 20 } = {}) {
+// Zones interdites (cf `nogos` dans brouter_client.js) posees UNIQUEMENT sur
+// l'approche finale du troncon (les nearM derniers metres avant le point
+// d'arrivee, hors les tout derniers edgeBufferM pour ne pas enfermer le
+// point d'arrivee lui-meme) - PAS sur tout le troncon. 1ere version
+// (interdiction sur tout le troncon avant->nouveau point) trop large :
+// sur une boucle etroite, ca bloquait aussi le chemin legitime de
+// continuation vers "apres" (qui passe geometriquement pres du reste du 1er
+// troncon sans jamais le reutiliser), forcant BRouter a partir chercher un
+// chemin sans rapport ailleurs (retour utilisateur, capture d'ecran : un
+// gros crochet par des sentiers de foret sans lien, gardant en plus
+// l'ancien troncon). Le vrai symptome de l'aller-retour (repartir du point
+// deplace en repassant par EXACTEMENT le dernier bout de chemin emprunte
+// pour l'atteindre) ne concerne que cette approche finale - la bloquer
+// suffit a forcer une sortie par un autre cote du reseau local, sans
+// perturber le reste du reseau plus loin.
+function buildNogoZonesNearEnd(points, { nearM = 60, stepM = 15, radius = 12, edgeBufferM = 15 } = {}) {
   if (!Array.isArray(points) || points.length < 2) return [];
   const cum = [0];
   for (let i = 1; i < points.length; i++) cum.push(cum[i - 1] + haversineDistance(points[i - 1], points[i]));
   const total = cum[cum.length - 1];
-  if (total <= edgeBufferM * 2) return [];
+  const end = total - edgeBufferM;
+  const start = Math.max(0, end - nearM);
+  if (end <= start) return [];
   const zones = [];
   let idx = 0;
-  for (let at = edgeBufferM; at <= total - edgeBufferM; at += stepM) {
+  for (let at = start; at <= end; at += stepM) {
     while (idx < cum.length - 1 && cum[idx + 1] < at) idx++;
     const p = points[idx];
     zones.push({ lat: p.lat, lon: p.lon, radius });
@@ -107,28 +117,43 @@ function buildNogoZonesAlongPath(points, { stepM = 20, radius = 15, edgeBufferM 
 }
 
 // Recalcule un troncon "avant -> nouveau point -> apres" en 2 requetes
-// BRouter successives, avec des zones interdites posees le long du 1er
-// troncon pour le 2e (retour utilisateur, aout 2026 : deplacer un point
-// produisait systematiquement un aller-retour). Un seul appel BRouter avec
-// les 3 points ordonnes (avant, ancien comportement) cherche independamment
-// le chemin le plus court pour chaque jambe : si le nouveau point se trouve
-// sur une petite boucle de sentiers, le plus court chemin pour rejoindre
-// "apres" depuis "nouveau" est presque toujours de reprendre le meme
-// sentier en sens inverse, meme quand un autre chemin existe reellement sur
-// le terrain (BRouter ne "sait" pas qu'on prefererait un vrai contournement).
-// En interdisant explicitement le trace du 1er troncon au 2e (avec une
-// marge aux extremites, cf buildNogoZonesAlongPath), on force BRouter a
-// chercher un autre chemin - donc a reformer une boucle plutot que de
-// rebrousser chemin, quand un tel chemin existe. Repli sur le 2e troncon
-// SANS zones interdites si aucune alternative n'est routable (vraie
-// impasse) - mieux vaut l'ancien comportement (aller-retour) qu'un echec.
+// BRouter successives, avec des zones interdites posees sur l'approche
+// finale du 1er troncon pour le 2e (retour utilisateur, aout 2026 :
+// deplacer un point produisait systematiquement un aller-retour). Un seul
+// appel BRouter avec les 3 points ordonnes (avant, ancien comportement)
+// cherche independamment le chemin le plus court pour chaque jambe : si le
+// nouveau point se trouve sur une petite boucle de sentiers, le plus court
+// chemin pour rejoindre "apres" depuis "nouveau" est presque toujours de
+// reprendre le meme sentier en sens inverse, meme quand un autre chemin
+// existe reellement sur le terrain (BRouter ne "sait" pas qu'on
+// prefererait un vrai contournement). En interdisant explicitement
+// l'approche finale du 1er troncon au 2e (cf buildNogoZonesNearEnd), on
+// force BRouter a sortir par un autre cote - donc a reformer une boucle
+// plutot que de rebrousser chemin, quand un tel chemin existe. Repli sur le
+// 2e troncon SANS zones interdites si aucune alternative n'est routable
+// (vraie impasse) - mieux vaut l'ancien comportement (aller-retour) qu'un
+// echec.
+function pathLengthM(points) {
+  let d = 0;
+  for (let i = 1; i < points.length; i++) d += haversineDistance(points[i - 1], points[i]);
+  return d;
+}
 async function routeThroughViaPoint(before, via, after, profile, opts = {}) {
   const leg1 = await routeThroughPoints([before, via], profile, opts);
-  const nogos = buildNogoZonesAlongPath(leg1.points);
-  let leg2;
-  try {
-    leg2 = nogos.length ? await routeThroughPoints([via, after], profile, { ...opts, nogos }) : null;
-  } catch (err) { leg2 = null; }
+  const nogos = buildNogoZonesNearEnd(leg1.points);
+  let leg2 = null;
+  if (nogos.length) {
+    try {
+      const candidate = await routeThroughPoints([via, after], profile, { ...opts, nogos });
+      // Garde-fou : si l'alternative sans aller-retour est un enorme detour
+      // par rapport a la distance directe via->apres, ce n'est plus une
+      // "vraie boucle" raisonnable mais un chemin sans rapport passant par
+      // des sentiers eloignes (retour utilisateur, capture d'ecran) - mieux
+      // vaut le court aller-retour original dans ce cas.
+      const directM = haversineDistance(via, after);
+      if (pathLengthM(candidate.points) <= Math.max(150, directM * 4)) leg2 = candidate;
+    } catch (err) { /* pas d'alternative routable, repli ci-dessous */ }
+  }
   if (!leg2) leg2 = await routeThroughPoints([via, after], profile, opts);
   return { points: [...leg1.points, ...leg2.points.slice(1)] };
 }
