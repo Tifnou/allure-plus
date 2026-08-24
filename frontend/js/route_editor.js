@@ -641,16 +641,30 @@ function renderRouteEditorAnchorMarkers(map, points) {
 // "Déplacer un point" - le geste de glisser-déposer EST déjà la
 // confirmation, et Annuler est maintenant juste au-dessus de la carte en
 // cas d'erreur). Un seul point sur le tracé : rien à router, juste
-// déplacer + rafraîchir l'altitude IGN. Départ/arrivée : un seul côté à
-// reancrer, à une distance interpolée (routeEditorPointAtDistanceBackward/
-// Forward) plutôt que le simple voisin immédiat, même raison que
-// onRouteEditorMovePointClick (marge géométrique insuffisante pour BRouter
-// sinon, aller-retour visible) - les ancres marquant systématiquement une
-// frontière entre deux tronçons "Prolonger le tracé", le voisin immédiat
-// PEUT être extrêmement loin si ce tronçon voisin est un long segment peu
-// dense en points bruts. Point intermédiaire : les deux côtés - BRouter
-// route depuis leurs coordonnées exactes quoi qu'il arrive, peu importe
-// qu'ils soient eux-mêmes une ancre ou un point intermédiaire déjà routé.
+// déplacer + rafraîchir l'altitude IGN. Départ/arrivée/point intermédiaire :
+// reancré sur les ANCRES VOISINES REELLES (routeEditorPrevAnchorIdx/
+// NextAnchorIdx) plutôt qu'une petite fenêtre autour de l'ANCIENNE position
+// de l'ancre déplacée - cause racine identifiée via diagnostic en
+// conditions réelles (data/via_point_debug.log, retour utilisateur) :
+// glisser une ancre est souvent un déplacement DE PLUSIEURS CENTAINES DE
+// METRES (reformer une portion de boucle, pas une petite retouche), auquel
+// cas une fenêtre de ~120m autour de l'ancienne position place "avant" et
+// "après" quasiment au MÊME endroit (tous deux proches de l'ancienne
+// position) alors que le nouveau point est loin - structurellement un
+// aller-retour, quel que soit le réseau de chemins réel (BRouter n'a
+// d'autre choix que d'aller loin puis de revenir près d'où il était).
+// Utiliser les vraies ancres voisines (posées par l'utilisateur via
+// "Prolonger le tracé", donc naturellement éloignées l'une de l'autre)
+// donne à BRouter un vrai problème de contournement au lieu de cette
+// impasse géométrique.
+function routeEditorPrevAnchorIdx(points, idx) {
+  for (let i = idx - 1; i > 0; i--) if (points[i].anchor) return i;
+  return 0;
+}
+function routeEditorNextAnchorIdx(points, idx) {
+  for (let i = idx + 1; i < points.length - 1; i++) if (points[i].anchor) return i;
+  return points.length - 1;
+}
 async function onRouteEditorAnchorDragEnd(idx, latlng) {
   const points = _routeEditorData.points;
   if (points.length === 1) {
@@ -672,19 +686,31 @@ async function onRouteEditorAnchorDragEnd(idx, latlng) {
 
   let startIdx, endIdx, waypoints;
   if (idx === 0) {
-    const fwd = routeEditorPointAtDistanceForward(points, 0);
-    startIdx = 0; endIdx = fwd.keepIdx - 1;
-    waypoints = [{ lat: latlng.lat, lon: latlng.lng }, fwd.point];
+    endIdx = routeEditorNextAnchorIdx(points, 0);
+    startIdx = 0;
+    waypoints = [{ lat: latlng.lat, lon: latlng.lng }, { lat: points[endIdx].lat, lon: points[endIdx].lon }];
   } else if (idx === points.length - 1) {
-    const back = routeEditorPointAtDistanceBackward(points, idx);
-    startIdx = back.keepIdx + 1; endIdx = points.length - 1;
-    waypoints = [back.point, { lat: latlng.lat, lon: latlng.lng }];
+    startIdx = routeEditorPrevAnchorIdx(points, idx);
+    endIdx = points.length - 1;
+    waypoints = [{ lat: points[startIdx].lat, lon: points[startIdx].lon }, { lat: latlng.lat, lon: latlng.lng }];
   } else {
-    const back = routeEditorPointAtDistanceBackward(points, idx);
-    const fwd = routeEditorPointAtDistanceForward(points, idx);
-    startIdx = back.keepIdx + 1; endIdx = fwd.keepIdx - 1;
-    waypoints = [back.point, { lat: latlng.lat, lon: latlng.lng }, fwd.point];
+    startIdx = routeEditorPrevAnchorIdx(points, idx);
+    endIdx = routeEditorNextAnchorIdx(points, idx);
+    waypoints = [
+      { lat: points[startIdx].lat, lon: points[startIdx].lon },
+      { lat: latlng.lat, lon: latlng.lng },
+      { lat: points[endIdx].lat, lon: points[endIdx].lon },
+    ];
   }
+
+  // startIdx/endIdx pointent parfois sur une VRAIE ancre voisine (pas
+  // seulement le départ/l'arrivée du tracé, toujours affichés quel que soit
+  // leur flag) - sa coordonnée sert de point de routage mais son index
+  // tombe dans le tronçon remplacé par la fusion (points.slice(0,startIdx)
+  // exclut startIdx lui-même), donc son flag `anchor` serait perdu sans
+  // report explicite plus bas (cf segStart/segEnd).
+  const prevAnchorPreserve = startIdx > 0 && startIdx < points.length && !!points[startIdx].anchor;
+  const nextAnchorPreserve = endIdx >= 0 && endIdx < points.length - 1 && !!points[endIdx].anchor;
 
   try {
     const tileOk = await routeEditorEnsureTileAvailable({ lat: latlng.lat, lon: latlng.lng });
@@ -692,7 +718,7 @@ async function onRouteEditorAnchorDragEnd(idx, latlng) {
     const { terrain, trailStyle } = routeEditorCurrentProfile();
     const res = await fetch(`${API}/api/route-editor/reroute`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ points, startIdx, endIdx, waypoints, terrain, trailStyle, debugMeta: { idx, startIdx, endIdx, totalPoints: points.length, via: 'anchor-drag' } }),
+      body: JSON.stringify({ points, startIdx, endIdx, waypoints, terrain, trailStyle }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Recalcul impossible');
@@ -700,7 +726,10 @@ async function onRouteEditorAnchorDragEnd(idx, latlng) {
     // Retrouve, dans le tronçon recalculé, le point le plus proche du
     // nouvel emplacement pour lui reporter le flag anchor (le tronçon
     // renvoyé par le serveur est fait de coordonnées fraîches, sans lien
-    // d'identité avec l'ancien point déplacé).
+    // d'identité avec l'ancien point déplacé) - et reporte aussi le flag
+    // des ancres voisines réutilisées comme bornes (cf prevAnchorPreserve/
+    // nextAnchorPreserve), sur les points de bornure du tronçon renvoyé
+    // (segStart/segEnd, quasiment identiques aux coordonnées demandées).
     let newPoints = data.points;
     const segStart = startIdx, segEnd = startIdx + data.segmentPoints.length - 1;
     let bestI = segStart, bestD = Infinity;
@@ -709,7 +738,12 @@ async function onRouteEditorAnchorDragEnd(idx, latlng) {
       const d = dLat * dLat + dLon * dLon;
       if (d < bestD) { bestD = d; bestI = i; }
     }
-    newPoints = newPoints.map((p, i) => i === bestI ? { ...p, anchor: true } : p);
+    newPoints = newPoints.map((p, i) => {
+      if (i === bestI) return { ...p, anchor: true };
+      if (prevAnchorPreserve && i === segStart) return { ...p, anchor: true };
+      if (nextAnchorPreserve && i === segEnd) return { ...p, anchor: true };
+      return p;
+    });
     const newStats = await routeEditorAnalyzePoints(newPoints);
     applyRouteEditorReroute(newPoints, newStats);
   } catch (err) {
