@@ -452,6 +452,70 @@ function reorientLoopToClosestPoint(points, requested) {
   return [...core.slice(bestIdx), ...core.slice(0, bestIdx), core[bestIdx]];
 }
 
+// Fraction des points d'une boucle fermee qui repassent tres pres
+// (< thresholdM) d'un autre point du MEME trace, suffisamment loin dans la
+// sequence pour ne pas etre un simple voisin adjacent (minIndexGap) -
+// detecte un aller-retour cache dans une boucle nominalement "sans
+// repetition" (retour utilisateur, capture d'ecran : boucle de 9.2 km route
+// demandee, ~5 km d'aller-retour identique en double autour d'une petite
+// boucle de ~2 km). loopWaypointsForBearing pousse vers `bearing` puis
+// revient par un angle different (+/-35deg) precisement pour eviter ca,
+// mais si le SEUL acces routier reel vers ce secteur est une unique rue,
+// BRouter route quand meme les deux jambes sur cette meme rue (dans les
+// deux sens) quel que soit l'angle demande - purement geometrique, aucune
+// garantie topologique. Ecart circulaire (gap) car la boucle est fermee :
+// le tout debut et la toute fin du tableau sont en realite adjacents.
+// Complexite O(n^2) volontairement acceptee : nombre de points modeste
+// (boucle scannee a rayon cible/4, quelques centaines de points max) et
+// calcul ponctuel en memoire, negligeable a cote des appels BRouter reseau
+// qui dominent deja le temps total.
+function computeLoopSelfOverlapFraction(points, { thresholdM = 8, minIndexGap = 5 } = {}) {
+  if (!points || points.length < minIndexGap * 3) return 0;
+  const n = points.length;
+  let overlapping = 0;
+  for (let i = 0; i < n; i++) {
+    let found = false;
+    for (let j = 0; j < n; j++) {
+      const gap = Math.min(Math.abs(i - j), n - Math.abs(i - j));
+      if (gap < minIndexGap) continue;
+      if (haversineDistance(points[i], points[j]) < thresholdM) { found = true; break; }
+    }
+    if (found) overlapping++;
+  }
+  return overlapping / n;
+}
+// Au-dela de ce taux, une boucle garde un avertissement honnete plutot que
+// d'etre presentee comme "sans repetition" sans nuance (cf commentaire
+// haut de fichier : "jamais un resultat unique force silencieusement").
+const LOOP_OVERLAP_WARNING_THRESHOLD = 0.20;
+// Au-dela de ce taux (plus strict), une direction candidate est ecartee au
+// profit d'une autre des SEARCH_DIRECTIONS si au moins une est plus propre -
+// seuil volontairement plus bas que WARNING : mieux vaut proposer une
+// direction legerement moins riche en D+ mais propre, qu'une direction
+// "meilleure sur le papier" à moitie repliee sur elle-meme.
+const LOOP_OVERLAP_REJECT_THRESHOLD = 0.12;
+
+// Reordonne les candidats de scanDirections en ecartant ceux dont la boucle
+// repasse trop sur elle-meme (cf computeLoopSelfOverlapFraction), SANS
+// perdre le tri deja fait par scanDirections (proximite/valeur de D+) parmi
+// les candidats qui passent le filtre. Uniquement pour la forme 'loop'
+// (generateLoop/generateLoopWithAlternates) - JAMAIS pour 'outback'
+// (buildOutAndBackOptionsAtSinglePoint), ou l'aller-retour EST la forme
+// demandee, pas un defaut a eviter donc scanDirections reste neutre/partage
+// entre les deux formes.
+function preferLowOverlapCandidates(candidates) {
+  const withOverlap = candidates.map(c => ({ ...c, overlapFraction: computeLoopSelfOverlapFraction(c.result.points) }));
+  const clean = withOverlap.filter(c => c.overlapFraction < LOOP_OVERLAP_REJECT_THRESHOLD);
+  // Si au moins une direction est propre, ne garder qu'elles (le tri D+ de
+  // scanDirections est prealablement preserve par .map, stable). Sinon,
+  // aucune direction propre n'existe reellement ici (ex: impasse/zone tres
+  // peu maillee) - mieux vaut rendre disponible la meilleure candidate
+  // (deja triee par D+) plutot que de faire echouer completement la
+  // generation ; le warning honnete est ajoute plus haut dans la chaine
+  // (buildLoopOptionsAtSinglePoint) a partir de overlapFraction.
+  return clean.length > 0 ? clean : withOverlap;
+}
+
 const SEARCH_DIRECTIONS = 8;
 
 // Explore les SEARCH_DIRECTIONS autour de `start` (en parallele) et renvoie
@@ -672,7 +736,7 @@ async function generateLoop(start, targetDistanceM, profile, opts = {}) {
   if (candidates.length === 0) {
     throw new Error('Impossible de generer une boucle exploitable autour de ce depart.');
   }
-  const top = candidates[0];
+  const top = preferLowOverlapCandidates(candidates)[0];
   const budget = reserveRepairBudget(top.result, targetDistanceM, opts.targetDurationMin, opts.targetAscentM);
   return refineLoopFromBearing(start, top.bearing, top.result, radius, budget.targetDistanceM, profile, maxRefineIterations, { ...opts, targetDurationMin: budget.targetDurationMin });
 }
@@ -705,14 +769,23 @@ function towardCompassPhrase(bearing) {
 // tracés "ailleurs" plutot que la seule meilleure direction en D+.
 async function generateLoopWithAlternates(start, targetDistanceM, profile, opts = {}) {
   const maxRefineIterations = opts.maxRefineIterations ?? DEFAULT_REFINE_ITERATIONS;
-  const { candidates, radius } = await scanDirections(start, targetDistanceM, profile, opts.targetAscentM, opts.trailStyle);
-  if (candidates.length === 0) {
+  const { candidates: rawCandidates, radius } = await scanDirections(start, targetDistanceM, profile, opts.targetAscentM, opts.trailStyle);
+  if (rawCandidates.length === 0) {
     throw new Error('Impossible de generer une boucle exploitable autour de ce depart.');
   }
+  const candidates = preferLowOverlapCandidates(rawCandidates);
 
   const primary = candidates[0];
   const primaryBudget = reserveRepairBudget(primary.result, targetDistanceM, opts.targetDurationMin, opts.targetAscentM);
   const best = await refineLoopFromBearing(start, primary.bearing, primary.result, radius, primaryBudget.targetDistanceM, profile, maxRefineIterations, { ...opts, targetDurationMin: primaryBudget.targetDurationMin });
+  // Reevalue sur le resultat APRES affinage (le rayon a change depuis le
+  // scan initial, cf refineLoopFromBearing) - preferLowOverlapCandidates
+  // n'a filtre que sur la geometrie du scan, pas garanti stable une fois le
+  // rayon affine. Expose pour l'avertissement honnete plus haut dans la
+  // chaine (buildLoopOptionsAtSinglePoint), jamais pour re-choisir une autre
+  // direction ici (l'affinage a deja consomme le budget d'appels BRouter
+  // pour CETTE direction).
+  const bestOverlapFraction = computeLoopSelfOverlapFraction(best.points);
 
   const chosenBearings = [primary.bearing];
   const altPicks = [];
@@ -729,11 +802,11 @@ async function generateLoopWithAlternates(start, targetDistanceM, profile, opts 
     try {
       const pickBudget = reserveRepairBudget(pick.result, targetDistanceM, opts.targetDurationMin, opts.targetAscentM);
       const refined = await refineLoopFromBearing(start, pick.bearing, pick.result, radius, pickBudget.targetDistanceM, profile, maxRefineIterations, { ...opts, targetDurationMin: pickBudget.targetDurationMin });
-      alternates.push({ bearing: pick.bearing, result: refined });
+      alternates.push({ bearing: pick.bearing, result: refined, overlapFraction: computeLoopSelfOverlapFraction(refined.points) });
     } catch (err) { /* direction devenue non routable en affinant - on garde les autres */ }
   }
 
-  return { best, bestBearing: primary.bearing, alternates };
+  return { best, bestBearing: primary.bearing, bestOverlapFraction, alternates };
 }
 
 // Cout (minutes) d'un aller-retour sur CHAQUE segment consecutif du trace,
@@ -1542,7 +1615,7 @@ async function generateOptionsAcrossSearchRadius({ start, targetDistanceM, targe
 // pour le dispatcher qui gere aussi 'outback'/'both', et
 // generateOptionsAcrossSearchRadius pour la recherche elargie.
 async function buildLoopOptionsAtSinglePoint({ start, targetDistanceM, targetAscentM, targetDurationMin, terrain, paceMinPerKm, profile, trailLevel, trailStyle }) {
-  let { best: natural, alternates } = await generateLoopWithAlternates(start, targetDistanceM, profile, { targetDurationMin, paceMinPerKm, trailLevel, trailStyle, targetAscentM: terrain === 'trail' ? targetAscentM : null });
+  let { best: natural, alternates, bestOverlapFraction } = await generateLoopWithAlternates(start, targetDistanceM, profile, { targetDurationMin, paceMinPerKm, trailLevel, trailStyle, targetAscentM: terrain === 'trail' ? targetAscentM : null });
   let naturalAscentM = calibrateAscent(natural.filteredAscendM);
   const initialNeedsMoreAscent = terrain === 'trail' && targetAscentM
     && naturalAscentM < targetAscentM - ASCENT_TOLERANCE_M;
@@ -1554,6 +1627,19 @@ async function buildLoopOptionsAtSinglePoint({ start, targetDistanceM, targetAsc
   natural = { ...natural, points: reorientLoopToClosestPoint(natural.points, start) };
   alternates = alternates.map(alt => ({ ...alt, result: { ...alt.result, points: reorientLoopToClosestPoint(alt.result.points, start) } }));
 
+  // Avertissement honnete si la boucle "naturelle" (label "sans repetition")
+  // repasse en fait beaucoup sur elle-meme malgre la preference pour les
+  // directions propres (preferLowOverlapCandidates) - cf
+  // computeLoopSelfOverlapFraction : peut arriver si TOUTES les directions
+  // scannees partagent le meme goulot d'etranglement d'acces (ex: depart
+  // dans une zone a acces routier unique). Jamais un resultat force
+  // silencieusement (cf commentaire en tete de fichier) - le libelle
+  // "sans répétition" reste vrai (aucune côte n'est répétée), mais la
+  // description precise honnêtement qu'une partie du trace est un
+  // aller-retour, plutôt que de laisser croire à une vraie boucle propre.
+  const naturalOverlapWarning = bestOverlapFraction >= LOOP_OVERLAP_WARNING_THRESHOLD
+    ? ` ⚠️ Environ ${Math.round(bestOverlapFraction * 100)}% de ce tracé reprend le même chemin à l'aller et au retour — accès limité à ce secteur depuis le départ demandé.`
+    : '';
   const naturalOption = {
     type: 'boucle-naturelle',
     shape: 'loop',
@@ -1562,9 +1648,9 @@ async function buildLoopOptionsAtSinglePoint({ start, targetDistanceM, targetAsc
     distanceM: natural.distanceM,
     ascentM: naturalAscentM,
     predictedDurationMin: predictDurationMin(natural.points, paceMinPerKm, trailLevel),
-    commentary: terrain === 'trail'
+    commentary: (terrain === 'trail'
       ? `Boucle construite en explorant ${SEARCH_DIRECTIONS} directions autour du départ pour trouver le meilleur dénivelé naturel du secteur, sans répétition de côte.`
-      : `Boucle construite en explorant ${SEARCH_DIRECTIONS} directions autour du départ pour coller au mieux à la distance/durée visée.`,
+      : `Boucle construite en explorant ${SEARCH_DIRECTIONS} directions autour du départ pour coller au mieux à la distance/durée visée.`) + naturalOverlapWarning,
     alternateStart: null,
   };
 
@@ -1620,6 +1706,14 @@ async function buildLoopOptionsAtSinglePoint({ start, targetDistanceM, targetAsc
     // cette direction, cf ALT_MIN_CLOSENESS) - ecartee plutot que proposee
     // comme si elle etait une variante valable au meme titre que les autres.
     if (altCloseness(altDistanceM, altDurationMin, targetDistanceM, targetDurationMin) < ALT_MIN_CLOSENESS) continue;
+
+    // Meme avertissement honnete que l'option principale (cf naturalOverlapWarning)
+    // - seulement si aucune repetition n'a ete ajoutee (altPoints inchange) :
+    // une repetition de côte EST deja un aller-retour assume et explique par
+    // son propre commentaire, pas la peine de doubler l'avertissement dessus.
+    if (altPoints === alt.result.points && alt.overlapFraction >= LOOP_OVERLAP_WARNING_THRESHOLD) {
+      altCommentary += ` ⚠️ Environ ${Math.round(alt.overlapFraction * 100)}% de ce tracé reprend le même chemin à l'aller et au retour — accès limité à ce secteur.`;
+    }
 
     options.push({
       type: 'boucle-alternative',
