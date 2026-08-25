@@ -985,12 +985,21 @@ function haversineKm(a, b) {
 // charge avant route_editor.js dans index.html, cf haversineKm ci-dessus déjà
 // réutilisé de la même façon) - une seule implémentation plutôt que deux.
 
-// Circuit "boucle" = départ et arrivée au même endroit à quelques dizaines de
-// mètres près (tolérance GPS/BRouter, jamais exactement identique) : permet
-// de choisir un nouveau départ=arrivée n'importe où sur le tracé (rotation,
-// même forme, même distance) plutôt que de le raccourcir (seul choix
-// géométriquement possible sur un tracé non bouclé, cf trimTrackPoints).
-function isClosedLoopTrack(points, toleranceKm = 0.05) {
+// Circuit "boucle" = départ et arrivée au même endroit, à une tolérance près
+// - jamais exactement identique (dérive GPS au démarrage/à l'arrêt de la
+// montre, point de départ légèrement décalé du point d'arrivée sur un sentier
+// avec une courte liaison vers le parking...). Permet de choisir un nouveau
+// départ=arrivée n'importe où sur le tracé (rotation, même forme, même
+// distance) plutôt que de le raccourcir (seul choix géométriquement possible
+// sur un tracé non bouclé, cf trimTrackPoints) - une tolérance trop stricte
+// fait passer à tort une vraie boucle importée pour un tracé non bouclé,
+// avec pour conséquence un raccourci destructeur au lieu d'une simple
+// rotation (bug réel constaté, retour utilisateur 25/08 : GPX importé
+// manifestement bouclé mais détecté non-bouclé). 300 m, largement au-dessus
+// de la dérive GPS typique en début/fin d'enregistrement (souvent <50 m),
+// pour rester robuste sur les imports GPX réels plutôt que sur des tracés
+// synthétiques parfaitement fermés.
+function isClosedLoopTrack(points, toleranceKm = 0.3) {
   return !!points && points.length >= 3 && haversineKm(points[0], points[points.length - 1]) < toleranceKm;
 }
 
