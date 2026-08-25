@@ -1202,6 +1202,29 @@ app.post('/api/admin/users/:email/ticket-access', requireAdmin, async (req, res)
 // capture dans /api/dashboard) + profil/plan/assiduite (user_data). Portee
 // volontairement limitee (pas d'avatar/PPS/diplomes) : uniquement ce que
 // l'utilisateur a explicitement demande.
+// Trois petites fonctions dediees a cette route, transcrites depuis
+// l'equivalent client (frontend/js/campus.js) pour que l'assiduite calculee
+// ici corresponde EXACTEMENT a celle affichee sur la page Objectifs -
+// tout ecart de formule reproduirait le bug d'origine (73% affiche ici
+// contre 88%/78% sur Objectifs, retour utilisateur 25/08).
+function startOfDayServer(ts) {
+  const d = new Date(ts);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+function isStrengthSessionServer(session) {
+  return session.sport === 'ppg' || session.trainingCategory === 'gpp';
+}
+// Valeur la plus frequente d'un tableau (pas la moyenne) : le rythme
+// "normal" d'un plan (jours/semaine) doit ignorer une semaine d'affutage/
+// reprise plus legere plutot que d'etre tire vers le bas par elle.
+function modeOf(arr) {
+  const counts = {};
+  arr.forEach(v => { counts[v] = (counts[v] || 0) + 1; });
+  let best = null, bestCount = 0;
+  Object.entries(counts).forEach(([k, c]) => { if (c > bestCount) { bestCount = c; best = parseInt(k, 10); } });
+  return best;
+}
 app.get('/api/admin/users/:email/details', requireAdmin, async (req, res) => {
   try {
     const email = req.params.email.toLowerCase();
@@ -1248,38 +1271,64 @@ app.get('/api/admin/users/:email/details', requireAdmin, async (req, res) => {
 
     // Plan suivi : "importe" (un de nos .aplus, avec libelle depuis
     // goal.planCategory/name) prioritaire sur "libre" quand prefer_imported_plan
-    // est actif (meme regle que campus.js) ; sinon, aucune trace locale ->
-    // probablement un plan Campus Coach vivant (juste mentionne, jamais
-    // interroge - cf. echange utilisateur, hors de portee sans son propre
-    // token Campus).
-    let plan = { type: 'campus' };
-    let adherence = null;
+    // est actif (meme regle que campus.js) ; sinon, repli sur "default" -
+    // PAS "campus" par defaut comme avant (bug reel constate, retour
+    // utilisateur 25/08) : "aucune trace locale trouvee" n'est pas une
+    // preuve de connexion Campus Coach. Campus Coach est de toute facon
+    // techniquement invisible/inaccessible a tout compte autre que
+    // CAMPUS_VISIBLE_EMAIL (cf. campusVisibleForSession plus haut dans ce
+    // fichier) - pour n'importe quel autre utilisateur de cette table
+    // Admin, "Plan Campus Coach" est donc une reponse categoriquement
+    // impossible, pas juste incertaine. Seul CAMPUS_VISIBLE_EMAIL peut
+    // encore recevoir ce libelle par defaut (toujours une supposition, pas
+    // une verification directe - aucun token Campus disponible ici).
+    let plan = (CAMPUS_ENABLED && email === CAMPUS_VISIBLE_EMAIL.toLowerCase()) ? { type: 'campus' } : { type: 'default' };
+    let adherenceCardio = null, adherenceStrength = null;
     if (ud.suivi_imported_plan && ud.prefer_imported_plan === 'true') {
       try {
         const data = JSON.parse(ud.suivi_imported_plan);
         const goal = data.goal || {};
         const cat = goal.planCategory;
         const label = cat ? [cat.sportLabel, cat.distLabel, cat.dplusTier].filter(Boolean).join(' · ') : (goal.goalType || null);
-        plan = { type: 'imported', raceName: goal.name || goal.goalTitle || null, label };
+        const weeksTotal = (data.weeks || []).length || null;
+        const sessionsPerWeek = goal.sessionsPerWeek || modeOf((data.weeks || []).map(w => (w.sessions || []).length).filter(n => n > 0));
+        plan = { type: 'imported', raceName: goal.name || goal.goalTitle || null, label, weeksTotal, sessionsPerWeek };
 
-        // Assiduite : seances des semaines deja commencees, "done" vs total du.
+        // Assiduite : transcription fidele de computeSessionStats/
+        // isStrengthSession (frontend/js/campus.js), la formule de reference
+        // deja utilisee par la page Objectifs (bouton "Voir mon assiduite") -
+        // deux ecarts corriges par rapport a l'ancienne version de cette
+        // route (bug reel constate, retour utilisateur : 73% affiche ici
+        // alors que Objectifs montrait 88%/78% separement, impossible avec
+        // l'ancienne formule) : (1) course et renfo etaient melangees en un
+        // seul ratio, jamais separees comme sur la page Objectifs ; (2) une
+        // semaine comptait comme "due" des qu'elle COMMENCE (weekDate<=now),
+        // y compris des seances de jours pas encore passes cette semaine -
+        // Objectifs ne compte une semaine due qu'une fois ENTIEREMENT
+        // terminee (week.weekDate + 7 jours < aujourd'hui), les seances de
+        // la semaine en cours restant hors ratio ("remaining").
         const localDone = ud.suivi_local_done ? JSON.parse(ud.suivi_local_done) : {};
         const now = Date.now();
-        let due = 0, done = 0;
+        const cardio = { done: 0, missed: 0 }, strength = { done: 0, missed: 0 };
         (data.weeks || []).forEach(week => {
-          if (!week.weekDate || week.weekDate > now) return;
-          (week.sessions || []).forEach((sess, idx) => {
-            due++;
-            if (localDone[`${week._id}_${sess.trainingIndex ?? idx}`] === 'done') done++;
+          const weekPassed = startOfDayServer(week.weekDate + 7 * 86400000) < startOfDayServer(now);
+          (week.sessions || []).forEach(sess => {
+            const bucket = isStrengthSessionServer(sess) ? strength : cardio;
+            const key = (week._id || '') + '_' + sess.trainingIndex;
+            const status = localDone[key] || sess.status || 'todo';
+            if (status === 'done') bucket.done++;
+            else if (status === 'skip') bucket.missed++;
+            else if (weekPassed) bucket.missed++;
           });
         });
-        if (due > 0) adherence = Math.round((done / due) * 100);
-      } catch (e) { /* plan illisible -> reste "campus" par defaut */ }
+        if (cardio.done + cardio.missed > 0) adherenceCardio = Math.round((cardio.done / (cardio.done + cardio.missed)) * 100);
+        if (strength.done + strength.missed > 0) adherenceStrength = Math.round((strength.done / (strength.done + strength.missed)) * 100);
+      } catch (e) { /* plan illisible -> reste au repli decide plus haut */ }
     } else if (ud.suivi_free_sessions) {
       plan = { type: 'free' };
     }
 
-    res.json({ vo2max, vo2maxDate, profile, plan, adherence });
+    res.json({ vo2max, vo2maxDate, profile, plan, adherenceCardio, adherenceStrength });
   } catch (err) { handleError(res, err); }
 });
 

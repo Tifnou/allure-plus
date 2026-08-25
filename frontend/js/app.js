@@ -4550,25 +4550,55 @@ async function toggleAdminUserDetail(row) {
   }
 }
 
+// Couleurs par seuil d'assiduité - reprend EXACTEMENT celles de fillBucket
+// (page Objectifs, frontend/js/campus.js) pour rester visuellement cohérent
+// entre les deux endroits où ce même chiffre peut apparaître.
+function adminAssiduityColor(pct) {
+  if (pct == null) return '';
+  return pct >= 80 ? '#22c55e' : pct >= 50 ? '#f59e0b' : '#ef4444';
+}
+
+// Toujours exactement les 6 mêmes tuiles, dans le même ordre, pour tout le
+// monde - avec "—" en valeur plutôt qu'une tuile absente quand une donnée
+// manque (retour utilisateur explicite : le format doit être identique
+// d'une fiche à l'autre, pas 3 tuiles pour l'un et 5 pour l'autre).
 function renderAdminUserDetail(d) {
   const items = [];
-  if (d.profile) {
-    items.push({ label: 'Sexe', value: d.profile.sex === 'M' ? 'Homme' : d.profile.sex === 'F' ? 'Femme' : '—' });
-    items.push({ label: 'Âge', value: d.profile.age != null ? d.profile.age + ' ans' : '—' });
-  }
-  items.push({ label: 'VO₂max', value: d.vo2max != null ? d.vo2max.toFixed(1) + ' mL/kg/min' + (d.vo2maxDate ? ` (${formatDate(d.vo2maxDate)})` : '') : '—' });
+  items.push({ label: 'Sexe', value: d.profile?.sex === 'M' ? 'Homme' : d.profile?.sex === 'F' ? 'Femme' : '—' });
+  items.push({ label: 'Âge', value: d.profile?.age != null ? d.profile.age + ' ans' : '—' });
 
-  let planLabel = '—';
-  if (d.plan?.type === 'imported') planLabel = 'Plan importé — ' + ([d.plan.raceName, d.plan.label].filter(Boolean).join(' · ') || 'sans détail');
-  else if (d.plan?.type === 'free') planLabel = 'Séances libres (par défaut)';
+  // Unité et date en plus petit/atténué (admin-users-detail-sub) - demande
+  // utilisateur explicite, la valeur elle-même reste seule mise en avant.
+  items.push({
+    label: 'VO₂max',
+    value: d.vo2max != null
+      ? `${d.vo2max.toFixed(1)}<span class="admin-users-detail-sub"> mL/kg/min${d.vo2maxDate ? ' · ' + formatDate(d.vo2maxDate) : ''}</span>`
+      : '—',
+  });
+
+  // "default" = aucune trace locale trouvée (ni plan importé, ni séances
+  // libres) - PAS présumé "Plan Campus Coach" comme avant (bug réel corrigé
+  // côté serveur, cf. server.js) : Campus Coach est de toute façon
+  // techniquement inaccessible à tout compte autre que CAMPUS_VISIBLE_EMAIL.
+  let planLabel = '—', planSub = '';
+  if (d.plan?.type === 'imported') {
+    planLabel = 'Plan importé — ' + ([d.plan.raceName, d.plan.label].filter(Boolean).join(' · ') || 'sans détail');
+    const parts = [];
+    if (d.plan.weeksTotal) parts.push(`${d.plan.weeksTotal} semaines`);
+    if (d.plan.sessionsPerWeek) parts.push(`${d.plan.sessionsPerWeek} j/sem`);
+    if (parts.length) planSub = `<span class="admin-users-detail-sub">${parts.join(' · ')}</span>`;
+  } else if (d.plan?.type === 'free') planLabel = 'Séances libres (par défaut)';
   else if (d.plan?.type === 'campus') planLabel = 'Plan Campus Coach';
-  items.push({ label: 'Plan suivi', value: planLabel });
-  if (d.adherence != null) items.push({ label: 'Assiduité', value: d.adherence + '%' });
+  else if (d.plan?.type === 'default') planLabel = 'Plan par défaut Allure+';
+  items.push({ label: 'Plan suivi', value: planLabel + (planSub ? `<br>${planSub}` : '') });
+
+  items.push({ label: 'Assiduité course', value: d.adherenceCardio != null ? d.adherenceCardio + '%' : '—', color: adminAssiduityColor(d.adherenceCardio) });
+  items.push({ label: 'Assiduité renfo', value: d.adherenceStrength != null ? d.adherenceStrength + '%' : '—', color: adminAssiduityColor(d.adherenceStrength) });
 
   return `<div class="admin-users-detail-grid">${items.map(i => `
     <div class="admin-users-detail-item">
       <div class="admin-users-detail-label">${i.label}</div>
-      <div class="admin-users-detail-value">${i.value}</div>
+      <div class="admin-users-detail-value"${i.color ? ` style="color:${i.color}"` : ''}>${i.value}</div>
     </div>`).join('')}</div>`;
 }
 

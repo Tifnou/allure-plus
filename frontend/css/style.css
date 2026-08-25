@@ -3462,14 +3462,21 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
   transition:max-height 0.35s ease, opacity 0.25s ease, padding 0.35s ease;
   padding:0 10px;
 }
-.admin-users-detail-panel--open{ max-height:220px; opacity:1; padding:12px 10px 16px; }
+/* Toujours 6 tuiles désormais (Sexe/Âge/VO2max/Plan/Assiduité course/
+   Assiduité renfo, cf renderAdminUserDetail) au lieu de 3 à 5 selon les
+   données disponibles - max-height remonté en conséquence pour ne jamais
+   clipper sur un écran plus étroit (grille repassée sur 2-3 lignes). */
+.admin-users-detail-panel--open{ max-height:320px; opacity:1; padding:14px 10px 18px; }
 .admin-users-detail-loading{ font-size:12px; color:var(--text-muted); padding:4px 0; }
-.admin-users-detail-grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:10px; }
+.admin-users-detail-grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; }
 .admin-users-detail-item{
-  background:var(--bg); border-radius:8px; padding:8px 10px;
+  background:var(--bg); border:1px solid var(--border-light); border-radius:8px; padding:9px 12px;
 }
-.admin-users-detail-label{ font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.04em; margin-bottom:3px; }
-.admin-users-detail-value{ font-size:13px; color:var(--text-primary); font-weight:600; }
+.admin-users-detail-label{ font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:4px; font-weight:600; }
+.admin-users-detail-value{ font-size:13.5px; color:var(--text-primary); font-weight:600; line-height:1.4; }
+/* Unité/date (VO2max) ou durée/rythme (Plan suivi) - toujours secondaires
+   par rapport à la valeur principale (retour utilisateur explicite). */
+.admin-users-detail-sub{ font-size:10.5px; color:var(--text-muted); font-weight:500; }
 
 .admin-logs-pre {
   background: var(--bg);
