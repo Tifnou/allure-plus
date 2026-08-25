@@ -2028,11 +2028,21 @@ async function generateRouteOptions({ start, targetDistanceM, targetAscentM, tar
   return { options, warning, requestedStart: { lat: start.lat, lon: start.lon }, searchRadiusM: searchRadiusM || null };
 }
 
-function buildGpxXml(points, label = 'Allure+') {
+// waypoints (optionnel) : {lat, lon, name, sym} - deviennent des "Course
+// Points" Garmin (alerte pop-up sur la montre en approchant du point pendant
+// la navigation d'un parcours importé) - retour utilisateur explicite (25/08) :
+// aucun moyen de savoir en course combien de fois il reste à répéter une côte.
+// <wpt> DOIT précéder <trk> (ordre imposé par le schéma GPX 1.1 :
+// metadata, wpt*, rte*, trk*, extensions).
+function buildGpxXml(points, label = 'Allure+', waypoints = []) {
   const esc = (s) => String(s).replace(/[<>&'"]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;' }[c]));
   const trkpts = points.map(p => `<trkpt lat="${p.lat}" lon="${p.lon}"><ele>${p.ele ?? 0}</ele></trkpt>`).join('\n      ');
+  const wpts = (waypoints || []).map(w => `<wpt lat="${w.lat}" lon="${w.lon}">
+    <name>${esc(w.name || '')}</name>${w.sym ? `\n    <sym>${esc(w.sym)}</sym>` : ''}
+  </wpt>`).join('\n  ');
   return `<?xml version="1.0" encoding="UTF-8"?>
 <gpx version="1.1" creator="Allure+" xmlns="http://www.topografix.com/GPX/1/1">
+  ${wpts}
   <trk>
     <name>${esc(label)}</name>
     <trkseg>

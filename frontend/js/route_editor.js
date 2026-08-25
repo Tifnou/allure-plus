@@ -79,7 +79,7 @@ function renderRouteEditorImportStatus() {
 // gère nativement le cas stats===null (moins de 2 points, rien à
 // analyser/afficher encore).
 function routeEditorStartCreation() {
-  _routeEditorData = { filename: 'Nouveau parcours', points: [], stats: null, pois: [] };
+  _routeEditorData = { filename: 'Nouveau parcours', points: [], stats: null, pois: [], repeats: [] };
   _routeEditorOriginal = null;
   _routeEditorHistory = [];
   _routeEditorFuture = [];
@@ -129,8 +129,8 @@ async function handleRouteEditorFileSelected(file) {
     const res = await fetch(`${API}/api/route-editor/import`, { method: 'POST', body: fd });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Import impossible');
-    _routeEditorData = { ...data, pois: [] };
-    _routeEditorOriginal = { points: data.points, stats: data.stats, pois: [] };
+    _routeEditorData = { ...data, pois: [], repeats: [] };
+    _routeEditorOriginal = { points: data.points, stats: data.stats, pois: [], repeats: [] };
     _routeEditorHistory = [];
     _routeEditorFuture = [];
     _routeEditorVariants = [];
@@ -845,7 +845,7 @@ function routeEditorNextAnchorIdx(points, idx) {
 async function onRouteEditorAnchorDragEnd(idx, latlng) {
   const points = _routeEditorData.points;
   if (points.length === 1) {
-    _routeEditorHistory.push({ points: [...points], stats: null, pois: [] });
+    _routeEditorHistory.push({ points: [...points], stats: null, pois: [], repeats: [] });
     _routeEditorFuture = [];
     let ele = points[0].ele || 0;
     try {
@@ -1137,7 +1137,7 @@ function onRouteEditorExtendClick(latlng) {
 // routeThroughPoints/getElevations cote serveur. anchor:true marque ce point
 // comme deplacable par glisser-deposer sur la carte (renderRouteEditorAnchorMarkers).
 async function routeEditorPlaceStartPoint(lat, lon) {
-  _routeEditorHistory.push({ points: [], stats: null, pois: [] });
+  _routeEditorHistory.push({ points: [], stats: null, pois: [], repeats: [] });
   _routeEditorFuture = [];
   let ele = 0;
   try {
@@ -1148,7 +1148,7 @@ async function routeEditorPlaceStartPoint(lat, lon) {
     const data = await res.json();
     if (res.ok && typeof data.ele === 'number') ele = data.ele;
   } catch (err) { /* repli silencieux sur 0 - pas bloquant pour poser le depart */ }
-  _routeEditorData = { ..._routeEditorData, points: [{ lat, lon, ele, anchor: true }], pois: [] };
+  _routeEditorData = { ..._routeEditorData, points: [{ lat, lon, ele, anchor: true }], pois: [], repeats: [] };
   // Seule exception à la préservation du zoom (cf _routeEditorMapView) : le
   // tout premier point posé doit encore zoomer automatiquement dessus, la
   // vue par défaut avant ça (France entière) n'étant d'aucune utilité une
@@ -1183,14 +1183,15 @@ async function routeEditorExtendTrack(fromPoint, toPoint) {
     if (newPoints.length) newPoints[newPoints.length - 1] = { ...newPoints[newPoints.length - 1], anchor: true };
     const newStats = newPoints.length >= 2 ? await routeEditorAnalyzePoints(newPoints) : null;
 
-    _routeEditorHistory.push({ points: prevPoints, stats: prevStats, pois: prevPois });
+    const prevRepeats = _routeEditorData.repeats || [];
+    _routeEditorHistory.push({ points: prevPoints, stats: prevStats, pois: prevPois, repeats: prevRepeats });
     _routeEditorFuture = [];
-    _routeEditorData = { ..._routeEditorData, points: newPoints, stats: newStats, pois: [] };
+    _routeEditorData = { ..._routeEditorData, points: newPoints, stats: newStats, pois: [], repeats: [] };
     // Figé une seule fois (la 1ère fois que le tracé devient analysable) -
     // pas réécrit à chaque point ajouté ensuite, pour que "Restaurer le GPX
     // original" garde son sens habituel (revenir au début, pas au dernier
     // point posé).
-    if (!_routeEditorOriginal && newStats) _routeEditorOriginal = { points: newPoints, stats: newStats, pois: [] };
+    if (!_routeEditorOriginal && newStats) _routeEditorOriginal = { points: newPoints, stats: newStats, pois: [], repeats: [] };
     renderRouteEditorWorkspace();
   } catch (err) {
     showToast('Erreur : ' + err.message, 'error');
@@ -1266,30 +1267,47 @@ function onRouteEditorMoveEndpointClick(latlng, points) {
   const idx = findNearestRouteEditorPointIndex(latlng, points);
   const n = points.length;
   const pois = _routeEditorData.pois || [];
-  let newPoints, newPois;
+  const repeats = _routeEditorData.repeats || [];
+  let newPoints, newPois, newRepeats = repeats;
   if (_routeEditorMode === 'move-loop') {
     if (idx <= 0 || idx >= n - 1) { showToast('Choisissez un point du tracé, différent du départ actuel.', 'error'); return; }
     newPoints = rotateLoopPoints(points, idx);
     newPois = pois.map(p => ({ ...p, idx: remapIndexAfterLoopRotate(p.idx, idx, n) }));
+    // Coordonnées absolues, pas des index - une rotation ne change pas leur
+    // position, newRepeats reste inchangé (cf commentaire routeEditorApplyEndpointMove).
   } else if (_routeEditorMode === 'move-start') {
     if (idx >= n - 1) { showToast('Choisissez un point avant l\'arrivée actuelle.', 'error'); return; }
     newPoints = trimTrackPoints(points, idx, n - 1);
     newPois = pois.filter(p => p.idx >= idx).map(p => ({ ...p, idx: p.idx - idx }));
+    newRepeats = routeEditorFilterRepeatsToPoints(repeats, newPoints);
   } else {
     if (idx <= 0) { showToast('Choisissez un point après le départ actuel.', 'error'); return; }
     newPoints = trimTrackPoints(points, 0, idx);
     newPois = pois.filter(p => p.idx <= idx);
+    newRepeats = routeEditorFilterRepeatsToPoints(repeats, newPoints);
   }
   if (newPoints.length < 2) { showToast('Le tracé résultant est trop court.', 'error'); return; }
-  routeEditorApplyEndpointMove(newPoints, newPois);
+  routeEditorApplyEndpointMove(newPoints, newPois, newRepeats);
 }
 
-async function routeEditorApplyEndpointMove(newPoints, newPois) {
+// Un raccourci (move-start/move-finish) peut couper une zone de répétition
+// enregistrée (_routeEditorData.repeats, coordonnées absolues) hors du
+// nouveau tracé - retire celles qui ne correspondent plus à aucun point
+// proche (30 m de tolérance) plutôt que de garder un marqueur GPX inutile
+// pointant vers un endroit qui n'est plus sur le parcours exporté.
+function routeEditorFilterRepeatsToPoints(repeats, points) {
+  return repeats.filter(r => {
+    const nearestIdx = findNearestPointIndexOnTrack(points, { lat: r.lat, lon: r.lon });
+    return haversineKm(points[nearestIdx], r) < 0.03;
+  });
+}
+
+async function routeEditorApplyEndpointMove(newPoints, newPois, newRepeats) {
   try {
     const newStats = await routeEditorAnalyzePoints(newPoints);
-    _routeEditorHistory.push({ points: _routeEditorData.points, stats: _routeEditorData.stats, pois: _routeEditorData.pois || [] });
+    _routeEditorHistory.push({ points: _routeEditorData.points, stats: _routeEditorData.stats, pois: _routeEditorData.pois || [], repeats: _routeEditorData.repeats || [] });
     _routeEditorFuture = [];
-    _routeEditorData = { ..._routeEditorData, points: newPoints, stats: newStats, pois: newPois };
+    _routeEditorData = { ..._routeEditorData, points: newPoints, stats: newStats, pois: newPois, repeats: newRepeats };
     _routeEditorSelection = { aIdx: null, bIdx: null };
     _routeEditorMode = 'select';
     renderRouteEditorWorkspace();
@@ -1310,8 +1328,11 @@ async function routeEditorReverseDirection() {
     const reversed = points.slice().reverse();
     const newStats = await routeEditorAnalyzePoints(reversed);
     const newPois = (_routeEditorData.pois || []).map(p => ({ ...p, idx: n - 1 - p.idx }));
-    _routeEditorHistory.push({ points: _routeEditorData.points, stats: _routeEditorData.stats, pois: _routeEditorData.pois || [] });
+    _routeEditorHistory.push({ points: _routeEditorData.points, stats: _routeEditorData.stats, pois: _routeEditorData.pois || [], repeats: _routeEditorData.repeats || [] });
     _routeEditorFuture = [];
+    // repeats : coordonnées absolues (pas des index), une inversion de l'ordre
+    // des points ne les affecte pas - conservées telles quelles (pas dans le
+    // spread ci-dessous, donc héritées automatiquement de _routeEditorData).
     _routeEditorData = { ..._routeEditorData, points: reversed, stats: newStats, pois: newPois };
     const sel = _routeEditorSelection;
     _routeEditorSelection = sel.aIdx == null ? { aIdx: null, bIdx: null }
@@ -1427,9 +1448,12 @@ async function routeEditorPreviewReroute({ startIdx, endIdx, waypoints, terrain,
 }
 
 async function applyRouteEditorReroute(newPoints, newStats) {
-  _routeEditorHistory.push({ points: _routeEditorData.points, stats: _routeEditorData.stats, pois: _routeEditorData.pois || [] });
+  _routeEditorHistory.push({ points: _routeEditorData.points, stats: _routeEditorData.stats, pois: _routeEditorData.pois || [], repeats: _routeEditorData.repeats || [] });
   _routeEditorFuture = [];
-  _routeEditorData = { ..._routeEditorData, points: newPoints, stats: newStats, pois: [] };
+  // repeats effacés : le recalcul BRouter peut changer la géométrie de façon
+  // imprévisible, un ancien marqueur de répétition n'y aurait plus de sens
+  // fiable - même précédent que pois ci-dessus.
+  _routeEditorData = { ..._routeEditorData, points: newPoints, stats: newStats, pois: [], repeats: [] };
   _routeEditorSelection = { aIdx: null, bIdx: null };
   renderRouteEditorWorkspace();
 }
@@ -1480,15 +1504,19 @@ function selectClimbForRepeat(climbIdx) {
 // d'ajout _routeEditorData = {..., pois: []} dans ce fichier), Annuler/
 // Rétablir les restaurent en revanche puisqu'ils reviennent à un état déjà
 // connu (pois voyage avec points/stats dans l'historique).
+// sym : symbole Garmin GPX associé à chaque type (export waypoint, cf
+// routeEditorExportGpx) - best-effort uniquement, un nom non reconnu par un
+// modèle donné retombe sur une icône générique sans rien casser (le texte de
+// l'alerte sur la montre reste affiché dans tous les cas).
 const ROUTE_EDITOR_POI_TYPES = [
-  { key: 'ravito', icon: '🍫', label: 'Ravitaillement' },
-  { key: 'eau', icon: '💧', label: 'Eau' },
-  { key: 'sommet', icon: '🏔️', label: 'Sommet' },
-  { key: 'vue', icon: '👁️', label: 'Point de vue' },
-  { key: 'parking', icon: '🅿️', label: 'Parking' },
-  { key: 'refuge', icon: '🏠', label: 'Refuge' },
-  { key: 'technique', icon: '⚠️', label: 'Passage technique' },
-  { key: 'perso', icon: '📌', label: 'Point personnel' },
+  { key: 'ravito', icon: '🍫', label: 'Ravitaillement', sym: 'Fast Food' },
+  { key: 'eau', icon: '💧', label: 'Eau', sym: 'Drinking Water' },
+  { key: 'sommet', icon: '🏔️', label: 'Sommet', sym: 'Summit' },
+  { key: 'vue', icon: '👁️', label: 'Point de vue', sym: 'Scenic Area' },
+  { key: 'parking', icon: '🅿️', label: 'Parking', sym: 'Parking Area' },
+  { key: 'refuge', icon: '🏠', label: 'Refuge', sym: 'Residence' },
+  { key: 'technique', icon: '⚠️', label: 'Passage technique', sym: 'Danger Area' },
+  { key: 'perso', icon: '📌', label: 'Point personnel', sym: 'Flag, Blue' },
 ];
 function routeEditorPoiTypeInfo(key) {
   return ROUTE_EDITOR_POI_TYPES.find(t => t.key === key) || ROUTE_EDITOR_POI_TYPES[ROUTE_EDITOR_POI_TYPES.length - 1];
@@ -1619,6 +1647,7 @@ function onRouteEditorSaveVariantClick() {
       points: _routeEditorData.points,
       stats: _routeEditorData.stats,
       pois: _routeEditorData.pois || [],
+      repeats: _routeEditorData.repeats || [],
     }];
     close();
     renderRouteEditorVariantsTable();
@@ -1627,12 +1656,12 @@ function onRouteEditorSaveVariantClick() {
 
 function routeEditorLoadVariant(id) {
   const variant = id === 'original'
-    ? { points: _routeEditorOriginal.points, stats: _routeEditorOriginal.stats, pois: _routeEditorOriginal.pois || [] }
+    ? { points: _routeEditorOriginal.points, stats: _routeEditorOriginal.stats, pois: _routeEditorOriginal.pois || [], repeats: _routeEditorOriginal.repeats || [] }
     : _routeEditorVariants.find(v => v.id === id);
   if (!variant || variant.points === _routeEditorData.points) return;
-  _routeEditorHistory.push({ points: _routeEditorData.points, stats: _routeEditorData.stats, pois: _routeEditorData.pois || [] });
+  _routeEditorHistory.push({ points: _routeEditorData.points, stats: _routeEditorData.stats, pois: _routeEditorData.pois || [], repeats: _routeEditorData.repeats || [] });
   _routeEditorFuture = [];
-  _routeEditorData = { ..._routeEditorData, points: variant.points, stats: variant.stats, pois: variant.pois };
+  _routeEditorData = { ..._routeEditorData, points: variant.points, stats: variant.stats, pois: variant.pois, repeats: variant.repeats || [] };
   _routeEditorSelection = { aIdx: null, bIdx: null };
   renderRouteEditorWorkspace();
 }
@@ -1911,9 +1940,18 @@ async function applyRouteEditorObjectivePlan(plan, newPoints, finalStats) {
   const btn = document.getElementById('route-editor-apply-auto-btn');
   if (btn) { btn.disabled = true; btn.textContent = '⏳ Application…'; }
   try {
-    _routeEditorHistory.push({ points: _routeEditorData.points, stats: _routeEditorData.stats, pois: _routeEditorData.pois || [] });
+    // Un waypoint "Répétition k/N" par côte du plan (coordonnée B = sommet où
+    // chaque passage fait demi-tour), à partir du tracé AVANT répétition -
+    // export GPX (cf routeEditorExportGpx). passes est déjà le nombre TOTAL
+    // de montées ici (convention de l'Éditeur, différente de reps+1 côté
+    // générateur d'itinéraires - cf CLAUDE.md).
+    const newRepeatEntries = plan.map(p => {
+      const b = _routeEditorData.points[p.climb.endIdx];
+      return { lat: b.lat, lon: b.lon, totalPasses: p.passes };
+    });
+    _routeEditorHistory.push({ points: _routeEditorData.points, stats: _routeEditorData.stats, pois: _routeEditorData.pois || [], repeats: _routeEditorData.repeats || [] });
     _routeEditorFuture = [];
-    _routeEditorData = { ..._routeEditorData, points: newPoints, stats: finalStats, pois: [] };
+    _routeEditorData = { ..._routeEditorData, points: newPoints, stats: finalStats, pois: [], repeats: [...(_routeEditorData.repeats || []), ...newRepeatEntries] };
     _routeEditorSelection = { aIdx: null, bIdx: null };
     // Plan issu de l'objectif : vient d'être appliqué, on l'efface pour ne
     // pas re-suggérer immédiatement une nouvelle répétition (cf même logique
@@ -1974,11 +2012,15 @@ async function applyRouteEditorRepeat(explicitCount) {
   const applyBtn = el('route-editor-apply-repeat-btn') || el('route-editor-apply-objective-btn') || el('route-editor-apply-auto-btn');
   if (applyBtn) { applyBtn.disabled = true; applyBtn.textContent = '⏳ Application…'; }
   try {
+    const b = _routeEditorData.points[sel.bIdx];
     const newPoints = buildRepeatedPoints(_routeEditorData.points, sel.aIdx, sel.bIdx, count);
     const stats = await routeEditorAnalyzePoints(newPoints);
-    _routeEditorHistory.push({ points: _routeEditorData.points, stats: _routeEditorData.stats, pois: _routeEditorData.pois || [] });
+    _routeEditorHistory.push({ points: _routeEditorData.points, stats: _routeEditorData.stats, pois: _routeEditorData.pois || [], repeats: _routeEditorData.repeats || [] });
     _routeEditorFuture = [];
-    _routeEditorData = { ..._routeEditorData, points: newPoints, stats, pois: [] };
+    // Waypoint "Répétition k/N" (N=count, déjà le total de montées côté
+    // Éditeur) au point B, où chaque passage fait demi-tour - export GPX
+    // (cf routeEditorExportGpx).
+    _routeEditorData = { ..._routeEditorData, points: newPoints, stats, pois: [], repeats: [...(_routeEditorData.repeats || []), { lat: b.lat, lon: b.lon, totalPasses: count }] };
     _routeEditorSelection = { aIdx: null, bIdx: null };
     // Repetition declenchee par un objectif (D+/distance) : l'objectif vient
     // d'etre applique, on l'efface pour ne pas re-suggerer immediatement une
@@ -1993,29 +2035,51 @@ async function applyRouteEditorRepeat(explicitCount) {
 
 function routeEditorUndo() {
   if (!_routeEditorHistory.length) return;
-  _routeEditorFuture.push({ points: _routeEditorData.points, stats: _routeEditorData.stats, pois: _routeEditorData.pois || [] });
+  _routeEditorFuture.push({ points: _routeEditorData.points, stats: _routeEditorData.stats, pois: _routeEditorData.pois || [], repeats: _routeEditorData.repeats || [] });
   const prev = _routeEditorHistory.pop();
-  _routeEditorData = { ..._routeEditorData, points: prev.points, stats: prev.stats, pois: prev.pois || [] };
+  _routeEditorData = { ..._routeEditorData, points: prev.points, stats: prev.stats, pois: prev.pois || [], repeats: prev.repeats || [] };
   _routeEditorSelection = { aIdx: null, bIdx: null };
   renderRouteEditorWorkspace();
 }
 
 function routeEditorRedo() {
   if (!_routeEditorFuture.length) return;
-  _routeEditorHistory.push({ points: _routeEditorData.points, stats: _routeEditorData.stats, pois: _routeEditorData.pois || [] });
+  _routeEditorHistory.push({ points: _routeEditorData.points, stats: _routeEditorData.stats, pois: _routeEditorData.pois || [], repeats: _routeEditorData.repeats || [] });
   const next = _routeEditorFuture.pop();
-  _routeEditorData = { ..._routeEditorData, points: next.points, stats: next.stats, pois: next.pois || [] };
+  _routeEditorData = { ..._routeEditorData, points: next.points, stats: next.stats, pois: next.pois || [], repeats: next.repeats || [] };
   _routeEditorSelection = { aIdx: null, bIdx: null };
   renderRouteEditorWorkspace();
 }
 
 function routeEditorRestoreOriginal() {
   if (!_routeEditorOriginal || _routeEditorData.points === _routeEditorOriginal.points) return;
-  _routeEditorHistory.push({ points: _routeEditorData.points, stats: _routeEditorData.stats, pois: _routeEditorData.pois || [] });
+  _routeEditorHistory.push({ points: _routeEditorData.points, stats: _routeEditorData.stats, pois: _routeEditorData.pois || [], repeats: _routeEditorData.repeats || [] });
   _routeEditorFuture = [];
-  _routeEditorData = { ..._routeEditorData, points: _routeEditorOriginal.points, stats: _routeEditorOriginal.stats, pois: _routeEditorOriginal.pois || [] };
+  _routeEditorData = { ..._routeEditorData, points: _routeEditorOriginal.points, stats: _routeEditorOriginal.stats, pois: _routeEditorOriginal.pois || [], repeats: _routeEditorOriginal.repeats || [] };
   _routeEditorSelection = { aIdx: null, bIdx: null };
   renderRouteEditorWorkspace();
+}
+
+// Waypoints Garmin ("Course Points") exportés avec le GPX : un par 📌 point
+// d'intérêt (nom + symbole selon son type), et un par montée d'une côte
+// répétée ("Répétition k/N", cf applyRouteEditorRepeat/
+// applyRouteEditorObjectivePlan qui alimentent _routeEditorData.repeats) -
+// retour utilisateur explicite (25/08) : aucun moyen de savoir en course
+// combien de fois il reste à répéter une côte.
+function routeEditorBuildExportWaypoints() {
+  const wps = [];
+  (_routeEditorData.pois || []).forEach(poi => {
+    const p = _routeEditorData.points[poi.idx];
+    if (!p) return;
+    const info = routeEditorPoiTypeInfo(poi.type);
+    wps.push({ lat: p.lat, lon: p.lon, name: poi.label || info.label, sym: info.sym });
+  });
+  (_routeEditorData.repeats || []).forEach(r => {
+    for (let k = 1; k <= r.totalPasses; k++) {
+      wps.push({ lat: r.lat, lon: r.lon, name: `Répétition ${k}/${r.totalPasses}`, sym: 'Flag, Blue' });
+    }
+  });
+  return wps;
 }
 
 async function routeEditorExportGpx() {
@@ -2025,7 +2089,7 @@ async function routeEditorExportGpx() {
     const res = await fetch(`${API}/api/routes/gpx`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ points: _routeEditorData.points, label }),
+      body: JSON.stringify({ points: _routeEditorData.points, label, waypoints: routeEditorBuildExportWaypoints() }),
     });
     if (!res.ok) throw new Error('Export GPX impossible');
     const blob = await res.blob();

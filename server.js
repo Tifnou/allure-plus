@@ -1543,11 +1543,11 @@ app.post('/api/routes/generate', requireSession, async (req, res) => {
 
 app.post('/api/routes/gpx', requireSession, (req, res) => {
   try {
-    const { points, label } = req.body || {};
+    const { points, label, waypoints } = req.body || {};
     if (!Array.isArray(points) || points.length < 2) {
       return res.status(400).json({ error: 'Points de tracé manquants' });
     }
-    const gpx = buildGpxXml(points, label);
+    const gpx = buildGpxXml(points, label, Array.isArray(waypoints) ? waypoints : []);
     const filename = (label || 'itineraire').replace(/[^a-zA-Z0-9-_]+/g, '_') + '.gpx';
     res.set('Content-Type', 'application/gpx+xml');
     res.set('Content-Disposition', `attachment; filename="${filename}"`);

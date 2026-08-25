@@ -1038,8 +1038,11 @@ function addDirectionChevrons(map, latLngs) {
   if (!latLngs || latLngs.length < 2 || typeof L.polylineDecorator !== 'function') return null;
   return L.polylineDecorator(latLngs, {
     patterns: [{
+      // polygon:false = chevron "en contour" (deux traits, comme un ">"),
+      // pas un triangle plein - demande utilisateur explicite. Le style
+      // passe alors par pathOptions en TRAIT (color/weight), pas fillOpacity.
       offset: 25, repeat: 90,
-      symbol: L.Symbol.arrowHead({ pixelSize: 9, pathOptions: { color: '#1e293b', fillOpacity: 0.9, weight: 0 } }),
+      symbol: L.Symbol.arrowHead({ pixelSize: 12, polygon: false, pathOptions: { color: '#1e293b', weight: 2, opacity: 0.9 } }),
     }],
   }).addTo(map);
 }
@@ -1233,12 +1236,29 @@ function renderRouteMap(mapDivId, opt, context = {}) {
   };
 }
 
+// Waypoints Garmin "Répétition k/N" pour chaque côte répétée du parcours
+// (Course Points GPX - alerte pop-up sur la montre en approchant du point,
+// cf buildGpxXml côté serveur) - N = seg.reps + 1 : reps compte les passages
+// ADDITIONNELS au sommet, en plus de la montée naturelle déjà présente dans
+// la boucle de base (vérifié empiriquement - ne pas confondre avec la
+// convention de l'Éditeur Parcours, où le compte saisi est déjà le total).
+function buildRepeatWaypoints(opt) {
+  const wps = [];
+  (opt.repeatedSegments || []).forEach(seg => {
+    const total = seg.reps + 1;
+    for (let k = 1; k <= total; k++) {
+      wps.push({ lat: seg.toLat, lon: seg.toLon, name: `Répétition ${k}/${total}`, sym: 'Flag, Blue' });
+    }
+  });
+  return wps;
+}
+
 async function downloadRouteGpx(option) {
   try {
     const res = await fetch(`${API}/api/routes/gpx`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ points: option.points, label: option.label }),
+      body: JSON.stringify({ points: option.points, label: option.label, waypoints: buildRepeatWaypoints(option) }),
     });
     if (!res.ok) throw new Error('Export GPX impossible');
     const blob = await res.blob();
