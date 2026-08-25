@@ -38,7 +38,11 @@ Source: "..\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignorev
 Source: "..\Images\*"; DestDir: "{app}\Images"; Flags: recursesubdirs createallsubdirs ignoreversion; Excludes: "\thumbs,\thumbs\*"; Check: ShouldSeedImages
 
 [Tasks]
-Name: "desktopicon"; Description: "Créer une icône sur le Bureau"; GroupDescription: "Icônes supplémentaires :"
+; checkedonce : cochee par defaut (comme la plupart des installeurs), mais
+; seulement la toute PREMIERE fois qu'elle est proposee a un utilisateur -
+; une mise a jour ulterieure respecte alors son choix reel (decochee s'il
+; l'a explicitement decochee) plutot que de la re-cocher a chaque fois.
+Name: "desktopicon"; Description: "Créer une icône sur le Bureau"; GroupDescription: "Icônes supplémentaires :"; Flags: checkedonce
 
 [Icons]
 ; Filename pointe vers cmd.exe (un vrai .exe) plutot que directement vers
