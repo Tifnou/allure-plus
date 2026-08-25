@@ -1346,6 +1346,68 @@ function buildAnalysisModalHtml(record) {
   `;
 }
 
+// 🎉 Confettis qui tombent ~3.5s en overlay plein écran (canvas, au-dessus de
+// la modale) - purement décoratif (pointer-events:none), respecte
+// prefers-reduced-motion. Un MutationObserver retire le canvas dès que la
+// modale d'analyse disparaît du DOM (Fermer/Echap avant la fin de
+// l'animation) plutôt que de laisser un overlay plein écran orphelin.
+function fireConfetti() {
+  if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const DURATION_MS = 3500;
+  const COLORS = ['#f43f5e', '#f59e0b', '#22c55e', '#3b82f6', '#a855f7', '#ec4899', '#14b8a6'];
+  const canvas = document.createElement('canvas');
+  canvas.style.cssText = 'position:fixed;inset:0;z-index:10000;pointer-events:none;';
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+  document.body.appendChild(canvas);
+  const ctx = canvas.getContext('2d');
+
+  const pieces = Array.from({ length: 140 }, () => ({
+    x: Math.random() * canvas.width,
+    y: -20 - Math.random() * canvas.height * 0.6, // depart etale au-dessus de l'ecran, pas tous alignes sur la meme ligne
+    w: 6 + Math.random() * 6,
+    h: 8 + Math.random() * 8,
+    color: COLORS[Math.floor(Math.random() * COLORS.length)],
+    vy: 2.5 + Math.random() * 2.5,
+    vx: (Math.random() - 0.5) * 2,
+    rotation: Math.random() * Math.PI * 2,
+    rotSpeed: (Math.random() - 0.5) * 0.2,
+  }));
+
+  const start = performance.now();
+  let rafId;
+  function tick(now) {
+    const elapsed = now - start;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    const fadeStart = DURATION_MS - 600;
+    const globalOpacity = elapsed > fadeStart ? Math.max(0, 1 - (elapsed - fadeStart) / 600) : 1;
+    pieces.forEach(p => {
+      p.x += p.vx;
+      p.y += p.vy;
+      p.rotation += p.rotSpeed;
+      ctx.save();
+      ctx.globalAlpha = globalOpacity;
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
+      ctx.restore();
+    });
+    if (elapsed < DURATION_MS) { rafId = requestAnimationFrame(tick); return; }
+    canvas.remove();
+    observer.disconnect();
+  }
+  const observer = new MutationObserver(() => {
+    if (!document.getElementById('session-analysis-result-modal')) {
+      cancelAnimationFrame(rafId);
+      canvas.remove();
+      observer.disconnect();
+    }
+  });
+  observer.observe(document.body, { childList: true });
+  rafId = requestAnimationFrame(tick);
+}
+
 function openAnalysisModal(record) {
   _closeSessionAnalysisModals();
   const modal = document.createElement('div');
@@ -1371,6 +1433,9 @@ function openAnalysisModal(record) {
       </div>
     </div>`;
   document.body.appendChild(modal);
+  // 🎉 Petite animation festive quand le score depasse 90% - demande
+  // utilisateur explicite ("juste pour rigoler"), cf fireConfetti ci-dessous.
+  if (record.score >= 90) fireConfetti();
   const close = () => { modal.remove(); document.removeEventListener('keydown', escHandler); };
   function escHandler(e) { if (e.key === 'Escape') close(); }
   modal.querySelector('#session-analysis-close').addEventListener('click', close);
