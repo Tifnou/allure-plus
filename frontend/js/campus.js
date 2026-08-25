@@ -1168,7 +1168,7 @@ function renderTrainingPlan(goal, weeks) {
       <button class="btn-plan-action btn-campus-disconnect" onclick="disconnectCampus()" title="Tester en mode plan partage (deconnecte Campus)">
         Déconnecter Campus
       </button>` : ''}
-      <button class="btn-plan-action btn-cancel-plan" onclick="cancelPlan()" title="Supprimer le plan en cours et revenir à l'écran de connexion" style="margin-left:auto;opacity:.85;background:rgba(229,57,53,.15);color:#e53935;border:1px solid rgba(229,57,53,.3);">
+      <button class="btn-plan-action btn-cancel-plan" onclick="cancelPlan()" title="Supprimer le plan en cours et revenir à l'écran de connexion" style="margin-left:auto;">
         ✕ Annuler le plan
       </button>
     </div>`;

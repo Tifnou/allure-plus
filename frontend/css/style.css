@@ -2410,6 +2410,19 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
   color: var(--accent-text);
   background: var(--accent-light);
 }
+/* Action destructive : fond plein plutôt que la transparence des autres
+   boutons de cette rangée (peu visible sur le diaporama-photo en arrière-plan
+   de la page - retour utilisateur, capture d'écran). */
+.btn-cancel-plan {
+  background: #e53935;
+  border-color: #e53935;
+  color: #fff;
+}
+.btn-cancel-plan:hover {
+  background: #c62828;
+  border-color: #c62828;
+  color: #fff;
+}
 .btn-plan-export svg, .btn-plan-import svg {
   flex-shrink: 0;
 }
