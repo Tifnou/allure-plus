@@ -294,12 +294,12 @@ echo.
 :: ═══════════════════════════════════════════════════════════
 echo.
 echo  ===================================================
-:: Raccourci Bureau
-echo  [INFO] Creation du raccourci bureau Allure+...
-if exist "%~dp0creer_raccourci.ps1" (
-    powershell -ExecutionPolicy Bypass -File "%~dp0creer_raccourci.ps1"
-    if not errorlevel 1 echo  [OK] Raccourci Allure+ cree sur le Bureau.
-)
+:: Raccourci Bureau : desormais cree par l'installeur lui-meme (section
+:: [Icons] de allure-plus.iss, cible cmd.exe /c "...start.bat" - un vrai
+:: .exe, epinglable directement a la barre des taches, contrairement au
+:: raccourci que ce script creait auparavant ici via creer_raccourci.ps1
+:: (pointait directement sur start.bat, non epinglable - retour utilisateur
+:: 25/08). Ne plus le recreer ici evite un doublon avec celui de l'installeur.
 
 echo    Installation terminee avec succes !
 echo  ===================================================
