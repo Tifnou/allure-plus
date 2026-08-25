@@ -77,6 +77,49 @@ Filename: "{app}\install.bat"; WorkingDir: "{app}"; Flags: waituntilterminated; 
 Filename: "{app}\start.bat"; WorkingDir: "{app}"; Flags: nowait postinstall skipifsilent; Description: "Lancer Allure+"
 
 [Code]
+// Migration a usage unique (1.67.0) : les versions precedentes creaient le
+// raccourci Bureau via install.bat/creer_raccourci.ps1 (retire depuis),
+// pointant DIRECTEMENT sur start.bat - jamais epinglable a la barre des
+// taches. Laisse tel quel, il coexisterait EN DOUBLE avec le nouveau
+// raccourci Bureau cree par ce meme installeur juste apres (meme nom
+// "Allure+", mais deux dossiers differents - bureau personnel pour
+// l'ancien, bureau commun pour le nouveau - Windows ne les fusionne pas en
+// un seul, retour utilisateur explicite). Supprime l'ancien UNIQUEMENT si
+// sa cible correspond exactement a l'ancien format automatique - jamais si
+// l'utilisateur l'a personnalise a la main (ex: fait pointer vers cmd.exe
+// pour le rendre epinglable lui-meme) : un raccourci que l'utilisateur a
+// deja corrige de ses propres mains ne doit jamais etre efface
+// silencieusement.
+function GetShortcutTargetPath(const LnkPath: String): String;
+var
+  Shell: Variant;
+  Link: Variant;
+begin
+  Result := '';
+  if not FileExists(LnkPath) then Exit;
+  try
+    Shell := CreateOleObject('WScript.Shell');
+    Link := Shell.CreateShortcut(LnkPath);
+    Result := Link.TargetPath;
+  except
+    Result := '';
+  end;
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  OldDesktopLnk, OldTarget, ExpectedOldTarget: String;
+begin
+  if CurStep = ssPostInstall then
+  begin
+    OldDesktopLnk := ExpandConstant('{userdesktop}\Allure+.lnk');
+    ExpectedOldTarget := ExpandConstant('{app}\start.bat');
+    OldTarget := GetShortcutTargetPath(OldDesktopLnk);
+    if (OldTarget <> '') and (CompareText(OldTarget, ExpectedOldTarget) = 0) then
+      DeleteFile(OldDesktopLnk);
+  end;
+end;
+
 // Epingler a la barre des taches ne peut pas etre automatise depuis un
 // installeur : Microsoft a retire cette possibilite programmatique depuis
 // Windows 10 (~2016), precisement pour empecher les installeurs de le
