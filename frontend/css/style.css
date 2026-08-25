@@ -4104,8 +4104,15 @@ body.plans-active {
    16'46"/km) - un flex+gap les laisse chacune s'aligner sur sa propre
    largeur, décalant la flèche et la colonne cible ligne par ligne (retour
    utilisateur, capture d'écran). text-align:right sur les valeurs pour que
-   les chiffres eux-mêmes s'alignent aussi, pas juste les colonnes. */
-.goals-gpx-pace-row { display: grid; grid-template-columns: 70px minmax(66px, auto) 16px minmax(66px, auto); align-items: center; gap: 8px; font-size: 13px; padding: 3px 0; }
+   les chiffres eux-mêmes s'alignent aussi, pas juste les colonnes.
+   max-content (pas auto) comme maximum des colonnes valeur : une piste
+   grid dont le max vaut littéralement "auto" s'étire pour absorber tout
+   l'espace libre du conteneur dès qu'aucune piste "fr" n'existe (règle du
+   spec CSS Grid) - ça éloignait démesurément la flèche/la colonne cible du
+   reste de la ligne sur une carte large (retour utilisateur, capture
+   d'écran). max-content garde chaque colonne à la taille de son contenu,
+   toute la ligne reste groupée à gauche. */
+.goals-gpx-pace-row { display: grid; grid-template-columns: 70px minmax(66px, max-content) 16px minmax(66px, max-content); align-items: center; gap: 8px; font-size: 13px; padding: 3px 0; }
 .goals-gpx-pace-label { color: var(--text-secondary); }
 .goals-gpx-pace-val { font-variant-numeric: tabular-nums; font-weight: 600; text-align: right; }
 .goals-gpx-pace-val--target { color: var(--accent); }

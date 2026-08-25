@@ -2793,8 +2793,10 @@ function renderEstimations(goal, weeks, dplusM, distKmOverride) {
   const vo2max = parseFloat((_latestVO2Max || (vma * 1000 / 60 * 0.2 + 3.5)).toFixed(1));
   // GPX importé pour ce plan : estimation affinée par le profil altimétrique
   // réel (plat/montée/descente) plutôt que la règle générique "1 m D+ =
-  // 10 m plat" - cf estimateRaceTimeFromGpxProfile.
-  const gpxStats = campusState.gpxProfile?.stats || null;
+  // 10 m plat" - cf estimateRaceTimeFromGpxProfile. goalGpxStatsForEstimate
+  // (pas campusState.gpxProfile?.stats directement) respecte le choix
+  // "Garder mes valeurs" de la modale d'import GPX.
+  const gpxStats = goalGpxStatsForEstimate();
   const secsNow = gpxStats ? estimateRaceTimeFromGpxProfile(vma, gpxStats, isTrail)?.totalSecs : estimateRaceTime(vma, distKm, dplusM, isTrail);
   const vo2Color = vo2max >= 55 ? '#22c55e' : vo2max >= 45 ? '#3b82f6' : vo2max >= 35 ? '#f59e0b' : '#ef4444';
   const vo2El = el('goals-vo2-current');
@@ -2911,7 +2913,9 @@ function buildProjectionLine(weeks, goal, distKm, dplusM, isTrail, weeksTotal, v
   // sur le graphique). Le point de départ, lui, reste volontairement sur la
   // formule générique : "Début de plan" (secsStart) ne consulte pas non plus
   // le profil GPX, les deux restent donc déjà cohérents tels quels.
-  const gpxStats = campusState.gpxProfile?.stats || null;
+  // goalGpxStatsForEstimate (pas campusState.gpxProfile?.stats directement) :
+  // respecte le choix "Garder mes valeurs" de la modale d'import GPX.
+  const gpxStats = goalGpxStatsForEstimate();
   const vo2Start = getStartVo2(weeks, buildAnchoredVo2History(), goal._id || 'plan');
   const vmaStart = vo2Start != null ? vo2ToVmaCalibrated(vo2Start) : vma;
   const startMins = Math.round((estimateRaceTime(vmaStart, distKm, dplusM, isTrail) || 0) / 60);
@@ -2965,9 +2969,10 @@ function renderObjectifsChart(weeks, goal, dplusM, distKmOverride) {
   const pauseMins = Math.round(getPauseSec(goal) / 60);
 
   // Même formule que la carte "Estimation actuelle" (renderEstimations,
-  // secsNow) - profil GPX importé si disponible, sinon repli générique (cf
+  // secsNow) - profil GPX importé si disponible (et retenu pour
+  // l'estimation, cf goalGpxStatsForEstimate), sinon repli générique (cf
   // commentaire équivalent dans buildProjectionLine).
-  const gpxStatsNow = campusState.gpxProfile?.stats || null;
+  const gpxStatsNow = goalGpxStatsForEstimate();
   const currentSecs = gpxStatsNow ? estimateRaceTimeFromGpxProfile(vma, gpxStatsNow, isTrail)?.totalSecs : estimateRaceTime(vma, distKm, dplusM, isTrail);
   const currentMins = Math.round((currentSecs || 0) / 60);
 
@@ -3753,6 +3758,26 @@ function showPacesModal() {
 // pour (1) affiner l'estimation, (2) afficher les allures/vitesses a tenir
 // par type de terrain, (3) visualiser le parcours (modale dediee).
 
+// Stats GPX à utiliser pour les FORMULES D'ESTIMATION (secsNow/secsEnd/
+// courbe/allures par terrain) UNIQUEMENT - distinct de campusState.gpxProfile
+// lui-même, qui reste toujours disponible pour la simple VISUALISATION du
+// tracé importé (bouton "Voir", carte/profil altimétrique), même quand
+// l'utilisateur a choisi de ne pas l'utiliser pour l'estimation. Bug réel
+// constaté (retour utilisateur, 25/08) : la modale "Reprendre les valeurs du
+// GPX ?" ne met à jour que les CHAMPS distance/D+ saisis - un clic sur
+// "Garder mes valeurs" n'empêchait pas les formules de continuer à lire
+// campusState.gpxProfile.stats directement, donc à recalculer quand même
+// depuis le GPX malgré le refus explicite. Persisté en localStorage par plan
+// (comme suivi_objectif_dist_*/dplus_*/pause_*, cf handleGoalGpxFileSelected)
+// - PAS une clé "durable" synchronisée serveur (uniquement local à cette
+// machine, comme les autres suivi_objectif_*).
+function goalGpxStatsForEstimate() {
+  const stats = campusState.gpxProfile?.stats;
+  if (!stats) return null;
+  const planId = campusState.goal?._id || 'plan';
+  return localStorage.getItem('suivi_objectif_gpx_use_estimate_' + planId) === '0' ? null : stats;
+}
+
 // État du profil GPX importe pour le plan actuellement affiche - null si
 // aucun import, sinon {points, stats, filename, importedAt} (cf reponse de
 // GET /api/goals/gpx/:planId).
@@ -3813,6 +3838,7 @@ async function removeGoalGpx() {
   if (!proceed) return;
   try { await fetchJSON(`${API}/api/goals/gpx/${encodeURIComponent(planId)}`, { method: 'DELETE' }); } catch (e) {}
   campusState.gpxProfile = null;
+  localStorage.removeItem('suivi_objectif_gpx_use_estimate_' + planId);
   renderGoalGpxStatus();
   refreshGoalEstimations();
 }
@@ -3854,6 +3880,13 @@ async function handleGoalGpxFileSelected(file) {
         distInput.value = gpxDistKm;
         if (dplusInput) dplusInput.value = gpxDplusM;
         applyRaceInputs();
+        localStorage.setItem('suivi_objectif_gpx_use_estimate_' + planId, '1');
+      } else {
+        // "Garder mes valeurs" : les champs distance/D+ restent tels quels,
+        // et les formules d'estimation ne doivent plus lire le GPX non plus
+        // (cf goalGpxStatsForEstimate) - sinon l'incohérence persiste malgré
+        // le refus explicite (retour utilisateur).
+        localStorage.setItem('suivi_objectif_gpx_use_estimate_' + planId, '0');
       }
     }
     refreshGoalEstimations();
@@ -3946,9 +3979,14 @@ function fmtPaceShort(secKm) {
 function renderGoalGpxPaces(vma, isTrail, targetSecs) {
   const box = document.getElementById('goals-gpx-paces');
   if (!box) return;
-  const profile = campusState.gpxProfile;
-  if (!profile || !vma) { box.innerHTML = ''; return; }
-  const now = estimateRaceTimeFromGpxProfile(vma, profile.stats, isTrail);
+  // Tableau des allures par terrain (plat/montée/descente) : dérivé du
+  // profil GPX par construction, donc lui aussi masqué si l'utilisateur a
+  // choisi "Garder mes valeurs" - l'afficher quand même reviendrait à
+  // montrer une répartition GPX que l'estimation elle-même n'utilise plus
+  // (même cohérence que goalGpxStatsForEstimate ailleurs dans ce fichier).
+  const stats = goalGpxStatsForEstimate();
+  if (!stats || !vma) { box.innerHTML = ''; return; }
+  const now = estimateRaceTimeFromGpxProfile(vma, stats, isTrail);
   if (!now) { box.innerHTML = ''; return; }
   const target = targetSecs ? scaleGpxPacesToTarget(now, targetSecs) : null;
   const row = (label, nowVal, targetVal) => `
