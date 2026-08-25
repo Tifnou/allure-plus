@@ -830,7 +830,10 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
    pas besoin d'une regle [data-theme="dark"] separee pour ca. Opacite assez
    forte pour rester net sur les 3 couleurs de remplissage differentes.*/
 .health-bar-target{position:absolute; top:-1px; bottom:-1px; background:transparent; border:2px dashed var(--text-primary); border-radius:20px; opacity:0.9; pointer-events:none;}
-.health-bar-fill{position:absolute; top:0; bottom:0; left:0; background:var(--accent); border-radius:20px 0 0 20px; transition:width .5s ease;}
+/* border-radius sur les 4 coins (pas seulement gauche) - retour utilisateur,
+   capture d'ecran : le bout droit de la barre restait carre/tranche net,
+   alors que le conteneur .health-bar-track est lui pleinement arrondi. */
+.health-bar-fill{position:absolute; top:0; bottom:0; left:0; background:var(--accent); border-radius:20px; transition:width .5s ease;}
 .health-bar-value{font-family:var(--font-mono); font-size:12px; font-weight:700; color:var(--text-primary); text-align:right; white-space:nowrap;}
 .health-bar-range{font-family:var(--font-body); font-size:10.5px; font-weight:500; color:var(--text-muted); margin-left:4px;}
 .health-bars-legend{display:flex; align-items:center; gap:6px; font-family:var(--font-body); font-size:10.5px; color:var(--text-muted); margin-top:2px;}
@@ -4096,11 +4099,17 @@ body.plans-active {
 .goals-gpx-paces { margin-top: 10px; }
 .goals-gpx-pace-title { font-size: 0.75rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.02em; margin-bottom: 6px; }
 .goals-gpx-pace-hint { cursor: help; font-weight: 400; text-transform: none; letter-spacing: normal; }
-.goals-gpx-pace-row { display: flex; align-items: center; gap: 8px; font-size: 13px; padding: 3px 0; }
-.goals-gpx-pace-label { width: 70px; color: var(--text-secondary); flex-shrink: 0; }
-.goals-gpx-pace-val { font-variant-numeric: tabular-nums; font-weight: 600; }
+/* Grille à colonnes fixes plutôt qu'un simple flex : les valeurs "Plat"/
+   "Montée"/"Descente" n'ont pas la même largeur (ex: 7'04"/km vs
+   16'46"/km) - un flex+gap les laisse chacune s'aligner sur sa propre
+   largeur, décalant la flèche et la colonne cible ligne par ligne (retour
+   utilisateur, capture d'écran). text-align:right sur les valeurs pour que
+   les chiffres eux-mêmes s'alignent aussi, pas juste les colonnes. */
+.goals-gpx-pace-row { display: grid; grid-template-columns: 70px minmax(66px, auto) 16px minmax(66px, auto); align-items: center; gap: 8px; font-size: 13px; padding: 3px 0; }
+.goals-gpx-pace-label { color: var(--text-secondary); }
+.goals-gpx-pace-val { font-variant-numeric: tabular-nums; font-weight: 600; text-align: right; }
 .goals-gpx-pace-val--target { color: var(--accent); }
-.goals-gpx-pace-arrow { color: var(--text-muted); }
+.goals-gpx-pace-arrow { color: var(--text-muted); text-align: center; }
 
 /* ── Modale de visualisation du profil GPX importé (Objectifs) ────────── */
 .gpx-profile-modal { max-width: 720px; width: 100%; }

@@ -2902,12 +2902,23 @@ let _goalsChartInst = null;
  *  rétrécissait et se redessinait sans cesse (retour utilisateur : la
  *  courbe réelle "supprimait" la projection au fil des semaines). */
 function buildProjectionLine(weeks, goal, distKm, dplusM, isTrail, weeksTotal, vma) {
+  // Le point d'arrivée DOIT utiliser exactement la même formule que la carte
+  // "Fin de plan (projection)" (renderEstimations, secsEnd) - profil GPX
+  // importé si disponible pour ce plan (plus précis, plat/montée/descente),
+  // repli sur la formule générique distance+D+ sinon - sinon la courbe et la
+  // carte affichent deux valeurs différentes pour "la même" estimation (bug
+  // réel constaté, retour utilisateur : 5h38-5h53 dans la carte vs 5h47-6h02
+  // sur le graphique). Le point de départ, lui, reste volontairement sur la
+  // formule générique : "Début de plan" (secsStart) ne consulte pas non plus
+  // le profil GPX, les deux restent donc déjà cohérents tels quels.
+  const gpxStats = campusState.gpxProfile?.stats || null;
   const vo2Start = getStartVo2(weeks, buildAnchoredVo2History(), goal._id || 'plan');
   const vmaStart = vo2Start != null ? vo2ToVmaCalibrated(vo2Start) : vma;
   const startMins = Math.round((estimateRaceTime(vmaStart, distKm, dplusM, isTrail) || 0) / 60);
 
   const vmaEnd = vma * (1 + getRemainingVmaGainPct(weeksTotal, weeks));
-  const endMins = Math.round((estimateRaceTime(vmaEnd, distKm, dplusM, isTrail) || 0) / 60);
+  const endSecs = gpxStats ? estimateRaceTimeFromGpxProfile(vmaEnd, gpxStats, isTrail)?.totalSecs : estimateRaceTime(vmaEnd, distKm, dplusM, isTrail);
+  const endMins = Math.round((endSecs || 0) / 60);
 
   const values = [];
   for (let w = 1; w <= weeksTotal; w++) {
@@ -2953,7 +2964,12 @@ function renderObjectifsChart(weeks, goal, dplusM, distKmOverride) {
   // est un temps total chrono) - voir getPauseSec.
   const pauseMins = Math.round(getPauseSec(goal) / 60);
 
-  const currentMins = Math.round((estimateRaceTime(vma, distKm, dplusM, isTrail) || 0) / 60);
+  // Même formule que la carte "Estimation actuelle" (renderEstimations,
+  // secsNow) - profil GPX importé si disponible, sinon repli générique (cf
+  // commentaire équivalent dans buildProjectionLine).
+  const gpxStatsNow = campusState.gpxProfile?.stats || null;
+  const currentSecs = gpxStatsNow ? estimateRaceTimeFromGpxProfile(vma, gpxStatsNow, isTrail)?.totalSecs : estimateRaceTime(vma, distKm, dplusM, isTrail);
+  const currentMins = Math.round((currentSecs || 0) / 60);
 
   // Projection : ligne droite début de plan → fin de plan projetée (voir
   // buildProjectionLine), couvrant toutes les semaines - une vraie 3e
@@ -2990,16 +3006,25 @@ function renderObjectifsChart(weeks, goal, dplusM, distKmOverride) {
   const gc = dark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.06)';
   const hasPause = pauseMins > 0;
 
-  // Les datasets "low" (label vide) portent la borne sans pause, invisibles
-  // en propre : elles servent uniquement de référence fill:'-1' pour la
-  // bande de la dataset "high" juste après (_pairLowIndex, lu dans le
-  // tooltip pour afficher la fourchette complète).
+  // Les datasets "low" (label vide) portent la borne sans pause - servent de
+  // référence fill:'-1' pour la bande de la dataset "high" juste après
+  // (_pairLowIndex, lu dans le tooltip pour afficher la fourchette complète),
+  // ET tracent désormais aussi leur PROPRE trait (plus fin, en pointillés,
+  // même teinte atténuée) dès qu'une pause est définie - un nuage "borné" par
+  // ses deux bords plutôt qu'un simple aplat sous la ligne haute (retour
+  // utilisateur, capture d'écran). Sans pause, real===realHigh (bande de
+  // largeur nulle) : le trait bas resterait invisible pour rien, inutile de
+  // le tracer.
   const datasets = [
-    { label: '', data: real, borderColor: 'transparent', pointRadius: 0, borderWidth: 0, fill: false, tension: 0.4 },
+    { label: '', data: real, borderColor: hasPause ? 'rgba(59,130,246,0.55)' : 'transparent',
+      borderDash: hasPause ? [3, 3] : undefined, pointRadius: 0, borderWidth: hasPause ? 1.5 : 0,
+      fill: false, tension: 0.4 },
     { label: 'Progression réelle', data: realHigh, borderColor: '#3b82f6',
       backgroundColor: 'rgba(59,130,246,0.15)', fill: hasPause ? '-1' : true, tension: 0.4,
       pointRadius: 3, borderWidth: 2.5, _pairLowIndex: 0 },
-    { label: '', data: projection, borderColor: 'transparent', pointRadius: 0, borderWidth: 0, fill: false, tension: 0.4 },
+    { label: '', data: projection, borderColor: hasPause ? 'rgba(249,115,22,0.55)' : 'transparent',
+      borderDash: hasPause ? [3, 3] : undefined, pointRadius: 0, borderWidth: hasPause ? 1.5 : 0,
+      fill: false, tension: 0.4 },
     { label: 'Projection', data: projectionHigh, borderColor: '#f97316',
       borderDash: [5,5], backgroundColor: 'rgba(249,115,22,0.15)', fill: hasPause ? '-1' : false,
       tension: 0.4, pointRadius: 2, borderWidth: 2, _pairLowIndex: 2 },
@@ -3012,11 +3037,93 @@ function renderObjectifsChart(weeks, goal, dplusM, distKmOverride) {
     });
   }
 
+  // Fleche double sens (haut/bas du nuage) + libelles temps, uniquement en
+  // fin de chaque nuage (dernier point reel = semaine en cours pour
+  // "Progression reelle", derniere semaine du plan pour "Projection") - et
+  // valeur cible affichee en bout de graphique sur l'axe vert, en
+  // blanc/noir selon le theme plutot qu'en vert (lisibilite sur les deux
+  // themes) - demandes utilisateur explicites. Plugin Chart.js local (pas de
+  // dependance CDN supplementaire), enregistre uniquement pour cette
+  // instance via `plugins:[...]` plus bas.
+  const fmtChartTime = m => Math.floor(m / 60) + 'h' + String(m % 60).padStart(2, '0');
+  let realLastIdx = -1;
+  for (let i = real.length - 1; i >= 0; i--) { if (real[i] != null) { realLastIdx = i; break; } }
+  let projLastIdx = -1;
+  for (let i = projection.length - 1; i >= 0; i--) { if (projection[i] != null) { projLastIdx = i; break; } }
+  const chartFontFamily = (getComputedStyle(document.body).fontFamily || 'sans-serif').split(',')[0];
+  const rangeArrowPlugin = {
+    id: 'goalsRangeArrows',
+    afterDraw(chart) {
+      const ctx = chart.ctx;
+      // Blanc en theme sombre / noir en theme clair pour la fleche ET ses
+      // libelles - pas la couleur de la courbe (bleu/orange), demande
+      // utilisateur explicite (lisibilite constante quel que soit le nuage).
+      const markerColor = dark ? '#ffffff' : '#000000';
+      if (hasPause) {
+        const drawArrow = (idx, lowVal, highVal, color, labelAlign) => {
+          if (idx < 0 || lowVal == null || highVal == null || lowVal === highVal) return;
+          // getPixelForValue (pas getPixelForTick) : ce dernier ne resout que
+          // les index encore presents apres l'eclaircissement de
+          // maxTicksLimit (10) et renvoie null au-dela - bug reel constate,
+          // 13 semaines -> seulement 7 ticks generes, getPixelForTick(12)
+          // (derniere semaine) valait null, coerce a 0 par Canvas -> fleche/
+          // libelle affiches tout a gauche au lieu du bon endroit.
+          const x = chart.scales.x.getPixelForValue(idx);
+          // Valeur haute = temps plus long = plus HAUT a l'ecran (axe Y
+          // croissant vers le haut) -> pixel Y plus petit que la valeur basse.
+          const yHigh = chart.scales.y.getPixelForValue(highVal);
+          const yLow = chart.scales.y.getPixelForValue(lowVal);
+          ctx.save();
+          ctx.strokeStyle = color;
+          ctx.fillStyle = color;
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.moveTo(x, yHigh);
+          ctx.lineTo(x, yLow);
+          ctx.stroke();
+          const drawHead = (yTip, dir) => {
+            ctx.beginPath();
+            ctx.moveTo(x, yTip);
+            ctx.lineTo(x - 4, yTip + dir * 6);
+            ctx.lineTo(x + 4, yTip + dir * 6);
+            ctx.closePath();
+            ctx.fill();
+          };
+          drawHead(yHigh, 1);
+          drawHead(yLow, -1);
+          ctx.font = '600 10.5px ' + chartFontFamily;
+          ctx.textAlign = labelAlign;
+          const tx = x + (labelAlign === 'right' ? -8 : 8);
+          ctx.textBaseline = 'bottom';
+          ctx.fillText(fmtChartTime(highVal), tx, yHigh - 3);
+          ctx.textBaseline = 'top';
+          ctx.fillText(fmtChartTime(lowVal), tx, yLow + 3);
+          ctx.restore();
+        };
+        drawArrow(realLastIdx, real[realLastIdx], realHigh[realLastIdx], markerColor, 'left');
+        drawArrow(projLastIdx, projection[projLastIdx], projectionHigh[projLastIdx], markerColor, 'right');
+      }
+      if (targetMins) {
+        const yTarget = chart.scales.y.getPixelForValue(targetMins);
+        const xEnd = chart.scales.x.getPixelForValue(weeksTotal - 1);
+        ctx.save();
+        ctx.font = '700 11px ' + chartFontFamily;
+        ctx.fillStyle = markerColor;
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(fmtChartTime(targetMins), xEnd + 10, yTarget);
+        ctx.restore();
+      }
+    }
+  };
+
   _goalsChartInst = new Chart(canvas, {
     type: 'line',
     data: { labels, datasets },
+    plugins: [rangeArrowPlugin],
     options: {
       responsive: true, maintainAspectRatio: false,
+      layout: { padding: { right: targetMins ? 46 : 8 } },
       plugins: {
         legend: { labels: { color: tc, font: { size: 12 }, boxWidth: 20,
           filter: item => item.text !== '' } },

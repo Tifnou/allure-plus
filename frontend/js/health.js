@@ -565,8 +565,8 @@ async function loadTrainingIntensityMetric(_days) {
   // clair/orange clair/turquoise), pour rester reconnaissable d'un outil a
   // l'autre plutot que d'inventer une palette maison sur cet indicateur precis.
   const bars = [
-    { key: 'aerobicLow', label: 'Aérobie faible', value: intensity.aerobicLow, min: intensity.aerobicLowMin, max: intensity.aerobicLowMax, color: '#FB923C' },
-    { key: 'aerobicHigh', label: 'Aérobie élevée', value: intensity.aerobicHigh, min: intensity.aerobicHighMin, max: intensity.aerobicHighMax, color: '#2DD4BF' },
+    { key: 'aerobicLow', label: 'Aérobie faible', value: intensity.aerobicLow, min: intensity.aerobicLowMin, max: intensity.aerobicLowMax, color: '#2DD4BF' },
+    { key: 'aerobicHigh', label: 'Aérobie élevée', value: intensity.aerobicHigh, min: intensity.aerobicHighMin, max: intensity.aerobicHighMax, color: '#FB923C' },
     { key: 'anaerobic', label: 'Anaérobique', value: intensity.anaerobic, min: intensity.anaerobicMin, max: intensity.anaerobicMax, color: '#C084FC' },
   ];
   // Commentaire chiffre (valeur reelle + plage cible), pas juste qualitatif -
