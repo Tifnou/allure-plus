@@ -129,6 +129,7 @@
 }
 .route-editor-btn-secondary:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
 .route-editor-btn-secondary:disabled { opacity: 0.45; cursor: not-allowed; }
+.route-editor-btn-secondary.active { border-color: var(--accent); color: var(--accent); background: var(--accent-light); }
 
 /* Sélection A→B sur la carte/le profil (PDF §7-8, §25) */
 .route-editor-hint {
@@ -375,6 +376,7 @@
    plupart du temps, donc l'écart doit venir de lui plutôt que d'annuler ce
    margin-top:0 globalement (retour utilisateur, capture d'écran). */
 #route-editor-extend-controls:not(:empty) { margin-bottom: 14px; }
+#route-editor-move-endpoint-controls:not(:empty) { margin-bottom: 14px; display: flex; gap: 10px; flex-wrap: wrap; }
 
 /* Points ancres déplaçables par glisser-déposer (départ/arrivée/points posés
    en mode "Prolonger le tracé") - petit disque net, distinct des étiquettes

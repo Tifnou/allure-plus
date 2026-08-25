@@ -426,6 +426,11 @@
   padding: 7px 14px;
 }
 
+.routes-card-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
+.routes-action-btn { font-size: 12px; padding: 7px 14px; }
+.routes-action-btn.active { border-color: var(--accent); color: var(--accent); background: var(--accent-light); }
+.routes-picking-hint { margin-bottom: 6px; }
+
 [data-theme="dark"] .routes-form-card,
 [data-theme="dark"] .routes-text-input,
 [data-theme="dark"] .routes-number-input,

@@ -462,6 +462,33 @@ function renderRouteEditorExtendControls() {
   if (btn) btn.onclick = () => routeEditorExtendTrack(points[points.length - 1], { lat: points[0].lat, lon: points[0].lon });
 }
 
+// Déplacer le départ/l'arrivée le long du tracé SANS changer sa forme :
+// pour une boucle (isClosedLoopTrack, routes.js), un seul point à déplacer
+// (départ=arrivée) - le tracé tourne autour de la boucle (rotateLoopPoints,
+// même distance/D+). Pour un tracé non bouclé, seule option géométriquement
+// possible sans changer la forme : raccourcir (trimTrackPoints) en coupant
+// la portion avant le nouveau départ (ou après la nouvelle arrivée) -
+// confirmé avec l'utilisateur. Réutilise le state machine des modes
+// existant (_routeEditorMode) plutôt qu'un état dédié - même dispatch de
+// clic carte (onRouteEditorMapClick) que "move-point"/"add-waypoint".
+function renderRouteEditorMoveEndpointControls() {
+  const box = el('route-editor-move-endpoint-controls');
+  if (!box) return;
+  const points = _routeEditorData?.points || [];
+  if (points.length < 2) { box.innerHTML = ''; return; }
+  const loop = isClosedLoopTrack(points);
+  box.innerHTML = loop
+    ? `<button type="button" class="route-editor-btn-secondary${_routeEditorMode === 'move-loop' ? ' active' : ''}" id="route-editor-move-loop-btn">📍 Déplacer le départ/l'arrivée</button>`
+    : `<button type="button" class="route-editor-btn-secondary${_routeEditorMode === 'move-start' ? ' active' : ''}" id="route-editor-move-start-btn">📍 Déplacer le départ</button>
+       <button type="button" class="route-editor-btn-secondary${_routeEditorMode === 'move-finish' ? ' active' : ''}" id="route-editor-move-finish-btn">🏁 Déplacer l'arrivée</button>`;
+  const loopBtn = el('route-editor-move-loop-btn');
+  if (loopBtn) loopBtn.onclick = () => setRouteEditorMode(_routeEditorMode === 'move-loop' ? 'select' : 'move-loop');
+  const startBtn = el('route-editor-move-start-btn');
+  if (startBtn) startBtn.onclick = () => setRouteEditorMode(_routeEditorMode === 'move-start' ? 'select' : 'move-start');
+  const finishBtn = el('route-editor-move-finish-btn');
+  if (finishBtn) finishBtn.onclick = () => setRouteEditorMode(_routeEditorMode === 'move-finish' ? 'select' : 'move-finish');
+}
+
 // Résumé intelligent (PDF §19) : texte templé à partir des stats déjà
 // calculées (aucun appel serveur, aucun LLM) - même esprit que l'exemple
 // du PDF ("difficulté concentrée entre les km X et Y, qui regroupent Z% du
@@ -528,10 +555,12 @@ function renderRouteEditorWorkspace() {
     <div class="gpx-profile-elev-container"><canvas id="route-editor-elev-chart"></canvas></div>
     <div id="route-editor-mode-hint" class="route-editor-hint"></div>
     <div id="route-editor-extend-controls"></div>
+    <div id="route-editor-move-endpoint-controls"></div>
     <div id="route-editor-reroute-preview"></div>
     <div class="route-editor-actions route-editor-actions--top">
       <button type="button" class="route-editor-btn-secondary" id="route-editor-undo-btn" ${_routeEditorHistory.length ? '' : 'disabled'}>↶ Annuler</button>
       <button type="button" class="route-editor-btn-secondary" id="route-editor-redo-btn" ${_routeEditorFuture.length ? '' : 'disabled'}>↷ Rétablir</button>
+      <button type="button" class="route-editor-btn-secondary" id="route-editor-reverse-btn">↔ Inverser le sens</button>
       <button type="button" class="route-editor-btn-secondary" id="route-editor-restore-btn" ${isOriginal ? 'disabled' : ''}>Restaurer l'original</button>
       <button type="button" class="btn-plans-restart" id="route-editor-export-btn">⬇️ Exporter le GPX</button>
     </div>
@@ -576,11 +605,14 @@ function renderRouteEditorWorkspace() {
   if (redoBtn) redoBtn.onclick = routeEditorRedo;
   const restoreBtn = el('route-editor-restore-btn');
   if (restoreBtn) restoreBtn.onclick = routeEditorRestoreOriginal;
+  const reverseBtn = el('route-editor-reverse-btn');
+  if (reverseBtn) reverseBtn.onclick = routeEditorReverseDirection;
   ws.querySelectorAll('.route-editor-climb-repeat-btn').forEach(btn => {
     btn.onclick = () => selectClimbForRepeat(parseInt(btn.dataset.climbIdx, 10));
   });
   wireRouteEditorModeToolbar(ws);
   renderRouteEditorExtendControls();
+  renderRouteEditorMoveEndpointControls();
   renderRouteEditorPoiTable();
   const saveVariantBtn = el('route-editor-save-variant-btn');
   if (saveVariantBtn) saveVariantBtn.onclick = onRouteEditorSaveVariantClick;
@@ -673,6 +705,7 @@ function renderRouteEditorVisuals() {
         const seg = latLngs.slice(bin.startIdx, bin.endIdx + 1);
         if (seg.length > 1) L.polyline(seg, { color: gpxGradeBand(bin.gradePct).color, weight: 4 }).addTo(map);
       });
+      addDirectionChevrons(map, latLngs);
     }
     if (_routeEditorMapView) {
       // Un zoom/pan a déjà été choisi par l'utilisateur lors d'un rendu
@@ -1020,6 +1053,7 @@ function setRouteEditorMode(mode) {
   document.querySelectorAll('.route-editor-mode-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.mode === mode));
   renderRouteEditorModeHint();
   renderRouteEditorExtendControls();
+  renderRouteEditorMoveEndpointControls();
 }
 
 function renderRouteEditorModeHint() {
@@ -1040,6 +1074,12 @@ function renderRouteEditorModeHint() {
       : 'Cliquez sur la carte pour prolonger le tracé jusqu\'à ce point.';
   } else if (_routeEditorMode === 'poi') {
     hint.textContent = 'Cliquez sur un point du tracé pour y ajouter un point d\'intérêt (ravitaillement, eau, sommet…).';
+  } else if (_routeEditorMode === 'move-loop') {
+    hint.textContent = 'Cliquez sur un point du tracé pour en faire le nouveau départ = arrivée — la boucle garde exactement la même forme.';
+  } else if (_routeEditorMode === 'move-start') {
+    hint.textContent = 'Cliquez sur un point du tracé pour en faire le nouveau départ — la portion avant ce point sera supprimée.';
+  } else if (_routeEditorMode === 'move-finish') {
+    hint.textContent = 'Cliquez sur un point du tracé pour en faire la nouvelle arrivée — la portion après ce point sera supprimée.';
   } else {
     hint.textContent = '';
   }
@@ -1066,6 +1106,9 @@ function onRouteEditorMapClick(latlng, points) {
   if (_routeEditorMode === 'move-point') { onRouteEditorMovePointClick(latlng, points); return; }
   if (_routeEditorMode === 'add-waypoint') { onRouteEditorAddWaypointClick(latlng); return; }
   if (_routeEditorMode === 'poi') { onRouteEditorPoiClick(findNearestRouteEditorPointIndex(latlng, points)); return; }
+  if (_routeEditorMode === 'move-loop' || _routeEditorMode === 'move-start' || _routeEditorMode === 'move-finish') {
+    onRouteEditorMoveEndpointClick(latlng, points); return;
+  }
   onRouteEditorPointClick(findNearestRouteEditorAnchorSnapped(latlng, points));
 }
 
@@ -1211,6 +1254,73 @@ function onRouteEditorAddWaypointClick(latlng) {
     endIdx: sel.bIdx,
     waypoints: [{ lat: a.lat, lon: a.lon }, { lat: latlng.lat, lon: latlng.lng }, { lat: b.lat, lon: b.lon }],
   });
+}
+
+// Clic en mode "move-loop"/"move-start"/"move-finish" (cf
+// renderRouteEditorMoveEndpointControls) : contrairement à "move-point"/
+// "add-waypoint", c'est une pure opération de tableau (rotation ou
+// raccourci), pas un recalcul BRouter incertain - appliquée directement,
+// sans étape de prévisualisation (même esprit que "Fermer la boucle" ou le
+// glisser-déposer d'un point unique).
+function onRouteEditorMoveEndpointClick(latlng, points) {
+  const idx = findNearestRouteEditorPointIndex(latlng, points);
+  const n = points.length;
+  const pois = _routeEditorData.pois || [];
+  let newPoints, newPois;
+  if (_routeEditorMode === 'move-loop') {
+    if (idx <= 0 || idx >= n - 1) { showToast('Choisissez un point du tracé, différent du départ actuel.', 'error'); return; }
+    newPoints = rotateLoopPoints(points, idx);
+    newPois = pois.map(p => ({ ...p, idx: remapIndexAfterLoopRotate(p.idx, idx, n) }));
+  } else if (_routeEditorMode === 'move-start') {
+    if (idx >= n - 1) { showToast('Choisissez un point avant l\'arrivée actuelle.', 'error'); return; }
+    newPoints = trimTrackPoints(points, idx, n - 1);
+    newPois = pois.filter(p => p.idx >= idx).map(p => ({ ...p, idx: p.idx - idx }));
+  } else {
+    if (idx <= 0) { showToast('Choisissez un point après le départ actuel.', 'error'); return; }
+    newPoints = trimTrackPoints(points, 0, idx);
+    newPois = pois.filter(p => p.idx <= idx);
+  }
+  if (newPoints.length < 2) { showToast('Le tracé résultant est trop court.', 'error'); return; }
+  routeEditorApplyEndpointMove(newPoints, newPois);
+}
+
+async function routeEditorApplyEndpointMove(newPoints, newPois) {
+  try {
+    const newStats = await routeEditorAnalyzePoints(newPoints);
+    _routeEditorHistory.push({ points: _routeEditorData.points, stats: _routeEditorData.stats, pois: _routeEditorData.pois || [] });
+    _routeEditorFuture = [];
+    _routeEditorData = { ..._routeEditorData, points: newPoints, stats: newStats, pois: newPois };
+    _routeEditorSelection = { aIdx: null, bIdx: null };
+    _routeEditorMode = 'select';
+    renderRouteEditorWorkspace();
+  } catch (err) {
+    showToast('Erreur : ' + err.message, 'error');
+  }
+}
+
+// Inverse le sens de parcours du tracé courant : la géométrie ne change pas,
+// seul l'ordre des points s'inverse - une montée devient une descente et
+// inversement, d'où le recalcul complet des stats (routeEditorAnalyzePoints)
+// plutôt qu'une inversion manuelle des champs climbs/pctClimb/pctDescent.
+async function routeEditorReverseDirection() {
+  const points = _routeEditorData?.points || [];
+  if (points.length < 2) return;
+  try {
+    const n = points.length;
+    const reversed = points.slice().reverse();
+    const newStats = await routeEditorAnalyzePoints(reversed);
+    const newPois = (_routeEditorData.pois || []).map(p => ({ ...p, idx: n - 1 - p.idx }));
+    _routeEditorHistory.push({ points: _routeEditorData.points, stats: _routeEditorData.stats, pois: _routeEditorData.pois || [] });
+    _routeEditorFuture = [];
+    _routeEditorData = { ..._routeEditorData, points: reversed, stats: newStats, pois: newPois };
+    const sel = _routeEditorSelection;
+    _routeEditorSelection = sel.aIdx == null ? { aIdx: null, bIdx: null }
+      : sel.bIdx == null ? { aIdx: n - 1 - sel.aIdx, bIdx: null }
+      : { aIdx: n - 1 - sel.bIdx, bIdx: n - 1 - sel.aIdx };
+    renderRouteEditorWorkspace();
+  } catch (err) {
+    showToast('Erreur : ' + err.message, 'error');
+  }
 }
 
 // Vérifie que la tuile OSM couvrant ce point est présente localement, sinon

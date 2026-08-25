@@ -22,6 +22,7 @@ function routesDefaultState() {
     searchRadiusKm: 5,
     lastResult: null,
     openIndex: null,         // index de la carte résultat ouverte (une seule à la fois)
+    pickingEndpoint: null,   // { idx, target: 'start'|'finish'|'loop' } - carte en attente d'un clic pour déplacer le départ/l'arrivée
   };
 }
 
@@ -452,6 +453,7 @@ async function routesResolveStart() {
 function routesRestart() {
   routesState.lastResult = null;
   routesState.openIndex = null;
+  routesState.pickingEndpoint = null;
   showRoutesView('form');
   renderRoutesForm();
 }
@@ -727,7 +729,99 @@ async function routesGenerateClicked() {
 
 function toggleRouteCard(idx) {
   routesState.openIndex = routesState.openIndex === idx ? null : idx;
+  routesState.pickingEndpoint = null;
   renderRoutesResults(routesState.lastResult);
+}
+
+// Inverse le sens de parcours d'une option générée : la géométrie ne change
+// pas, seul l'ordre des points s'inverse - distance/D+ totaux restent
+// identiques (un aller-retour comme une boucle sont symétriques par
+// construction), donc pas de recalcul de stats nécessaire. outLegPointCount/
+// repeatedSegments (order-dependent) sont recalés en conséquence.
+function reverseRouteOption(idx) {
+  const opt = routesState.lastResult?.options?.[idx];
+  if (!opt || !opt.points || opt.points.length < 2) return;
+  const n = opt.points.length;
+  opt.points = opt.points.slice().reverse();
+  if (opt.outLegPointCount != null) opt.outLegPointCount = n - opt.outLegPointCount;
+  if (opt.repeatedSegments) {
+    opt.repeatedSegments = opt.repeatedSegments.map(s => ({ ...s, startIdx: n - 1 - s.endIdx, endIdx: n - 1 - s.startIdx }));
+  }
+  routesState.pickingEndpoint = null;
+  renderRoutesResults(routesState.lastResult);
+}
+
+// Arme/désarme le mode "cliquez sur le tracé pour choisir le nouveau
+// départ/arrivée" pour la carte idx - un nouveau clic sur le même bouton
+// annule (toggle), cliquer un autre bouton réarme sur une autre cible.
+function armRouteEndpointPicking(idx, target) {
+  const cur = routesState.pickingEndpoint;
+  routesState.pickingEndpoint = (cur && cur.idx === idx && cur.target === target) ? null : { idx, target };
+  renderRoutesResults(routesState.lastResult);
+}
+
+// Applique le déplacement de départ/arrivée choisi par armRouteEndpointPicking
+// une fois le point cliqué sur la carte (cf renderRouteMap) : rotation pour
+// une boucle (même forme/distance), raccourci sinon (seule option possible
+// sans changer la forme du reste du tracé, confirmé avec l'utilisateur) - la
+// distance/D+/durée sont alors recalculés (approximation proportionnelle
+// pour la durée, aucun profil d'allure recalculable côté client) et les
+// correspondances D+/distance/durée visées à la génération sont effacées
+// (elles ne représentent plus ce tracé raccourci manuellement).
+function onRoutesEndpointPick(idx, target, opt, latlng) {
+  const n = opt.points.length;
+  const snappedIdx = findNearestPointIndexOnTrack(opt.points, latlng);
+  let newPoints;
+  if (target === 'loop') {
+    if (snappedIdx <= 0 || snappedIdx >= n - 1) { showToast('Choisissez un point du tracé, différent du départ actuel.', 'error'); return; }
+    newPoints = rotateLoopPoints(opt.points, snappedIdx);
+    if (opt.repeatedSegments) {
+      opt.repeatedSegments = opt.repeatedSegments
+        .map(s => ({ ...s, startIdx: remapIndexAfterLoopRotate(s.startIdx, snappedIdx, n), endIdx: remapIndexAfterLoopRotate(s.endIdx, snappedIdx, n) }))
+        .filter(s => s.endIdx > s.startIdx);
+    }
+    opt.outLegPointCount = null;
+  } else if (target === 'start') {
+    if (snappedIdx >= n - 1) { showToast("Choisissez un point avant l'arrivée actuelle.", 'error'); return; }
+    newPoints = trimTrackPoints(opt.points, snappedIdx, n - 1);
+    if (opt.repeatedSegments) opt.repeatedSegments = opt.repeatedSegments.map(s => ({ ...s, startIdx: s.startIdx - snappedIdx, endIdx: s.endIdx - snappedIdx })).filter(s => s.startIdx >= 0);
+    if (opt.outLegPointCount != null) opt.outLegPointCount = Math.max(0, opt.outLegPointCount - snappedIdx);
+  } else {
+    if (snappedIdx <= 0) { showToast('Choisissez un point après le départ actuel.', 'error'); return; }
+    newPoints = trimTrackPoints(opt.points, 0, snappedIdx);
+    if (opt.repeatedSegments) opt.repeatedSegments = opt.repeatedSegments.filter(s => s.endIdx <= snappedIdx);
+    if (opt.outLegPointCount != null && opt.outLegPointCount > snappedIdx) opt.outLegPointCount = null;
+  }
+  opt.points = newPoints;
+  if (target !== 'loop') recomputeRouteOptionMetrics(opt);
+  routesState.pickingEndpoint = null;
+  renderRoutesResults(routesState.lastResult);
+}
+
+// Recalcule distance/D+/durée après un raccourci (target 'start'/'finish') -
+// une rotation de boucle (target 'loop') garde exactement la même distance/D+
+// totaux, aucun recalcul n'est nécessaire dans ce cas. La durée est mise à
+// l'échelle proportionnellement à la nouvelle distance (aucun profil
+// d'allure par pente recalculable côté client, cf predictDurationMin côté
+// serveur) - une approximation raisonnable plutôt qu'une durée totalement
+// périmée. Les correspondances D+/distance/durée visées à la génération ne
+// représentent plus ce tracé modifié manuellement, elles sont effacées.
+function recomputeRouteOptionMetrics(opt) {
+  const pts = opt.points;
+  let distM = 0, ascentM = 0;
+  for (let i = 1; i < pts.length; i++) {
+    distM += haversineKm(pts[i - 1], pts[i]) * 1000;
+    const dEle = pts[i].ele - pts[i - 1].ele;
+    if (dEle > 0) ascentM += dEle;
+  }
+  const ratio = opt.distanceM > 0 ? distM / opt.distanceM : 1;
+  opt.predictedDurationMin = Math.max(1, Math.round(opt.predictedDurationMin * ratio));
+  opt.distanceM = Math.round(distM);
+  opt.ascentM = Math.round(ascentM);
+  opt.matchLabel = null;
+  opt.durationMatch = null;
+  opt.distanceMatch = null;
+  opt.ascentMatch = null;
 }
 
 const ROUTES_OPTION_COUNT_WORDS = ['', 'Une', 'Deux', 'Trois', 'Quatre', 'Cinq'];
@@ -825,13 +919,28 @@ function renderRoutesResults(data) {
           ${opt.shape === 'outback' ? '<span class="routes-legend-swatch routes-legend-swatch--return"></span> Retour (même tracé que l\'aller) &nbsp;' : ''}
           <span class="routes-legend-swatch routes-legend-swatch--normal"></span> Reste du parcours
         </div>` : ''}
-        <button class="btn-plans-restart routes-download-btn" id="routes-download-${idx}">⬇ Télécharger le GPX</button>
+        ${routesState.pickingEndpoint && routesState.pickingEndpoint.idx === idx ? `<div class="routes-hint routes-picking-hint">🖱️ Cliquez sur le tracé (carte ci-dessus) pour choisir le nouveau point.</div>` : ''}
+        <div class="routes-card-actions">
+          <button type="button" class="route-editor-btn-secondary routes-action-btn" id="routes-reverse-${idx}">↔ Inverser le sens</button>
+          ${isClosedLoopTrack(opt.points) ? `
+          <button type="button" class="route-editor-btn-secondary routes-action-btn${routesState.pickingEndpoint?.idx === idx && routesState.pickingEndpoint.target === 'loop' ? ' active' : ''}" id="routes-move-loop-${idx}">📍 Déplacer le départ/l'arrivée</button>` : `
+          <button type="button" class="route-editor-btn-secondary routes-action-btn${routesState.pickingEndpoint?.idx === idx && routesState.pickingEndpoint.target === 'start' ? ' active' : ''}" id="routes-move-start-${idx}">📍 Déplacer le départ</button>
+          <button type="button" class="route-editor-btn-secondary routes-action-btn${routesState.pickingEndpoint?.idx === idx && routesState.pickingEndpoint.target === 'finish' ? ' active' : ''}" id="routes-move-finish-${idx}">🏁 Déplacer l'arrivée</button>`}
+          <button class="btn-plans-restart routes-download-btn" id="routes-download-${idx}">⬇ Télécharger le GPX</button>
+        </div>
       </div>
     `;
     list.appendChild(card);
     card.querySelector('.routes-result-header').onclick = () => toggleRouteCard(idx);
     if (open) {
       card.querySelector(`#routes-download-${idx}`).onclick = () => downloadRouteGpx(opt);
+      card.querySelector(`#routes-reverse-${idx}`).onclick = () => reverseRouteOption(idx);
+      const loopBtn = card.querySelector(`#routes-move-loop-${idx}`);
+      if (loopBtn) loopBtn.onclick = () => armRouteEndpointPicking(idx, 'loop');
+      const startBtn = card.querySelector(`#routes-move-start-${idx}`);
+      if (startBtn) startBtn.onclick = () => armRouteEndpointPicking(idx, 'start');
+      const finishBtn = card.querySelector(`#routes-move-finish-${idx}`);
+      if (finishBtn) finishBtn.onclick = () => armRouteEndpointPicking(idx, 'finish');
     }
   });
 
@@ -844,7 +953,7 @@ function renderRoutesResults(data) {
       // le profil d'altitude, enchaîné juste apres dans le meme callback).
       let mapCtrl = null;
       try {
-        mapCtrl = renderRouteMap(`routes-map-${routesState.openIndex}`, opt, { requestedStart: data.requestedStart, searchRadiusM: data.searchRadiusM });
+        mapCtrl = renderRouteMap(`routes-map-${routesState.openIndex}`, opt, { requestedStart: data.requestedStart, searchRadiusM: data.searchRadiusM, cardIdx: routesState.openIndex, picking: routesState.pickingEndpoint });
       } catch (err) {
         console.error('[routes] Erreur rendu carte:', err);
       }
@@ -869,6 +978,70 @@ function haversineKm(a, b) {
   const la1 = a.lat * Math.PI / 180, la2 = b.lat * Math.PI / 180;
   const h = Math.sin(dLat / 2) ** 2 + Math.cos(la1) * Math.cos(la2) * Math.sin(dLon / 2) ** 2;
   return 2 * R * Math.asin(Math.sqrt(h));
+}
+
+// ─── Sens du parcours / départ-arrivée déplaçables ──────────────────────
+// Fonctions partagées par la page Itinéraires et l'Éditeur Parcours (routes.js
+// charge avant route_editor.js dans index.html, cf haversineKm ci-dessus déjà
+// réutilisé de la même façon) - une seule implémentation plutôt que deux.
+
+// Circuit "boucle" = départ et arrivée au même endroit à quelques dizaines de
+// mètres près (tolérance GPS/BRouter, jamais exactement identique) : permet
+// de choisir un nouveau départ=arrivée n'importe où sur le tracé (rotation,
+// même forme, même distance) plutôt que de le raccourcir (seul choix
+// géométriquement possible sur un tracé non bouclé, cf trimTrackPoints).
+function isClosedLoopTrack(points, toleranceKm = 0.05) {
+  return !!points && points.length >= 3 && haversineKm(points[0], points[points.length - 1]) < toleranceKm;
+}
+
+// Fait tourner un tracé bouclé (dernier point ≈ premier, doublon de clôture)
+// pour que pivotIdx devienne le nouveau départ=arrivée - même forme, même
+// distance, seul le point de rupture départ/arrivée se déplace.
+function rotateLoopPoints(points, pivotIdx) {
+  if (pivotIdx <= 0 || pivotIdx >= points.length - 1) return points;
+  const core = points.slice(0, points.length - 1);
+  const rotated = [...core.slice(pivotIdx), ...core.slice(0, pivotIdx)];
+  rotated.push(rotated[0]);
+  return rotated;
+}
+
+// Recale un index existant (POI, zone répétée...) après rotateLoopPoints.
+function remapIndexAfterLoopRotate(oldIdx, pivotIdx, n) {
+  const core = n - 1;
+  return ((oldIdx % core) - pivotIdx + core) % core;
+}
+
+// Raccourcit un tracé NON bouclé en ne gardant que [newStartIdx..newEndIdx] -
+// seule façon géométriquement possible de déplacer le départ/l'arrivée sans
+// changer la forme du reste du tracé (confirmé avec l'utilisateur).
+function trimTrackPoints(points, newStartIdx, newEndIdx) {
+  return points.slice(newStartIdx, newEndIdx + 1);
+}
+
+function findNearestPointIndexOnTrack(points, latlng) {
+  const lon = latlng.lon != null ? latlng.lon : latlng.lng;
+  let best = 0, bestD = Infinity;
+  for (let i = 0; i < points.length; i++) {
+    const dLat = points[i].lat - latlng.lat, dLon = points[i].lon - lon;
+    const d = dLat * dLat + dLon * dLon;
+    if (d < bestD) { bestD = d; best = i; }
+  }
+  return best;
+}
+
+// Chevrons directionnels le long d'un tracé (plugin leaflet-polylinedecorator,
+// cf index.html) - montre le sens de parcours quelle que soit son origine
+// (importé, généré, créé). Garde typeof : si le plugin CDN n'a pas pu
+// charger (coupure réseau), la carte doit rester utilisable sans chevrons
+// plutôt que de faire planter tout le rendu.
+function addDirectionChevrons(map, latLngs) {
+  if (!latLngs || latLngs.length < 2 || typeof L.polylineDecorator !== 'function') return null;
+  return L.polylineDecorator(latLngs, {
+    patterns: [{
+      offset: 25, repeat: 90,
+      symbol: L.Symbol.arrowHead({ pixelSize: 9, pathOptions: { color: '#1e293b', fillOpacity: 0.9, weight: 0 } }),
+    }],
+  }).addTo(map);
 }
 
 // opt.repeatedSegments[].{startIdx,endIdx} (calculés côté serveur, cf
@@ -996,7 +1169,20 @@ function renderRouteMap(mapDivId, opt, context = {}) {
   } else {
     drawWithRepeatZones(latLngs, repeatZones);
   }
+  addDirectionChevrons(map, latLngs);
   L.marker(latLngs[0]).addTo(map).bindTooltip('Départ du tracé');
+  if (latLngs.length > 1) {
+    L.circleMarker(latLngs[latLngs.length - 1], { radius: 7, color: '#fff', weight: 2, fillColor: '#dc2626', fillOpacity: 0.95 })
+      .addTo(map).bindTooltip('Arrivée du tracé');
+  }
+
+  // Sélection du nouveau départ/arrivée (armée par armRouteEndpointPicking,
+  // boutons "Déplacer le départ/l'arrivée" de la carte) : un seul clic sur le
+  // tracé suffit à appliquer, cette carte n'affichant qu'une seule option à
+  // la fois (pas d'ambiguïté possible sur la cible du clic).
+  if (context.picking && context.picking.idx === context.cardIdx) {
+    map.on('click', e => onRoutesEndpointPick(context.cardIdx, context.picking.target, opt, e.latlng));
+  }
 
   if (context.requestedStart) {
     const reqLatLng = [context.requestedStart.lat, context.requestedStart.lon];
