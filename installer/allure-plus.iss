@@ -1,5 +1,5 @@
 #define MyAppName "Allure+"
-#define MyAppVersion "1.64.0"
+#define MyAppVersion "1.67.0"
 #define MyAppPublisher "Allure+"
 
 [Setup]
@@ -37,8 +37,22 @@ Source: "..\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignorev
 ; de l'utilisateur (par defaut ou personnalisees) - voir ShouldSeedImages ci-dessous.
 Source: "..\Images\*"; DestDir: "{app}\Images"; Flags: recursesubdirs createallsubdirs ignoreversion; Excludes: "\thumbs,\thumbs\*"; Check: ShouldSeedImages
 
+[Tasks]
+Name: "desktopicon"; Description: "Créer une icône sur le Bureau"; GroupDescription: "Icônes supplémentaires :"
+
 [Icons]
-Name: "{group}\Allure+"; Filename: "{app}\start.bat"; WorkingDir: "{app}"; IconFilename: "{app}\logo-allure.ico"
+; Filename pointe vers cmd.exe (un vrai .exe) plutot que directement vers
+; start.bat : Windows refuse "Epingler a la barre des taches" (menu
+; contextuel ET glisser-depose) pour un raccourci dont la cible est un
+; script .bat/.cmd - constate en conditions reelles (retour utilisateur,
+; 25/08). cmd.exe /c "...start.bat" lance exactement le meme script (qui
+; gere lui-meme le demarrage serveur + ouverture du navigateur en mode
+; app), mais la cible etant un .exe reconnu, l'epinglage fonctionne
+; directement au clic droit, sans contournement manuel. runminimized :
+; la fenetre de commande (juste le temps que start.bat demarre le serveur)
+; reste discrete plutot que de s'afficher en plein ecran.
+Name: "{group}\Allure+"; Filename: "{cmd}"; Parameters: "/c ""{app}\start.bat"""; WorkingDir: "{app}"; IconFilename: "{app}\logo-allure.ico"; Flags: runminimized
+Name: "{autodesktop}\Allure+"; Filename: "{cmd}"; Parameters: "/c ""{app}\start.bat"""; WorkingDir: "{app}"; IconFilename: "{app}\logo-allure.ico"; Flags: runminimized; Tasks: desktopicon
 Name: "{group}\Arreter Allure+"; Filename: "{app}\stop_serveur.bat"; WorkingDir: "{app}"; IconFilename: "{app}\logo-allure.ico"
 Name: "{group}\Desinstaller Allure+"; Filename: "{uninstallexe}"
 
@@ -59,6 +73,22 @@ Filename: "{app}\install.bat"; WorkingDir: "{app}"; Flags: waituntilterminated; 
 Filename: "{app}\start.bat"; WorkingDir: "{app}"; Flags: nowait postinstall skipifsilent; Description: "Lancer Allure+"
 
 [Code]
+// Epingler a la barre des taches ne peut pas etre automatise depuis un
+// installeur : Microsoft a retire cette possibilite programmatique depuis
+// Windows 10 (~2016), precisement pour empecher les installeurs de le
+// faire sans action explicite de l'utilisateur - aucun contournement
+// legitime cote Inno Setup. Le raccourci cree ci-dessus pointant vers
+// cmd.exe (pas start.bat directement) rend desormais "Epingler a la barre
+// des taches" disponible en un clic droit (voir commentaire [Icons]) - on
+// se contente donc d'informer l'utilisateur de ce raccourci sur la
+// derniere page de l'assistant, plutot que d'une automatisation impossible.
+procedure CurPageChanged(CurPageID: Integer);
+begin
+  if CurPageID = wpFinished then
+    WizardForm.FinishedLabel.Caption := WizardForm.FinishedLabel.Caption + #13#10#13#10 +
+      'Astuce : pour un accès encore plus rapide, faites un clic droit sur le raccourci Allure+ (menu Démarrer ou Bureau) puis choisissez "Épingler à la barre des tâches".';
+end;
+
 // Ferme une instance Allure+ deja en cours (fenetre navigateur --app +
 // serveur node) tout au debut du setup, avant meme la premiere page du
 // wizard - sinon, lors d'une mise a jour lancee depuis l'app elle-meme
