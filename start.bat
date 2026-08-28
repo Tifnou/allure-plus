@@ -26,15 +26,25 @@ REM libere le port avant de relancer un nouveau node.exe (incident reel
 REM 12/08 : un node.exe pas encore libere restait sur le port pendant
 REM qu'un second etait lance en parallele, echouait a se lier, et plantait
 REM silencieusement, laissant l'utilisateur sans le savoir sur l'ancienne
-REM instance perimee). On attend maintenant explicitement que "tasklist" ne
-REM voie plus aucun node.exe, avec un plafond de 10s pour ne jamais bloquer
-REM indefiniment si un processus refuse de mourir (droits, verrou...) - le
-REM serveur lui-meme retente aussi plusieurs fois au demarrage en filet de
-REM securite (cf server.js, EADDRINUSE).
-taskkill /F /IM node.exe >nul 2>&1
+REM instance perimee). On attend maintenant explicitement que le port soit
+REM libere, avec un plafond de 10s pour ne jamais bloquer indefiniment si
+REM un processus refuse de mourir (droits, verrou...) - le serveur lui-meme
+REM retente aussi plusieurs fois au demarrage en filet de securite (cf
+REM server.js, EADDRINUSE).
+REM
+REM IMPORTANT : on ne tue QUE le(s) processus qui occupent le port
+REM d'Allure+ (jamais "taskkill /IM node.exe", qui tuait TOUT node.exe de
+REM la machine et cassait au passage n'importe quelle autre appli Node en
+REM cours - incident du 27/08 avec un autre projet, Pilotage TST).
+set "ALLURE_PORT=3001"
+for /f "tokens=2 delims==" %%v in ('findstr /B /C:"PORT=" ".env" 2^>nul') do set "ALLURE_PORT=%%v"
+
+for /f "tokens=5" %%p in ('netstat -ano ^| findstr /R /C:":%ALLURE_PORT% .*LISTENING"') do (
+    taskkill /F /PID %%p >nul 2>&1
+)
 set "KILLWAIT=0"
 :waitkill
-tasklist /FI "IMAGENAME eq node.exe" 2>nul | find /I "node.exe" >nul
+netstat -ano | findstr /R /C:":%ALLURE_PORT% .*LISTENING" >nul
 if not errorlevel 1 (
     set /a KILLWAIT+=1
     if !KILLWAIT! GEQ 10 goto :killdone
