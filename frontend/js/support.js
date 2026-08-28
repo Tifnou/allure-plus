@@ -618,6 +618,21 @@ function wireSupportAdminFilters() {
   });
 }
 
+// Si le ticket actuellement affiche dans le panneau de detail ne fait plus
+// partie de la liste visible (changement de filtre, ticket resolu/supprime,
+// rechargement de la page) - ne jamais laisser le fil d'un ticket qui n'est
+// plus selectionne affiche a droite (retour utilisateur : le detail restait
+// visible alors que la liste de gauche affichait deja "Aucun ticket").
+// N'affecte pas le cas normal (ticket toujours visible dans le filtre
+// courant, ex: juste apres l'avoir ouvert ou change de statut sur place).
+function clearAdminDetailIfOrphaned(visibleTickets) {
+  if (_supportAdminOpenTicket == null) return;
+  if (visibleTickets.some(t => t.number === _supportAdminOpenTicket)) return;
+  _supportAdminOpenTicket = null;
+  const detail = el('support-admin-detail');
+  if (detail) detail.innerHTML = '<div class="support-empty">Sélectionnez un ticket dans la liste.</div>';
+}
+
 function renderSupportAdminList() {
   const list = el('support-admin-list');
   if (!list) return;
@@ -629,6 +644,7 @@ function renderSupportAdminList() {
   // (retour utilisateur : trop de tickets resolus melanges aux actifs).
   if (_supportAdminFilter === 'all') tickets = tickets.filter(t => t.status !== 'resolu');
   else tickets = tickets.filter(t => t.status === _supportAdminFilter);
+  clearAdminDetailIfOrphaned(tickets);
   if (tickets.length === 0) { list.innerHTML = `<div class="support-empty">${_supportAdminFilter === 'resolu' ? 'Aucun ticket archivé.' : 'Aucun ticket.'}</div>`; return; }
   list.innerHTML = tickets.map(t => {
     const cat = SUPPORT_CATEGORY_MAP[t.category ? SUPPORT_CATEGORY_BY_GH_LABEL[t.category] : null];
