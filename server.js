@@ -1563,7 +1563,7 @@ app.post('/api/routes/tile-download', requireSession, async (req, res) => {
 
 app.post('/api/routes/generate', requireSession, async (req, res) => {
   try {
-    const { start, targetDistanceM, targetDurationMin, targetAscentM, terrain, searchRadiusKm, routeShape, trailLevel, trailStyle } = req.body || {};
+    const { start, targetDistanceM, targetDurationMin, targetAscentM, terrain, searchRadiusKm, routeShape, trailLevel, trailStyle, paceMinPerKm: requestedPaceMinPerKm } = req.body || {};
     if (!start || typeof start.lat !== 'number' || typeof start.lon !== 'number') {
       return res.status(400).json({ error: 'Point de départ invalide (adresse non confirmée ?)' });
     }
@@ -1581,8 +1581,17 @@ app.post('/api/routes/generate', requireSession, async (req, res) => {
     const vo2maxSnapshots = getHealthSnapshots('vo2max', null, req.session.email);
     const latestVo2max = vo2maxSnapshots.length ? vo2maxSnapshots[vo2maxSnapshots.length - 1].value?.vo2max : null;
     const efPace = efFastPaceMinPerKm(latestVo2max);
-    const paceMinPerKm = applyEfPaceAnchor(paceProfile.paceMinPerKm, efPace);
+    let paceMinPerKm = applyEfPaceAnchor(paceProfile.paceMinPerKm, efPace);
     const isTrail = terrain !== 'route';
+    // Allure cible explicite (route + duree uniquement, cf routes.js
+    // routesHasPaceField) : remplace le profil d'allure detecte
+    // automatiquement par la valeur choisie par l'utilisateur pour CETTE
+    // recherche precise - une seule valeur pour toutes les tranches de
+    // pente (terrain route = quasi plat, un ratio pente serait arbitraire
+    // et invisible a l'utilisateur qui n'a saisi qu'une seule allure).
+    if (!isTrail && targetDurationMin && requestedPaceMinPerKm > 0) {
+      paceMinPerKm = { downhill: requestedPaceMinPerKm, flat: requestedPaceMinPerKm, moderate: requestedPaceMinPerKm, steep: requestedPaceMinPerKm };
+    }
     const levelMidKmh = isTrail ? trailLevelMidKmh(trailLevel) : null;
     // Si seule la duree est fournie, estimation de depart pour la forme de la
     // boucle (affinee ensuite par generateLoop). Deux modeles selon le

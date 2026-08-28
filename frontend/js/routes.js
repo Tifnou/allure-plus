@@ -13,6 +13,7 @@ function routesDefaultState() {
     mode: 'distance',        // 'distance' | 'duration'
     distanceKm: 10,
     durationMin: 60,
+    routePaceMinPerKm: 6,    // allure visée (route + durée uniquement) - voir routesHasPaceField()
     terrain: 'trail',        // 'trail' | 'route'
     routeShape: 'loop',      // 'loop' | 'outback' | 'both'
     ascentM: 300,
@@ -115,6 +116,12 @@ function showRoutesView(view) {
 }
 
 function routesHasAscentField() { return routesState.terrain === 'trail'; }
+// Allure cible explicite (route uniquement - le trail a deja des fourchettes
+// d'allure par niveau de traileur, cf ROUTES_TRAIL_LEVELS) : necessaire
+// uniquement en mode "duree", pour convertir la duree visee en distance
+// reelle sans deviner l'allure de l'utilisateur (retour utilisateur, Thomas
+// PAVARD - meme distance parcourue en 30 min a 5'40"/km ou 6'45"/km).
+function routesHasPaceField() { return routesState.mode === 'duration' && routesState.terrain === 'route'; }
 
 // Champs numeriques du formulaire Itineraires : type="text" + inputmode="numeric"
 // plutot que type="number" (retour utilisateur 18/08 - saisie fiable via les
@@ -181,6 +188,12 @@ function renderRoutesForm() {
         <button type="button" class="routes-toggle-btn ${routesState.terrain === 'route' ? 'active' : ''}" data-terrain="route">Route (asphalte, chemin)</button>
       </div>
       ${routesState.terrain === 'route' ? `<div class="routes-hint">⚠️ Le tracé évite autant que possible les grands axes, mais peut encore emprunter une portion de route sans trottoir ni accotement séparé — vérifiez la sécurité du parcours avant de partir.</div>` : ''}
+    </div>
+
+    <div class="routes-field" id="routes-pace-field" style="display:${routesHasPaceField() ? '' : 'none'}">
+      <div class="routes-field-label">Allure visée</div>
+      <div class="routes-hint">Utilisée pour convertir la durée visée en distance réelle — vous ne parcourez pas la même distance en 30 min à 5'40"/km qu'à 6'45"/km.</div>
+      <div class="routes-number-row" style="margin-top:6px" id="routes-pace-input"></div>
     </div>
 
     <div class="routes-field">
@@ -270,6 +283,20 @@ function renderRoutesForm() {
     };
     wireNumericInput('routes-input-duration-h', updateDurationMin);
     wireNumericInput('routes-input-duration-m', updateDurationMin);
+  }
+
+  if (routesHasPaceField()) {
+    const paceInput = el('routes-pace-input');
+    const pMin = Math.floor(routesState.routePaceMinPerKm);
+    const pSec = Math.round((routesState.routePaceMinPerKm - pMin) * 60);
+    paceInput.innerHTML = `<input type="text" inputmode="numeric" id="routes-input-pace-min" class="routes-number-input routes-number-input--xs" value="${pMin}">' <input type="text" inputmode="numeric" id="routes-input-pace-sec" class="routes-number-input routes-number-input--xs" value="${String(pSec).padStart(2, '0')}">"/km`;
+    const updatePace = () => {
+      const minVal = parseInt(el('routes-input-pace-min').value, 10) || 0;
+      const secVal = Math.min(59, parseInt(el('routes-input-pace-sec').value, 10) || 0);
+      routesState.routePaceMinPerKm = Math.max(0.1, minVal + secVal / 60);
+    };
+    wireNumericInput('routes-input-pace-min', updatePace);
+    wireNumericInput('routes-input-pace-sec', updatePace);
   }
 
   if (routesHasAscentField()) {
@@ -702,6 +729,7 @@ async function routesGenerateClicked() {
     };
     if (routesState.mode === 'distance') body.targetDistanceM = routesState.distanceKm * 1000;
     else body.targetDurationMin = routesState.durationMin;
+    if (routesHasPaceField()) body.paceMinPerKm = routesState.routePaceMinPerKm;
     if (routesState.searchWider && routesState.searchRadiusKm > 0) {
       body.searchRadiusKm = routesState.searchRadiusKm;
     }
