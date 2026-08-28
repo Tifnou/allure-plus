@@ -209,9 +209,34 @@ function extractImageFromMessage(message) {
 
 // ─── Émojis rapides (équivalent léger du sélecteur Windows+.) ──────────
 const SUPPORT_QUICK_EMOJIS = [
-  '😀', '😂', '🙂', '😉', '😍', '😅', '😭', '😡', '😱', '🤔',
-  '👍', '👎', '👏', '🙏', '💪', '🤝', '❤️', '🔥', '🎉', '✅',
-  '❌', '⭐', '💡', '🚀', '😊', '🥳', '😴', '🤒', '☀️', '🌧️',
+  // Smileys / émotions
+  '😀', '😃', '😄', '😁', '😆', '😅', '🤣', '😂', '🙂', '🙃',
+  '😉', '😊', '😇', '🥰', '😍', '🤩', '😘', '😗', '😚', '😙',
+  '😋', '😛', '😜', '🤪', '😝', '🤑', '🤗', '🤭', '🤫', '🤔',
+  '🤐', '🤨', '😐', '😑', '😶', '😏', '😒', '🙄', '😬', '😌',
+  '😔', '😪', '🤤', '😴', '😷', '🤒', '🤕', '🤢', '🥵', '🥶',
+  '🥴', '😵', '🤯', '🤠', '🥳', '😎', '🤓', '🧐', '😕', '🙁',
+  '😮', '😯', '😲', '🥺', '😢', '😭', '😱', '😖', '😞', '😓',
+  '😩', '😫', '🥱', '😤', '😡', '😠', '🤬', '😈', '💀', '🤡',
+  '👻', '🤖', '😺', '😻', '😹', '🙀', '😿',
+  // Coeurs
+  '❤️', '🧡', '💛', '💚', '💙', '💜', '🖤', '🤍', '🤎', '💔',
+  '❣️', '💕', '💞', '💓', '💗', '💖', '💘', '💝', '💟', '💌', '💋',
+  // Mains / gestes
+  '👍', '👎', '👌', '🤏', '✌️', '🤞', '🤟', '🤘', '🤙', '👉',
+  '👆', '👇', '☝️', '👋', '🖐️', '✋', '👏', '🙌', '🤲', '🙏',
+  '✍️', '💪',
+  // Fêtes / sport
+  '🎉', '🎊', '🎁', '🏆', '🥇', '🥈', '🥉', '🏅', '🎖️', '⚽',
+  '🏃', '🚴', '🏋️', '🧘', '🏊',
+  // Nature / météo
+  '☀️', '🌤️', '⛅', '🌦️', '🌧️', '⛈️', '❄️', '☃️', '🌈', '⭐',
+  '🌟', '✨', '🔥', '💧', '🌊', '🌙',
+  // Objets / symboles
+  '💡', '🚀', '⏰', '📌', '📍', '✅', '❌', '❗', '❓', '⚠️',
+  '🔔', '🔒', '📷', '🎯', '💯', '🔧', '📈', '📉',
+  // Nourriture
+  '☕', '🍕', '🍔', '🍰', '🍺', '🍷',
 ];
 function emojiToolbarHtml(idPrefix) {
   return `<div class="support-emoji-toolbar"><button type="button" class="support-emoji-btn" id="${idPrefix}-emoji-btn" title="Insérer un émoji">😀</button></div>`;
@@ -297,6 +322,9 @@ function renderSupportNewForm() {
       <textarea class="form-input support-form-textarea" id="support-field-message" placeholder="Décrivez le bug, l'idée ou la question…" required></textarea>
       ${emojiToolbarHtml('support-field')}
       ${supportImagePickerHtml('support-new')}
+      <label class="form-checkbox-inline support-privacy-checkbox">
+        <input type="checkbox" id="support-field-private" /> 🔒 Ticket privé — visible uniquement par vous et l'administrateur
+      </label>
       <button class="btn-save-profile" type="submit">Envoyer le ticket</button>
     </form>`;
   const imagePicker = wireSupportImagePicker('support-new');
@@ -309,6 +337,7 @@ async function submitSupportTicket(e, imagePicker) {
   const category = el('support-field-category').value;
   const page = el('support-field-page').value;
   const message = el('support-field-message').value.trim();
+  const isPrivate = el('support-field-private')?.checked || false;
   if (!message) return;
   const btn = e.target.querySelector('button[type="submit"]');
   btn.disabled = true; btn.textContent = 'Envoi…';
@@ -317,7 +346,7 @@ async function submitSupportTicket(e, imagePicker) {
     const res = await fetch(`${API}/api/support/tickets`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ category, page, message, imageUrl }),
+      body: JSON.stringify({ category, page, message, imageUrl, private: isPrivate }),
     });
     if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Erreur');
     const { ticket } = await res.json();
@@ -353,7 +382,7 @@ async function renderSupportList(scope) {
         <button class="support-ticket-item ${isUnseen ? 'support-ticket-item--unseen' : ''}" data-number="${t.number}" type="button">
           <span class="support-ticket-cat">${cat ? cat.icon : '📝'}</span>
           <span class="support-ticket-info">
-            <span class="support-ticket-title">${escapeHtml(extractImageFromMessage(t.message || t.title || '').text.slice(0, 70))}</span>
+            <span class="support-ticket-title">${t.private ? '🔒 ' : ''}${escapeHtml(extractImageFromMessage(t.message || t.title || '').text.slice(0, 70))}</span>
             <span class="support-ticket-meta">${t.page ? escapeHtml(t.page) + ' · ' : ''}${formatDate(t.updatedAt)}</span>
           </span>
           <span class="support-status ${status.cls}">${status.label}</span>
@@ -395,6 +424,30 @@ async function deleteSupportTicket(number, onDeleted) {
   }
 }
 
+// Bascule privé/public - retroactive, fonctionne aussi sur un ticket deja
+// archive/resolu (voir support-relay handleSetPrivacy, qui ne touche que les
+// labels, jamais l'etat du ticket). Utilisee par la vue utilisateur (son
+// propre ticket) et la page admin (n'importe quel ticket, meme sans en etre
+// l'auteur).
+async function toggleTicketPrivacy(number, makePrivate) {
+  try {
+    const r = await fetch(`${API}/api/support/tickets/${number}/privacy`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ private: makePrivate }),
+    });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Erreur');
+    showToast(makePrivate ? '🔒 Ticket rendu privé' : '🔓 Ticket rendu public', 'success');
+    return true;
+  } catch (err) {
+    showToast('Erreur : ' + err.message, 'error');
+    return false;
+  }
+}
+
+function privacyToggleBtnHtml(idAttr, ticket) {
+  return `<button type="button" class="support-privacy-toggle ${ticket.private ? 'is-private' : ''}" id="${idAttr}" title="${ticket.private ? 'Rendre ce ticket public' : 'Rendre ce ticket privé'}">${ticket.private ? '🔒' : '🔓'}</button>`;
+}
+
 async function openSupportTicket(number, scope) {
   _supportOpenTicket = number;
   const body = el('support-modal-body');
@@ -412,10 +465,11 @@ async function openSupportTicket(number, scope) {
       <div class="support-thread-header">
         <span class="support-ticket-cat">${cat ? cat.icon : '📝'}</span>
         <div>
-          <div class="support-ticket-title">${renderSupportMsgHtml(ticket.message || ticket.title || '')}</div>
+          <div class="support-ticket-title">${ticket.private ? '🔒 ' : ''}${renderSupportMsgHtml(ticket.message || ticket.title || '')}</div>
           <div class="support-ticket-meta">${ticket.page ? escapeHtml(ticket.page) + ' · ' : ''}Ouvert le ${formatDate(ticket.createdAt)}</div>
         </div>
         <span class="support-status ${status.cls}">${status.label}</span>
+        ${canReply ? privacyToggleBtnHtml('support-privacy-toggle', ticket) : ''}
       </div>
       <div class="support-thread-comments">
         ${comments.length === 0 ? '<div class="support-empty">Pas encore de réponse.</div>' : comments.map(c => `
@@ -435,6 +489,14 @@ async function openSupportTicket(number, scope) {
       <button class="support-delete-btn" id="support-delete-ticket" type="button">🗑️ Supprimer ce ticket</button>` : ''}
     `;
     body.querySelector('#support-back').onclick = () => { _supportOpenTicket = null; renderSupportList(scope); };
+    const privacyBtn = body.querySelector('#support-privacy-toggle');
+    if (privacyBtn) {
+      privacyBtn.onclick = async () => {
+        privacyBtn.disabled = true;
+        const ok = await toggleTicketPrivacy(number, !ticket.private);
+        if (ok) openSupportTicket(number, scope); else privacyBtn.disabled = false;
+      };
+    }
     const deleteBtn = body.querySelector('#support-delete-ticket');
     if (deleteBtn) {
       deleteBtn.onclick = () => deleteSupportTicket(number, () => { _supportOpenTicket = null; renderSupportList(scope); });
@@ -576,7 +638,7 @@ function renderSupportAdminList() {
       <button class="support-ticket-item ${unseen ? 'support-ticket-item--unseen' : ''} ${_supportAdminOpenTicket === t.number ? 'support-ticket-item--active' : ''}" data-number="${t.number}" type="button">
         <span class="support-ticket-cat">${cat ? cat.icon : '📝'}</span>
         <span class="support-ticket-info">
-          <span class="support-ticket-title">${escapeHtml(extractImageFromMessage(t.message || t.title || '').text.slice(0, 60))}</span>
+          <span class="support-ticket-title">${t.private ? '🔒 ' : ''}${escapeHtml(extractImageFromMessage(t.message || t.title || '').text.slice(0, 60))}</span>
           <span class="support-ticket-meta">${t.reporterEmail ? escapeHtml(supportUserLabel(t.reporterEmail)) + ' · ' : ''}${formatDate(t.updatedAt)}</span>
         </span>
         <span class="support-status ${status.cls}">${status.label}</span>
@@ -603,12 +665,13 @@ async function openSupportAdminTicket(number) {
       <div class="support-thread-header">
         <span class="support-ticket-cat">${cat ? cat.icon : '📝'}</span>
         <div>
-          <div class="support-ticket-title">${renderSupportMsgHtml(ticket.message || ticket.title || '')}</div>
+          <div class="support-ticket-title">${ticket.private ? '🔒 ' : ''}${renderSupportMsgHtml(ticket.message || ticket.title || '')}</div>
           <div class="support-ticket-meta">${ticket.page ? escapeHtml(ticket.page) + ' · ' : ''}${ticket.reporterEmail ? escapeHtml(supportUserLabel(ticket.reporterEmail)) + ' · ' : ''}Ouvert le ${formatDate(ticket.createdAt)}</div>
         </div>
         <select class="form-input support-status-select" id="support-admin-status-select">
           ${Object.entries(SUPPORT_STATUS).map(([k, v]) => `<option value="${k}" ${ticket.status === k ? 'selected' : ''}>${v.label}</option>`).join('')}
         </select>
+        ${privacyToggleBtnHtml('support-admin-privacy-toggle', ticket)}
       </div>
       <div class="support-thread-comments">
         ${comments.length === 0 ? '<div class="support-empty">Pas encore de réponse.</div>' : comments.map(c => `
@@ -632,6 +695,17 @@ async function openSupportAdminTicket(number) {
       renderSupportAdminList();
       el('support-admin-detail').innerHTML = '<div class="support-empty">Sélectionnez un ticket dans la liste.</div>';
     });
+    el('support-admin-privacy-toggle').onclick = async (e) => {
+      e.target.disabled = true;
+      const ok = await toggleTicketPrivacy(number, !ticket.private);
+      if (ok) {
+        const t = _supportAdminTicketsCache.find(x => x.number === number);
+        if (t) t.private = !ticket.private;
+        openSupportAdminTicket(number);
+      } else {
+        e.target.disabled = false;
+      }
+    };
     el('support-admin-status-select').onchange = async (e) => {
       const status = e.target.value;
       try {

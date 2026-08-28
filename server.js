@@ -1349,10 +1349,10 @@ app.post('/api/support/images', requireSession, async (req, res) => {
 
 app.post('/api/support/tickets', requireSession, async (req, res) => {
   try {
-    const { category, page, message, imageUrl } = req.body || {};
+    const { category, page, message, imageUrl, private: isPrivate } = req.body || {};
     const data = await callSupportRelay('/tickets', {
       method: 'POST',
-      body: JSON.stringify({ email: req.session.email, category, page, message, imageUrl, clientKey: SUPPORT_CLIENT_KEY }),
+      body: JSON.stringify({ email: req.session.email, category, page, message, imageUrl, private: !!isPrivate, clientKey: SUPPORT_CLIENT_KEY }),
     });
     res.json(data);
   } catch (err) { handleError(res, err); }
@@ -1361,7 +1361,9 @@ app.post('/api/support/tickets', requireSession, async (req, res) => {
 app.get('/api/support/tickets', requireSession, async (req, res) => {
   try {
     const scope = req.query.scope === 'all' ? 'all' : 'mine';
+    const isAdmin = req.session.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
     const params = new URLSearchParams({ email: req.session.email, scope });
+    if (isAdmin) params.set('adminKey', SUPPORT_ADMIN_KEY);
     const data = await callSupportRelay(`/tickets?${params}`);
     res.json(data);
   } catch (err) { handleError(res, err); }
@@ -1369,7 +1371,30 @@ app.get('/api/support/tickets', requireSession, async (req, res) => {
 
 app.get('/api/support/tickets/:number', requireSession, async (req, res) => {
   try {
-    const data = await callSupportRelay(`/tickets/${Number(req.params.number)}`);
+    const isAdmin = req.session.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
+    const params = new URLSearchParams({ email: req.session.email });
+    if (isAdmin) params.set('adminKey', SUPPORT_ADMIN_KEY);
+    const data = await callSupportRelay(`/tickets/${Number(req.params.number)}?${params}`);
+    res.json(data);
+  } catch (err) { handleError(res, err); }
+});
+
+// Bascule privé/public - retroactive (tickets ouverts ET archives, cf.
+// support-relay/src/index.js handleSetPrivacy qui ne touche jamais l'etat du
+// ticket). L'admin peut basculer n'importe quel ticket, meme sans en etre
+// l'auteur (meme logique isAdmin que les autres routes ci-dessus).
+app.post('/api/support/tickets/:number/privacy', requireSession, async (req, res) => {
+  try {
+    const isAdmin = req.session.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
+    const data = await callSupportRelay(`/tickets/${Number(req.params.number)}/privacy`, {
+      method: 'POST',
+      body: JSON.stringify({
+        email: req.session.email,
+        private: !!req.body?.private,
+        clientKey: SUPPORT_CLIENT_KEY,
+        adminKey: isAdmin ? SUPPORT_ADMIN_KEY : undefined,
+      }),
+    });
     res.json(data);
   } catch (err) { handleError(res, err); }
 });

@@ -47,6 +47,14 @@ const CATEGORY_LABELS = {
   question: 'question',
 };
 
+// Ticket "prive" : label dedie, meme mecanique que "en cours"/"supprime"
+// (jamais un champ GitHub natif, les Issues n'en ont pas). Un ticket prive
+// reste techniquement lisible sur GitHub par quiconque a l'URL (le repo
+// Tifnou/allure-plus est public) - ce label ne fait que le masquer entre
+// utilisateurs de l'app elle-meme (cf. handleListTickets/handleGetTicket),
+// ce n'est pas une vraie confidentialite cote GitHub.
+const PRIVATE_LABEL = 'privé';
+
 function stripMarker(body, marker) {
   const re = new RegExp(`\\n*<!--\\s*${marker}:(.*?)\\s*-->\\s*$`, 's');
   const m = body?.match(re);
@@ -80,6 +88,10 @@ function isDeleted(issue) {
   return (issue.labels || []).some(l => (l.name || l) === 'supprimé');
 }
 
+function isPrivateIssue(issue) {
+  return (issue.labels || []).some(l => (l.name || l) === PRIVATE_LABEL);
+}
+
 function categoryFromLabels(labels) {
   const names = (labels || []).map(l => l.name || l);
   return Object.values(CATEGORY_LABELS).find(l => names.includes(l)) || null;
@@ -96,6 +108,7 @@ function summarizeIssue(issue, { includeReporter } = {}) {
     page: pageMatch ? pageMatch[1].trim() : null,
     message,
     status: ticketStatus(issue),
+    private: isPrivateIssue(issue),
     createdAt: issue.created_at,
     updatedAt: issue.updated_at,
     commentsCount: issue.comments,
@@ -150,11 +163,12 @@ async function handleCreateTicket(req, env) {
     appendImage(message, body.imageUrl),
     `<!-- reporter:${email} -->`,
   ].filter(Boolean).join('\n\n');
+  const labels = body.private ? [label, PRIVATE_LABEL] : [label];
 
   const issue = await gh(env, '/issues', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ title, body: issueBody, labels: [label] }),
+    body: JSON.stringify({ title, body: issueBody, labels }),
   });
   return json({ ticket: summarizeIssue(issue, { includeReporter: true }) }, 201);
 }
@@ -165,23 +179,38 @@ async function handleListTickets(req, env, url) {
   const isAdmin = url.searchParams.get('adminKey') === env.ADMIN_KEY;
 
   const issues = await gh(env, '/issues?state=all&per_page=100&sort=updated');
+  // reporterEmail toujours extrait ici (meme cote non-admin/scope=all) pour
+  // pouvoir filtrer les tickets prives des AUTRES utilisateurs ci-dessous -
+  // retire du resultat juste avant le retour si non autorise (comportement
+  // inchange pour qui a le droit de le voir ou non).
   let tickets = issues
     .filter(i => !i.pull_request && !isDeleted(i))
-    .map(i => summarizeIssue(i, { includeReporter: scope === 'mine' || isAdmin }));
+    .map(i => summarizeIssue(i, { includeReporter: true }));
 
   if (scope === 'mine') {
     tickets = tickets.filter(t => t.reporterEmail === email);
+  } else if (!isAdmin) {
+    tickets = tickets.filter(t => !t.private || t.reporterEmail === email);
+  }
+
+  if (!(scope === 'mine' || isAdmin)) {
+    tickets = tickets.map(({ reporterEmail, ...rest }) => rest);
   }
   return json({ tickets });
 }
 
-async function handleGetTicket(req, env, number) {
+async function handleGetTicket(req, env, number, url) {
   const [issue, comments] = await Promise.all([
     gh(env, `/issues/${number}`),
     gh(env, `/issues/${number}/comments?per_page=100`),
   ]);
   if (isDeleted(issue)) throw { status: 404, message: 'Ticket introuvable' };
   const summary = summarizeIssue(issue, { includeReporter: true });
+  const isAdmin = url.searchParams.get('adminKey') === env.ADMIN_KEY;
+  const email = (url.searchParams.get('email') || '').toLowerCase();
+  if (summary.private && !isAdmin && summary.reporterEmail !== email) {
+    throw { status: 403, message: 'Ce ticket est privé' };
+  }
   const thread = comments.map(c => {
     const { author, cleaned } = extractCommentAuthor(c.body || '');
     return {
@@ -236,6 +265,33 @@ async function handleSetStatus(req, env, number) {
     body: JSON.stringify({ state: status === 'resolu' ? 'closed' : 'open', labels }),
   });
   return json({ ok: true });
+}
+
+// Bascule privé/public - uniquement les labels, jamais l'etat (state) du
+// ticket : doit fonctionner aussi bien sur un ticket ouvert que deja
+// archive/resolu (demande utilisateur explicite, "retroactivement"), sans
+// jamais le rouvrir/refermer par effet de bord. Autorise le proprietaire du
+// ticket OU l'admin (qui peut basculer n'importe quel ticket, meme sans
+// jamais l'avoir ouvert au prealable).
+async function handleSetPrivacy(req, env, number) {
+  const body = await req.json();
+  if (String(body.clientKey || '') !== env.CLIENT_KEY) throw { status: 401, message: 'Client non autorisé' };
+  const isAdmin = body.adminKey && body.adminKey === env.ADMIN_KEY;
+  const email = String(body.email || '').slice(0, 200).trim().toLowerCase();
+
+  const issue = await gh(env, `/issues/${number}`);
+  if (!isAdmin) {
+    const { value: reporter } = extractReporter(issue.body || '');
+    if (reporter !== email) throw { status: 403, message: "Ce ticket n'appartient pas à cet utilisateur" };
+  }
+  const otherLabels = (issue.labels || []).map(l => l.name || l).filter(n => n !== PRIVATE_LABEL);
+  const labels = body.private ? [...otherLabels, PRIVATE_LABEL] : otherLabels;
+  await gh(env, `/issues/${number}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ labels }),
+  });
+  return json({ ok: true, private: !!body.private });
 }
 
 async function handleDeleteTicket(req, env, number) {
@@ -400,9 +456,10 @@ export default {
       const number = Number(parts[1]);
       if (!Number.isInteger(number) || number <= 0) return json({ message: 'Ticket invalide' }, 400);
 
-      if (parts.length === 2 && req.method === 'GET') return await handleGetTicket(req, env, number);
+      if (parts.length === 2 && req.method === 'GET') return await handleGetTicket(req, env, number, url);
       if (parts.length === 3 && parts[2] === 'comments' && req.method === 'POST') return await handleAddComment(req, env, number);
       if (parts.length === 3 && parts[2] === 'status' && req.method === 'POST') return await handleSetStatus(req, env, number);
+      if (parts.length === 3 && parts[2] === 'privacy' && req.method === 'POST') return await handleSetPrivacy(req, env, number);
       if (parts.length === 3 && parts[2] === 'delete' && req.method === 'POST') return await handleDeleteTicket(req, env, number);
 
       return json({ message: 'Not found' }, 404);
