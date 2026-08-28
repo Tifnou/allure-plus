@@ -361,13 +361,14 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
 .btn-refresh.spinning svg{animation:spin 0.7s linear infinite;}
 @keyframes spin{to{transform:rotate(360deg);}}
 .last-updated{font-size:11px;color:var(--text-muted);font-family:var(--font-body);}
-.sidebar-version-row{display:flex;align-items:center;gap:6px;margin-top:4px;}
+.sidebar-version-row{display:flex;align-items:stretch;gap:6px;margin-top:4px;}
 .app-version{
-  display:inline-block;
+  display:flex;align-items:center;justify-content:center;
+  flex:1;min-width:0;height:27px;box-sizing:border-box;
   font-size:10px;font-weight:700;letter-spacing:0.02em;
   font-family:var(--font-body);color:var(--text-secondary);
   background:var(--bg-hover);border:1px solid var(--border);
-  border-radius:20px;padding:2px 7px;
+  border-radius:6px;padding:0 7px;
 }
 .app-author{
   font-size:10px;color:var(--text-muted);font-family:var(--font-body);
@@ -3569,10 +3570,10 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
    que la variante nav-item pleine largeur, juste un habillage visuel en plus
    pour ressembler aux boutons icone du bloc au-dessus (icon-btn-bg). */
 .nav-item--footer-icon{
-  flex:0 0 32px; width:32px; height:32px; padding:0; gap:0;
+  flex:0 0 34px; width:34px; height:27px; box-sizing:border-box; padding:0; gap:0;
   justify-content:center;
-  border:1px solid var(--border); background:rgba(255,255,255,0.03);
-  border-radius:8px;
+  border:1.5px solid var(--border); background:none;
+  border-radius:6px;
 }
 .nav-item--footer-icon .nav-icon{width:14px;height:14px;}
 .nav-item--footer-icon .nav-badge-count{
@@ -3707,8 +3708,7 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
 
 /* ── Barre de statut serveur ── */
 [data-theme="dark"] .mini-status,
-[data-theme="dark"] .icon-btn-bg,
-[data-theme="dark"] .nav-item--footer-icon {
+[data-theme="dark"] .icon-btn-bg {
   background: rgba(12,15,25,0.9) !important;
 }
 
