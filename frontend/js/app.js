@@ -1702,7 +1702,7 @@ function showActivityDetail(activity, backTo = 'activities') {
         <div class="activity-stat"><div class="activity-stat-value">${elev}</div><div class="activity-stat-label">Denivele +</div></div>
         <div class="activity-stat"><div class="activity-stat-value">${cal}</div><div class="activity-stat-label">Calories</div></div>
         <div class="activity-stat"><div class="activity-stat-value">${vo2}</div><div class="activity-stat-label">VO2max estimee</div></div>
-        ${(type.toLowerCase().includes('run') || type.toLowerCase().includes('trail')) ? `<div class="activity-stat"><div class="activity-stat-value" id="activity-gear-value">\u2014</div><div class="activity-stat-label">Chaussures</div></div>` : ''}
+        ${(type.toLowerCase().includes('run') || type.toLowerCase().includes('trail') || type.toLowerCase().includes('walk') || type.toLowerCase().includes('hik')) ? `<div class="activity-stat"><div class="activity-stat-value" id="activity-gear-value">\u2014</div><div class="activity-stat-label">Chaussures</div></div>` : ''}
         ${typeof activityMoodStatHtml === 'function' ? activityMoodStatHtml(activity.id) : ''}
       </div>
       <div class="activity-detail-actions">
@@ -3866,6 +3866,12 @@ async function initBgSlideshow() {
   for (let i = images.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [images[i], images[j]] = [images[j], images[i]];
+  }
+  if (images.length === 1) {
+    layerA.style.backgroundImage = `url('${images[0]}')`;
+    layerA.style.transition = 'none';
+    layerA.classList.add('active');
+    return;
   }
   let currentIdx = 0, usingA = true;
   function preload(url) {

@@ -203,7 +203,12 @@ async function deleteGear(id) {
 async function mountActivityGearField(activity) {
   const wrap = el('activity-gear-value');
   if (!wrap || !activity?.id) return;
-  const isTrail = (activity.activityType || '').toLowerCase().includes('trail');
+  const type = (activity.activityType || '').toLowerCase();
+  const isTrail = type.includes('trail');
+  // Marche/rando : pas de paire "attitrée" par defaut (aucune activite de ce
+  // type n'a jamais servi a construire une paire route/trail) — la case reste
+  // vide tant que l'utilisateur ne choisit pas lui-meme une paire existante.
+  const isHike = type.includes('walk') || type.includes('hik');
 
   if (!_gearData.length) {
     try { _gearData = await fetch(`${API}/api/gear`).then(r => r.json()); } catch (e) {}
@@ -215,7 +220,7 @@ async function mountActivityGearField(activity) {
 
   let assigned = null;
   try { assigned = await fetch(`${API}/api/activity-gear/${activity.id}`).then(r => r.json()); } catch (e) {}
-  const defaultGear = _gearData.find(g => g.type === (isTrail ? 'trail' : 'route') && g.isDefault);
+  const defaultGear = isHike ? null : _gearData.find(g => g.type === (isTrail ? 'trail' : 'route') && g.isDefault);
   const selectedId = assigned?.gearId || defaultGear?.id || '';
 
   wrap.innerHTML = `<select id="activity-gear-select" class="activity-gear-select">
