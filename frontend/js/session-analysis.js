@@ -788,6 +788,10 @@ async function buildSessionAnalysis(session, week, activity) {
     volume, structure, paceAnalysis, reps, regularity, pacingStrategy, recovery, hr, cardiacDrift,
     coherenceNarrative, timeInZoneBreakdown, trail, anomalies, positives, improvements, commentary, timeline,
     pairingKey: computePairingKey(session),
+    // Detail du calcul du score, pour la modale "Comprendre votre score" —
+    // composants bruts + ponderations effectivement utilisees (celles a null
+    // sont exclues du calcul, cf §~752).
+    scoreBreakdown: { components, weights: profile.weights },
   };
 }
 
@@ -1331,7 +1335,10 @@ function buildAnalysisModalHtml(record) {
   return `
     <div class="analysis-modal-header">
       <div class="analysis-modal-title">${s.displayName}</div>
-      <div class="analysis-modal-score">${record.verdict.emoji} <strong>${record.score}%</strong> — ${record.verdict.label}</div>
+      <div class="analysis-modal-score-row">
+        <div class="analysis-modal-score">${record.verdict.emoji} <strong>${record.score}%</strong> — ${record.verdict.label}</div>
+        <button type="button" class="analysis-score-help-btn" id="analysis-score-help-btn">?</button>
+      </div>
     </div>
     <div class="analysis-summary-block">${summaryRowsHtml}${trailRowHtml}${gapRowHtml}</div>
     ${elevationProfileHtml}
@@ -1456,6 +1463,102 @@ function openAnalysisModal(record) {
   attachBackdropClose(modal, close);
   document.addEventListener('keydown', escHandler);
   if (record.sessionTypeKey === 'TRAIL' && record.trail?.plannedDPlusM) loadAnalysisElevationChart(record.activityId);
+
+  const helpBtn = modal.querySelector('#analysis-score-help-btn');
+  if (helpBtn) {
+    let tip = null;
+    helpBtn.addEventListener('mouseenter', () => {
+      tip = document.createElement('div');
+      tip.className = 'cal-chip-tooltip analysis-score-help-tooltip';
+      tip.textContent = 'Comprendre votre score ?';
+      helpBtn.appendChild(tip);
+    });
+    helpBtn.addEventListener('mouseleave', () => { if (tip) { tip.remove(); tip = null; } });
+    helpBtn.addEventListener('click', () => openScoreBreakdownModal(record));
+  }
+}
+
+// ─── Modale "Comprendre votre score" ───────────────────────────────────
+// Detail componente par composante du calcul du score (§ scoreBreakdown,
+// buildSessionAnalysis) — ouverte via le bouton (?) a cote du score dans la
+// modale d'analyse. Les composantes a null (non applicables a ce type de
+// seance, ex: structure pour un footing continu) sont exclues du calcul —
+// affichees grisees plutot que masquees, pour que la formule reste lisible.
+const SCORE_COMPONENT_LABELS = {
+  duration:   'Durée',
+  distance:   'Distance',
+  pace:       'Allure',
+  hr:         'Fréquence cardiaque (% du temps dans la zone cible)',
+  drift:      'Dérive cardiaque',
+  regularity: 'Régularité entre répétitions',
+  structure:  'Répétitions réalisées',
+  dplus:      'Dénivelé (D+)',
+};
+
+function buildScoreBreakdownHtml(record) {
+  const bd = record.scoreBreakdown;
+  if (!bd) {
+    return `<div class="analysis-modal-header"><div class="analysis-modal-title">Comprendre votre score</div></div>
+      <div class="analysis-commentary">Détail indisponible pour cette analyse plus ancienne — cliquez sur « 🔄 Recalculer » dans la fiche d'analyse pour l'obtenir.</div>`;
+  }
+  const { components, weights } = bd;
+  const rows = Object.entries(weights).map(([key, w]) => {
+    const label = SCORE_COMPONENT_LABELS[key] || key;
+    const v = components[key];
+    const pct = Math.round(w * 100);
+    if (v == null) {
+      return `<div class="score-breakdown-row score-breakdown-row--excluded">
+        <div class="score-breakdown-label">${label}</div>
+        <div class="score-breakdown-value">Non applicable à cette séance</div>
+      </div>`;
+    }
+    return `<div class="score-breakdown-row">
+      <div class="score-breakdown-label">${label} <span class="score-breakdown-weight">(pondération ${pct}%)</span></div>
+      <div class="score-breakdown-value"><strong>${Math.round(v)}%</strong></div>
+    </div>`;
+  }).join('');
+
+  let scoreSum = 0, scoreW = 0;
+  Object.entries(weights).forEach(([key, w]) => {
+    const v = components[key];
+    if (v == null) return;
+    scoreSum += v * w; scoreW += w;
+  });
+  const usedPct = Math.round(scoreW * 100);
+
+  return `
+    <div class="analysis-modal-header">
+      <div class="analysis-modal-title">Comprendre votre score</div>
+      <div class="analysis-modal-score">Séance type ${sessionTypeLabel(record.sessionTypeKey)} — ${record.verdict.emoji} <strong>${record.score}%</strong></div>
+    </div>
+    <div class="analysis-commentary">Chaque composante de la séance obtient un score de 0 à 100%, selon son écart à ce qui était prévu. Le score final est leur moyenne pondérée — seules les composantes applicables à ce type de séance comptent (pondérations totales utilisées ici : ${usedPct}%).</div>
+    <div class="score-breakdown-list">${rows}</div>
+    <div class="analysis-climb-note">Une composante à 100% est parfaitement conforme à la cible ; le score baisse progressivement au-delà d'une tolérance propre à chaque composante (ex : ±10s/km pour l'allure), jusqu'à 0% au-delà d'un écart jugé très important.</div>`;
+}
+
+function openScoreBreakdownModal(record) {
+  const existing = document.getElementById('score-breakdown-modal');
+  if (existing) existing.remove();
+  const modal = document.createElement('div');
+  modal.id = 'score-breakdown-modal';
+  modal.style.cssText = 'position:fixed;inset:0;z-index:10000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.55);backdrop-filter:blur(4px);';
+  modal.innerHTML = `
+    <div style="position:relative;width:100%;max-width:520px;max-height:88vh;">
+      <button id="score-breakdown-close-x" class="analysis-modal-close-x" title="Fermer" aria-label="Fermer">&times;</button>
+      <div class="analysis-modal-scroll" style="background:var(--bg-white);border:1px solid var(--border);border-radius:16px;padding:20px 22px 18px;max-height:88vh;overflow-y:auto;overscroll-behavior:contain;box-shadow:0 24px 60px rgba(0,0,0,.25);">
+        ${buildScoreBreakdownHtml(record)}
+        <div style="display:flex;gap:10px;margin-top:16px">
+          <button id="score-breakdown-close" class="btn-analysis-close-modal">Fermer</button>
+        </div>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+  const close = () => { modal.remove(); document.removeEventListener('keydown', escHandler); };
+  function escHandler(e) { if (e.key === 'Escape') close(); }
+  modal.querySelector('#score-breakdown-close').addEventListener('click', close);
+  modal.querySelector('#score-breakdown-close-x').addEventListener('click', close);
+  attachBackdropClose(modal, close);
+  document.addEventListener('keydown', escHandler);
 }
 
 // Profil altimetrique de la course, dans la modale d'analyse (seances trail
