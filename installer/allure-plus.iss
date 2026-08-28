@@ -31,7 +31,7 @@ Name: "french"; MessagesFile: "compiler:Languages\French.isl"
 ; exclu par erreur (meme regle que les donnees utilisateur type data/uploads),
 ; ce qui rendait la generation d'itineraires impossible sur toute nouvelle
 ; installation ("BRouter non configure - fichiers manquants").
-Source: "..\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion; Excludes: "\node_modules,\node_modules\*,\.git,\.git\*,\.claude,\.claude\*,\installer,\installer\*,\.env,\.campus_token,\.garmin_tokens,\.garmin_tokens\*,\cache.json,\imported_plan.json,\*.log,\Allure+.lnk,\uploads,\uploads\*,\Images,\Images\*,\data,\data\*,\brouter\segments4,\brouter\segments4\*,\support-relay,\support-relay\*,\sync-relay,\sync-relay\*"
+Source: "..\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion; Excludes: "\node_modules,\node_modules\*,\.git,\.git\*,\.claude,\.claude\*,\.impeccable,\.impeccable\*,\installer,\installer\*,\.env,\.campus_token,\.garmin_tokens,\.garmin_tokens\*,\cache.json,\imported_plan.json,\*.log,\Allure+.lnk,\uploads,\uploads\*,\Images,\Images\*,\data,\data\*,\brouter\segments4,\brouter\segments4\*,\support-relay,\support-relay\*,\sync-relay,\sync-relay\*,\Recettes,\Recettes\*"
 ; Photos de fond : ne sont copiees que si le dossier n'existe pas encore ou est
 ; vide (installation neuve). Sur une mise a jour, on ne touche jamais aux photos
 ; de l'utilisateur (par defaut ou personnalisees) - voir ShouldSeedImages ci-dessous.
