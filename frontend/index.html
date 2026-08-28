@@ -16,7 +16,7 @@
   <script>window.CESIUM_BASE_URL = 'https://cdn.jsdelivr.net/npm/cesium@1.120.0/Build/Cesium/';</script>
   <script src="https://cdn.jsdelivr.net/npm/cesium@1.120.0/Build/Cesium/Cesium.js"></script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cesium@1.120.0/Build/Cesium/Widgets/widgets.css" />
-  <link rel="stylesheet" href="css/style.css?v=1787740000004" />
+  <link rel="stylesheet" href="css/style.css?v=1787740000005" />
   <link rel="stylesheet" href="css/plans.css?v=1787132767394" />
   <link rel="stylesheet" href="css/routes.css?v=1787650000001" />
   <link rel="stylesheet" href="css/route_editor.css?v=1787650000002" />
@@ -142,20 +142,6 @@
         Éditeur Parcours
         <span class="nav-badge-beta">Bêta</span>
       </a>
-      <a class="nav-item nav-item--admin" data-page="admin" id="nav-admin">
-        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/>
-          <path d="M15.54 8.46a5 5 0 0 1 0 7.07M8.46 8.46a5 5 0 0 0 0 7.07"/>
-        </svg>
-        Admin
-      </a>
-      <a class="nav-item nav-item--admin" data-page="support-admin" id="nav-support-admin">
-        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M9 18h6"/><path d="M10 22h4"/><path d="M12 2a7 7 0 0 0-4 12.7V17h8v-2.3A7 7 0 0 0 12 2z"/>
-        </svg>
-        Centre de support
-        <span class="nav-badge-count" id="support-admin-badge" style="display:none">0</span>
-      </a>
     </nav>
 
     <div class="sidebar-footer">
@@ -228,7 +214,25 @@
         </button>
       </div>
 
-      <div class="app-version" id="app-version"></div>
+      <!-- Admin / Centre de support : deplaces ici (retour utilisateur) plutot
+           que dans la liste de nav principale - icones seules a cote de la
+           vignette de version, cachees par defaut (memes id/classe qu'avant,
+           showAdminNav les affiche pour le seul compte admin, cf app.js). -->
+      <div class="sidebar-version-row">
+        <div class="app-version" id="app-version"></div>
+        <a class="nav-item nav-item--admin nav-item--footer-icon" data-page="admin" id="nav-admin" title="Admin">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/>
+            <path d="M15.54 8.46a5 5 0 0 1 0 7.07M8.46 8.46a5 5 0 0 0 0 7.07"/>
+          </svg>
+        </a>
+        <a class="nav-item nav-item--admin nav-item--footer-icon" data-page="support-admin" id="nav-support-admin" title="Centre de support">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M9 18h6"/><path d="M10 22h4"/><path d="M12 2a7 7 0 0 0-4 12.7V17h8v-2.3A7 7 0 0 0 12 2z"/>
+          </svg>
+          <span class="nav-badge-count" id="support-admin-badge" style="display:none">0</span>
+        </a>
+      </div>
       <div class="app-author">Développé par Stéphane Martin</div>
       <button class="app-update-badge" id="app-update-badge" style="display:none" onclick="showUpdateModal()">✨ Mise à jour disponible</button>
     </div>

@@ -361,12 +361,13 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
 .btn-refresh.spinning svg{animation:spin 0.7s linear infinite;}
 @keyframes spin{to{transform:rotate(360deg);}}
 .last-updated{font-size:11px;color:var(--text-muted);font-family:var(--font-body);}
+.sidebar-version-row{display:flex;align-items:center;gap:6px;margin-top:4px;}
 .app-version{
-  display:inline-block;margin-top:4px;
-  font-size:11px;font-weight:700;letter-spacing:0.02em;
+  display:inline-block;
+  font-size:10px;font-weight:700;letter-spacing:0.02em;
   font-family:var(--font-body);color:var(--text-secondary);
   background:var(--bg-hover);border:1px solid var(--border);
-  border-radius:20px;padding:2px 9px;
+  border-radius:20px;padding:2px 7px;
 }
 .app-author{
   font-size:10px;color:var(--text-muted);font-family:var(--font-body);
@@ -3563,6 +3564,22 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
 .nav-item--admin.active { background: rgba(108,184,64,0.12); color: var(--brand-green); }
 .nav-item--admin.active .nav-icon { stroke: var(--brand-green); }
 
+/* Variante icone seule (Admin / Centre de support deplaces a cote de la
+   vignette de version, cf sidebar-version-row) - memes elements/id/classes
+   que la variante nav-item pleine largeur, juste un habillage visuel en plus
+   pour ressembler aux boutons icone du bloc au-dessus (icon-btn-bg). */
+.nav-item--footer-icon{
+  flex:0 0 32px; width:32px; height:32px; padding:0; gap:0;
+  justify-content:center;
+  border:1px solid var(--border); background:rgba(255,255,255,0.03);
+  border-radius:8px;
+}
+.nav-item--footer-icon .nav-icon{width:14px;height:14px;}
+.nav-item--footer-icon .nav-badge-count{
+  position:absolute; top:-4px; right:-4px; margin-left:0;
+  min-width:14px; height:14px; padding:0 3px; font-size:8px;
+}
+
 /* ═══════════════════════════════════════════════════════════════════
    DARK MODE — Overrides exhaustifs pour tous composants hardcodés
    ═══════════════════════════════════════════════════════════════════ */
@@ -3690,7 +3707,8 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
 
 /* ── Barre de statut serveur ── */
 [data-theme="dark"] .mini-status,
-[data-theme="dark"] .icon-btn-bg {
+[data-theme="dark"] .icon-btn-bg,
+[data-theme="dark"] .nav-item--footer-icon {
   background: rgba(12,15,25,0.9) !important;
 }
 
