@@ -20,6 +20,7 @@
   <link rel="stylesheet" href="css/plans.css?v=1787132767394" />
   <link rel="stylesheet" href="css/routes.css?v=1787650000001" />
   <link rel="stylesheet" href="css/route_editor.css?v=1787650000002" />
+  <link rel="stylesheet" href="css/nutrition.css?v=1787990000001" />
 </head>
 <body>
 <!-- ✨ SPLASH SCREEN ✨ -->
@@ -92,6 +93,13 @@
           <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
         </svg>
         Santé et performance
+      </a>
+      <a class="nav-item" data-page="nutrition" id="nav-nutrition" onclick="initNutritionPage()">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4Z"/>
+          <line x1="6" y1="1" x2="6" y2="4"/><line x1="10" y1="1" x2="10" y2="4"/><line x1="14" y1="1" x2="14" y2="4"/>
+        </svg>
+        Nutrition
       </a>
       <a class="nav-item" data-page="training" id="nav-training">
         <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -855,6 +863,42 @@
       </div>
     </div>
 
+    <!-- PAGE : NUTRITION -->
+    <div class="page" id="page-nutrition">
+      <div class="page-header">
+        <div>
+          <h1 class="page-title">Nutrition</h1>
+          <div class="page-subtitle">80 recettes pensées pour la récupération et la performance</div>
+        </div>
+      </div>
+
+      <div class="nutri-carousel" id="nutri-carousel">
+        <div class="nutri-carousel-layer nutri-carousel-layer--a" id="nutri-carousel-a"></div>
+        <div class="nutri-carousel-layer nutri-carousel-layer--b" id="nutri-carousel-b"></div>
+        <div class="nutri-carousel-scrim"></div>
+        <div class="nutri-carousel-info" id="nutri-carousel-info"></div>
+      </div>
+
+      <div class="nutri-library">
+        <div class="nutri-library-header">
+          <h2 class="nutri-library-title">Bibliothèque de recettes</h2>
+          <div class="nutri-library-count" id="nutri-library-count"></div>
+        </div>
+        <div class="nutri-filters">
+          <div class="nutri-filter-group">
+            <span class="nutri-filter-label">Ingrédient principal</span>
+            <select class="form-input" id="nutri-filter-protein"><option value="">Tous</option></select>
+          </div>
+          <div class="nutri-filter-group">
+            <span class="nutri-filter-label">Légume / féculent</span>
+            <select class="form-input" id="nutri-filter-side"><option value="">Tous</option></select>
+          </div>
+          <button type="button" class="nutri-filter-reset" id="nutri-filter-reset" style="display:none">✕ Réinitialiser</button>
+        </div>
+        <div class="nutri-grid" id="nutri-grid"></div>
+      </div>
+    </div>
+
     <!-- "?"? PAGE : ENTRAZNEMENTS "?"? -->
     <div class="page" id="page-training">
       <div class="page-header">
@@ -1420,9 +1464,10 @@
 
   <script src="js/app.js?v=1787740000004"></script>
   <script src="js/gear.js?v=1786459105634"></script>
-  <script src="js/campus.js?v=1787730000001"></script>
+  <script src="js/campus.js?v=1787730000002"></script>
   <script src="js/free_sessions.js?v=1786701705047"></script>
   <script src="js/session-analysis.js?v=1787700000003"></script>
+  <script src="js/nutrition.js?v=1787990000002"></script>
   <script src="js/stats.js?v=1787231562110"></script>
   <script src="js/records.js?v=1787231562110"></script>
   <script src="js/health.js?v=1787710000003"></script>

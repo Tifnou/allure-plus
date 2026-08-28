@@ -1532,7 +1532,10 @@ function renderSessionDetail(session, weekId, isCurrentWeek) {
       <div class="session-detail-panel" onclick="event.stopPropagation()">
         ${session.description ? `
           <div class="session-detail-section">
-            <div class="session-detail-section-title">Description</div>
+            <div class="session-detail-section-title-row">
+              <div class="session-detail-section-title">Description</div>
+              ${typeof mealSuggestBtnHtml === 'function' ? mealSuggestBtnHtml(session, weekId) : ''}
+            </div>
             <div class="session-detail-desc">${mdBold(sanitizeCoachText(session.description))}</div>
           </div>` : ''}
         ${session.coachAdvice ? `
@@ -1733,7 +1736,10 @@ function renderSessionDetail(session, weekId, isCurrentWeek) {
     <div class="session-detail-panel" onclick="event.stopPropagation()">
       ${session.description ? `
         <div class="session-detail-section">
-          <div class="session-detail-section-title">Description</div>
+          <div class="session-detail-section-title-row">
+            <div class="session-detail-section-title">Description</div>
+            ${typeof mealSuggestBtnHtml === 'function' ? mealSuggestBtnHtml(session, weekId) : ''}
+          </div>
           <div class="session-detail-desc">${mdBold(sanitizeCoachText(session.description))}</div>
         </div>` : ''}
       ${session.coachAdvice ? `
