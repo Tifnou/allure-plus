@@ -16,7 +16,7 @@
   <script>window.CESIUM_BASE_URL = 'https://cdn.jsdelivr.net/npm/cesium@1.120.0/Build/Cesium/';</script>
   <script src="https://cdn.jsdelivr.net/npm/cesium@1.120.0/Build/Cesium/Cesium.js"></script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cesium@1.120.0/Build/Cesium/Widgets/widgets.css" />
-  <link rel="stylesheet" href="css/style.css?v=1787740000005" />
+  <link rel="stylesheet" href="css/style.css?v=1787740000006" />
   <link rel="stylesheet" href="css/plans.css?v=1787132767394" />
   <link rel="stylesheet" href="css/routes.css?v=1787650000001" />
   <link rel="stylesheet" href="css/route_editor.css?v=1787650000002" />
@@ -145,14 +145,15 @@
     </nav>
 
     <div class="sidebar-footer">
-      <button class="btn-refresh" id="refresh-btn" title="Actualiser les données Garmin">
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/>
-          <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
-        </svg>
-        <span>Actualiser les données</span>
-      </button>
-      <div class="last-updated" id="last-updated"></div>
+      <div class="refresh-row">
+        <button class="btn-refresh" id="refresh-btn" title="Actualiser les données Garmin">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/>
+            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+          </svg>
+        </button>
+        <div class="last-updated" id="last-updated"></div>
+      </div>
 
       <div class="sidebar-footer-divider"></div>
 
@@ -1417,7 +1418,7 @@
     <span class="support-fab-dot" id="support-fab-dot" style="display:none"></span>
   </button>
 
-  <script src="js/app.js?v=1787740000003"></script>
+  <script src="js/app.js?v=1787740000004"></script>
   <script src="js/gear.js?v=1786459105634"></script>
   <script src="js/campus.js?v=1787730000001"></script>
   <script src="js/free_sessions.js?v=1786701705047"></script>

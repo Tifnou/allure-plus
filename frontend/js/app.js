@@ -771,7 +771,7 @@ async function loadDashboard() {
 
     if (lastUpdated) {
       const d = new Date(lastUpdated);
-      setVal('last-updated', `Mis à jour à ${d.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})}`);
+      setVal('last-updated', `Données Garmin ${d.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})}`);
     }
   } catch(e) {
     console.error('Erreur dashboard:', e);
