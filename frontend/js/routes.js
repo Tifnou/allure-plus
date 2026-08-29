@@ -1008,6 +1008,22 @@ function haversineKm(a, b) {
   return 2 * R * Math.asin(Math.sqrt(h));
 }
 
+// Decale un point de quelques metres - des repetitions au meme sommet
+// produisent plusieurs waypoints a des coordonnees strictement identiques,
+// et Garmin Connect ne cree qu'un seul "Course Point" par coordonnee unique
+// a l'import GPX (les autres passages sont silencieusement ignores, retour
+// utilisateur 29/08 : aucune alerte "Repetition k/N" sur la montre malgre un
+// GPX correctement forme). Un leger decalage en cercle les rend uniques tout
+// en restant tres en-dessous de la tolerance d'accrochage au trace de Garmin
+// (~35-40m documentee) - reutilise par buildRepeatWaypoints ci-dessous et par
+// routeEditorBuildExportWaypoints (route_editor.js, charge apres ce fichier).
+function nudgeLatLon(lat, lon, meters, angleDeg) {
+  const rad = angleDeg * Math.PI / 180;
+  const dLat = (meters * Math.cos(rad)) / 111320;
+  const dLon = (meters * Math.sin(rad)) / (111320 * Math.cos(lat * Math.PI / 180));
+  return { lat: lat + dLat, lon: lon + dLon };
+}
+
 // ─── Sens du parcours / départ-arrivée déplaçables ──────────────────────
 // Fonctions partagées par la page Itinéraires et l'Éditeur Parcours (routes.js
 // charge avant route_editor.js dans index.html, cf haversineKm ci-dessus déjà
@@ -1157,8 +1173,8 @@ function renderRouteMap(mapDivId, opt, context = {}) {
   const latLngs = points.map(p => [p.lat, p.lon]);
   const bounds = L.latLngBounds(latLngs);
   const map = L.map(mapDiv, { zoomControl: true, attributionControl: true });
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-    maxZoom: 19, attribution: '&copy; <a href="https://openstreetmap.org">OSM</a> &copy; <a href="https://carto.com">CARTO</a>',
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19, attribution: '&copy; <a href="https://openstreetmap.org">OSM</a>',
   }).addTo(map);
 
   // Alterne vert (parcours normal) / orange (zone repetee), une paire par
@@ -1284,7 +1300,8 @@ function buildRepeatWaypoints(opt) {
   (opt.repeatedSegments || []).forEach(seg => {
     const total = seg.reps + 1;
     for (let k = 1; k <= total; k++) {
-      wps.push({ lat: seg.toLat, lon: seg.toLon, name: `Répétition ${k}/${total}`, sym: 'Flag, Blue' });
+      const p = k === 1 ? { lat: seg.toLat, lon: seg.toLon } : nudgeLatLon(seg.toLat, seg.toLon, (k - 1) * 4, (k - 1) * 137);
+      wps.push({ lat: p.lat, lon: p.lon, name: `Répétition ${k}/${total}`, sym: 'Flag, Blue' });
     }
   });
   return wps;

@@ -1991,8 +1991,8 @@ function drawRouteTrace(canvas, rawPoints) {
       doubleClickZoom: false, boxZoom: false, keyboard: false
     });
     window._routeLeafletMap = map;
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-      maxZoom: 19, attribution: '&copy; <a href="https://openstreetmap.org">OSM</a> &copy; <a href="https://carto.com">CARTO</a>'
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19, attribution: '&copy; <a href="https://openstreetmap.org">OSM</a>'
     }).addTo(map);
     map.fitBounds(bounds, { padding: [44, 44] });
     coords = points.map(p => {
