@@ -136,6 +136,21 @@
 /* ─── Impression ─── */
 #recipe-print-sheet{ display:none; }
 @media print{
+  /* Le theme sombre (body{background:var(--bg)}) et le watermark logo
+     (#logo-watermark, style.css) survivent tous les deux a "body > *
+     {display:none}" ci-dessous : le fond parce qu'il est sur body lui-meme
+     (pas un enfant masquable), le watermark parce que sa regle
+     "#logo-watermark{display:block!important}" (style.css, la version
+     "finale" du watermark) a la meme specificite ID+!important - seul l'ordre
+     de chargement des feuilles tranche, et nutrition.css est chargee APRES
+     style.css donc gagne a specificite egale. Retour utilisateur 29/08 :
+     impression illisible en theme sombre (texte fonce du bloc impression sur
+     fond sombre du body) + logo visible en bas a droite sur le papier.
+     La modale a l'ecran continue de suivre le theme normalement, seule
+     l'impression est forcee en blanc classique. */
+  html, body{ background:#fff !important; }
+  body::before{ display:none !important; }
+  #bg-slideshow, #logo-watermark, #splash-screen{ display:none !important; }
   body > *{ display:none !important; }
   #recipe-print-sheet{
     display:block !important; position:static; max-width:720px; margin:0 auto;
