@@ -113,6 +113,10 @@
 }
 .route-editor-climbs-table tr:last-child td { border-bottom: none; }
 .route-editor-climbs-empty { color: var(--text-muted); font-size: 12.5px; padding: 10px 2px; }
+.route-editor-repeat-badge {
+  display: inline-block; margin-left: 6px; padding: 1px 7px; border-radius: 999px;
+  font-size: 10px; font-weight: 700; color: #fff; vertical-align: middle;
+}
 
 .route-editor-actions { display: flex; gap: 10px; margin-top: 18px; flex-wrap: wrap; }
 

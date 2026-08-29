@@ -515,6 +515,75 @@ function buildRouteEditorSummary(stats) {
   return text;
 }
 
+// Mise en evidence des repetitions (retour utilisateur : "peux-tu mettre en
+// evidence les repetitions qui ont ete ajoutees pour atteindre le D+
+// attendu") - une couleur par repetition, reutilisee a la fois sur le
+// graphique (accolade + libelle) et le tableau des cotes (fond teinte +
+// badge).
+//
+// DEUX VERSIONS PRECEDENTES ABANDONNEES (retour utilisateur 29/08, sur un
+// vrai parcours a 9 cotes rapprochees sur ~10km) :
+// 1. Marche vers le minimum local autour du seul point B - ne s'arretait pas
+//    toujours au bon minimum sur une approche/sortie quasi plate, debordant
+//    largement sur les cotes voisines.
+// 2. Recherche de A et B par SIMPLE PROXIMITE DE COORDONNEES dans tout le
+//    tableau de points - cassait sur un trace en lacets (plusieurs cotes sur
+//    le meme versant) : deux points a des kilometres tres differents du
+//    parcours peuvent etre a quelques metres l'un de l'autre en coordonnees
+//    brutes, la recherche attrapait alors le mauvais point et l'accolade
+//    englobait des cotes totalement independantes.
+//
+// Version actuelle : deterministe, aucune recherche de B necessaire.
+// _routeEditorData.repeats stocke A (coordonnee absolue) et legPointCount
+// (nombre de points ORIGINAL entre A et B, cf applyRouteEditorRepeat/
+// applyRouteEditorObjectivePlan) - buildMultiRepeatedPoints inserant
+// toujours exactement legPointCount*(2*passes-1)+1 points pour cette
+// section (verifie sur son code : 1 aller complet + (passes-1) allers-
+// retours partiels), l'index de fin se calcule directement depuis l'index
+// de A, sans jamais chercher B. Seul A est encore recherche par proximite,
+// mais en avancant un curseur STRICTEMENT CROISSANT le long du trace (les
+// repetitions sont creees triees par position, cf plan.sort dans
+// planRouteEditorObjectiveRepeats) : la recherche ne revient jamais en
+// arriere, donc un lacet plus loin sur le trace ne peut plus jamais
+// remonter le temps et voler l'occurrence d'une repetition precedente.
+const ROUTE_EDITOR_REPEAT_COLORS = ['#f97316', '#8b5cf6', '#0ea5e9', '#ec4899', '#22c55e'];
+function computeRouteEditorRepeatBrackets(points) {
+  const repeats = _routeEditorData?.repeats || [];
+  if (!repeats.length || !points || points.length < 2) return [];
+  const cum = [0];
+  for (let i = 1; i < points.length; i++) cum.push(cum[i - 1] + haversineKm(points[i - 1], points[i]));
+  const TOL_KM = 0.02; // 20 m
+  const firstNearFrom = (lat, lon, fromIdx) => {
+    for (let idx = fromIdx; idx < points.length; idx++) if (haversineKm(points[idx], { lat, lon }) <= TOL_KM) return idx;
+    return null;
+  };
+  let cursor = 0;
+  return repeats.map((r, i) => {
+    let startIdx, endIdx;
+    if (r.aLat != null && r.aLon != null && r.legPointCount != null) {
+      startIdx = firstNearFrom(r.aLat, r.aLon, cursor);
+      if (startIdx == null) return null;
+      endIdx = Math.min(points.length - 1, startIdx + r.legPointCount * (2 * r.totalPasses - 1));
+      cursor = endIdx + 1;
+    } else {
+      // Repli (ancienne variante enregistree avant l'ajout de aLat/aLon/
+      // legPointCount) : minimum local autour de B seul, cf note ci-dessus -
+      // moins fiable mais mieux que rien pour une variante deja sauvegardee.
+      const nearIdx = [];
+      for (let idx = cursor; idx < points.length; idx++) if (haversineKm(points[idx], { lat: r.lat, lon: r.lon }) <= TOL_KM) nearIdx.push(idx);
+      if (!nearIdx.length) return null;
+      const ELE_NOISE_TOL_M = 0.3;
+      let a = nearIdx[0], b = nearIdx[nearIdx.length - 1], steps = 0;
+      while (a > 0 && steps < 400 && points[a - 1].ele <= points[a].ele - ELE_NOISE_TOL_M) { a--; steps++; }
+      steps = 0;
+      while (b < points.length - 1 && steps < 400 && points[b + 1].ele <= points[b].ele - ELE_NOISE_TOL_M) { b++; steps++; }
+      startIdx = a; endIdx = b;
+      cursor = endIdx + 1;
+    }
+    return { startIdx, endIdx, startKm: cum[startIdx], endKm: cum[endIdx], totalPasses: r.totalPasses, color: ROUTE_EDITOR_REPEAT_COLORS[i % ROUTE_EDITOR_REPEAT_COLORS.length] };
+  }).filter(Boolean);
+}
+
 function renderRouteEditorWorkspace() {
   const ws = el('route-editor-workspace');
   if (!ws || !_routeEditorData) return;
@@ -523,16 +592,24 @@ function renderRouteEditorWorkspace() {
   ws.style.display = '';
 
   const climbs = stats.climbs || [];
-  const climbsRows = climbs.map((c, i) => `
-    <tr>
-      <td>Côte ${i + 1}</td>
+  const repeatBrackets = computeRouteEditorRepeatBrackets(_routeEditorData.points);
+  const climbsRows = climbs.map((c, i) => {
+    // Chevauchement KM entre cette côte et une répétition détectée - une
+    // côte étendue en va-et-vient chevauche forcément la portion d'origine.
+    const bracket = repeatBrackets.find(b => c.startKm <= b.endKm && c.endKm >= b.startKm);
+    const rowStyle = bracket ? ` style="background:${bracket.color}1f"` : '';
+    const badge = bracket ? ` <span class="route-editor-repeat-badge" style="background:${bracket.color}">répétée ×${bracket.totalPasses}</span>` : '';
+    return `
+    <tr${rowStyle}>
+      <td>Côte ${i + 1}${badge}</td>
       <td>KM ${c.startKm.toFixed(1)} → ${c.endKm.toFixed(1)}</td>
       <td>${(c.distM / 1000).toFixed(2)} km</td>
       <td>+${c.gainM} m</td>
       <td>${c.avgGradePct.toFixed(1)} %</td>
       <td>${c.maxGradePct.toFixed(1)} %</td>
       <td><button type="button" class="route-editor-climb-repeat-btn" data-climb-idx="${i}">🔁 Répéter</button></td>
-    </tr>`).join('');
+    </tr>`;
+  }).join('');
 
   const isOriginal = _routeEditorOriginal && _routeEditorData.points === _routeEditorOriginal.points;
 
@@ -741,6 +818,24 @@ function renderRouteEditorVisuals() {
     const gradeAtIdx = new Array(points.length).fill(0);
     bins.forEach(bin => { for (let i = bin.startIdx; i <= bin.endIdx; i++) gradeAtIdx[i] = bin.gradePct; });
     const baseOptions = typeof chartOptions === 'function' ? chartOptions() : { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } };
+    // Sur un parcours a plusieurs cotes repetees rapprochees (retour
+    // utilisateur : 9 cotes sur ~10km, accolades/libelles empiles illisibles),
+    // repartit les accolades qui se chevauchent (ou se touchent quasiment) en
+    // plusieurs lignes empilees plutot que de toutes les dessiner a la meme
+    // hauteur - assignation par les distances KM (pas les pixels, indisponibles
+    // avant la construction du graphique), reutilisee telle quelle au dessin.
+    const REPEAT_BRACKET_GAP_KM = 0.15;
+    const repeatBrackets = (() => {
+      const list = computeRouteEditorRepeatBrackets(points).sort((a, b) => a.startKm - b.startKm);
+      const rowsEndKm = [];
+      list.forEach(b => {
+        let row = rowsEndKm.findIndex(endKm => b.startKm > endKm + REPEAT_BRACKET_GAP_KM);
+        if (row === -1) { row = rowsEndKm.length; rowsEndKm.push(b.endKm); } else { rowsEndKm[row] = b.endKm; }
+        b.row = row;
+      });
+      return list;
+    })();
+    const repeatBracketRows = repeatBrackets.length ? Math.max(...repeatBrackets.map(b => b.row)) + 1 : 0;
     _routeEditorChart = new Chart(canvas.getContext('2d'), {
       type: 'line',
       data: { labels, datasets: [{
@@ -752,8 +847,42 @@ function renderRouteEditorVisuals() {
         pointBorderColor: '#fff',
         pointBorderWidth: 1.5,
       }] },
+      // Accolade + libelle compact "×N" au-dessus de chaque portion repetee
+      // (retour utilisateur) - plugin inline plutot qu'une lib d'annotation
+      // externe, dessine directement sur le canvas du graphique existant.
+      // Libelle volontairement court ("×N", pas "Répétition ×N") : sur un
+      // parcours a plusieurs cotes rapprochees le texte complet debordait
+      // largement de chaque accolade et se chevauchait avec les voisines -
+      // le detail complet ("répétée ×N") reste visible dans le tableau des
+      // cotes juste en dessous. repeatBracketRows (ligne empilee par
+      // accolade, cf plus haut) determine la hauteur reservee ET la position
+      // verticale de chaque accolade.
+      plugins: repeatBrackets.length ? [{
+        id: 'routeEditorRepeatBrackets',
+        afterDraw(chart) {
+          const { ctx, chartArea, scales } = chart;
+          if (!chartArea || !scales.x) return;
+          ctx.save();
+          ctx.font = '700 10px sans-serif';
+          ctx.textAlign = 'center';
+          repeatBrackets.forEach(b => {
+            const x1 = scales.x.getPixelForValue(b.startIdx);
+            const x2 = scales.x.getPixelForValue(b.endIdx);
+            const y = chartArea.top + 11 + b.row * 13;
+            ctx.strokeStyle = b.color;
+            ctx.fillStyle = b.color;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(x1, y - 4); ctx.lineTo(x1, y); ctx.lineTo(x2, y); ctx.lineTo(x2, y - 4);
+            ctx.stroke();
+            ctx.fillText(`×${b.totalPasses}`, (x1 + x2) / 2, y - 6);
+          });
+          ctx.restore();
+        },
+      }] : [],
       options: {
         ...baseOptions,
+        layout: { padding: { top: repeatBracketRows ? 12 + repeatBracketRows * 13 : 0 } },
         scales: { ...(baseOptions.scales || {}), x: { ...(baseOptions.scales?.x || {}), ticks: { maxTicksLimit: 8 } } },
         onHover: (evt, activeElements) => {
           if (!_routeEditorMap || !_routeEditorLatLngs) return;
@@ -1946,8 +2075,9 @@ async function applyRouteEditorObjectivePlan(plan, newPoints, finalStats) {
     // de montées ici (convention de l'Éditeur, différente de reps+1 côté
     // générateur d'itinéraires - cf CLAUDE.md).
     const newRepeatEntries = plan.map(p => {
+      const a = _routeEditorData.points[p.climb.startIdx];
       const b = _routeEditorData.points[p.climb.endIdx];
-      return { lat: b.lat, lon: b.lon, totalPasses: p.passes };
+      return { aLat: a.lat, aLon: a.lon, lat: b.lat, lon: b.lon, totalPasses: p.passes, legPointCount: p.climb.endIdx - p.climb.startIdx };
     });
     _routeEditorHistory.push({ points: _routeEditorData.points, stats: _routeEditorData.stats, pois: _routeEditorData.pois || [], repeats: _routeEditorData.repeats || [] });
     _routeEditorFuture = [];
@@ -2012,6 +2142,7 @@ async function applyRouteEditorRepeat(explicitCount) {
   const applyBtn = el('route-editor-apply-repeat-btn') || el('route-editor-apply-objective-btn') || el('route-editor-apply-auto-btn');
   if (applyBtn) { applyBtn.disabled = true; applyBtn.textContent = '⏳ Application…'; }
   try {
+    const a = _routeEditorData.points[sel.aIdx];
     const b = _routeEditorData.points[sel.bIdx];
     const newPoints = buildRepeatedPoints(_routeEditorData.points, sel.aIdx, sel.bIdx, count);
     const stats = await routeEditorAnalyzePoints(newPoints);
@@ -2019,8 +2150,13 @@ async function applyRouteEditorRepeat(explicitCount) {
     _routeEditorFuture = [];
     // Waypoint "Répétition k/N" (N=count, déjà le total de montées côté
     // Éditeur) au point B, où chaque passage fait demi-tour - export GPX
-    // (cf routeEditorExportGpx).
-    _routeEditorData = { ..._routeEditorData, points: newPoints, stats, pois: [], repeats: [...(_routeEditorData.repeats || []), { lat: b.lat, lon: b.lon, totalPasses: count }] };
+    // (cf routeEditorExportGpx). aLat/aLon (point A) conservés en plus de
+    // lat/lon (B) uniquement pour computeRouteEditorRepeatBrackets (mise en
+    // évidence graphique/tableau) - retrouver les deux bornes exactes du
+    // va-et-vient sans deviner (cf commentaire sur cette fonction : sur un
+    // parcours a plusieurs cotes rapprochees, une reconstruction par minimum
+    // local se faisait deborder d'une repetition sur la suivante).
+    _routeEditorData = { ..._routeEditorData, points: newPoints, stats, pois: [], repeats: [...(_routeEditorData.repeats || []), { aLat: a.lat, aLon: a.lon, lat: b.lat, lon: b.lon, totalPasses: count, legPointCount: sel.bIdx - sel.aIdx }] };
     _routeEditorSelection = { aIdx: null, bIdx: null };
     // Repetition declenchee par un objectif (D+/distance) : l'objectif vient
     // d'etre applique, on l'efface pour ne pas re-suggerer immediatement une
@@ -2076,7 +2212,8 @@ function routeEditorBuildExportWaypoints() {
   });
   (_routeEditorData.repeats || []).forEach(r => {
     for (let k = 1; k <= r.totalPasses; k++) {
-      wps.push({ lat: r.lat, lon: r.lon, name: `Répétition ${k}/${r.totalPasses}`, sym: 'Flag, Blue' });
+      const p = k === 1 ? { lat: r.lat, lon: r.lon } : nudgeLatLon(r.lat, r.lon, (k - 1) * 4, (k - 1) * 137);
+      wps.push({ lat: p.lat, lon: p.lon, name: `Répétition ${k}/${r.totalPasses}`, sym: 'Flag, Blue' });
     }
   });
   return wps;
