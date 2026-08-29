@@ -391,11 +391,30 @@ async function buildSessionAnalysis(session, week, activity) {
     // seance continue (sortie longue en D+, pas de repetitions), tous les
     // laps SONT l'effort (pas de recup a exclure) — garder la moyenne sur
     // l'ensemble, comportement deja valide avec l'utilisateur (cas du 16/08).
+    // Pondere par le temps de DEPLACEMENT (pas elapsed) : un lap contenant un
+    // arret (ex: photo, pause) a sinon un poids artificiellement gonfle dans
+    // la moyenne alors que ce temps d'arret ne reflete aucun effort au GAP de
+    // ce lap - retour utilisateur 29/08, constate concretement sur cette
+    // meme sortie (un lap avec elapsedDuration=892s / movingDuration=698s,
+    // soit 194s d'arret, etait aussi le lap au GAP le plus lent : le ponderer
+    // par elapsed tirait a tort la moyenne globale vers le bas).
     const gapLaps = laps
-      .map((l, idx) => ({ durSec: l.elapsedDuration || l.movingDuration || l.duration || 0, gapSecKm: l.avgGradeAdjustedSpeed > 0 ? 1000 / l.avgGradeAdjustedSpeed : null, isEffort: types[idx] === 'effort' }))
-      .filter(l => l.durSec > 0 && l.gapSecKm != null && (!hasStructuredReps || l.isEffort));
+      .map((l, idx) => ({ durSec: l.movingDuration || l.elapsedDuration || l.duration || 0, gapMps: l.avgGradeAdjustedSpeed > 0 ? l.avgGradeAdjustedSpeed : null, isEffort: types[idx] === 'effort' }))
+      .filter(l => l.durSec > 0 && l.gapMps != null && (!hasStructuredReps || l.isEffort));
     const gapTotalSec = gapLaps.reduce((s, l) => s + l.durSec, 0);
-    const gapAvgSecKm = gapTotalSec > 0 ? gapLaps.reduce((s, l) => s + l.gapSecKm * l.durSec, 0) / gapTotalSec : null;
+    // Moyenne HARMONIQUE (temps total / distance-equivalente-GAP totale), PAS
+    // une moyenne arithmetique des allures par lap ponderee par la duree :
+    // moyenner des allures (secondes/km, l'inverse d'une vitesse) ecrase le
+    // resultat vers les laps les plus lents au lieu de refleter la vitesse
+    // moyenne reelle - piege statistique classique (les vitesses s'additionnent
+    // correctement en moyenne ponderee, pas leurs inverses). Retour
+    // utilisateur 29/08 : l'ecart entre "Allure moy. en deplacement" et
+    // "Allure moy. ajustee a la pente" semblait bien trop faible pour une
+    // sortie a +12.9% de pente moyenne en cote - verifie sur cette meme
+    // sortie : la moyenne arithmetique donnait 524s/km (8'44"), la moyenne
+    // harmonique 492s/km (8'12"), bien plus coherente et proche de Garmin (8:19).
+    const gapTotalEquivM = gapLaps.reduce((s, l) => s + l.gapMps * l.durSec, 0);
+    const gapAvgSecKm = (gapTotalSec > 0 && gapTotalEquivM > 0) ? gapTotalSec / (gapTotalEquivM / 1000) : null;
     const flatPaceRange = (mainZoneKey && vma) ? calcAllureRef(mainZoneKey, vma) : null;
 
     let gapDeviationSecKm = null, gapVerdict = null;
@@ -413,11 +432,15 @@ async function buildSessionAnalysis(session, week, activity) {
     // ~14% reel). Recalcule a partir de la trace GPS fine de l'activite
     // (points espaces de quelques metres a quelques dizaines de metres),
     // regroupee en tronçons de ~50m — cf. computeGradeSegments.
-    let gradeStats = null;
+    let gradeStats = null, movementSplit = null;
     try {
       const gpsRes = await fetch(`/api/activity/${activity.id}/gps`);
-      if (gpsRes.ok) { const { elevation } = await gpsRes.json(); gradeStats = computeGradeSegments(elevation); }
-    } catch (e) { /* pas de trace GPS -> pas de detail pente/FC cote-plat, GAP reste dispo */ }
+      if (gpsRes.ok) {
+        const { elevation } = await gpsRes.json();
+        gradeStats = computeGradeSegments(elevation);
+        movementSplit = computeMovementSplit(elevation);
+      }
+    } catch (e) { /* pas de trace GPS -> pas de detail pente/FC cote-plat ni detection course/marche, GAP reste dispo */ }
 
     if (gapAvgSecKm != null || gradeStats) {
       climbAnalysis = {
@@ -426,8 +449,10 @@ async function buildSessionAnalysis(session, week, activity) {
         pctDistanceClimbing: gradeStats?.pctDistanceClimbing ?? null,
         hrClimb: gradeStats?.hrClimb ?? null,
         hrFlat: gradeStats?.hrFlat ?? null,
+        climbs: gradeStats?.climbs ?? [],
         gapAvgSecKm: gapAvgSecKm != null ? Math.round(gapAvgSecKm) : null,
         flatPaceRange, gapDeviationSecKm, gapVerdict,
+        movementSplit,
       };
     }
   }
@@ -836,6 +861,9 @@ function computeGradeSegments(elevation, binSizeM = 50) {
         const hrVals = bucket.map(p => p.hr).filter(h => h != null);
         bins.push({
           distM,
+          startDistKm: start.distKm,
+          endDistKm: pt.distKm,
+          ascentM: Math.max(0, pt.alt - start.alt),
           gradePct: ((pt.alt - start.alt) / distM) * 100,
           hrAvg: hrVals.length ? hrVals.reduce((a, b) => a + b, 0) / hrVals.length : null,
         });
@@ -857,13 +885,125 @@ function computeGradeSegments(elevation, binSizeM = 50) {
   const hrClimbBins = climbBins.filter(b => b.hrAvg != null);
   const hrFlatBins = flatBins.filter(b => b.hrAvg != null);
 
+  // Regroupe les tronçons en côte CONSECUTIFS en montées individuelles
+  // (Focus montées, un panneau navigable par montée détectée façon "Montée
+  // X of Y" de Garmin Connect) - un tronçon plat/descente entre deux groupes
+  // de bins en côte marque la fin d'une montée et le début de la suivante.
+  // MIN_CLIMB_DIST_M écarte les montées trop courtes pour être pertinentes
+  // (bruit GPS/altimétrique isolé sur un terrain vallonné).
+  const MIN_CLIMB_DIST_M = 80;
+  const climbGroups = [];
+  let cur = null;
+  bins.forEach(b => {
+    if (b.gradePct >= CLIMB_GRADE_PCT) {
+      if (!cur) cur = [];
+      cur.push(b);
+    } else if (cur) { climbGroups.push(cur); cur = null; }
+  });
+  if (cur) climbGroups.push(cur);
+  const climbs = climbGroups.map(group => {
+    const totalDistM = group.reduce((s, b) => s + b.distM, 0);
+    if (totalDistM < MIN_CLIMB_DIST_M) return null;
+    const totalAscentM = group.reduce((s, b) => s + b.ascentM, 0);
+    const maxB = group.reduce((best, b) => (!best || b.gradePct > best.gradePct) ? b : best, null);
+    return {
+      startDistKm: group[0].startDistKm,
+      endDistKm: group[group.length - 1].endDistKm,
+      distM: Math.round(totalDistM),
+      ascentM: Math.round(totalAscentM),
+      avgGradePct: Math.round((totalAscentM / totalDistM) * 1000) / 10,
+      maxGradePct: Math.round(maxB.gradePct * 10) / 10,
+    };
+  }).filter(Boolean);
+
   return {
     avgGradePctClimb: climbBins.length ? Math.round(wAvg(climbBins, 'gradePct') * 10) / 10 : null,
     maxGradePct: maxBin ? Math.round(maxBin.gradePct * 10) / 10 : null,
     pctDistanceClimbing: totalDist > 0 ? Math.round((climbDist / totalDist) * 100) : null,
     hrClimb: hrClimbBins.length ? Math.round(wAvg(hrClimbBins, 'hrAvg')) : null,
     hrFlat: hrFlatBins.length ? Math.round(wAvg(hrFlatBins, 'hrAvg')) : null,
+    climbs,
   };
+}
+
+// Detection course/marche/immobile (retour utilisateur 29/08 : les allures
+// affichees comptaient le temps a l'arret, faussant les allures de course et
+// de marche sur une sortie mixte). Garmin realise cette detection en interne
+// via l'accelerometre (motif/cadence de mouvement) - inaccessible depuis
+// notre API OAuth (connectapi.garmin.com), donc approximation ici a partir de
+// la vitesse GPS brute (directSpeed). La cadence Garmin (directRunCadence)
+// a ete testee en premier mais ecartee : sur une sortie trail reelle de
+// l'utilisateur (avg grade climb +12.9%), les valeurs renvoyees plafonnaient
+// a 113 (moyenne 56) - trop bas et trop peu variable pour une cadence de
+// course exploitable (unite/fiabilite du champ cote Garmin peu claires),
+// classification 0% course avec un seuil de cadence. Seuil de vitesse
+// calibre a la place sur cette meme sortie (Garmin affichait 59:15 de
+// course / 29:04 de marche sur ce total, soit 63% du temps en mouvement) :
+// 1.5 m/s reproduit ce split a 1% pres. Coincide aussi avec la limite
+// habituelle marche rapide/jogging lent citee par les methodes "run-walk"
+// (~5.5 km/h) - pas juste un artefact de calibration sur un seul cas. Cette
+// limite depend du terrain (plus basse qu'un seuil "plat" classique, car sur
+// une pente tres raide un jogging reel est deja lent) : approximation, pas
+// une reproduction exacte de la detection Garmin. L'immobile n'est PAS un
+// seuil de vitesse mais lu directement des compteurs internes Garmin
+// sumMovingDuration/sumElapsedDuration (le plus fiable possible, Garmin
+// calcule deja cette distinction cote serveur) - cf /api/activity/:id/gps.
+const RUN_SPEED_THRESHOLD_MPS = 1.5;
+
+function computeMovementSplit(elevation) {
+  if (!Array.isArray(elevation) || elevation.length < 2) return null;
+  let runSec = 0, walkSec = 0, stillSec = 0, runDistKm = 0, walkDistKm = 0;
+  let hasStillData = false;
+  for (let i = 1; i < elevation.length; i++) {
+    const prev = elevation[i - 1], cur = elevation[i];
+    const dDist = Math.max(0, cur.distKm - prev.distKm);
+    let dMoving, dElapsed;
+    if (cur.movingSec != null && prev.movingSec != null && cur.elapsedSec != null && prev.elapsedSec != null) {
+      hasStillData = true;
+      dElapsed = Math.max(0, cur.elapsedSec - prev.elapsedSec);
+      dMoving = Math.max(0, Math.min(dElapsed, cur.movingSec - prev.movingSec));
+    } else {
+      dElapsed = Math.max(0, (cur.sec || 0) - (prev.sec || 0));
+      dMoving = dElapsed; // pas d'info arret dispo pour cette activite -> tout compte en mouvement
+    }
+    stillSec += Math.max(0, dElapsed - dMoving);
+    if (dMoving <= 0) continue;
+    const speed = cur.speedMps ?? prev.speedMps;
+    const isRunning = speed != null ? speed >= RUN_SPEED_THRESHOLD_MPS : true;
+    if (isRunning) { runSec += dMoving; runDistKm += dDist; } else { walkSec += dMoving; walkDistKm += dDist; }
+  }
+  const totalDistKm = runDistKm + walkDistKm;
+  const totalMovingSec = runSec + walkSec;
+  if (totalDistKm <= 0 || totalMovingSec <= 0) return null;
+  const totalElapsedSec = totalMovingSec + stillSec;
+  return {
+    runSec: Math.round(runSec), walkSec: Math.round(walkSec), stillSec: Math.round(stillSec), hasStillData,
+    avgPaceElapsedSecKm: Math.round(totalElapsedSec / totalDistKm),
+    avgPaceMovingSecKm: Math.round(totalMovingSec / totalDistKm),
+    runPaceSecKm: (runSec > 0 && runDistKm > 0) ? Math.round(runSec / runDistKm) : null,
+    walkPaceSecKm: (walkSec > 0 && walkDistKm > 0) ? Math.round(walkSec / walkDistKm) : null,
+    bestPaceSecKm: computeBestPace(elevation),
+  };
+}
+
+// "Meilleure allure" façon Garmin : la vitesse la plus rapide soutenue sur
+// une courte fenêtre glissante (pas l'instantané brut, trop bruité GPS).
+function computeBestPace(elevation, windowSec = 20) {
+  let best = null;
+  for (let i = 0; i < elevation.length; i++) {
+    const t0 = elevation[i].elapsedSec ?? elevation[i].sec;
+    if (t0 == null) continue;
+    let j = i;
+    while (j + 1 < elevation.length && ((elevation[j + 1].elapsedSec ?? elevation[j + 1].sec) - t0) < windowSec) j++;
+    const t1 = elevation[j].elapsedSec ?? elevation[j].sec;
+    const dt = t1 - t0;
+    if (dt < windowSec * 0.5) continue; // fenetre trop courte (fin de trace)
+    const dDist = elevation[j].distKm - elevation[i].distKm;
+    if (dDist <= 0) continue;
+    const paceSecKm = dt / dDist;
+    if (best == null || paceSecKm < best) best = paceSecKm;
+  }
+  return best != null ? Math.round(best) : null;
 }
 
 function computeCardiacDrift(laps) {
@@ -1332,6 +1472,54 @@ function buildAnalysisModalHtml(record) {
     </div>
     <div class="analysis-climb-note">Pente calculée sur la trace GPS fine, par tronçons d'environ 50 m — une variation plus ponctuelle peut exister à une échelle encore plus fine. Le GAP neutralise l'effet de la pente pour évaluer l'effort réel : comparez-le à la cible plate (ligne "Effort (GAP)" ci-dessus), pas à la cible "Allure" qui est déjà majorée forfaitairement pour le dénivelé.</div>` : '';
 
+  // Détection course/marche/immobile + allures détaillées (façon Garmin
+  // Connect) — retour utilisateur 29/08 : l'allure "globale" mélangeait à
+  // tort temps d'arrêt et déplacement, faussant les allures course/marche
+  // sur une sortie mixte. Détection approximative (cadence/vitesse GPS, cf.
+  // computeMovementSplit) — Garmin utilise en interne l'accéléromètre, plus
+  // fin, inaccessible depuis notre API.
+  const ms = climb?.movementSplit || null;
+  const movementHtml = (isTrail && ms) ? `
+    <div class="analysis-section-title">Détection de course/marche</div>
+    <div class="analysis-climb-grid">
+      <div class="analysis-climb-stat"><span class="analysis-climb-stat-label">Temps de course</span><span class="analysis-climb-stat-value">${fmtDuration(ms.runSec)}</span></div>
+      <div class="analysis-climb-stat"><span class="analysis-climb-stat-label">Temps de marche</span><span class="analysis-climb-stat-value">${fmtDuration(ms.walkSec)}</span></div>
+      ${ms.hasStillData ? `<div class="analysis-climb-stat"><span class="analysis-climb-stat-label">Temps immobile</span><span class="analysis-climb-stat-value">${fmtDuration(ms.stillSec)}</span></div>` : ''}
+    </div>
+    <div class="analysis-section-title">Allure/vitesse</div>
+    <div class="analysis-climb-grid">
+      <div class="analysis-climb-stat"><span class="analysis-climb-stat-label">Allure moyenne</span><span class="analysis-climb-stat-value">${fmtPace(ms.avgPaceElapsedSecKm)}/km</span></div>
+      <div class="analysis-climb-stat"><span class="analysis-climb-stat-label">Allure moy. en déplacement</span><span class="analysis-climb-stat-value">${fmtPace(ms.avgPaceMovingSecKm)}/km</span></div>
+      ${ms.bestPaceSecKm != null ? `<div class="analysis-climb-stat"><span class="analysis-climb-stat-label">Meilleure allure</span><span class="analysis-climb-stat-value">${fmtPace(ms.bestPaceSecKm)}/km</span></div>` : ''}
+      ${climb.gapAvgSecKm != null ? `<div class="analysis-climb-stat"><span class="analysis-climb-stat-label">Allure moy. ajustée à la pente</span><span class="analysis-climb-stat-value">${fmtPace(climb.gapAvgSecKm)}/km</span></div>` : ''}
+    </div>
+    <div class="analysis-climb-note">Allure de course${ms.runPaceSecKm != null ? ` ${fmtPace(ms.runPaceSecKm)}/km` : ' —'} · allure de marche${ms.walkPaceSecKm != null ? ` ${fmtPace(ms.walkPaceSecKm)}/km` : ' —'} — détection approximative à partir de la vitesse GPS (Garmin utilise en interne l'accéléromètre, plus précis).</div>` : '';
+
+  // Focus montées : un panneau navigable par montée individuellement
+  // détectée (façon "Montée X of Y" de Garmin Connect) - cf. climbs dans
+  // computeGradeSegments. Reste separe du bloc agrege "Pente & effort en
+  // côte" ci-dessus (moyennes sur toute la seance) : ici, une carte par
+  // montee avec son propre profil (survol = pente locale).
+  const climbFocusHtml = (isTrail && climb?.climbs?.length) ? `
+    <div class="analysis-section-title">Focus montées</div>
+    <div class="analysis-climb-focus" id="analysis-climb-focus">
+      <div class="climb-focus-header">
+        <button type="button" id="climb-focus-prev" class="climb-focus-nav-btn" aria-label="Montée précédente">‹</button>
+        <span id="climb-focus-title" class="climb-focus-title"></span>
+        <button type="button" id="climb-focus-next" class="climb-focus-nav-btn" aria-label="Montée suivante">›</button>
+      </div>
+      <div class="analysis-climb-grid">
+        <div class="analysis-climb-stat"><span class="analysis-climb-stat-label">Pente moy.</span><span class="analysis-climb-stat-value" id="climb-focus-avg">—</span></div>
+        <div class="analysis-climb-stat"><span class="analysis-climb-stat-label">Pente max</span><span class="analysis-climb-stat-value" id="climb-focus-max">—</span></div>
+        <div class="analysis-climb-stat"><span class="analysis-climb-stat-label">Ascension</span><span class="analysis-climb-stat-value" id="climb-focus-ascent">—</span></div>
+        <div class="analysis-climb-stat"><span class="analysis-climb-stat-label">Distance</span><span class="analysis-climb-stat-value" id="climb-focus-dist">—</span></div>
+      </div>
+      <div class="analysis-elevation-chart-wrapper">
+        <canvas id="climb-focus-chart"></canvas>
+      </div>
+      <div class="analysis-climb-note">Survolez le profil pour voir la pente locale à cet endroit précis.</div>
+    </div>` : '';
+
   return `
     <div class="analysis-modal-header">
       <div class="analysis-modal-title">${s.displayName}</div>
@@ -1341,8 +1529,10 @@ function buildAnalysisModalHtml(record) {
       </div>
     </div>
     <div class="analysis-summary-block">${summaryRowsHtml}${trailRowHtml}${gapRowHtml}</div>
+    ${movementHtml}
     ${elevationProfileHtml}
     ${climbDetailHtml}
+    ${climbFocusHtml}
     ${timelineHtml}
     ${repsTableHtml}
     ${positivesHtml}
@@ -1462,7 +1652,16 @@ function openAnalysisModal(record) {
   modal.querySelector('#session-analysis-recalc').addEventListener('click', () => recalculateAnalysis(record));
   attachBackdropClose(modal, close);
   document.addEventListener('keydown', escHandler);
-  if (record.sessionTypeKey === 'TRAIL' && record.trail?.plannedDPlusM) loadAnalysisElevationChart(record.activityId);
+  const climbList = record.trail?.climb?.climbs;
+  const needsProfile = record.sessionTypeKey === 'TRAIL' && record.trail?.plannedDPlusM;
+  const needsClimbFocus = record.sessionTypeKey === 'TRAIL' && climbList?.length;
+  if (needsProfile || needsClimbFocus) {
+    loadAnalysisActivityElevation(record.activityId).then(elevation => {
+      if (!elevation || !modal.isConnected) return;
+      if (needsProfile) renderAnalysisElevationChart(elevation);
+      if (needsClimbFocus) initClimbFocusPanel(elevation, climbList);
+    });
+  }
 
   const helpBtn = modal.querySelector('#analysis-score-help-btn');
   if (helpBtn) {
@@ -1495,6 +1694,84 @@ const SCORE_COMPONENT_LABELS = {
   dplus:      'Dénivelé (D+)',
 };
 
+// Phrase "coach" par composante du score (retour utilisateur 29/08 : les %
+// bruts + ponderations sont trop "mathematiques", il veut la meme chose
+// qu'un coach qui pointe concretement ce qui n'a pas colle - cible vs
+// realise, en une phrase). Reutilise les valeurs deja calculees ailleurs
+// dans le record (sessionSnapshot/activitySnapshot pour duree/distance,
+// paceAnalysis, hr, cardiacDrift, regularity, structure, trail) plutot que
+// de refaire un calcul parallele - aucune nouvelle donnee necessaire.
+function componentNarrative(key, record) {
+  const s = record.sessionSnapshot, a = record.activitySnapshot;
+  switch (key) {
+    case 'duration': {
+      const planned = s.stats?.expectedDuration, actual = a.durationSec;
+      if (!planned || !actual) return null;
+      const diffMin = Math.round((actual - planned) / 60);
+      if (Math.abs(diffMin) < 3) return `Durée quasi identique à ce qui était prévu (${fmtDuration(planned)} visé, ${fmtDuration(actual)} réalisé).`;
+      return diffMin > 0
+        ? `${Math.abs(diffMin)} min de plus que prévu (${fmtDuration(planned)} visé → ${fmtDuration(actual)} réalisé).`
+        : `Séance écourtée de ${Math.abs(diffMin)} min par rapport à la cible (${fmtDuration(planned)} visé → ${fmtDuration(actual)} réalisé).`;
+    }
+    case 'distance': {
+      const planned = s.stats?.expectedDistance, actual = a.distanceKm;
+      if (!planned || !actual) return null;
+      const diffKm = Math.round((actual - planned) * 10) / 10;
+      if (Math.abs(diffKm) < 0.3) return `Distance quasi identique à la cible (${planned.toFixed(1)} km visés, ${actual.toFixed(1)} km réalisés).`;
+      return diffKm > 0
+        ? `${Math.abs(diffKm).toFixed(1)} km de plus que prévu (${planned.toFixed(1)} km visés → ${actual.toFixed(1)} km réalisés).`
+        : `${Math.abs(diffKm).toFixed(1)} km de moins que prévu (${planned.toFixed(1)} km visés → ${actual.toFixed(1)} km réalisés).`;
+    }
+    case 'pace': {
+      const p = record.paceAnalysis?.[0];
+      if (!p || p.deviationSecKm == null) return null;
+      const usingGap = record.sessionTypeKey === 'TRAIL' && record.trail?.climb?.gapVerdict != null;
+      const actualLabel = usingGap ? `${fmtPace(record.trail.climb.gapAvgSecKm)}/km (effort réel, GAP)` : `${fmtPace(p.actualPaceSecKm)}/km`;
+      if (Math.abs(p.deviationSecKm) <= 10) return `Bien dans la cible (${fmtPace(p.targetPaceMin)}–${fmtPace(p.targetPaceMax)}/km visé, ${actualLabel} réalisé).`;
+      return p.deviationSecKm < 0
+        ? `${Math.abs(p.deviationSecKm)}s/km plus rapide que la cible (${fmtPace(p.targetPaceMin)}–${fmtPace(p.targetPaceMax)}/km visé, ${actualLabel} réalisé).`
+        : `${p.deviationSecKm}s/km plus lent que la cible (${fmtPace(p.targetPaceMin)}–${fmtPace(p.targetPaceMax)}/km visé, ${actualLabel} réalisé).`;
+    }
+    case 'hr': {
+      const hr = record.hr;
+      if (!hr) return null;
+      const band = hr.approxTargetBand;
+      const bandTxt = band ? ` (zone visée ~${band.low}-${band.high} bpm)` : '';
+      return hr.pctTimeInTargetZone != null
+        ? `${hr.pctTimeInTargetZone}% du temps dans la zone de FC visée${bandTxt} — FC moyenne ${hr.avgHR} bpm.`
+        : `FC moyenne de ${hr.avgHR} bpm${bandTxt}.`;
+    }
+    case 'drift': {
+      const cd = record.cardiacDrift;
+      if (!cd || cd.driftPct == null) return null;
+      const detail = `(${cd.driftPct > 0 ? '+' : ''}${cd.driftPct}% entre les deux moitiés — ${cd.firstHalfHR} puis ${cd.secondHalfHR} bpm)`;
+      return cd.narrative ? `${cd.narrative} ${detail}` : `Dérive cardiaque ${detail}.`;
+    }
+    case 'regularity': {
+      const r = record.regularity;
+      if (!r || r.maxEcartSecKm == null) return null;
+      return `Écart maximal de ${r.maxEcartSecKm}s/km entre tes répétitions${r.label ? ' — ' + r.label : ''}.`;
+    }
+    case 'structure': {
+      const st = record.structure;
+      if (!st || st.plannedMainReps == null) return null;
+      return (st.actualMainReps >= st.plannedMainReps)
+        ? `Toutes les répétitions prévues ont été réalisées (${st.actualMainReps}/${st.plannedMainReps}).`
+        : `${st.plannedMainReps - (st.actualMainReps || 0)} répétition(s) manquante(s) sur ${st.plannedMainReps} prévues.`;
+    }
+    case 'dplus': {
+      const t = record.trail;
+      if (!t || t.plannedDPlusM == null || t.actualDPlusM == null) return null;
+      const diff = Math.round(t.actualDPlusM - t.plannedDPlusM);
+      if (Math.abs(t.deltaPct ?? 0) <= 10) return `Dénivelé quasi conforme (${Math.round(t.plannedDPlusM)} m visés, ${Math.round(t.actualDPlusM)} m réalisés).`;
+      return diff > 0
+        ? `${diff} m de D+ en plus par rapport à la cible (${Math.round(t.plannedDPlusM)} m visés → ${Math.round(t.actualDPlusM)} m réalisés).`
+        : `${Math.abs(diff)} m de D+ en moins par rapport à la cible (${Math.round(t.plannedDPlusM)} m visés → ${Math.round(t.actualDPlusM)} m réalisés).`;
+    }
+    default: return null;
+  }
+}
+
 function buildScoreBreakdownHtml(record) {
   const bd = record.scoreBreakdown;
   if (!bd) {
@@ -1508,13 +1785,19 @@ function buildScoreBreakdownHtml(record) {
     const pct = Math.round(w * 100);
     if (v == null) {
       return `<div class="score-breakdown-row score-breakdown-row--excluded">
-        <div class="score-breakdown-label">${label}</div>
-        <div class="score-breakdown-value">Non applicable à cette séance</div>
+        <div class="score-breakdown-row-header">
+          <div class="score-breakdown-label">${label}</div>
+          <div class="score-breakdown-value">Non applicable à cette séance</div>
+        </div>
       </div>`;
     }
+    const narrative = componentNarrative(key, record);
     return `<div class="score-breakdown-row">
-      <div class="score-breakdown-label">${label} <span class="score-breakdown-weight">(pondération ${pct}%)</span></div>
-      <div class="score-breakdown-value"><strong>${Math.round(v)}%</strong></div>
+      <div class="score-breakdown-row-header">
+        <div class="score-breakdown-label">${label} <span class="score-breakdown-weight">(pondération ${pct}%)</span></div>
+        <div class="score-breakdown-value"><strong>${Math.round(v)}%</strong></div>
+      </div>
+      ${narrative ? `<div class="score-breakdown-narrative">${narrative}</div>` : ''}
     </div>`;
   }).join('');
 
@@ -1566,14 +1849,23 @@ function openScoreBreakdownModal(record) {
 // Meme source/lissage que renderElevationProfile (app.js, carte d'activite),
 // dupliquee ici car cette modale n'a pas de canevas "route" partage.
 let _analysisElevationChart = null;
-async function loadAnalysisElevationChart(activityId) {
+// Recupere la trace GPS/elevation d'une activite - factorise car reutilisee a
+// la fois par le profil altimetrique global (renderAnalysisElevationChart) et
+// le panneau "Focus montees" (initClimbFocusPanel), pour un seul appel reseau
+// meme quand les deux sont affiches dans la meme modale.
+async function loadAnalysisActivityElevation(activityId) {
+  try {
+    const res = await fetch(`/api/activity/${activityId}/gps`);
+    const { elevation } = await res.json();
+    return (Array.isArray(elevation) && elevation.length >= 2) ? elevation : null;
+  } catch (e) { console.error('loadAnalysisActivityElevation:', e); return null; }
+}
+function renderAnalysisElevationChart(elevation) {
   const canvas = document.getElementById('analysis-elevation-chart');
   if (!canvas) return;
   if (_analysisElevationChart) { _analysisElevationChart.destroy(); _analysisElevationChart = null; }
   try {
-    const res = await fetch(`/api/activity/${activityId}/gps`);
-    const { elevation } = await res.json();
-    if (!canvas.isConnected || !elevation || elevation.length < 2) return;
+    if (!canvas.isConnected) return;
     const labels = elevation.map(p => p.distKm.toFixed(2));
     const rawAlt = elevation.map(p => p.alt);
     const WINDOW = 5;
@@ -1594,7 +1886,93 @@ async function loadAnalysisElevationChart(activityId) {
         scales: { ...base.scales, x: { ...base.scales.x, ticks: { ...base.scales.x.ticks, maxTicksLimit: 6 } } },
       }
     });
-  } catch (e) { console.error('loadAnalysisElevationChart:', e); }
+  } catch (e) { console.error('renderAnalysisElevationChart:', e); }
+}
+
+// ─── Focus montées : panneau navigable, une carte par montée détectée ─────
+// (façon "Montée X of Y" de Garmin Connect) - liste des montées dans
+// climb.climbs (computeGradeSegments), profil/survol construits ici à partir
+// de la trace GPS complète déjà chargée pour le profil altimétrique global.
+let _analysisClimbChart = null;
+let _climbFocusState = null; // { elevation, climbs, index }
+
+function initClimbFocusPanel(elevation, climbs) {
+  const container = document.getElementById('analysis-climb-focus');
+  if (!container || !climbs || !climbs.length) return;
+  _climbFocusState = { elevation, climbs, index: 0 };
+  renderClimbFocusCard();
+  const prevBtn = document.getElementById('climb-focus-prev');
+  const nextBtn = document.getElementById('climb-focus-next');
+  if (prevBtn) prevBtn.addEventListener('click', () => stepClimbFocus(-1));
+  if (nextBtn) nextBtn.addEventListener('click', () => stepClimbFocus(1));
+}
+
+function stepClimbFocus(delta) {
+  if (!_climbFocusState) return;
+  const { climbs, index } = _climbFocusState;
+  const next = Math.max(0, Math.min(climbs.length - 1, index + delta));
+  if (next === index) return;
+  _climbFocusState.index = next;
+  renderClimbFocusCard();
+}
+
+function renderClimbFocusCard() {
+  if (!_climbFocusState) return;
+  const { elevation, climbs, index } = _climbFocusState;
+  const c = climbs[index];
+  const titleEl = document.getElementById('climb-focus-title');
+  const prevBtn = document.getElementById('climb-focus-prev');
+  const nextBtn = document.getElementById('climb-focus-next');
+  if (titleEl) titleEl.textContent = `Montée ${index + 1} / ${climbs.length}`;
+  if (prevBtn) prevBtn.disabled = index === 0;
+  if (nextBtn) nextBtn.disabled = index === climbs.length - 1;
+  const setStat = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+  setStat('climb-focus-avg', `+${c.avgGradePct}%`);
+  setStat('climb-focus-max', `${c.maxGradePct >= 0 ? '+' : ''}${c.maxGradePct}%`);
+  setStat('climb-focus-ascent', `${c.ascentM} m`);
+  setStat('climb-focus-dist', c.distM >= 1000 ? `${(c.distM / 1000).toFixed(2)} km` : `${c.distM} m`);
+  renderClimbFocusChart(elevation, c);
+}
+
+// Pente locale par point (fenetre glissante ~30m, plus fine que les tronçons
+// de 50m de computeGradeSegments) affichee au survol - meme principe que la
+// vue "Montée détails" de Garmin Connect.
+const CLIMB_FOCUS_GRADE_WINDOW_M = 30;
+function renderClimbFocusChart(elevation, climb) {
+  const canvas = document.getElementById('climb-focus-chart');
+  if (!canvas) return;
+  if (_analysisClimbChart) { _analysisClimbChart.destroy(); _analysisClimbChart = null; }
+  try {
+    if (!canvas.isConnected) return;
+    // Marge de contexte avant/apres la montee (pour voir son amorce et sa
+    // fin), plafonnee pour ne pas noyer une montee courte dans du plat.
+    const marginKm = Math.min(0.15, (climb.endDistKm - climb.startDistKm) * 0.25);
+    const pts = elevation.filter(p => p.distKm >= climb.startDistKm - marginKm && p.distKm <= climb.endDistKm + marginKm);
+    if (pts.length < 2) return;
+    const labels = pts.map(p => p.distKm.toFixed(2));
+    const alt = pts.map(p => p.alt);
+    const grades = pts.map((p, i) => {
+      let lo = i, hi = i;
+      while (lo > 0 && (p.distKm - pts[lo - 1].distKm) * 1000 < CLIMB_FOCUS_GRADE_WINDOW_M / 2) lo--;
+      while (hi < pts.length - 1 && (pts[hi + 1].distKm - p.distKm) * 1000 < CLIMB_FOCUS_GRADE_WINDOW_M / 2) hi++;
+      const dM = (pts[hi].distKm - pts[lo].distKm) * 1000;
+      return dM > 3 ? ((pts[hi].alt - pts[lo].alt) / dM) * 100 : 0;
+    });
+    const base = chartOptions();
+    _analysisClimbChart = new Chart(canvas.getContext('2d'), {
+      type: 'line',
+      data: { labels, datasets: [{ data: alt, borderColor: '#fb923c', backgroundColor: 'rgba(251,146,60,0.18)', fill: true, pointRadius: 0, borderWidth: 2, cubicInterpolationMode: 'monotone' }] },
+      options: {
+        ...base,
+        plugins: { ...base.plugins, tooltip: { ...base.plugins.tooltip, displayColors: false,
+          callbacks: {
+            title: (items) => `${items[0].label} km`,
+            label: (item) => `${Math.round(item.raw)} m · pente ${grades[item.dataIndex] >= 0 ? '+' : ''}${grades[item.dataIndex].toFixed(1)}%`,
+          } } },
+        scales: { ...base.scales, x: { ...base.scales.x, ticks: { ...base.scales.x.ticks, maxTicksLimit: 6 } } },
+      }
+    });
+  } catch (e) { console.error('renderClimbFocusChart:', e); }
 }
 
 // Recalcule une analyse existante avec le moteur actuel (utile apres une

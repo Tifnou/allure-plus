@@ -3406,6 +3406,13 @@ app.get('/api/activity/:id/gps', requireSession, async (req, res) => {
     // tronçon de ~50m plutot que par lap Garmin (1km ou plus) - un lap entier
     // dilue une cote courte et repetee (ex: 320m/45m D+) en une pente nette
     // quasi nulle si le reste du lap redescend ou est plat.
+    // speedMps (directSpeed, vitesse brute instantanee - PAS le GAP) et
+    // movingSec/elapsedSec (sumMovingDuration/sumElapsedDuration, cumules) :
+    // ajoutes pour la detection course/marche/immobile (computeMovementSplit,
+    // session-analysis.js) - retour utilisateur 29/08, les allures affichees
+    // comptaient le temps a l'arret. La cadence (directRunCadence) a aussi
+    // ete testee mais ecartee (valeurs trop basses/peu fiables, cf commentaire
+    // sur RUN_SPEED_THRESHOLD_MPS dans session-analysis.js) - pas extraite ici.
     let elevation = [];
     if (Array.isArray(detail.metricDescriptors) && Array.isArray(detail.activityDetailMetrics)) {
       const keys = detail.metricDescriptors.map(m => m.key);
@@ -3414,6 +3421,9 @@ app.get('/api/activity/:id/gps', requireSession, async (req, res) => {
       const idxHR   = keys.indexOf('directHeartRate');
       const idxGap  = keys.indexOf('directGradeAdjustedSpeed');
       const idxSec  = keys.indexOf('sumDuration');
+      const idxSpeed   = keys.indexOf('directSpeed');
+      const idxMoving  = keys.indexOf('sumMovingDuration');
+      const idxElapsed = keys.indexOf('sumElapsedDuration');
       if (idxElev !== -1 && idxDist !== -1) {
         const rows = detail.activityDetailMetrics;
         const elevStep = Math.max(1, Math.floor(rows.length / MAX_PTS));
@@ -3425,6 +3435,9 @@ app.get('/api/activity/:id/gps', requireSession, async (req, res) => {
             hr: idxHR !== -1 ? r.metrics[idxHR] : null,
             gapMps: idxGap !== -1 ? r.metrics[idxGap] : null,
             sec: idxSec !== -1 ? r.metrics[idxSec] : null,
+            speedMps: idxSpeed !== -1 ? r.metrics[idxSpeed] : null,
+            movingSec: idxMoving !== -1 ? r.metrics[idxMoving] : null,
+            elapsedSec: idxElapsed !== -1 ? r.metrics[idxElapsed] : null,
           }))
           .filter(p => p.alt != null);
       }
