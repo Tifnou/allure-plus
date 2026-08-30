@@ -258,6 +258,16 @@ body::before{
   overflow-y:auto;
 }
 
+/* Separe les familles de menu (Suivi / Entrainement / Bien-etre / Parcours)
+   - retour utilisateur : reorganisation par usage plutot que l'ordre
+   historique, avec un repere visuel entre chaque groupe. */
+/* Couleur dediee (pas var(--border)) : la sidebar a un fond translucide
+   propre (rgba blanc/noir, cf .sidebar) bien plus clair que les cartes
+   opaques pour lesquelles --border est calibre - le token generique etait
+   quasi invisible dessus en theme clair (retour utilisateur). */
+.nav-divider{height:1px;background:rgba(0,0,0,0.12);margin:2px 8px;flex-shrink:0;}
+[data-theme="dark"] .nav-divider{background:rgba(255,255,255,0.10);}
+
 .nav-item{
   display:flex;
   align-items:center;
