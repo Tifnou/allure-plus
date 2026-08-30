@@ -2197,11 +2197,14 @@ function routeEditorRestoreOriginal() {
 }
 
 // Waypoints Garmin ("Course Points") exportés avec le GPX : un par 📌 point
-// d'intérêt (nom + symbole selon son type), et un par montée d'une côte
-// répétée ("Répétition k/N", cf applyRouteEditorRepeat/
-// applyRouteEditorObjectivePlan qui alimentent _routeEditorData.repeats) -
-// retour utilisateur explicite (25/08) : aucun moyen de savoir en course
-// combien de fois il reste à répéter une côte.
+// d'intérêt (nom + symbole selon son type), et une paire {Début xN, Sommet
+// xN} par montée d'une côte répétée (cf buildRepeatWaypointPair, routes.js -
+// chargé avant ce fichier dans index.html, même partage que nudgeLatLon) -
+// alimentée par applyRouteEditorRepeat/applyRouteEditorObjectivePlan qui
+// stockent aLat/aLon (pied de côte) en plus de lat/lon (sommet) dans
+// _routeEditorData.repeats. Retour utilisateur explicite (25/08 puis 30/08
+// après test réel) : aucun moyen de savoir en course combien de fois il
+// reste à répéter une côte, et un point unique au sommet arrive trop tard.
 function routeEditorBuildExportWaypoints() {
   const wps = [];
   (_routeEditorData.pois || []).forEach(poi => {
@@ -2212,8 +2215,7 @@ function routeEditorBuildExportWaypoints() {
   });
   (_routeEditorData.repeats || []).forEach(r => {
     for (let k = 1; k <= r.totalPasses; k++) {
-      const p = k === 1 ? { lat: r.lat, lon: r.lon } : nudgeLatLon(r.lat, r.lon, (k - 1) * 4, (k - 1) * 137);
-      wps.push({ lat: p.lat, lon: p.lon, name: `Répétition ${k}/${r.totalPasses}`, sym: 'Flag, Blue' });
+      wps.push(...buildRepeatWaypointPair(r.aLat, r.aLon, r.lat, r.lon, k, r.totalPasses));
     }
   });
   return wps;

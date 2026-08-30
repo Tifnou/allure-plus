@@ -1289,19 +1289,39 @@ function renderRouteMap(mapDivId, opt, context = {}) {
   };
 }
 
-// Waypoints Garmin "Répétition k/N" pour chaque côte répétée du parcours
-// (Course Points GPX - alerte pop-up sur la montre en approchant du point,
-// cf buildGpxXml côté serveur) - N = seg.reps + 1 : reps compte les passages
-// ADDITIONNELS au sommet, en plus de la montée naturelle déjà présente dans
-// la boucle de base (vérifié empiriquement - ne pas confondre avec la
-// convention de l'Éditeur Parcours, où le compte saisi est déjà le total).
+// Waypoints Garmin "Course Points" pour chaque côte répétée du parcours
+// (alerte pop-up sur la montre en approchant du point, cf buildGpxXml côté
+// serveur) - un COUPLE {Début xN, Sommet xN} par passage plutôt qu'un seul
+// point au sommet ("Répétition k/N", ancien format) : retour utilisateur
+// (30/08) après un test réel sur une sortie avec répétitions - le marqueur
+// unique au sommet ne prévient qu'une fois la côte déjà montée, trop tard
+// pour savoir qu'il fallait la refaire, et "Répétition k/N" se faisait
+// tronquer sur l'écran de la montre au point de ne plus voir le total (juste
+// "Répétition 2/"). N = repetitions ENCORE a faire, CE passage inclus (donc
+// invariant du début à la fin d'un même passage : x3 en bas puis en haut =
+// encore 3 montées dans le cycle en comptant celle-ci) plutôt que le numéro
+// du passage en cours (k), plus court et actionnable immédiatement en
+// arrivant au pied de la côte, avant même de la monter.
+function buildRepeatWaypointPair(aLat, aLon, bLat, bLon, k, total) {
+  const remaining = total - k + 1;
+  const aP = k === 1 ? { lat: aLat, lon: aLon } : nudgeLatLon(aLat, aLon, (k - 1) * 4, (k - 1) * 137);
+  const bP = k === 1 ? { lat: bLat, lon: bLon } : nudgeLatLon(bLat, bLon, (k - 1) * 4, (k - 1) * 137);
+  return [
+    { lat: aP.lat, lon: aP.lon, name: `Début x${remaining}`, sym: 'Flag, Blue' },
+    { lat: bP.lat, lon: bP.lon, name: `Sommet x${remaining}`, sym: 'Flag, Blue' },
+  ];
+}
+
+// seg.reps + 1 : reps compte les passages ADDITIONNELS au sommet, en plus de
+// la montée naturelle déjà présente dans la boucle de base (vérifié
+// empiriquement - ne pas confondre avec la convention de l'Éditeur Parcours,
+// où le compte saisi est déjà le total, cf routeEditorBuildExportWaypoints).
 function buildRepeatWaypoints(opt) {
   const wps = [];
   (opt.repeatedSegments || []).forEach(seg => {
     const total = seg.reps + 1;
     for (let k = 1; k <= total; k++) {
-      const p = k === 1 ? { lat: seg.toLat, lon: seg.toLon } : nudgeLatLon(seg.toLat, seg.toLon, (k - 1) * 4, (k - 1) * 137);
-      wps.push({ lat: p.lat, lon: p.lon, name: `Répétition ${k}/${total}`, sym: 'Flag, Blue' });
+      wps.push(...buildRepeatWaypointPair(seg.fromLat, seg.fromLon, seg.toLat, seg.toLon, k, total));
     }
   });
   return wps;
