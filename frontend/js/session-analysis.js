@@ -1193,26 +1193,48 @@ async function _ensureYearActivitiesLoaded(year) {
   } catch (e) { /* silencieux, la liste sera juste incomplete */ }
 }
 
+// Marge de part et d'autre de la semaine calendaire du plan : une seance
+// decalee (ex: sortie du dimanche faite le lundi suivant pour des raisons
+// d'organisation, retour utilisateur 30/08) tombe alors dans la semaine
+// SUIVANTE au sens calendaire pur - sans cette marge, l'activite reelle
+// n'apparaissait jamais dans la liste de liaison de la seance concernee.
+// 3 jours couvre un decalage de quelques jours dans un sens ou l'autre sans
+// pour autant noyer la liste avec des activites sans rapport - le choix
+// reste manuel (l'utilisateur voit la date exacte de chaque ligne), une
+// marge large n'est donc pas dangereuse, juste bruyante au-dela.
+const SESSION_LINK_WINDOW_PAD_DAYS = 3;
+
 function _candidateActivitiesForWeek(week) {
   const weekStart = startOfDay(week.weekDate);
   const weekEnd = weekStart + 7 * 86400000;
+  const padMs = SESSION_LINK_WINDOW_PAD_DAYS * 86400000;
+  const paddedStart = weekStart - padMs;
+  const paddedEnd = weekEnd + padMs;
   return (_allActivities || []).filter(a => {
     const t = (a.activityType || '').toLowerCase();
     if (!(t.includes('run') || t.includes('trail'))) return false;
     const d = startOfDay(new Date(a.date).getTime());
-    if (!(d >= weekStart && d < weekEnd)) return false;
+    if (!(d >= paddedStart && d < paddedEnd)) return false;
     if (_analysisIndex.byActivity[String(a.id)]) return false; // deja liee a une autre seance
     return true;
-  }).sort((a, b) => new Date(a.date) - new Date(b.date));
+  }).map(a => ({ ...a, _outOfWeek: startOfDay(new Date(a.date).getTime()) < weekStart ? 'avant' : (startOfDay(new Date(a.date).getTime()) >= weekEnd ? 'apres' : null) }))
+    .sort((a, b) => new Date(a.date) - new Date(b.date));
 }
 
+// a._outOfWeek ('avant'/'apres'/null, cf _candidateActivitiesForWeek) : signale
+// une activite hors de la semaine calendaire stricte de la seance (repechee
+// par la marge de quelques jours) - sans ce repere, rien ne distingue une
+// sortie decalee d'une sortie de la bonne semaine dans cette liste.
 function _renderActivityPickerRow(a, onPick) {
   const row = document.createElement('div');
   row.className = 'session-link-picker-row';
   row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 8px;border-bottom:1px solid var(--border-light);';
+  const outOfWeekBadge = a._outOfWeek
+    ? `<span style="display:inline-block;margin-left:6px;padding:1px 6px;border-radius:6px;background:var(--bg-soft, rgba(0,0,0,.06));color:var(--text-secondary);font-size:10.5px;font-weight:600;">${a._outOfWeek === 'avant' ? 'semaine précédente' : 'semaine suivante'}</span>`
+    : '';
   row.innerHTML = `
     <div>
-      <div style="font-family:var(--font-body);font-weight:600;font-size:13px;color:var(--text-primary)">${a.name || 'Activité'}</div>
+      <div style="font-family:var(--font-body);font-weight:600;font-size:13px;color:var(--text-primary)">${a.name || 'Activité'}${outOfWeekBadge}</div>
       <div style="font-family:var(--font-body);font-size:11.5px;color:var(--text-secondary)">${formatDateShort(a.date, true)} · ${a.distanceKm ? a.distanceKm.toFixed(2)+' km' : '—'} · ${fmtDuration(a.durationSec)} · ${fmtPace(a.avgPaceSecPerKm)}</div>
     </div>
     <button type="button" style="flex-shrink:0;padding:6px 12px;border-radius:8px;border:1px solid var(--brand-green);background:var(--brand-green);color:#fff;font-size:12px;font-weight:700;cursor:pointer;">Lier &amp; analyser</button>`;
@@ -1223,13 +1245,23 @@ function _renderActivityPickerRow(a, onPick) {
 async function populateSessionLinkPickerList(week, weekId, trainingIndex) {
   const listEl = document.getElementById('session-link-picker-list');
   if (!listEl) return;
-  const year = new Date(startOfDay(week.weekDate)).getFullYear();
-  await _ensureYearActivitiesLoaded(year);
+  // La marge de _candidateActivitiesForWeek (SESSION_LINK_WINDOW_PAD_DAYS) peut
+  // deborder sur l'annee precedente/suivante (semaine a cheval sur le 1er
+  // janvier) - charger aussi ces annees-la, sinon les activites decalees
+  // dans cette marge resteraient invisibles malgre le filtre elargi.
+  const padMs = SESSION_LINK_WINDOW_PAD_DAYS * 86400000;
+  const weekStart = startOfDay(week.weekDate);
+  const years = new Set([
+    new Date(weekStart).getFullYear(),
+    new Date(weekStart - padMs).getFullYear(),
+    new Date(weekStart + 7 * 86400000 + padMs).getFullYear(),
+  ]);
+  await Promise.all([...years].map(_ensureYearActivitiesLoaded));
 
   const candidates = _candidateActivitiesForWeek(week);
   if (!document.getElementById('session-link-picker-list')) return; // modale fermee entre-temps
   if (candidates.length === 0) {
-    listEl.innerHTML = 'Aucune activité de course disponible cette semaine-là.';
+    listEl.innerHTML = `Aucune activité de course disponible autour de cette semaine-là (± ${SESSION_LINK_WINDOW_PAD_DAYS} jours).`;
     return;
   }
   listEl.style.textAlign = '';
@@ -1267,14 +1299,43 @@ async function linkSessionToActivity(weekId, trainingIndex, activityId) {
   }
 }
 
+// Semaines dont la fenetre padee (SESSION_LINK_WINDOW_PAD_DAYS, meme marge
+// que _candidateActivitiesForWeek) couvre la date de l'activite - sens
+// inverse de _candidateActivitiesForWeek : on part ici d'une activite pour
+// retrouver les seances candidates, y compris celle de la semaine PRECEDENTE
+// quand l'activite a ete faite en retard (ex: sortie du dimanche decalee au
+// lundi suivant, retour utilisateur 30/08 - sans cette marge, seule la
+// semaine calendaire du lundi etait proposee, jamais celle du dimanche visee).
+function _weeksNearDate(dateStr) {
+  const t = new Date(dateStr).getTime();
+  const padMs = SESSION_LINK_WINDOW_PAD_DAYS * 86400000;
+  return (campusState.weeks || []).filter(w => {
+    const s = startOfDay(w.weekDate) - padMs;
+    const e = startOfDay(w.weekDate) + 7 * 86400000 + padMs;
+    return t >= s && t < e;
+  });
+}
+
 // ═══════════════════════════════════════════════════════
 // MODALE PICKER — depuis Activites (activite connue, choix de la seance)
 // ═══════════════════════════════════════════════════════
 function openActivityLinkPicker(activity) {
-  const week = findWeekForDate(activity.date);
-  if (!week) { if (typeof showToast === 'function') showToast('Aucune semaine de plan ne correspond à la date de cette activité.', 'info'); return; }
-  const weekId = week._id;
-  const eligible = (week.sessions || []).filter(s => isSessionAnalysable(s) && !_analysisIndex.bySession[_analysisSessionKey(weekId, s.trainingIndex ?? 0)]);
+  const weeks = _weeksNearDate(activity.date);
+  if (!weeks.length) { if (typeof showToast === 'function') showToast('Aucune semaine de plan ne correspond à la date de cette activité.', 'info'); return; }
+  const dayAct = startOfDay(new Date(activity.date).getTime());
+  // rel = position de la semaine de LA SEANCE par rapport au jour reel de
+  // l'activite - null si l'activite tombe dans sa propre semaine calendaire,
+  // 'precedente'/'suivante' sinon (cf badge sur chaque ligne ci-dessous).
+  const eligible = [];
+  weeks.forEach(week => {
+    const weekStart = startOfDay(week.weekDate);
+    const weekEnd = weekStart + 7 * 86400000;
+    const rel = dayAct >= weekStart && dayAct < weekEnd ? null : (dayAct >= weekEnd ? 'precedente' : 'suivante');
+    (week.sessions || []).forEach(s => {
+      if (!isSessionAnalysable(s) || _analysisIndex.bySession[_analysisSessionKey(week._id, s.trainingIndex ?? 0)]) return;
+      eligible.push({ session: s, week, rel });
+    });
+  });
 
   _closeSessionAnalysisModals();
   const modal = document.createElement('div');
@@ -1283,7 +1344,7 @@ function openActivityLinkPicker(activity) {
   modal.innerHTML = `
     <div style="background:var(--bg-white);border:1px solid var(--border);border-radius:16px;padding:18px 20px 16px;width:100%;max-width:560px;max-height:85vh;overflow-y:auto;box-shadow:0 24px 60px rgba(0,0,0,.25);">
       <div style="font-family:var(--font);font-weight:700;font-size:15px;color:var(--text-primary);margin-bottom:4px">Lier à une séance du plan</div>
-      <div style="font-family:var(--font-body);font-size:12px;color:var(--text-secondary);margin-bottom:14px">${activity.name || 'Activité'} — semaine du ${fmtWeekRange(week.weekDate)}</div>
+      <div style="font-family:var(--font-body);font-size:12px;color:var(--text-secondary);margin-bottom:14px">${activity.name || 'Activité'} — ${formatDateShort(activity.date, true)}</div>
       <div id="session-link-picker-list"></div>
       <button id="session-link-picker-close" style="margin-top:14px;width:100%;padding:9px;border:1px solid var(--border);border-radius:9px;background:transparent;color:var(--text-secondary);font-size:13px;font-weight:600;cursor:pointer;">Fermer</button>
     </div>`;
@@ -1296,19 +1357,22 @@ function openActivityLinkPicker(activity) {
 
   const listEl = modal.querySelector('#session-link-picker-list');
   if (eligible.length === 0) {
-    listEl.innerHTML = '<div style="font-family:var(--font-body);font-size:12.5px;color:var(--text-muted);padding:16px 0;text-align:center">Aucune séance disponible cette semaine-là (déjà liées ou non analysables).</div>';
+    listEl.innerHTML = `<div style="font-family:var(--font-body);font-size:12.5px;color:var(--text-muted);padding:16px 0;text-align:center">Aucune séance disponible autour de cette date (± ${SESSION_LINK_WINDOW_PAD_DAYS} jours, déjà liées ou non analysables).</div>`;
     return;
   }
-  eligible.forEach(s => {
+  eligible.forEach(({ session: s, week, rel }) => {
     const row = document.createElement('div');
     row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 8px;border-bottom:1px solid var(--border-light);';
+    const relBadge = rel
+      ? `<span style="display:inline-block;margin-left:6px;padding:1px 6px;border-radius:6px;background:var(--bg-soft, rgba(0,0,0,.06));color:var(--text-secondary);font-size:10.5px;font-weight:600;">semaine ${rel}</span>`
+      : '';
     row.innerHTML = `
       <div>
-        <div style="font-family:var(--font-body);font-weight:600;font-size:13px;color:var(--text-primary)">${s.displayName || s.name}</div>
-        <div style="font-family:var(--font-body);font-size:11.5px;color:var(--text-secondary)">${getCategoryStyle(s.trainingCategory).label}</div>
+        <div style="font-family:var(--font-body);font-weight:600;font-size:13px;color:var(--text-primary)">${s.displayName || s.name}${relBadge}</div>
+        <div style="font-family:var(--font-body);font-size:11.5px;color:var(--text-secondary)">${getCategoryStyle(s.trainingCategory).label} · semaine du ${fmtWeekRange(week.weekDate)}</div>
       </div>
       <button type="button" style="flex-shrink:0;padding:6px 12px;border-radius:8px;border:1px solid var(--brand-green);background:var(--brand-green);color:#fff;font-size:12px;font-weight:700;cursor:pointer;">Lier &amp; analyser</button>`;
-    row.querySelector('button').addEventListener('click', () => linkSessionToActivity(weekId, s.trainingIndex ?? 0, activity.id));
+    row.querySelector('button').addEventListener('click', () => linkSessionToActivity(week._id, s.trainingIndex ?? 0, activity.id));
     listEl.appendChild(row);
   });
 }
@@ -2044,7 +2108,10 @@ function renderActivityAnalysisButtons(activity) {
   }
   const t = (activity.activityType || '').toLowerCase();
   if (!(t.includes('run') || t.includes('trail'))) return '';
-  if (!findWeekForDate(activity.date)) return '';
+  // _weeksNearDate (pas findWeekForDate) : une activite decalee hors de sa
+  // semaine calendaire stricte (cf openActivityLinkPicker) doit quand meme
+  // voir apparaitre ce bouton, sinon la marge de rattrapage est invisible.
+  if (!_weeksNearDate(activity.date).length) return '';
   return `<button type="button" class="activity-link" id="btn-link-session-analysis" style="cursor:pointer">🔗 Lier à une séance</button>`;
 }
 
