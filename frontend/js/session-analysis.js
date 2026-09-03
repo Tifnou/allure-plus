@@ -232,8 +232,87 @@ function getHistoricalVo2Max(dateStr) {
 // incoherente avec celle deja affichee sur la fiche de seance — exactement
 // l'erreur que CLAUDE.md interdit ("ne jamais utiliser les allures
 // historiques de Campus").
-function getCorrectVma(activity) {
-  const vo2 = (activity?.date ? getHistoricalVo2Max(activity.date) : null)
+// VO2max Garmin tel qu'il etait juste APRES la DERNIERE seance CAP/Trail qui
+// precede celle analysee (peu importe le jour) — vO2MaxValue sur une
+// activite reflete l'etat APRES le recalcul qu'ELLE a declenche (voir
+// getCorrectVma), donc celui de la derniere sortie course/trail precedente
+// est la meilleure estimation disponible de "la valeur juste avant" la
+// seance analysee : plus precis qu'une simple veille calendaire
+// (getHistoricalVo2Max) quand le VO2max change LE JOUR MEME de la seance,
+// entre son debut et sa fin (bug reel constate : seance seuil dont le VO2max
+// Garmin passe de 47.5 a 47.8 entre le debut et la fin de CETTE MEME seance
+// — la veille calendaire ne suffit pas a isoler ce cas). Restreint aux
+// activites CAP/Trail (activityType contenant "run", couvre aussi
+// trail_running/track_running/treadmill_running) : Garmin calcule un VO2max
+// DIFFERENT par sport (course vs velo...), donc une activite non-course
+// juste avant (marche, velo, PPG...) ne porte pas la bonne valeur meme si
+// son champ vO2MaxValue est renseigne (retour utilisateur : le 1er essai qui
+// prenait n'importe quelle activite precedente donnait encore un resultat
+// different de l'attendu). _allActivities (app.js) est deja triee par Garmin
+// la plus recente en premier, donc on cherche la plus RECENTE activite
+// CAP/Trail strictement anterieure, pas juste la premiere du tableau.
+function getPrevActivityVo2Max(activity) {
+  if (typeof _allActivities === 'undefined' || !_allActivities.length || !activity?.date) return null;
+  const t = new Date(activity.date).getTime();
+  const activityId = activity.id != null ? String(activity.id) : null;
+  let best = null, bestT = -Infinity;
+  for (const a of _allActivities) {
+    if (a.vO2MaxValue == null || !a.date) continue;
+    if (activityId != null && String(a.id) === activityId) continue;
+    if (!(a.activityType || '').toLowerCase().includes('run')) continue;
+    const at = new Date(a.date).getTime();
+    if (at < t && at > bestT) { bestT = at; best = a.vO2MaxValue; }
+  }
+  return best;
+}
+
+// Instantane quotidien du VO2max capture par Allure+ lui-meme
+// (captureHealthSnapshot('vo2max', ...), server.js, appele a CHAQUE
+// chargement du dashboard) — un seul instantane GARDE par jour calendaire, le
+// PREMIER vu ce jour-la (ecriture ignoree si une entree existe deja pour
+// cette date, cf server.js captureHealthSnapshot). On prend la valeur de la
+// VEILLE de l'activite (jour STRICTEMENT anterieur), jamais celle du jour
+// meme : le "premier instantane du jour" peut tres bien avoir ete capture
+// APRES la seance elle-meme (ex : premiere ouverture de l'app ce jour-la
+// faite pour consulter l'analyse juste apres avoir couru), auquel cas il
+// porterait deja la valeur post-seance — retour utilisateur (03/09) confirme
+// par les donnees reelles (data/health_snapshots.json) : l'instantane du jour
+// de la seance valait deja 47.8 (post-seance), celui de la VEILLE valait
+// 47.5, exactement la valeur qui redonne la cible 5'00-5'11 realement
+// affichee ce matin-la sur la page Entrainement (verifie : S60 84-87% VMA,
+// VMA(47.5)=13.77km/h -> 5'00-5'11/km au sec pres). Priorite la plus haute
+// dans getCorrectVma : plus fiable que l'historique Garmin officiel
+// (_vo2maxSeries/getHistoricalVo2Max), qui s'est avere donner une valeur
+// encore trop proche du post-seance sur ce meme cas reel (4'58-5'08) — et que
+// la derniere sortie CAP/Trail precedente (getPrevActivityVo2Max), trop
+// ancienne pour refleter la progression recente (5'04-5'15 sur ce meme cas).
+let _vo2maxDailySnapshotsPromise = null;
+function fetchVo2maxDailySnapshots() {
+  if (!_vo2maxDailySnapshotsPromise) {
+    _vo2maxDailySnapshotsPromise = fetch('/api/health-history/vo2max')
+      .then(res => res.ok ? res.json() : [])
+      .catch(() => []);
+  }
+  return _vo2maxDailySnapshotsPromise;
+}
+async function getAppSnapshotVo2MaxBeforeDay(dateStr) {
+  if (!dateStr) return null;
+  const activityDay = String(dateStr).slice(0, 10);
+  const snapshots = await fetchVo2maxDailySnapshots();
+  if (!snapshots || !snapshots.length) return null;
+  let best = null;
+  for (const entry of snapshots) { // deja trie croissant par date (cf server.js)
+    if (entry.date < activityDay) best = entry; else break;
+  }
+  if (!best) return null;
+  const v = best.value;
+  return (v && typeof v === 'object') ? (v.precise ?? v.vo2max ?? null) : (v ?? null);
+}
+
+async function getCorrectVma(activity) {
+  const vo2 = await getAppSnapshotVo2MaxBeforeDay(activity?.date)
+    || getPrevActivityVo2Max(activity)
+    || (activity?.date ? getHistoricalVo2Max(activity.date) : null)
     || activity?.vO2MaxValue
     || (typeof _latestVO2Max !== 'undefined' ? _latestVO2Max : null);
   if (vo2 && vo2 > 3.5) {
@@ -310,7 +389,7 @@ async function buildSessionAnalysis(session, week, activity) {
   const isTrail = isTrailSession(session);
   const sessionTypeKey = classifySessionType(session, goalType, isTrail);
   const profile = SESSION_TYPE_PROFILES[sessionTypeKey];
-  const vma = getCorrectVma(activity);
+  const vma = await getCorrectVma(activity);
 
   const plannedFlat = flattenPlannedExercises(session);
   const warmupEx   = plannedFlat.filter(e => e.blockType === 'warm-up');
@@ -629,18 +708,27 @@ async function buildSessionAnalysis(session, week, activity) {
   let hr = null;
   if (activity.avgHR) {
     let pctTimeInTargetZone = null;
+    // pctTimeNotOverBand : temps PAS AU-DESSUS de la borne haute (zone cible
+    // + en dessous), utilise pour le SCORE (composant "hr" plus bas) —
+    // distinct de pctTimeInTargetZone (affiche tel quel, litteral, dans la
+    // modale). Une FC basse alors que l'allure est conforme est un signe de
+    // bonne forme, jamais un defaut a sanctionner comme une FC trop haute
+    // (coherent avec hrVerdict 'basse', deja traite en positif ailleurs).
+    let pctTimeNotOverBand = null;
     if (approxBand && zoneRelevantLaps.length) {
-      let inTime = 0, totalTime = 0;
+      let inTime = 0, notOverTime = 0, totalTime = 0;
       zoneRelevantLaps.forEach(l => {
         const dur = l.elapsedDuration || l.movingDuration || l.duration || 0;
         totalTime += dur;
         if (l.averageHR && l.averageHR >= approxBand.low && l.averageHR <= approxBand.high) inTime += dur;
+        if (l.averageHR && l.averageHR <= approxBand.high) notOverTime += dur;
       });
       pctTimeInTargetZone = totalTime > 0 ? Math.round((inTime / totalTime) * 100) : null;
+      pctTimeNotOverBand = totalTime > 0 ? Math.round((notOverTime / totalTime) * 100) : null;
     }
     hr = {
       avgHR: Math.round(activity.avgHR), maxHR: activity.maxHR ? Math.round(activity.maxHR) : null,
-      approxTargetBand: approxBand, pctTimeInTargetZone,
+      approxTargetBand: approxBand, pctTimeInTargetZone, pctTimeNotOverBand,
       trendAcrossReps: (useRepsPath && mainGroup) ? zoneRelevantLaps.map(l => l.averageHR ? Math.round(l.averageHR) : null) : [],
       hrRecoveryBetweenReps: recoveryLaps.map(l => l.averageHR ? Math.round(l.averageHR) : null),
     };
@@ -768,7 +856,7 @@ async function buildSessionAnalysis(session, week, activity) {
     duration: scoreFromDeltaPct(durDeltaPct, 10, 50),
     distance: scoreFromDeltaPct(distDeltaPct, 10, 50),
     pace: (paceLenient && rawPaceScore != null) ? Math.max(rawPaceScore, 75) : rawPaceScore,
-    hr: hr && hr.pctTimeInTargetZone != null ? hr.pctTimeInTargetZone : null,
+    hr: hr && hr.pctTimeNotOverBand != null ? hr.pctTimeNotOverBand : null,
     drift: cardiacDrift ? scoreFromBand(cardiacDrift.driftPct, 4, 18) : null,
     regularity: scoreFromBand(regularity.maxEcartSecKm, 8, 40),
     structure: scoreFromStructureReps(plannedMainReps, structure.actualMainReps),
@@ -1751,7 +1839,7 @@ const SCORE_COMPONENT_LABELS = {
   duration:   'Durée',
   distance:   'Distance',
   pace:       'Allure',
-  hr:         'Fréquence cardiaque (% du temps dans la zone cible)',
+  hr:         'Fréquence cardiaque (% du temps sans dépassement de la zone cible)',
   drift:      'Dérive cardiaque',
   regularity: 'Régularité entre répétitions',
   structure:  'Répétitions réalisées',
@@ -1801,6 +1889,12 @@ function componentNarrative(key, record) {
       if (!hr) return null;
       const band = hr.approxTargetBand;
       const bandTxt = band ? ` (zone visée ~${band.low}-${band.high} bpm)` : '';
+      // Une FC sous la zone visee n'est jamais penalisee (voir components.hr,
+      // pctTimeNotOverBand) : phrase dediee pour ne pas laisser croire que le
+      // score en tient rigueur, ce qui contredirait le pourcentage affiche.
+      if (band && hr.avgHR < band.low) {
+        return `FC moyenne de ${hr.avgHR} bpm, en dessous de la zone visée${bandTxt} — effort bien maîtrisé, ne pénalise pas le score.`;
+      }
       return hr.pctTimeInTargetZone != null
         ? `${hr.pctTimeInTargetZone}% du temps dans la zone de FC visée${bandTxt} — FC moyenne ${hr.avgHR} bpm.`
         : `FC moyenne de ${hr.avgHR} bpm${bandTxt}.`;
