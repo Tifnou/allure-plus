@@ -1,12 +1,21 @@
 // globe.js — Globe 3D des activites (page Activites), moteur CesiumJS
-// Approche a tuiles (CARTO dark_all, meme famille OSM/CARTO deja utilisee
-// pour les cartes de trace GPS ailleurs dans l'app) plutot qu'une texture
-// image unique : zoom net a tout niveau, pas de flou (contrainte explicite
-// utilisateur) - contrairement a la version precedente (globe.gl), qui
-// plafonnait a la resolution d'une seule image raster. Pas de compte
-// Cesium Ion (Ion.defaultAccessToken laisse vide) : terrain plat
-// (EllipsoidTerrainProvider, pas de relief) + imagerie CARTO seule,
-// aucune fonctionnalite payante utilisee.
+// Approche a tuiles (raster Esri World Dark/Light Gray Base, voir plus bas)
+// plutot qu'une texture image unique : zoom net a tout niveau, pas de flou
+// (contrainte explicite utilisateur) - contrairement a la version
+// precedente (globe.gl), qui plafonnait a la resolution d'une seule image
+// raster. Pas de compte Cesium Ion (Ion.defaultAccessToken laisse vide) :
+// terrain plat (EllipsoidTerrainProvider, pas de relief) + imagerie Esri
+// seule, aucune fonctionnalite payante/compte utilisateur necessaire.
+//
+// Utilisait a l'origine les tuiles CARTO (basemaps.cartocdn.com, meme
+// famille OSM/CARTO que les cartes de trace GPS ailleurs dans l'app) -
+// CARTO a ferme l'acces anonyme a ce service (watermark "API KEY REQUIRED"
+// constate par l'utilisateur, migration cote CARTO vers un compte/cle API
+// obligatoire meme pour un usage gratuit). Bascule sur les tuiles raster
+// Esri "World Dark/Light Gray Base" (server.arcgisonline.com), verifiees
+// librement accessibles sans cle ni compte - seul inconvenient : ordre
+// {z}/{y}/{x} (pas {z}/{x}/{y}) et pas de sous-domaines {s}/{r} a gerer
+// (un seul hote, pas de variante retina dediee).
 //
 // Les cercles/halos (memes marqueurs que la version globe.gl) sont de
 // vrais elements DOM positionnes a chaque frame via la projection
@@ -29,7 +38,6 @@ let _globeFarLayer = null;
 let _globeCloseLayer = null;
 let _globeIsClose = false;
 const GLOBE_ZOOM_SWITCH_METERS = 20000;
-const _globeTileSubdomains = ['a', 'b', 'c', 'd'];
 
 function _globeGeoPoints() {
   return (_lastFilteredActivities || [])
@@ -154,15 +162,13 @@ function _initGlobeInstance() {
     infoBox: false,
     selectionIndicator: false,
     terrainProvider: new Cesium.EllipsoidTerrainProvider(),
-    // "_nolabels" sur les deux couches : les libelles CARTO (pays, regions -
-    // "NORMANDY", "BURGUNDY-FREE COUNTY"...) sont figes en anglais, pas de
-    // parametre de langue disponible sur ces tuiles raster hebergees -
-    // plutot que d'afficher du texte dans la mauvaise langue, on les
-    // retire simplement des deux styles.
+    // "Base" (sans libelles) sur les deux couches : les libelles Esri
+    // seraient de toute facon figes en anglais, pas de parametre de langue
+    // disponible sur ces tuiles raster hebergees - on garde le meme choix
+    // qu'avec CARTO precedemment (styles "_nolabels").
     baseLayer: new Cesium.ImageryLayer(new Cesium.UrlTemplateImageryProvider({
-      url: 'https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png',
-      subdomains: _globeTileSubdomains,
-      credit: '© OpenStreetMap contributors © CARTO',
+      url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+      credit: 'Esri, HERE, Garmin, © OpenStreetMap contributors',
       maximumLevel: 19,
     })),
     contextOptions: { webgl: { alpha: true } },
@@ -179,17 +185,15 @@ function _initGlobeInstance() {
   scene.screenSpaceCameraController.minimumZoomDistance = 50;
   _cesiumViewer.cesiumWidget.creditContainer.style.display = 'none';
 
-  // Style sombre CARTO illisible de pres (rues a peine visibles sur fond
-  // quasi noir, constate par l'utilisateur) - deuxieme couche claire
-  // (meme "positron" que la version routiere legere de CARTO, jamais
-  // utilisee ailleurs dans l'app mais meme famille), affichee seulement
-  // sous GLOBE_ZOOM_SWITCH_METERS d'altitude camera pour garder le globe
-  // sombre et epure vu de loin, tout en restant lisible une fois zoome.
+  // Style sombre illisible de pres (rues a peine visibles sur fond quasi
+  // noir, constate par l'utilisateur) - deuxieme couche claire (Esri "World
+  // Light Gray Base", meme famille), affichee seulement sous
+  // GLOBE_ZOOM_SWITCH_METERS d'altitude camera pour garder le globe sombre
+  // et epure vu de loin, tout en restant lisible une fois zoome.
   _globeFarLayer = _cesiumViewer.imageryLayers.get(0);
   _globeCloseLayer = _cesiumViewer.imageryLayers.addImageryProvider(new Cesium.UrlTemplateImageryProvider({
-    url: 'https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png',
-    subdomains: _globeTileSubdomains,
-    credit: '© OpenStreetMap contributors © CARTO',
+    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+    credit: 'Esri, HERE, Garmin, © OpenStreetMap contributors',
     maximumLevel: 19,
   }));
   _globeCloseLayer.show = false;
