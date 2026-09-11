@@ -169,7 +169,13 @@ function _initGlobeInstance() {
     baseLayer: new Cesium.ImageryLayer(new Cesium.UrlTemplateImageryProvider({
       url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',
       credit: 'Esri, HERE, Garmin, © OpenStreetMap contributors',
-      maximumLevel: 19,
+      // Couverture reelle verifiee jusqu'a la zone 16 seulement (zone 17+ :
+      // tuile "Map data not yet available" identique quelles que soient les
+      // coordonnees, constate par l'utilisateur en zoomant sur le detail
+      // des rues) - au-dela, Cesium n'a plus besoin de charger cette tuile
+      // fixe : il reutilise/agrandit automatiquement la derniere tuile
+      // reelle (zone 16) au lieu d'afficher le message d'indisponibilite.
+      maximumLevel: 16,
     })),
     contextOptions: { webgl: { alpha: true } },
   });
@@ -194,7 +200,7 @@ function _initGlobeInstance() {
   _globeCloseLayer = _cesiumViewer.imageryLayers.addImageryProvider(new Cesium.UrlTemplateImageryProvider({
     url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}',
     credit: 'Esri, HERE, Garmin, © OpenStreetMap contributors',
-    maximumLevel: 19,
+    maximumLevel: 16, // meme couverture reelle que la couche sombre ci-dessus
   }));
   _globeCloseLayer.show = false;
 
