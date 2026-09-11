@@ -410,7 +410,20 @@ async function buildSessionAnalysis(session, week, activity) {
   // Seules les repetitions d'un bloc reellement repete (repeat > 1) comptent
   // comme "repetitions" — le bloc continu (repeat 1, ex: le corps d'un
   // footing EF) n'en est pas une, meme s'il est aussi de type "running".
-  const repeatingRunningEx = mainFlat.filter(e => e.exerciseType === 'running' && (e.blockRepeat || 1) > 1);
+  // Exclusion supplementaire sur pace.perception ('easy'/'comfortable') :
+  // certains gabarits Campus (constate sur une seance "Bloc Choc" trail,
+  // repeat 2x[allure course 30' + recup 5']) taguent la recuperation d'un
+  // bloc repete en exerciseType "running" au lieu de "recuperation" (seul
+  // le cooldown final l'utilise correctement dans ce gabarit) - sans ce
+  // filtre, chaque repetition compte alors pour 2 (effort + recup) au lieu
+  // de 1 (4 → — affiche au lieu de 2 → 2 sur cette seance reelle). Le
+  // vocabulaire perception ('easy'/'comfortable' = recuperation, 'target'/
+  // 'steady'/etc = effort) est lui coherent sur tous les gabarits verifies,
+  // y compris les fractionnes bien tagues (S60 8x1' notamment) - repli sur
+  // ce signal plutot que sur exerciseType seul.
+  const repeatingRunningEx = mainFlat.filter(e =>
+    e.exerciseType === 'running' && (e.blockRepeat || 1) > 1
+    && !['easy', 'comfortable'].includes(e.pace?.perception));
 
   const plannedWarmupSec   = warmupEx.reduce((s, e) => s + durationsToSeconds(e.durations), 0);
   const plannedCooldownSec = cooldownEx.reduce((s, e) => s + durationsToSeconds(e.durations), 0);
@@ -1043,9 +1056,11 @@ function computeGradeSegments(elevation, binSizeM = 50) {
 // limite depend du terrain (plus basse qu'un seuil "plat" classique, car sur
 // une pente tres raide un jogging reel est deja lent) : approximation, pas
 // une reproduction exacte de la detection Garmin. L'immobile n'est PAS un
-// seuil de vitesse mais lu directement des compteurs internes Garmin
-// sumMovingDuration/sumElapsedDuration (le plus fiable possible, Garmin
-// calcule deja cette distinction cote serveur) - cf /api/activity/:id/gps.
+// seuil de vitesse mais derive du compteur interne Garmin sumMovingDuration
+// (le plus fiable possible pour cette distinction precise, Garmin calcule
+// deja mouvement/immobile cote serveur) - cf /api/activity/:id/gps. Voir
+// computeMovementSplit plus bas pour pourquoi l'axe de temps utilise est
+// `sec`, pas sumElapsedDuration (qui peut deborder la duree reelle).
 const RUN_SPEED_THRESHOLD_MPS = 1.5;
 
 function computeMovementSplit(elevation) {
@@ -1055,10 +1070,25 @@ function computeMovementSplit(elevation) {
   for (let i = 1; i < elevation.length; i++) {
     const prev = elevation[i - 1], cur = elevation[i];
     const dDist = Math.max(0, cur.distKm - prev.distKm);
+    // dElapsed vient de `sec` (horodatage reel du point GPS), PAS de la
+    // difference de `elapsedSec` (compteur cumule Garmin sumElapsedDuration)
+    // : retour utilisateur (sortie 2h/538m D+ avec un arret reel pour
+    // discuter) confirme sur cette meme activite que sumElapsedDuration peut
+    // depasser la duree reelle de l'activite (verifie : dernier point a
+    // elapsedSec=7899s pour une sortie de 7200s reels, exactement l'ecart
+    // "Temps ecoule" 2:11:38 vs "Duree" 2:00:01 que Garmin affiche lui-meme
+    // pour cette activite) - utiliser elapsedSec comme axe de temps faisait
+    // deborder le total course+marche+immobile au-dela de la duree reelle
+    // ET gonflait a tort l'allure moyenne "en deplacement" (9'03/km calcule
+    // sur 7899s au lieu du 8'11/km reel). `sec`, lui, correspond exactement
+    // a la duree reelle de l'activite (verifie sur ce meme cas : dernier
+    // point a sec=7201s). movingSec reste la source de l'ecart
+    // mouvement/immobile (le plus fiable pour CETTE distinction precise),
+    // simplement borne pour ne jamais depasser l'intervalle reel dElapsed.
     let dMoving, dElapsed;
-    if (cur.movingSec != null && prev.movingSec != null && cur.elapsedSec != null && prev.elapsedSec != null) {
+    if (cur.movingSec != null && prev.movingSec != null && cur.sec != null && prev.sec != null) {
       hasStillData = true;
-      dElapsed = Math.max(0, cur.elapsedSec - prev.elapsedSec);
+      dElapsed = Math.max(0, (cur.sec || 0) - (prev.sec || 0));
       dMoving = Math.max(0, Math.min(dElapsed, cur.movingSec - prev.movingSec));
     } else {
       dElapsed = Math.max(0, (cur.sec || 0) - (prev.sec || 0));
@@ -1088,12 +1118,15 @@ function computeMovementSplit(elevation) {
 // une courte fenêtre glissante (pas l'instantané brut, trop bruité GPS).
 function computeBestPace(elevation, windowSec = 20) {
   let best = null;
+  // `sec` prioritaire sur `elapsedSec` (voir computeMovementSplit plus haut
+  // pour pourquoi : sumElapsedDuration peut deborder la duree reelle d'une
+  // activite) - `elapsedSec` ne reste qu'un repli si `sec` est absent.
   for (let i = 0; i < elevation.length; i++) {
-    const t0 = elevation[i].elapsedSec ?? elevation[i].sec;
+    const t0 = elevation[i].sec ?? elevation[i].elapsedSec;
     if (t0 == null) continue;
     let j = i;
-    while (j + 1 < elevation.length && ((elevation[j + 1].elapsedSec ?? elevation[j + 1].sec) - t0) < windowSec) j++;
-    const t1 = elevation[j].elapsedSec ?? elevation[j].sec;
+    while (j + 1 < elevation.length && ((elevation[j + 1].sec ?? elevation[j + 1].elapsedSec) - t0) < windowSec) j++;
+    const t1 = elevation[j].sec ?? elevation[j].elapsedSec;
     const dt = t1 - t0;
     if (dt < windowSec * 0.5) continue; // fenetre trop courte (fin de trace)
     const dDist = elevation[j].distKm - elevation[i].distKm;
