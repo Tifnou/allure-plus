@@ -449,13 +449,24 @@ function requireCampusToken(req, res, next) {
   next();
 }
 
-// Meme constante que frontend/js/app.js (ADMIN_EMAIL) - export du plan
-// reserve au compte admin, seul a partager son plan a des amis externes
+// Meme constante que frontend/js/app.js (ADMIN_EMAIL)
 const ADMIN_EMAIL = 'shiznogoud@gmail.com';
 function requireAdmin(req, res, next) {
   const s = getSession(req);
   if (!s || !s.email || s.email.toLowerCase() !== ADMIN_EMAIL.toLowerCase()) {
     return res.status(403).json({ error: 'Reserve au compte admin' });
+  }
+  next();
+}
+
+// Export du plan en Excel : admin d'office, ou tout compte a qui l'admin a
+// explicitement accorde le droit (xlsxExportAccess, tableau Utilisateurs) -
+// distinct de requireAdmin (qui, lui, reste reserve au reste du panel Admin).
+function requireXlsxExportAccess(req, res, next) {
+  const s = getSession(req);
+  const isAdmin = s?.email && s.email.toLowerCase() === ADMIN_EMAIL.toLowerCase();
+  if (!s || (!isAdmin && s.xlsxExportAccess !== true)) {
+    return res.status(403).json({ error: "Export du plan non autorise pour ce compte" });
   }
   next();
 }
@@ -507,9 +518,9 @@ async function finalizeGarminSession(gc, email) {
   // rejette la connexion s'il a ete bloque par l'admin (voir
   // checkUserDirectory plus bas - throw si blocked) - seule visibilite/
   // controle possible sur une appli distribuee en .exe, sans autre canal.
-  const { ticketAccess } = await checkUserDirectory(email, displayName);
+  const { ticketAccess, xlsxExportAccess } = await checkUserDirectory(email, displayName);
 
-  return { gc, email, displayName, fns, lastAccess: Date.now(), ticketAccess };
+  return { gc, email, displayName, fns, lastAccess: Date.now(), ticketAccess, xlsxExportAccess };
 }
 
 async function createGarminSession(email, password) {
@@ -703,8 +714,8 @@ async function restoreGarminSession() {
     // catch ci-dessous reserve aux jetons vraiment perimes/invalides), le
     // blocage est une decision Allure+, pas un probleme d'authentification
     // Garmin.
-    const { ticketAccess } = await checkUserDirectory(restoredEmail, displayName);
-    return { gc, email: restoredEmail, displayName, fns, lastAccess: Date.now(), ticketAccess };
+    const { ticketAccess, xlsxExportAccess } = await checkUserDirectory(restoredEmail, displayName);
+    return { gc, email: restoredEmail, displayName, fns, lastAccess: Date.now(), ticketAccess, xlsxExportAccess };
   } catch(e) {
     if (e.blocked) {
       console.warn(`[WARN] Compte bloque par l'administrateur, session non restauree : ${e.message}`);
@@ -837,6 +848,9 @@ app.get('/api/status', (req, res) => {
     // restauree avant l'ajout de ce champ...) reste "true" par defaut,
     // jamais bloquant pour un compte legitime.
     ticketAccess:   s?.ticketAccess !== false,
+    // true uniquement si explicitement accorde par l'admin (voir
+    // checkUserDirectory) - ferme par defaut, contrairement a ticketAccess.
+    xlsxExportAccess: !!s?.xlsxExportAccess,
   });
 });
 
@@ -1124,11 +1138,14 @@ async function checkUserDirectory(email, displayName) {
       err.blocked = true;
       throw err;
     }
-    return { ticketAccess: data.ticketAccess !== false };
+    // xlsxExportAccess (export du plan en Excel) : contrairement a
+    // ticketAccess, ferme par defaut - une panne du relais ne doit jamais
+    // accorder un droit qui n'a pas ete explicitement valide par l'admin.
+    return { ticketAccess: data.ticketAccess !== false, xlsxExportAccess: !!data.xlsxExportAccess };
   } catch (e) {
     if (e.blocked) throw e;
     console.warn('[users] Verification du repertoire impossible (fail-open) :', e.message);
-    return { ticketAccess: true };
+    return { ticketAccess: true, xlsxExportAccess: false };
   }
 }
 
@@ -1162,7 +1179,10 @@ async function syncActiveSessionsFromDirectory() {
         continue;
       }
       for (const s of sessions.values()) {
-        if (s.email && s.email.toLowerCase() === email) s.ticketAccess = data.ticketAccess !== false;
+        if (s.email && s.email.toLowerCase() === email) {
+          s.ticketAccess = data.ticketAccess !== false;
+          s.xlsxExportAccess = !!data.xlsxExportAccess;
+        }
       }
     } catch (e) { /* silencieux, retente au prochain cycle */ }
   }
@@ -1191,6 +1211,16 @@ app.post('/api/admin/users/:email/ticket-access', requireAdmin, async (req, res)
     const data = await callSupportRelay(`/users/${encodeURIComponent(req.params.email)}/ticket-access`, {
       method: 'POST',
       body: JSON.stringify({ adminKey: SUPPORT_ADMIN_KEY, ticketAccess: !!req.body?.ticketAccess }),
+    });
+    res.json(data);
+  } catch (err) { handleError(res, err); }
+});
+
+app.post('/api/admin/users/:email/xlsx-export-access', requireAdmin, async (req, res) => {
+  try {
+    const data = await callSupportRelay(`/users/${encodeURIComponent(req.params.email)}/xlsx-export-access`, {
+      method: 'POST',
+      body: JSON.stringify({ adminKey: SUPPORT_ADMIN_KEY, xlsxExportAccess: !!req.body?.xlsxExportAccess }),
     });
     res.json(data);
   } catch (err) { handleError(res, err); }
@@ -4154,13 +4184,15 @@ app.get('/api/campus/export-plan', requireCampusToken, async (req, res) => {
 });
 
 // Export du plan actif en fichier Excel (.xlsx) presentable a des amis qui
-// n'utilisent pas Allure+ - reserve au compte admin. Recoit goal/weeks
-// directement du frontend (campusState, deja charge a l'ecran) plutot que
-// de les re-chercher cote serveur : le plan affiche dans Entrainements peut
-// venir d'un choix cote navigateur (localStorage "prefer_imported_plan")
-// que le serveur ne voit pas, donc re-deviner la source cote serveur peut
-// exporter le mauvais plan (ou aucun) meme quand un plan est bien affiche.
-app.post('/api/campus/export-plan-xlsx', requireAdmin, async (req, res) => {
+// n'utilisent pas Allure+ - reserve a l'admin et aux comptes explicitement
+// autorises (requireXlsxExportAccess, tableau Utilisateurs de l'Admin).
+// Recoit goal/weeks directement du frontend (campusState, deja charge a
+// l'ecran) plutot que de les re-chercher cote serveur : le plan affiche dans
+// Entrainements peut venir d'un choix cote navigateur (localStorage
+// "prefer_imported_plan") que le serveur ne voit pas, donc re-deviner la
+// source cote serveur peut exporter le mauvais plan (ou aucun) meme quand un
+// plan est bien affiche.
+app.post('/api/campus/export-plan-xlsx', requireXlsxExportAccess, async (req, res) => {
   try {
     const { goal, weeks, raceDayDurationSec } = req.body || {};
     if (!goal || !Array.isArray(weeks) || weeks.length === 0) {

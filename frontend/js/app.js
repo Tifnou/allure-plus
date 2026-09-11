@@ -398,7 +398,7 @@ async function checkStatus() {
     if (typeof checkSupportNotifications === 'function') checkSupportNotifications();
 
     // Afficher menu Admin si compte administrateur
-    showAdminNav(data.user);
+    showAdminNav(data.user, data.xlsxExportAccess);
 
     // Tampon "Pref 2" (case a cocher reservee a un compte, dans Mes informations)
     loadPref2State();
@@ -4255,13 +4255,16 @@ async function renderBgManagerGrid() {
 // ══════════════════════════════════════════════════════
 const ADMIN_EMAIL = 'shiznogoud@gmail.com';
 
-function showAdminNav(userEmail) {
+function showAdminNav(userEmail, xlsxExportAccess) {
+  const isAdmin = !!userEmail && userEmail.toLowerCase() === ADMIN_EMAIL.toLowerCase();
   const navAdmin = document.getElementById('nav-admin');
-  if (navAdmin && userEmail && userEmail.toLowerCase() === ADMIN_EMAIL.toLowerCase()) {
+  if (navAdmin && isAdmin) {
     navAdmin.style.display = 'flex';
   }
+  // Export du plan en Excel : admin d'office, ou tout compte auquel l'admin
+  // a explicitement accorde le droit (tableau Utilisateurs, page Admin).
   const btnExport = document.getElementById('btn-export-plan-xlsx');
-  if (btnExport && userEmail && userEmail.toLowerCase() === ADMIN_EMAIL.toLowerCase()) {
+  if (btnExport && (isAdmin || xlsxExportAccess === true)) {
     btnExport.style.display = 'inline-flex';
   }
   const navSupportAdmin = document.getElementById('nav-support-admin');
@@ -4436,6 +4439,7 @@ async function loadAdminUsers() {
               <th>1ère connexion</th>
               <th>Dernière connexion</th>
               <th>Accès tickets</th>
+              <th>Export Excel</th>
               <th>Accès Allure+</th>
             </tr>
           </thead>
@@ -4452,13 +4456,18 @@ async function loadAdminUsers() {
                   </label>
                 </td>
                 <td>
+                  <label class="admin-users-checkbox" onclick="event.stopPropagation()">
+                    <input type="checkbox" data-email="${escapeHtml(u.email)}" data-field="xlsxExportAccess" ${u.xlsxExportAccess ? 'checked' : ''} title="Autorise ce compte à exporter son plan en Excel">
+                  </label>
+                </td>
+                <td>
                   <button class="admin-users-block-btn ${u.blocked ? 'admin-users-block-btn--blocked' : ''}" data-email="${escapeHtml(u.email)}" type="button" onclick="event.stopPropagation()">
                     ${u.blocked ? '🔒 Bloqué — débloquer' : '🔓 Bloquer'}
                   </button>
                 </td>
               </tr>
               <tr class="admin-users-detail-row">
-                <td colspan="6">
+                <td colspan="7">
                   <div class="admin-users-detail-panel"></div>
                 </td>
               </tr>`).join('')}
@@ -4482,6 +4491,22 @@ async function loadAdminUsers() {
             body: JSON.stringify({ ticketAccess: cb.checked }),
           });
           showToast('Accès tickets mis à jour', 'success');
+        } catch (e) {
+          showToast('Erreur : ' + e.message, 'error');
+          cb.checked = !cb.checked;
+        }
+        cb.disabled = false;
+      };
+    });
+    wrap.querySelectorAll('input[data-field="xlsxExportAccess"]').forEach(cb => {
+      cb.onchange = async () => {
+        cb.disabled = true;
+        try {
+          await fetch(`${API}/api/admin/users/${encodeURIComponent(cb.dataset.email)}/xlsx-export-access`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ xlsxExportAccess: cb.checked }),
+          });
+          showToast('Export Excel mis à jour', 'success');
         } catch (e) {
           showToast('Erreur : ' + e.message, 'error');
           cb.checked = !cb.checked;

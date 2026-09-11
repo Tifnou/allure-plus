@@ -349,14 +349,15 @@ async function handleUserPing(req, env) {
   // par cas depuis le tableau Utilisateurs) - sauf pour le compte admin
   // lui-meme (isAdmin, transmis par server.js qui seul connait ADMIN_EMAIL),
   // ouvert d'office. N'affecte jamais un compte deja existant (seule la
-  // creation initiale du record lit ce champ).
+  // creation initiale du record lit ce champ). xlsxExportAccess (export du
+  // plan en Excel) suit la meme logique, ferme par defaut sauf pour l'admin.
   const key = userKey(email);
   const existing = await env.USERS_KV.get(key, { type: 'json' });
-  const record = existing || { email, firstSeen: now, blocked: false, ticketAccess: !!body.isAdmin };
+  const record = existing || { email, firstSeen: now, blocked: false, ticketAccess: !!body.isAdmin, xlsxExportAccess: !!body.isAdmin };
   record.lastSeen = now;
   if (displayName) record.displayName = displayName;
   await env.USERS_KV.put(key, JSON.stringify(record));
-  return json({ blocked: !!record.blocked, ticketAccess: record.ticketAccess !== false });
+  return json({ blocked: !!record.blocked, ticketAccess: record.ticketAccess !== false, xlsxExportAccess: !!record.xlsxExportAccess });
 }
 
 // Endpoint volontairement leger (pas d'adminKey) : interroge en continu par
@@ -369,6 +370,7 @@ async function handleUserStatus(req, env, email) {
   return json({
     blocked: !!(record && record.blocked),
     ticketAccess: record ? record.ticketAccess !== false : true,
+    xlsxExportAccess: !!(record && record.xlsxExportAccess),
   });
 }
 
@@ -439,6 +441,7 @@ export default {
         if (parts.length === 3 && parts[2] === 'status' && req.method === 'GET') return await handleUserStatus(req, env, decodeURIComponent(parts[1]));
         if (parts.length === 3 && parts[2] === 'block' && req.method === 'POST') return await handleSetUserFlag(req, env, decodeURIComponent(parts[1]), 'blocked');
         if (parts.length === 3 && parts[2] === 'ticket-access' && req.method === 'POST') return await handleSetUserFlag(req, env, decodeURIComponent(parts[1]), 'ticketAccess');
+        if (parts.length === 3 && parts[2] === 'xlsx-export-access' && req.method === 'POST') return await handleSetUserFlag(req, env, decodeURIComponent(parts[1]), 'xlsxExportAccess');
         return json({ message: 'Not found' }, 404);
       }
 
