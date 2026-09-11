@@ -3796,6 +3796,46 @@ function matchZoneFromPace(paceSecKm, vma) {
   return 'Z5';                    // > 95% VMA f¢â, â," VMA, intervalles courts
 }
 
+const LAP_BUTTON_CONDITION = { conditionTypeId: 1, conditionTypeKey: 'lap.button' };
+
+// Rend "au lap" (bouton Lap, fin ouverte) la toute DERNIERE recuperation
+// d'une seance structuree deja assemblee (steps final, apres warmup/
+// cooldown/RepeatGroupDTO) - jamais une recuperation intermediaire. Deux cas
+// selon la structure reelle de la seance (retour utilisateur : la 1ere
+// version ciblait a tort la recuperation de la derniere ITERATION du bloc
+// repete, alors qu'une seance peut avoir un bloc de retour au calme/
+// recuperation SEPARE juste apres ce bloc - c'est CELUI-LA qui doit
+// cloturer, pas la recup intermediaire du dernier passage) :
+// 1) Le tout dernier step de la seance est deja un step "a plat"
+//    (recovery ou cooldown, ex: le bloc CD_x final d'un fractionne S60) :
+//    on le rend directement au lap, le RepeatGroupDTO reste intact (toutes
+//    ses iterations, y compris la derniere, gardent leur recup normale).
+// 2) Le tout dernier step est le RepeatGroupDTO lui-meme (pas de bloc
+//    separe apres) ET son gabarit se termine par une recuperation : seul
+//    cas ou il faut sortir la derniere iteration du groupe (impossible de
+//    distinguer une iteration du gabarit partage autrement) pour rendre
+//    UNIQUEMENT sa recuperation finale au lap.
+function markLastRecoveryOpenEnded(steps) {
+  if (!steps.length) return;
+  const idx = steps.length - 1;
+  const last = steps[idx];
+  if (last.type === 'ExecutableStepDTO' && ['recovery', 'cooldown'].includes(last.stepType?.stepTypeKey)) {
+    steps[idx] = { ...last, endCondition: LAP_BUTTON_CONDITION, endConditionValue: null };
+    return;
+  }
+  if (last.type === 'RepeatGroupDTO' && last.numberOfIterations >= 2) {
+    const inner = last.workoutSteps || [];
+    const lastInner = inner[inner.length - 1];
+    if (lastInner?.stepType?.stepTypeKey === 'recovery') {
+      const extracted = inner.map(s => ({ ...s }));
+      extracted[extracted.length - 1] = { ...extracted[extracted.length - 1], endCondition: LAP_BUTTON_CONDITION, endConditionValue: null };
+      const remaining = last.numberOfIterations - 1;
+      const replacement = remaining >= 1 ? [{ ...last, numberOfIterations: remaining }, ...extracted] : extracted;
+      steps.splice(idx, 1, ...replacement);
+    }
+  }
+}
+
 function buildGarminWorkoutFromSession(session, weekNum, sessionDisplay, userZones, preferAllureplusZones = false) {
   // Nom du workout en ASCII propre
   const toAscii = s => (s||'').replace(/[^\x00-\x7F]/g, c => {
@@ -3817,14 +3857,11 @@ function buildGarminWorkoutFromSession(session, weekNum, sessionDisplay, userZon
   const ZONE_NAMES = { Z1:'Endurance confort',Z2:'Endurance Fondamentale',Z3:'Allure Marathon',Z4:'Seuil',Z5:'VMA',RECOVER:'Recuperation',RECOVERY:'Recuperation',WARMUP:'Echauffement',COOLDOWN:'Retour au calme' };
 
   // Construire un step Garmin depuis une zone paceZone (index relatif pour
-  // stepOrder). opts.openEnded : etape "au lap" (fin sur pression du bouton
-  // Lap) au lieu d'une duree chronometree fixe - utilise uniquement pour la
-  // toute derniere recuperation d'une seance fractionnee (voir
-  // buildStructuredSteps) : si l'athlete depasse la duree calibree de cette
-  // derniere recup, Garmin comptabilise sinon le depassement comme un effort
-  // "course a pied" supplementaire, ce qui fausse la moyenne reelle de
-  // l'effort constatee a l'analyse (retour utilisateur).
-  const mkStep = (zone, index, opts = {}) => {
+  // stepOrder). La conversion "au lap" (bouton Lap) de la toute derniere
+  // recuperation d'une seance fractionnee est appliquee APRES coup sur le
+  // resultat assemble (voir markLastRecoveryOpenEnded, plus haut) - jamais
+  // ici, ce step ne sait pas encore s'il finira dernier dans la seance.
+  const mkStep = (zone, index) => {
     // Priorite 1: kind semantique (ne jamais le remplacer par une detection d'allure)
     const zKey = (zone.kind || '').toUpperCase();
     // La vraie zone de ce pas est déjà résolue depuis pace.slug (fiable, voir zones.js
@@ -3882,7 +3919,6 @@ function buildGarminWorkoutFromSession(session, weekNum, sessionDisplay, userZon
     else                                                          { stepTypeId = 3; stepTypeKey = 'interval'; }
 
     const duration = Math.max(zone.duration || 60, 10);
-    const openEnded = !!opts.openEnded;
     return {
       type: 'ExecutableStepDTO',
       stepId: null,
@@ -3890,10 +3926,8 @@ function buildGarminWorkoutFromSession(session, weekNum, sessionDisplay, userZon
       childStepId: null,
       description,
       stepType: { stepTypeId, stepTypeKey },
-      endCondition: openEnded
-        ? { conditionTypeId: 1, conditionTypeKey: 'lap.button' }
-        : { conditionTypeId: 2, conditionTypeKey: 'time' },
-      endConditionValue: openEnded ? null : duration,
+      endCondition: { conditionTypeId: 2, conditionTypeKey: 'time' },
+      endConditionValue: duration,
       endConditionCompare: null,
       endConditionZone: null,
       preferredEndConditionUnit: null,
@@ -3908,10 +3942,7 @@ function buildGarminWorkoutFromSession(session, weekNum, sessionDisplay, userZon
   function buildStructuredSteps(zones) {
     if (zones.length === 0) return [mkStep({ kind: '', duration: totalDuration }, 0)];
 
-    // Attention : ne jamais passer mkStep directement a .map() - .map()
-    // appelle son callback avec (element, index, tableauEntier), et le 3e
-    // argument atterrirait alors dans le parametre opts de mkStep.
-    const steps = zones.map((z, i) => mkStep(z, i));
+    const steps = zones.map(mkStep);
     let wStart = 0, cEnd = zones.length;
 
     // Warmup: 1ere zone Z1/Z2 si duree >= 3min ET il y a d'autres zones apres
@@ -3933,6 +3964,7 @@ function buildGarminWorkoutFromSession(session, weekNum, sessionDisplay, userZon
     const midZones = zones.slice(wStart, cEnd);
     const midSteps = steps.slice(wStart, cEnd);
     let midResult = midSteps;
+    let foundRepeatGroup = false;
 
     if (midZones.length >= 4) {
       // Essayer des patterns de longueur 2 ou 3
@@ -3950,9 +3982,12 @@ function buildGarminWorkoutFromSession(session, weekNum, sessionDisplay, userZon
           else break;
         }
         if (reps >= 2 && j === midZones.length) {
-          // Pattern trouve! Creer un RepeatGroupDTO
+          // Pattern trouve! Creer un RepeatGroupDTO (sans extraction a ce
+          // stade - voir markLastRecoveryOpenEnded, applique une fois le
+          // resultat final assemble : seul lui sait si un bloc separe, ex.
+          // un retour au calme/recuperation final, suit ce groupe ou non).
           const repeatSteps = midSteps.slice(0, patLen).map((s, idx) => ({ ...s, stepOrder: idx + 1 }));
-          const repeatGroup = {
+          midResult = [{
             type: 'RepeatGroupDTO',
             stepId: null,
             stepOrder: -1, // fixe ci-dessous
@@ -3961,30 +3996,8 @@ function buildGarminWorkoutFromSession(session, weekNum, sessionDisplay, userZon
             smartRepeat: false,
             numberOfIterations: reps,
             workoutSteps: repeatSteps,
-          };
-          midResult = [repeatGroup];
-
-          // Derniere recuperation de la seance "au lap" (voir mkStep) : ne
-          // s'applique que si le pattern se termine bien par une
-          // recuperation (cas normal effort+recup repete) - toutes les
-          // iterations d'un RepeatGroupDTO rejouent le meme gabarit de
-          // steps, impossible de distinguer la derniere sans la sortir du
-          // groupe. On la sort donc du groupe (numberOfIterations - 1,
-          // gabarit inchange) et on la rejoue une fois de plus a plat juste
-          // apres, avec sa recuperation finale en "lap.button".
-          const lastPatternKind = (pattern[patLen - 1].kind || '').toUpperCase();
-          if (['RECOVER', 'RECOVERY', 'REST'].includes(lastPatternKind)) {
-            const finalIterZones = midZones.slice(midZones.length - patLen);
-            const finalIterSteps = finalIterZones.map((z, idx) => mkStep(z, idx, { openEnded: idx === finalIterZones.length - 1 }));
-            if (reps - 1 >= 2) {
-              midResult = [{ ...repeatGroup, numberOfIterations: reps - 1 }, ...finalIterSteps];
-            } else {
-              // Une seule iteration resterait dans le groupe (reps===2) :
-              // pas besoin d'un RepeatGroupDTO pour une iteration unique,
-              // on aplatit les deux occurrences a plat.
-              midResult = [...repeatSteps, ...finalIterSteps];
-            }
-          }
+          }];
+          foundRepeatGroup = true;
           break;
         }
       }
@@ -3996,6 +4009,9 @@ function buildGarminWorkoutFromSession(session, weekNum, sessionDisplay, userZon
       ...midResult,
       ...steps.slice(cEnd),
     ];
+    // Seulement si une seance fractionnee a bien ete detectee (jamais sur
+    // une seance continue sans repetitions - hors sujet de ce correctif).
+    if (foundRepeatGroup) markLastRecoveryOpenEnded(result);
     return result.map((s, idx) => ({ ...s, stepOrder: idx + 1 }));
   }
 
