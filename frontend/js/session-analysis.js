@@ -389,7 +389,17 @@ async function buildSessionAnalysis(session, week, activity) {
   const isTrail = isTrailSession(session);
   const sessionTypeKey = classifySessionType(session, goalType, isTrail);
   const profile = SESSION_TYPE_PROFILES[sessionTypeKey];
-  const vma = await getCorrectVma(activity);
+  let vma = await getCorrectVma(activity);
+  // "Allure objectif" forcee pour CETTE seance (cf isGoalPaceForced/
+  // computeGoalPaceInfo, campus.js) : remplace la VMA reelle par la VMA
+  // implicite de l'objectif, exactement comme le fait deja l'export Garmin
+  // (exportWeekToGarmin, campus.js) — sinon l'analyse compare a des allures
+  // que l'athlete n'avait pas pour consigne de suivre ce jour-la.
+  const sessionKey = week._id + '_' + (session.trainingIndex ?? 0);
+  if (typeof isGoalPaceForced === 'function' && isGoalPaceForced(sessionKey)) {
+    const forced = computeGoalPaceInfo();
+    if (forced?.impliedVma) vma = forced.impliedVma;
+  }
 
   const plannedFlat = flattenPlannedExercises(session);
   const warmupEx   = plannedFlat.filter(e => e.blockType === 'warm-up');

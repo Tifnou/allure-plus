@@ -70,8 +70,10 @@ function fmtDurCompact(seconds) {
 
 function fmtHM(seconds) {
   if (!seconds || seconds <= 0) return '';
-  const h = Math.floor(seconds / 3600), m = Math.round((seconds % 3600) / 60);
-  return `${h}:${String(m).padStart(2, '0')}`;
+  const totalMin = Math.round(seconds / 60);
+  if (totalMin <= 59) return `${totalMin} min`;
+  const h = Math.floor(totalMin / 60), m = totalMin % 60;
+  return `${h}h${String(m).padStart(2, '0')}`;
 }
 
 /** Reconstruit un texte compact ("15' EF + 6x3' S60 r=1'30 EF + 5' EF") depuis
