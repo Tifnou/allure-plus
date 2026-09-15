@@ -214,7 +214,7 @@ function activityTypeLabel(type) {
   if (t.includes('trail'))    return 'Trail';
   if (t.includes('treadmill')) return 'Tapis';
   if (t.includes('run'))      return 'Course';
-  if (t.includes('cycl') || t.includes('bike')) return 'Vélo';
+  if (t.includes('cycl') || t.includes('bik')) return 'Vélo';
   if (t.includes('swim'))     return 'Natation';
   if (t.includes('walk'))     return 'Marche';
   if (t.includes('hik'))      return 'Rando';
@@ -1023,7 +1023,7 @@ function getSportIconClass(type) {
   const t = type.toLowerCase();
   if (t.includes('trail'))                         return 'sport-icon--trail';
   if (t.includes('treadmill') || t.includes('run')) return 'sport-icon--running';
-  if (t.includes('cycl') || t.includes('bike'))    return 'sport-icon--cycling';
+  if (t.includes('cycl') || t.includes('bik'))    return 'sport-icon--cycling';
   if (t.includes('walk') || t.includes('hik'))     return 'sport-icon--walking';
   if (t.includes('cardio') || t.includes('indoor') || t.includes('strength') || t.includes('fitness')) return 'sport-icon--cardio';
   if (t.includes('swim'))                          return 'sport-icon--swimming';
@@ -1114,7 +1114,7 @@ function activityMatchesSportFilter(activityType, filter) {
   return filters.includes('all') || filters.some(f => {
     if (f === 'running') return (t === 'running' || t === 'treadmill_running' || (t.includes('run') && !t.includes('trail')));
     if (f === 'trail')   return t.includes('trail');
-    if (f === 'cycling') return t === 'cycling' || t.includes('cycl') || t.includes('bike');
+    if (f === 'cycling') return t === 'cycling' || t.includes('cycl') || t.includes('bik');
     if (f === 'cardio')  return t.includes('cardio') || t.includes('fitness') || t.includes('indoor') || t.includes('strength') || t.includes('hiit') || t.includes('muscul');
     if (f === 'walking') return t.includes('walk') || t === 'walking';
     if (f === 'swimming') return t.includes('swim');
@@ -2921,7 +2921,7 @@ function initHeatmapTooltip(wrapper) {
     const t = (type || '').toLowerCase();
     if (t.includes('trail'))    return SPORT_ICON.trail;
     if (t.includes('run'))      return personEmoji('running');
-    if (t.includes('cycl') || t.includes('bike')) return personEmoji('cycling');
+    if (t.includes('cycl') || t.includes('bik')) return personEmoji('cycling');
     if (t.includes('walk'))     return personEmoji('walking');
     if (t.includes('strength') || t.includes('muscul')) return personEmoji('strength');
     if (t.includes('hiit'))     return SPORT_ICON.hiit;
