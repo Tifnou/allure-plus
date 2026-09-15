@@ -427,7 +427,19 @@ async function buildSessionAnalysis(session, week, activity) {
 
   const plannedWarmupSec   = warmupEx.reduce((s, e) => s + durationsToSeconds(e.durations), 0);
   const plannedCooldownSec = cooldownEx.reduce((s, e) => s + durationsToSeconds(e.durations), 0);
-  const plannedMainReps    = repeatingRunningEx.length;
+  // Une "repetition" = un tour du bloc repete (un repIdx donne), PAS un
+  // exercice "running" individuel : un bloc repete 4x peut contenir PLUSIEURS
+  // sous-efforts course a la suite avant la recuperation (ex: repeat
+  // 4x[3' à S30 + 2' à S60]) - .length ci-dessus comptait alors chaque
+  // sous-effort separement (8 "repetitions" prevues au lieu de 4), alors que
+  // Garmin (et le coureur) ne voit reellement que 4 blocs, un par repIdx (cas
+  // reel constate, retour utilisateur 15/09 : "4 blocs de 5' (3'+2')" annonce
+  // a tort 8 repetitions). Regrouper par (blockIdx, repIdx) restaure le
+  // vrai compte, y compris quand les sous-efforts visent des allures
+  // differentes (ex: 2x[3' à S30 + 3' à S60]) plutot que d'etre de simples
+  // repetitions identiques.
+  const plannedMainRepGroups = new Set(repeatingRunningEx.map(e => `${e.blockIdx}_${e.repIdx}`));
+  const plannedMainReps    = plannedMainRepGroups.size;
   const hasStructuredReps  = plannedMainReps > 1;
 
   // Zone dominante (ponderee duree) = objectif principal de la seance, sert
@@ -443,6 +455,16 @@ async function buildSessionAnalysis(session, week, activity) {
   const repsPaceRange = repsZoneKey && vma
     ? (isTrail ? calcAllureRefTrail(repsZoneKey, vma) : calcAllureRef(repsZoneKey, vma))
     : null;
+  // Zones FC utilisateur + bande approximative du bloc REPETE (repsZoneKey,
+  // ex S60), distincte de la zone dominante globale (mainZoneKey, ex EF sur
+  // une seance EF + lignes droites) - calculee ICI (avant le tableau
+  // "reps" plus bas) pour juger la FC repetition par repetition contre la
+  // zone qu'elles visent VRAIMENT, jamais contre celle du reste de la
+  // seance. Retour utilisateur 15/09 : la seule FC moyenne globale de la
+  // sortie n'indique pas si l'effort est tenu pendant les repetitions
+  // elles-memes (ex: quelle FC sur les S60 par rapport aux S30).
+  const hrZones = getUserHRZones();
+  const repsHRBand = repsZoneKey ? approxHRBandForPaceZone(repsZoneKey, hrZones) : null;
   // Les repetitions sont-elles l'objectif principal de la seance (Seuil, VMA
   // fractionne...) ou un accessoire secondaire greffe sur un footing continu
   // (EF + lignes droites) ? Determine si la moyenne du groupe de repetitions
@@ -694,13 +716,23 @@ async function buildSessionAnalysis(session, week, activity) {
         else if (p > repsPaceRange.paceMax) classification = (p - repsPaceRange.paceMax) > 15 ? 'too_slow' : 'slightly_slow';
         else classification = 'on_target';
       }
+      const repHR = lap.averageHR ? Math.round(lap.averageHR) : null;
+      // hrClassification : jugee contre repsHRBand (zone FC du bloc repete),
+      // jamais contre approxBand (zone dominante globale) - meme logique que
+      // la classification allure ci-dessus.
+      const hrClassification = (repHR != null && repsHRBand)
+        ? (repHR > repsHRBand.high ? 'elevee' : repHR < repsHRBand.low ? 'basse' : 'conforme')
+        : null;
       return {
         index: i + 1,
         targetPaceMinSecKm: repsPaceRange ? repsPaceRange.paceMin : null,
         targetPaceMaxSecKm: repsPaceRange ? repsPaceRange.paceMax : null,
         actualPaceSecKm: p, classification,
         actualDurationSec: Math.round(lap.elapsedDuration || lap.movingDuration || lap.duration || 0),
-        actualHR: lap.averageHR ? Math.round(lap.averageHR) : null,
+        actualHR: repHR,
+        targetHRMin: repsHRBand ? repsHRBand.low : null,
+        targetHRMax: repsHRBand ? repsHRBand.high : null,
+        hrClassification,
       };
     });
   }
@@ -726,7 +758,7 @@ async function buildSessionAnalysis(session, week, activity) {
   };
 
   // ── FC ──
-  const hrZones = getUserHRZones();
+  // hrZones/repsHRBand deja calcules plus haut (avant le tableau "reps").
   const approxBand = mainZoneKey ? approxHRBandForPaceZone(mainZoneKey, hrZones) : null;
   let hr = null;
   if (activity.avgHR) {
@@ -757,8 +789,15 @@ async function buildSessionAnalysis(session, week, activity) {
     };
   }
 
-  // ── Derive cardiaque (1ere moitie vs 2e moitie de l'activite entiere) ──
-  const cardiacDrift = computeCardiacDrift(laps);
+  // ── Derive cardiaque (1ere moitie vs 2e moitie de la seance, hors
+  // echauffement) ── Exclut le(s) lap(s) classes 'warmup' (types, calcule
+  // plus haut) : le coeur monte naturellement en debut de sortie jusqu'a
+  // atteindre son regime "de croisiere" (retour utilisateur 15/09) - les
+  // inclure dans la 1ere moitie tire artificiellement sa FC moyenne vers le
+  // bas et gonfle la derive annoncee, sans rapport avec une vraie fatigue
+  // cardiaque en cours de seance.
+  const driftLaps = laps.filter((_, i) => types[i] !== 'warmup');
+  const cardiacDrift = computeCardiacDrift(driftLaps);
 
   // ── Coherence allure / FC ──
   const paceVerdict = effectiveDeviationSecKm == null ? null : (Math.abs(effectiveDeviationSecKm) <= 10 ? 'conforme' : effectiveDeviationSecKm < 0 ? 'rapide' : 'lente');
@@ -921,7 +960,7 @@ async function buildSessionAnalysis(session, week, activity) {
       vO2MaxValue: activity.vO2MaxValue || null,
     },
     sessionTypeKey, score, verdict,
-    volume, structure, paceAnalysis, reps, regularity, pacingStrategy, recovery, hr, cardiacDrift,
+    volume, structure, paceAnalysis, reps, repsHRBand, regularity, pacingStrategy, recovery, hr, cardiacDrift,
     coherenceNarrative, timeInZoneBreakdown, trail, anomalies, positives, improvements, commentary, timeline,
     pairingKey: computePairingKey(session),
     // Detail du calcul du score, pour la modale "Comprendre votre score" —
@@ -1573,6 +1612,11 @@ function repClassificationLabel(c) {
   return map[c] || '—';
 }
 
+function repHRClassificationLabel(c) {
+  const map = { elevee: '⚠ Élevée', basse: '↓ Basse', conforme: '✅ Cible' };
+  return map[c] || '—';
+}
+
 function buildAnalysisModalHtml(record) {
   const s = record.sessionSnapshot, a = record.activitySnapshot;
   const isTrail = record.sessionTypeKey === 'TRAIL' && record.trail;
@@ -1623,16 +1667,20 @@ function buildAnalysisModalHtml(record) {
       <span class="analysis-summary-icon">${_rowIcon(climb.gapVerdict == null || climb.gapVerdict === 'conforme')}</span>
     </div>` : '';
 
+  // Colonne FC : n'affichee que si au moins une repetition a une FC connue
+  // (activite sans capteur FC) - evite une colonne "—" partout sans interet.
+  const repsHaveHR = record.reps.some(r => r.actualHR != null);
   const repsTableHtml = record.reps.length ? `
     <div class="analysis-section-title">Répétitions</div>
     <table class="analysis-reps-table">
-      <thead><tr><th>#</th><th>Cible</th><th>Réalisé</th><th>Analyse</th></tr></thead>
+      <thead><tr><th>#</th><th>Cible</th><th>Réalisé</th><th>Analyse</th>${repsHaveHR ? `<th>FC${record.repsHRBand ? ` (cible ~${record.repsHRBand.low}-${record.repsHRBand.high})` : ''}</th>` : ''}</tr></thead>
       <tbody>${record.reps.map(r => `
         <tr>
           <td>${r.index}</td>
           <td>${(r.targetPaceMinSecKm && r.targetPaceMaxSecKm) ? (fmtPace(r.targetPaceMinSecKm) + '–' + fmtPace(r.targetPaceMaxSecKm)) : '—'}</td>
           <td>${r.actualPaceSecKm ? fmtPace(r.actualPaceSecKm) : '—'}</td>
           <td>${repClassificationLabel(r.classification)}</td>
+          ${repsHaveHR ? `<td>${r.actualHR != null ? r.actualHR + ' bpm — ' + repHRClassificationLabel(r.hrClassification) : '—'}</td>` : ''}
         </tr>`).join('')}</tbody>
     </table>` : '';
 
