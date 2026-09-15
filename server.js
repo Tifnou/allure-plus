@@ -1379,10 +1379,10 @@ app.post('/api/support/images', requireSession, async (req, res) => {
 
 app.post('/api/support/tickets', requireSession, async (req, res) => {
   try {
-    const { category, page, message, imageUrl, private: isPrivate } = req.body || {};
+    const { category, page, message, imageUrls, private: isPrivate } = req.body || {};
     const data = await callSupportRelay('/tickets', {
       method: 'POST',
-      body: JSON.stringify({ email: req.session.email, category, page, message, imageUrl, private: !!isPrivate, clientKey: SUPPORT_CLIENT_KEY }),
+      body: JSON.stringify({ email: req.session.email, category, page, message, imageUrls, private: !!isPrivate, clientKey: SUPPORT_CLIENT_KEY }),
     });
     res.json(data);
   } catch (err) { handleError(res, err); }
@@ -1431,14 +1431,14 @@ app.post('/api/support/tickets/:number/privacy', requireSession, async (req, res
 
 app.post('/api/support/tickets/:number/comments', requireSession, async (req, res) => {
   try {
-    const { message, imageUrl } = req.body || {};
+    const { message, imageUrls } = req.body || {};
     const isAdmin = req.session.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
     const data = await callSupportRelay(`/tickets/${Number(req.params.number)}/comments`, {
       method: 'POST',
       body: JSON.stringify({
         email: req.session.email,
         message,
-        imageUrl,
+        imageUrls,
         clientKey: SUPPORT_CLIENT_KEY,
         adminKey: isAdmin ? SUPPORT_ADMIN_KEY : undefined,
       }),

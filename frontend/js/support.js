@@ -120,16 +120,21 @@ function setSupportTab(tab) {
   else renderSupportList(tab);
 }
 
-// ─── Piece jointe (capture d'ecran) ────────────────────────────────────
-// Une seule image par ticket/reponse (garde le formulaire simple). Reduite
-// cote client (canvas, max 1600px de large) avant encodage base64, pour
-// rester loin de la limite de taille de requete (voir server.js,
-// express.json 8mb) et de la limite KV du relais (support-relay, 4mb bruts).
+// ─── Piece(s) jointe(s) (captures d'ecran) ──────────────────────────────
+// Jusqu'a SUPPORT_MAX_IMAGES par ticket/reponse (avant, une seule - retour
+// utilisateur : plusieurs captures devaient sinon etre envoyees une par une,
+// dans des messages separes). Chaque image reduite cote client (canvas, max
+// 1600px de large) avant encodage base64, pour rester loin de la limite de
+// taille de requete (voir server.js, express.json 8mb) et de la limite KV du
+// relais (support-relay, 4mb bruts) - cette limite par image est inchangee,
+// seul le nombre d'images passe de 1 a plusieurs.
+const SUPPORT_MAX_IMAGES = 6;
+
 function supportImagePickerHtml(idPrefix) {
   return `
     <div class="support-image-picker">
-      <label class="support-image-label" for="${idPrefix}-image">📎 Ajouter une capture d'écran (optionnel)</label>
-      <input type="file" accept="image/*" id="${idPrefix}-image" class="support-image-input">
+      <label class="support-image-label" for="${idPrefix}-image">📎 Ajouter des captures d'écran (optionnel, ${SUPPORT_MAX_IMAGES} max)</label>
+      <input type="file" accept="image/*" multiple id="${idPrefix}-image" class="support-image-input">
       <div class="support-image-preview" id="${idPrefix}-image-preview" style="display:none"></div>
     </div>`;
 }
@@ -159,52 +164,83 @@ function downscaleImageToDataUrl(file, maxDim) {
   });
 }
 
-// Retourne un getter { getDataUrl() } lu au moment du submit - le picker
+// Retourne un getter { getDataUrls() } lu au moment du submit - le picker
 // vit dans le DOM entre temps, pas besoin de le faire remonter autrement.
+// Le tableau s'accumule au fil des selections (l'attribut `multiple` seul ne
+// permet pas d'ajouter des fichiers a une selection precedente dans certains
+// navigateurs) et chaque vignette a sa propre croix de suppression.
 function wireSupportImagePicker(idPrefix) {
   const input = document.getElementById(`${idPrefix}-image`);
   const preview = document.getElementById(`${idPrefix}-image-preview`);
-  let dataUrl = null;
-  if (!input) return { getDataUrl: () => null };
-  input.onchange = async () => {
-    const file = input.files[0];
-    if (!file) { dataUrl = null; preview.style.display = 'none'; preview.innerHTML = ''; return; }
-    try {
-      dataUrl = await downscaleImageToDataUrl(file, 1600);
-      preview.innerHTML = `<img src="${dataUrl}" alt="Aperçu"><button type="button" class="support-image-remove" title="Retirer">✕</button>`;
-      preview.style.display = 'flex';
-      preview.querySelector('.support-image-remove').onclick = () => {
-        dataUrl = null; input.value = ''; preview.style.display = 'none'; preview.innerHTML = '';
-      };
-    } catch (e) {
-      showToast('Image illisible : ' + e.message, 'error');
-      input.value = '';
-    }
+  let dataUrls = [];
+  if (!input) return { getDataUrls: () => [] };
+  const renderPreview = () => {
+    if (!dataUrls.length) { preview.style.display = 'none'; preview.innerHTML = ''; return; }
+    preview.style.display = 'flex';
+    preview.innerHTML = dataUrls.map((url, i) => `
+      <div class="support-image-thumb">
+        <img src="${url}" alt="Aperçu ${i + 1}">
+        <button type="button" class="support-image-remove" data-idx="${i}" title="Retirer">✕</button>
+      </div>`).join('');
+    preview.querySelectorAll('.support-image-remove').forEach(btn => {
+      btn.onclick = () => { dataUrls.splice(Number(btn.dataset.idx), 1); renderPreview(); };
+    });
   };
-  return { getDataUrl: () => dataUrl };
+  input.onchange = async () => {
+    const files = Array.from(input.files || []);
+    input.value = ''; // permet de re-choisir/ajouter apres coup
+    if (!files.length) return;
+    const room = SUPPORT_MAX_IMAGES - dataUrls.length;
+    if (room <= 0) { showToast(`Maximum ${SUPPORT_MAX_IMAGES} captures d'écran.`, 'info'); return; }
+    if (files.length > room) showToast(`Seules les ${room} premières ont été ajoutées (max ${SUPPORT_MAX_IMAGES}).`, 'info');
+    for (const file of files.slice(0, room)) {
+      try {
+        dataUrls.push(await downscaleImageToDataUrl(file, 1600));
+      } catch (e) {
+        showToast('Image illisible : ' + e.message, 'error');
+      }
+    }
+    renderPreview();
+  };
+  return { getDataUrls: () => dataUrls };
 }
 
-async function uploadSupportImage(dataUrl) {
-  if (!dataUrl) return null;
-  const match = dataUrl.match(/^data:(.*);base64,(.*)$/);
-  if (!match) throw new Error('Image invalide');
-  const res = await fetch(`${API}/api/support/images`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ contentType: match[1], dataBase64: match[2] }),
-  });
-  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Échec de l'envoi de l'image");
-  const { url } = await res.json();
-  return url;
+async function uploadSupportImages(dataUrls) {
+  const urls = [];
+  for (const dataUrl of (dataUrls || [])) {
+    const match = dataUrl.match(/^data:(.*);base64,(.*)$/);
+    if (!match) throw new Error('Image invalide');
+    const res = await fetch(`${API}/api/support/images`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contentType: match[1], dataBase64: match[2] }),
+    });
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Échec de l'envoi d'une image");
+    const { url } = await res.json();
+    urls.push(url);
+  }
+  return urls;
 }
 
-// Le relais (support-relay) stocke l'image en l'ajoutant en markdown
-// (`![capture](url)`) a la fin du texte brut sur GitHub - a l'affichage, on
-// l'extrait pour la rendre comme une vraie <img>, jamais comme du texte brut.
+// Le relais (support-relay) stocke chaque image en l'ajoutant en markdown
+// (`![capture](url)`, une ligne par image) a la fin du texte brut sur GitHub
+// - a l'affichage, on les extrait pour les rendre comme de vraies <img>,
+// jamais comme du texte brut.
 function extractImageFromMessage(message) {
-  const m = (message || '').match(/\n*!\[[^\]]*\]\((https?:\/\/[^\s)]+)\)\s*$/);
-  if (!m) return { text: message || '', imageUrl: null };
-  return { text: message.slice(0, m.index).trim(), imageUrl: m[1] };
+  const re = /\n*!\[[^\]]*\]\((https?:\/\/[^\s)]+)\)/g;
+  const imageUrls = [];
+  let lastIndex = (message || '').length;
+  // Ne consommer que les images EN FIN de texte (une suite ininterrompue
+  // d'occurrences jusqu'a la fin) - une image mentionnee au milieu d'un
+  // message libre ne doit pas etre retiree du texte affiche.
+  const matches = [...(message || '').matchAll(re)];
+  for (let i = matches.length - 1; i >= 0; i--) {
+    const m2 = matches[i];
+    if (m2.index + m2[0].length !== lastIndex) break;
+    imageUrls.unshift(m2[1]);
+    lastIndex = m2.index;
+  }
+  return { text: (message || '').slice(0, lastIndex).trim(), imageUrls };
 }
 
 // ─── Émojis rapides (équivalent léger du sélecteur Windows+.) ──────────
@@ -299,8 +335,11 @@ function wireEmojiPicker(idPrefix) {
 }
 
 function renderSupportMsgHtml(message) {
-  const { text, imageUrl } = extractImageFromMessage(message);
-  return `${escapeHtml(text)}${imageUrl ? `<a href="${imageUrl}" target="_blank" rel="noopener"><img class="support-msg-image" src="${imageUrl}" alt="Capture d'écran jointe"></a>` : ''}`;
+  const { text, imageUrls } = extractImageFromMessage(message);
+  const imagesHtml = (imageUrls || []).map(url =>
+    `<a href="${url}" target="_blank" rel="noopener"><img class="support-msg-image" src="${url}" alt="Capture d'écran jointe"></a>`
+  ).join('');
+  return `${escapeHtml(text)}${imagesHtml ? `<div class="support-msg-images">${imagesHtml}</div>` : ''}`;
 }
 
 function renderSupportNewForm() {
@@ -342,11 +381,11 @@ async function submitSupportTicket(e, imagePicker) {
   const btn = e.target.querySelector('button[type="submit"]');
   btn.disabled = true; btn.textContent = 'Envoi…';
   try {
-    const imageUrl = await uploadSupportImage(imagePicker?.getDataUrl());
+    const imageUrls = await uploadSupportImages(imagePicker?.getDataUrls());
     const res = await fetch(`${API}/api/support/tickets`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ category, page, message, imageUrl, private: isPrivate }),
+      body: JSON.stringify({ category, page, message, imageUrls, private: isPrivate }),
     });
     if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Erreur');
     const { ticket } = await res.json();
@@ -513,11 +552,11 @@ async function openSupportTicket(number, scope) {
         const btn = replyForm.querySelector('button[type="submit"]');
         btn.disabled = true; btn.textContent = 'Envoi…';
         try {
-          const imageUrl = await uploadSupportImage(replyImagePicker.getDataUrl());
+          const imageUrls = await uploadSupportImages(replyImagePicker.getDataUrls());
           const r = await fetch(`${API}/api/support/tickets/${number}/comments`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ message, imageUrl }),
+            body: JSON.stringify({ message, imageUrls }),
           });
           if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Erreur');
           markTicketSeen(number);
@@ -752,9 +791,9 @@ async function openSupportAdminTicket(number) {
       const btn = e.target.querySelector('button[type="submit"]');
       btn.disabled = true; btn.textContent = 'Envoi…';
       try {
-        const imageUrl = await uploadSupportImage(adminReplyImagePicker.getDataUrl());
+        const imageUrls = await uploadSupportImages(adminReplyImagePicker.getDataUrls());
         const r = await fetch(`${API}/api/support/tickets/${number}/comments`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message, imageUrl }),
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message, imageUrls }),
         });
         if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Erreur');
         openSupportAdminTicket(number);

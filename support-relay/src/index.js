@@ -124,12 +124,18 @@ function requireFields(body, fields) {
   }
 }
 
-// Une image jointe (voir handleUploadImage) est simplement une URL publique
-// deja hebergee dans IMAGES_KV a ce point - GitHub affiche nativement une
-// image via son URL en markdown, aucun upload cote GitHub necessaire.
-function appendImage(text, imageUrl) {
-  if (!imageUrl) return text;
-  return `${text}\n\n![capture](${imageUrl})`;
+// Une (ou plusieurs) image(s) jointe(s) (voir handleUploadImage) sont
+// simplement des URLs publiques deja hebergees dans IMAGES_KV a ce point -
+// GitHub affiche nativement une image via son URL en markdown, aucun upload
+// cote GitHub necessaire. Accepte `imageUrls` (tableau, plusieurs captures)
+// ou l'ancien `imageUrl` (chaine unique, retrocompatibilite avec un ticket
+// deja ouvert avant ce changement) - une ligne markdown par image, toutes
+// a la suite en fin de texte (extractImageFromMessage cote client,
+// frontend/js/support.js, doit rester capable d'en extraire plusieurs).
+function appendImage(text, imageUrls) {
+  const urls = (Array.isArray(imageUrls) ? imageUrls : [imageUrls]).filter(Boolean);
+  if (!urls.length) return text;
+  return `${text}\n\n${urls.map(u => `![capture](${u})`).join('\n\n')}`;
 }
 
 // Repere les ids d'images hebergees par CE relais (IMAGES_KV) dans un texte
@@ -160,7 +166,7 @@ async function handleCreateTicket(req, env) {
   const title = `[${label}] ${(page ? page + ' — ' : '') + message}`.slice(0, 90).trim();
   const issueBody = [
     page ? `**Page concernée :** ${page}` : null,
-    appendImage(message, body.imageUrl),
+    appendImage(message, body.imageUrls || body.imageUrl),
     `<!-- reporter:${email} -->`,
   ].filter(Boolean).join('\n\n');
   const labels = body.private ? [label, PRIVATE_LABEL] : [label];
@@ -240,7 +246,7 @@ async function handleAddComment(req, env, number) {
   // Pas de prefixe visible ici : l'app affiche deja "Reponse de l'equipe" via
   // le champ author separe (support.js), inutile de le repeter dans le texte.
   const marker = isAdmin ? 'admin' : email;
-  const commentBody = `<!-- author:${marker} -->\n${appendImage(message, body.imageUrl)}`;
+  const commentBody = `<!-- author:${marker} -->\n${appendImage(message, body.imageUrls || body.imageUrl)}`;
   await gh(env, `/issues/${number}/comments`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
