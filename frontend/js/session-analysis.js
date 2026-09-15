@@ -796,8 +796,18 @@ async function buildSessionAnalysis(session, week, activity) {
   // inclure dans la 1ere moitie tire artificiellement sa FC moyenne vers le
   // bas et gonfle la derive annoncee, sans rapport avec une vraie fatigue
   // cardiaque en cours de seance.
+  // Repli sur TOUS les laps si l'exclusion fait tomber sous le minimum
+  // exploitable par computeCardiacDrift (4 laps) : sur une seance a peu
+  // d'auto-laps (EF avec autolap 1-2km, souvent 4-5 laps au total), retirer
+  // le seul lap d'echauffement suffit a repasser sous ce seuil - la derive
+  // devenait alors `null`, un COMPOSANT DE SCORE ENTIER disparaissant
+  // silencieusement du calcul (les composants null sont ignores, pas
+  // penalises), ce qui gonflait le score global a tort (retour utilisateur
+  // 15/09 : "les scores sont quasiment tous a 100% maintenant"). Mieux vaut
+  // une derive legerement biaisee par l'echauffement (comportement d'avant)
+  // que pas de derive du tout.
   const driftLaps = laps.filter((_, i) => types[i] !== 'warmup');
-  const cardiacDrift = computeCardiacDrift(driftLaps);
+  const cardiacDrift = computeCardiacDrift(driftLaps.length >= 4 ? driftLaps : laps);
 
   // ── Coherence allure / FC ──
   const paceVerdict = effectiveDeviationSecKm == null ? null : (Math.abs(effectiveDeviationSecKm) <= 10 ? 'conforme' : effectiveDeviationSecKm < 0 ? 'rapide' : 'lente');
