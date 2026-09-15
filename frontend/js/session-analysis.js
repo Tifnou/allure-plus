@@ -790,23 +790,34 @@ async function buildSessionAnalysis(session, week, activity) {
   }
 
   // ── Derive cardiaque (1ere moitie vs 2e moitie de la seance, hors
-  // echauffement) ── Exclut le(s) lap(s) classes 'warmup' (types, calcule
-  // plus haut) : le coeur monte naturellement en debut de sortie jusqu'a
-  // atteindre son regime "de croisiere" (retour utilisateur 15/09) - les
-  // inclure dans la 1ere moitie tire artificiellement sa FC moyenne vers le
-  // bas et gonfle la derive annoncee, sans rapport avec une vraie fatigue
-  // cardiaque en cours de seance.
+  // 5 premieres minutes) ── Exclure le(s) lap(s) classes 'warmup' (types)
+  // etait trop large : ce tag peut couvrir tout un bloc d'echauffement
+  // planifie de 10-15 min, alors que le coeur atteint deja son regime de
+  // croisiere bien avant la fin de ce bloc (retour utilisateur 15/09) - au-
+  // dela de 5 min, ces minutes sont deja representatives de l'effort reel et
+  // ne doivent plus etre ecartees. Exclut donc par TEMPS ECOULE cumule
+  // (WARMUP_DRIFT_EXCLUDE_SEC), pas par tag de lap : un lap n'est ecarte que
+  // s'il se termine encore AVANT cette barre des 5 minutes (un lap qui la
+  // chevauche est garde en entier, la moyenne par lap ne permettant pas de
+  // le tronquer en cours de route).
+  const WARMUP_DRIFT_EXCLUDE_SEC = 300;
+  let driftCumSec = 0;
+  const driftLaps = laps.filter(l => {
+    const dur = l.elapsedDuration || l.movingDuration || l.duration || 0;
+    const endSec = driftCumSec + dur;
+    driftCumSec = endSec;
+    return endSec > WARMUP_DRIFT_EXCLUDE_SEC;
+  });
   // Repli sur TOUS les laps si l'exclusion fait tomber sous le minimum
   // exploitable par computeCardiacDrift (4 laps) : sur une seance a peu
-  // d'auto-laps (EF avec autolap 1-2km, souvent 4-5 laps au total), retirer
-  // le seul lap d'echauffement suffit a repasser sous ce seuil - la derive
-  // devenait alors `null`, un COMPOSANT DE SCORE ENTIER disparaissant
-  // silencieusement du calcul (les composants null sont ignores, pas
-  // penalises), ce qui gonflait le score global a tort (retour utilisateur
-  // 15/09 : "les scores sont quasiment tous a 100% maintenant"). Mieux vaut
-  // une derive legerement biaisee par l'echauffement (comportement d'avant)
+  // d'auto-laps (EF avec autolap 1-2km, souvent 4-5 laps au total), ecarter
+  // ne serait-ce qu'un lap peut repasser sous ce seuil - la derive devenait
+  // alors `null`, un COMPOSANT DE SCORE ENTIER disparaissant silencieusement
+  // du calcul (les composants null sont ignores, pas penalises), ce qui
+  // gonflait le score global a tort (retour utilisateur 15/09 : "les scores
+  // sont quasiment tous a 100% maintenant"). Mieux vaut une derive
+  // legerement biaisee par les 5 premieres minutes (comportement d'avant)
   // que pas de derive du tout.
-  const driftLaps = laps.filter((_, i) => types[i] !== 'warmup');
   const cardiacDrift = computeCardiacDrift(driftLaps.length >= 4 ? driftLaps : laps);
 
   // ── Coherence allure / FC ──
