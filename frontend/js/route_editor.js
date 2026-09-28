@@ -643,8 +643,6 @@ function renderRouteEditorWorkspace() {
         </div>
         <div class="gpx-profile-elev-container"><canvas id="route-editor-elev-chart"></canvas></div>
         <div id="route-editor-mode-hint" class="route-editor-hint"></div>
-        <div id="route-editor-extend-controls"></div>
-        <div id="route-editor-move-endpoint-controls"></div>
         <div id="route-editor-reroute-preview"></div>
         <div id="route-editor-hint" class="route-editor-hint">Cliquez sur deux points du tracé (carte ou profil) pour choisir une section à répéter.</div>
         <div id="route-editor-section-panel"></div>
@@ -652,6 +650,8 @@ function renderRouteEditorWorkspace() {
       <div class="route-editor-layout-sidebar">
         <details class="route-editor-collapsible" open>
           <summary>Actions</summary>
+          <div id="route-editor-extend-controls"></div>
+          <div id="route-editor-move-endpoint-controls"></div>
           <div class="route-editor-actions route-editor-actions--top">
             <button type="button" class="route-editor-btn-secondary" id="route-editor-undo-btn" ${_routeEditorHistory.length ? '' : 'disabled'}>↶ Annuler</button>
             <button type="button" class="route-editor-btn-secondary" id="route-editor-redo-btn" ${_routeEditorFuture.length ? '' : 'disabled'}>↷ Rétablir</button>
