@@ -741,6 +741,12 @@ function reserveRepairBudget(scanResult, targetDistanceM, targetDurationMin, tar
   };
 }
 
+// Nombre de directions reellement essayees (affinees) avant de se resigner
+// a la moins mauvaise - cf commentaire de generateLoop plus bas. Borne pour
+// ne pas multiplier le cout BRouter par SEARCH_DIRECTIONS (8) a chaque
+// hotspot de la recherche elargie.
+const LOOP_RETRY_CANDIDATES = 3;
+
 // Genere une boucle passant par `start`, convergeant vers targetDistanceM.
 // Ne se contente pas d'un seul losange symetrique fixe : explore plusieurs
 // directions autour du depart (en parallele) et garde celle qui cumule le
@@ -749,15 +755,41 @@ function reserveRepairBudget(scanResult, targetDistanceM, targetDurationMin, tar
 // qu'un vrai relief existe juste a cote (constate en test reel : plateau
 // plat au nord/est de Saclay, relief net vers le sud/sud-est).
 // Pas besoin d'Overpass : BRouter accroche deja les points au reseau reel.
+//
+// preferLowOverlapCandidates ne filtre que sur la geometrie du SCAN initial
+// (rayon fixe = distance/4, cf scanDirections) - elle ne garantit pas qu'une
+// direction reste propre une fois reellement affinee (refineLoopFromBearing
+// peut faire grossir/retrecir le rayon plusieurs fois pour atteindre la
+// distance visee, sur un chemin tres different du scan initial). Retour
+// utilisateur explicite (recherche elargie, terrain route) : une boucle
+// nominale ressortait comme plusieurs petits aller-retours accoles ("un A/R
+// par-ci, un autre par-la") des que la SEULE direction essayee se degradait
+// en affinant, alors que d'autres directions, disponibles mais jamais
+// essayees, auraient donne une vraie boucle - avec un reseau routier aussi
+// dense qu'une route classique, il y a presque toujours une meilleure
+// option a cote. Essaie donc jusqu'a LOOP_RETRY_CANDIDATES directions (dans
+// l'ordre deja etabli par preferLowOverlapCandidates : propres au scan
+// d'abord), en affinant REELLEMENT chacune, et s'arrete a la premiere dont
+// le chevauchement POST-affinage repasse sous le seuil de rejet - jamais un
+// resultat mediocre force silencieusement des le premier essai, jamais non
+// plus une exploration infinie qui ruinerait le temps de reponse.
 async function generateLoop(start, targetDistanceM, profile, opts = {}) {
   const maxRefineIterations = opts.maxRefineIterations ?? DEFAULT_REFINE_ITERATIONS;
   const { candidates, radius } = await scanDirections(start, targetDistanceM, profile, opts.targetAscentM, opts.trailStyle);
   if (candidates.length === 0) {
     throw new Error('Impossible de generer une boucle exploitable autour de ce depart.');
   }
-  const top = preferLowOverlapCandidates(candidates)[0];
-  const budget = reserveRepairBudget(top.result, targetDistanceM, opts.targetDurationMin, opts.targetAscentM);
-  return refineLoopFromBearing(start, top.bearing, top.result, radius, budget.targetDistanceM, profile, maxRefineIterations, { ...opts, targetDurationMin: budget.targetDurationMin });
+  const ordered = preferLowOverlapCandidates(candidates);
+  let bestAttempt = null;
+  for (const cand of ordered.slice(0, LOOP_RETRY_CANDIDATES)) {
+    const budget = reserveRepairBudget(cand.result, targetDistanceM, opts.targetDurationMin, opts.targetAscentM);
+    const refined = await refineLoopFromBearing(start, cand.bearing, cand.result, radius, budget.targetDistanceM, profile, maxRefineIterations, { ...opts, targetDurationMin: budget.targetDurationMin });
+    const overlapFraction = computeLoopSelfOverlapFraction(refined.points);
+    const attempt = { ...refined, overlapFraction };
+    if (!bestAttempt || overlapFraction < bestAttempt.overlapFraction) bestAttempt = attempt;
+    if (overlapFraction < LOOP_OVERLAP_REJECT_THRESHOLD) return attempt;
+  }
+  return bestAttempt; // aucune direction essayee n'est ressortie propre - la moins mauvaise des essayees
 }
 
 const MAX_ALT_DIRECTIONS = 2;
@@ -1523,6 +1555,12 @@ async function buildZoneCandidate(shape, start, hotspot, targetDistanceM, target
   }
   if (!result) return null;
 
+  // Capture avant un eventuel remplacement par boostAscentViaRepeats plus
+  // bas (le resultat "boucle avec repetitions" a deja sa propre explication
+  // de detour, cf commentaire dans generateOptionsAcrossSearchRadius - pas
+  // besoin d'y ajouter aussi l'avertissement de chevauchement generique).
+  const overlapFraction = shape === 'loop' ? result.overlapFraction : null;
+
   let ascentM = calibrateAscent(result.filteredAscendM);
   let repeatedSegments = null;
   // D+ vise applicable a tout terrain (route ou trail) des qu'il est fourni
@@ -1551,7 +1589,7 @@ async function buildZoneCandidate(shape, start, hotspot, targetDistanceM, target
   }
 
   return {
-    shape, hotspot, result, ascentM, repeatedSegments,
+    shape, hotspot, result, ascentM, repeatedSegments, overlapFraction,
     closeness: goalCloseness(result, targetDistanceM, targetDurationMin, paceMinPerKm, trailLevel),
   };
 }
@@ -1621,6 +1659,15 @@ async function generateOptionsAcrossSearchRadius({ start, targetDistanceM, targe
       commentary += c.shape === 'outback'
         ? ` Le D+ naturel de ce secteur ne suffisait pas seul — une ou plusieurs côtes sont répétées à l'aller uniquement, le retour reste direct.`
         : ` Le D+ naturel de ce secteur ne suffisait pas seul, complété par répétition d'une côte.`;
+    }
+    // Meme avertissement honnete que buildLoopOptionsAtSinglePoint
+    // (naturalOverlapWarning) : une boucle peut chevaucher son propre tracé
+    // (plusieurs petits aller-retours accoles) si l'acces routier local au
+    // secteur est limite - generateLoop a deja essaye plusieurs directions
+    // avant de se resigner a celle-ci (cf LOOP_RETRY_CANDIDATES), donc ce cas
+    // reste rare, mais jamais masque silencieusement quand il survient.
+    if (c.shape === 'loop' && !c.repeatedSegments && c.overlapFraction >= LOOP_OVERLAP_WARNING_THRESHOLD) {
+      commentary += ` ⚠️ Environ ${Math.round(c.overlapFraction * 100)}% de ce tracé reprend le même chemin à l'aller et au retour — accès routier limité à ce secteur.`;
     }
     const outLegPointCount = c.shape === 'outback'
       ? (c.result.outLegPointCount ?? (c.result.outLegPoints ? c.result.outLegPoints.length : null))
