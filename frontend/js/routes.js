@@ -115,7 +115,17 @@ function showRoutesView(view) {
   el('routes-results').style.display = view === 'results' ? '' : 'none';
 }
 
-function routesHasAscentField() { return routesState.terrain === 'trail'; }
+// D+ vise : valable pour la route ET le trail (retour utilisateur explicite -
+// avant, seul le trail pouvait cibler un D+). Ne pas confondre avec
+// routesIsTrail() ci-dessous, qui gate les reglages VRAIMENT specifiques au
+// trail (niveau de traileur, style de chemin) - ceux-la n'ont pas d'equivalent
+// route, contrairement au D+.
+function routesHasAscentField() { return true; }
+// Reglages propres au trail (niveau de traileur pour l'estimation de duree,
+// style de chemin BRouter) - la route garde son propre systeme d'allure
+// (routePaceMinPerKm, cf routesHasPaceField) et n'a pas de "style de chemin"
+// equivalent (profil BRouter route unique, fastbike-lowtraffic).
+function routesIsTrail() { return routesState.terrain === 'trail'; }
 // Allure cible explicite (route uniquement - le trail a deja des fourchettes
 // d'allure par niveau de traileur, cf ROUTES_TRAIL_LEVELS) : necessaire
 // uniquement en mode "duree", pour convertir la duree visee en distance
@@ -217,7 +227,7 @@ function renderRoutesForm() {
       </div>
     </div>
 
-    <div class="routes-field routes-field--full" id="routes-level-field" style="display:${routesHasAscentField() ? '' : 'none'}">
+    <div class="routes-field routes-field--full" id="routes-level-field" style="display:${routesIsTrail() ? '' : 'none'}">
       <div class="routes-field-label">Niveau de traileur</div>
       <div class="routes-hint">Utilisé pour estimer une durée réaliste sur un parcours avec du D+ — une allure unique se trompe largement dès que le terrain devient très pentu.</div>
       <select id="routes-input-level" class="routes-select" style="margin-top:6px;max-width:280px">
@@ -229,7 +239,7 @@ function renderRoutesForm() {
       <div id="routes-level-table" style="display:none;margin-top:8px"></div>
     </div>
 
-    <div class="routes-field routes-field--full" id="routes-style-field" style="display:${routesHasAscentField() ? '' : 'none'}">
+    <div class="routes-field routes-field--full" id="routes-style-field" style="display:${routesIsTrail() ? '' : 'none'}">
       <div class="routes-field-label">Style de chemin</div>
       <div class="routes-hint">${(ROUTES_TRAIL_STYLES[routesState.trailStyle] || {}).hint || ''}</div>
       <div class="routes-toggle" style="margin-top:6px">
@@ -301,6 +311,8 @@ function renderRoutesForm() {
 
   if (routesHasAscentField()) {
     wireNumericInput('routes-input-ascent', v => { routesState.ascentM = parseInt(v, 10) || 0; });
+  }
+  if (routesIsTrail()) {
     el('routes-input-level').onchange = e => { routesState.trailLevel = e.target.value; };
     el('routes-level-table-toggle').onclick = () => {
       const tableEl = el('routes-level-table');
@@ -690,7 +702,7 @@ async function routesGenerateClicked() {
   // Confirmation niveau/pente uniquement en Trail avec D+ (Route garde le
   // fonctionnement actuel : profil d'allure personnel, pas de niveau a
   // choisir ni de distance a confirmer ici - demande utilisateur explicite).
-  if (routesHasAscentField()) {
+  if (routesIsTrail()) {
     const confirmation = routesBuildLevelConfirmation();
     if (confirmation) {
       if (!confirmation.ok) {
@@ -721,11 +733,11 @@ async function routesGenerateClicked() {
 
     const body = {
       start: { lat: start.lat, lon: start.lon },
-      targetAscentM: routesHasAscentField() ? routesState.ascentM : null,
+      targetAscentM: routesState.ascentM || null,
       terrain: routesState.terrain,
       routeShape: routesState.routeShape,
-      trailLevel: routesHasAscentField() ? routesState.trailLevel : null,
-      trailStyle: routesHasAscentField() ? routesState.trailStyle : null,
+      trailLevel: routesIsTrail() ? routesState.trailLevel : null,
+      trailStyle: routesIsTrail() ? routesState.trailStyle : null,
     };
     if (routesState.mode === 'distance') body.targetDistanceM = routesState.distanceKm * 1000;
     else body.targetDurationMin = routesState.durationMin;

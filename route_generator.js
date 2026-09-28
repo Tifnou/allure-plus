@@ -1517,7 +1517,7 @@ async function buildZoneCandidate(shape, start, hotspot, targetDistanceM, target
   try {
     result = shape === 'outback'
       ? await generateOutAndBack(start, bearingBetween(start, hotspot), targetDistanceM, profile, { targetDurationMin, paceMinPerKm, trailLevel, trailStyle })
-      : await generateLoop(hotspot, targetDistanceM, profile, { targetDurationMin, paceMinPerKm, trailLevel, trailStyle, targetAscentM: terrain === 'trail' ? targetAscentM : null });
+      : await generateLoop(hotspot, targetDistanceM, profile, { targetDurationMin, paceMinPerKm, trailLevel, trailStyle, targetAscentM });
   } catch (err) {
     return null; // zone non routable dans cette forme depuis ce centre
   }
@@ -1525,7 +1525,10 @@ async function buildZoneCandidate(shape, start, hotspot, targetDistanceM, target
 
   let ascentM = calibrateAscent(result.filteredAscendM);
   let repeatedSegments = null;
-  const needsMoreAscent = terrain === 'trail' && targetAscentM && ascentM < targetAscentM - ASCENT_TOLERANCE_M
+  // D+ vise applicable a tout terrain (route ou trail) des qu'il est fourni
+  // - avant, seul le trail pouvait cibler un D+, la route n'avait aucune
+  // option equivalente (retour utilisateur explicite).
+  const needsMoreAscent = targetAscentM && ascentM < targetAscentM - ASCENT_TOLERANCE_M
     && !isAtDurationCeiling(result.points, targetDurationMin, paceMinPerKm, trailLevel);
   if (needsMoreAscent) {
     // Repetition acceptee comme filet de securite (demande utilisateur
@@ -1576,11 +1579,27 @@ async function generateOptionsAcrossSearchRadius({ start, targetDistanceM, targe
     throw new Error('Impossible de generer un circuit exploitable dans ce rayon de recherche.');
   }
 
-  // En trail avec D+ vise, la richesse en denivele prime (c'est l'objet meme
-  // d'une recherche elargie en trail) ; sinon, la proximite a la
-  // distance/duree visee.
-  const rankByAscent = terrain === 'trail' && !!targetAscentM;
-  candidates.sort((a, b) => rankByAscent ? (b.ascentM - a.ascentM) : (b.closeness - a.closeness));
+  // Avec un D+ vise (route ou trail), la richesse en denivele prime (c'est
+  // l'objet meme d'une recherche elargie avec cible de D+) ; sinon, la
+  // proximite a la distance/duree visee.
+  const rankByAscent = !!targetAscentM;
+  const rankFn = (a, b) => rankByAscent ? (b.ascentM - a.ascentM) : (b.closeness - a.closeness);
+  // En forme "les deux", un aller-retour colle quasi toujours mieux a la
+  // distance/duree visee (BRouter n'a qu'UN chemin a router puis le retour
+  // est le meme trace) qu'une boucle (qui doit boucler un vrai reseau local)
+  // - un tri global par seule proximite/D+ finissait donc par repousser les
+  // boucles derriere une majorite d'aller-retours, alors que l'utilisateur
+  // veut des boucles en priorite, l'aller-retour restant un complement quand
+  // peu ou pas de boucles valables existent (retour utilisateur explicite).
+  // Trie chaque forme separement puis concatene boucles d'abord.
+  if (routeShape === 'both') {
+    const loops = candidates.filter(c => c.shape === 'loop').sort(rankFn);
+    const outbacks = candidates.filter(c => c.shape === 'outback').sort(rankFn);
+    candidates.length = 0;
+    candidates.push(...loops, ...outbacks);
+  } else {
+    candidates.sort(rankFn);
+  }
   const kept = candidates.slice(0, MIN_SEARCH_OPTIONS);
 
   const options = kept.map((c, i) => {
@@ -1623,7 +1642,7 @@ async function generateOptionsAcrossSearchRadius({ start, targetDistanceM, targe
 
   let warning = null;
   const best = kept[0];
-  if (terrain === 'trail' && targetAscentM && best.ascentM < targetAscentM - ASCENT_TOLERANCE_M) {
+  if (targetAscentM && best.ascentM < targetAscentM - ASCENT_TOLERANCE_M) {
     warning = `Le rayon de recherche exploré (${(searchRadiusM / 1000).toFixed(0)} km, ${hotspots.length} zones testées) ne permet pas d'atteindre ${targetAscentM} m de D+ sans dépasser largement ce qui a été demandé — meilleure option trouvée : ${best.ascentM} m de D+.`;
   } else if (candidates.length < MIN_SEARCH_OPTIONS) {
     warning = `Seules ${candidates.length} option(s) routable(s) trouvée(s) dans ce rayon (sur ${hotspots.length * shapes.length} tentées) — essayez un rayon plus large pour plus de choix.`;
@@ -1639,9 +1658,9 @@ async function generateOptionsAcrossSearchRadius({ start, targetDistanceM, targe
 // pour le dispatcher qui gere aussi 'outback'/'both', et
 // generateOptionsAcrossSearchRadius pour la recherche elargie.
 async function buildLoopOptionsAtSinglePoint({ start, targetDistanceM, targetAscentM, targetDurationMin, terrain, paceMinPerKm, profile, trailLevel, trailStyle }) {
-  let { best: natural, alternates, bestOverlapFraction } = await generateLoopWithAlternates(start, targetDistanceM, profile, { targetDurationMin, paceMinPerKm, trailLevel, trailStyle, targetAscentM: terrain === 'trail' ? targetAscentM : null });
+  let { best: natural, alternates, bestOverlapFraction } = await generateLoopWithAlternates(start, targetDistanceM, profile, { targetDurationMin, paceMinPerKm, trailLevel, trailStyle, targetAscentM });
   let naturalAscentM = calibrateAscent(natural.filteredAscendM);
-  const initialNeedsMoreAscent = terrain === 'trail' && targetAscentM
+  const initialNeedsMoreAscent = targetAscentM
     && naturalAscentM < targetAscentM - ASCENT_TOLERANCE_M;
 
   // Reoriente chaque boucle (naturelle + alternatives) pour qu'elle
@@ -1672,7 +1691,7 @@ async function buildLoopOptionsAtSinglePoint({ start, targetDistanceM, targetAsc
     distanceM: natural.distanceM,
     ascentM: naturalAscentM,
     predictedDurationMin: predictDurationMin(natural.points, paceMinPerKm, trailLevel),
-    commentary: (terrain === 'trail'
+    commentary: (targetAscentM
       ? `Boucle construite en explorant ${SEARCH_DIRECTIONS} directions autour du départ pour trouver le meilleur dénivelé naturel du secteur, sans répétition de côte.`
       : `Boucle construite en explorant ${SEARCH_DIRECTIONS} directions autour du départ pour coller au mieux à la distance/durée visée.`) + naturalOverlapWarning,
     alternateStart: null,
@@ -1704,7 +1723,7 @@ async function buildLoopOptionsAtSinglePoint({ start, targetDistanceM, targetAsc
     let altCommentary = `Autre tracé possible, orienté ${toward} plutôt que vers le secteur retenu pour l'option principale — pour varier l'itinéraire tout en visant les mêmes critères.`;
     let altRepeatedSegments = null;
 
-    const altNeedsMoreAscent = terrain === 'trail' && targetAscentM && altAscentM < targetAscentM - ASCENT_TOLERANCE_M
+    const altNeedsMoreAscent = targetAscentM && altAscentM < targetAscentM - ASCENT_TOLERANCE_M
       && !isAtDurationCeiling(altPoints, targetDurationMin, paceMinPerKm, trailLevel);
     if (altNeedsMoreAscent) {
       const boost = await boostAscentViaRepeats(altPoints, targetAscentM, profile, paceMinPerKm, targetDurationMin, targetDistanceM, trailLevel, trailStyle);
@@ -1769,10 +1788,10 @@ async function buildLoopOptionsAtSinglePoint({ start, targetDistanceM, targetAsc
     warning = `Le secteur ne permet pas d'atteindre ${targetLabel} sans trop s'écarter — essayez la recherche élargie pour explorer plus loin — meilleure option trouvée : ${gotLabel}.`;
   }
 
-  const naturalAtDurationCeiling = terrain === 'trail' && targetAscentM
+  const naturalAtDurationCeiling = targetAscentM
     && naturalOption.ascentM < targetAscentM - ASCENT_TOLERANCE_M
     && isAtDurationCeiling(natural.points, targetDurationMin, paceMinPerKm, trailLevel);
-  const needsMoreAscent = terrain === 'trail' && targetAscentM
+  const needsMoreAscent = targetAscentM
     && naturalOption.ascentM < targetAscentM - ASCENT_TOLERANCE_M
     && !naturalAtDurationCeiling;
 
@@ -1821,7 +1840,7 @@ async function buildLoopOptionsAtSinglePoint({ start, targetDistanceM, targetAsc
     // repetition ne ferait qu'aggraver l'ecart de duree pour grappiller du D+,
     // contraire au principe "duree quasi dure" (etude externe aout 2026).
     warning = `La durée visée (${targetDurationMin} min) est déjà atteinte sans avoir atteint le D+ visé (${targetAscentM} m — ${naturalOption.ascentM} m obtenus) — pas de répétition ajoutée pour ne pas dépasser davantage la durée demandée. Essayez une durée plus longue, ou un D+ visé moins élevé.`;
-  } else if (terrain === 'trail' && targetAscentM && naturalOption.ascentM > targetAscentM * (1 + ASCENT_OVERSHOOT_WARNING_RATIO)) {
+  } else if (targetAscentM && naturalOption.ascentM > targetAscentM * (1 + ASCENT_OVERSHOOT_WARNING_RATIO)) {
     // Symetrique du warning "pas assez de D+" ci-dessus, pour le cas inverse
     // (terrain deja tres vallonne, ex: Beaufort/73270) : meme apres le tri
     // par proximite de scanDirections (voir son commentaire), la direction
@@ -1843,7 +1862,7 @@ async function buildLoopOptionsAtSinglePoint({ start, targetDistanceM, targetAsc
 // bearing retenu plutot qu'une boucle. Utilise pour la forme 'outback' - cf
 // generateOptionsAtSinglePoint (dispatcher) et generateOutAndBack.
 async function buildOutAndBackOptionsAtSinglePoint({ start, targetDistanceM, targetAscentM, targetDurationMin, terrain, paceMinPerKm, profile, trailLevel, trailStyle }) {
-  const { candidates } = await scanDirections(start, targetDistanceM, profile, terrain === 'trail' ? targetAscentM : null, trailStyle);
+  const { candidates } = await scanDirections(start, targetDistanceM, profile, targetAscentM, trailStyle);
   if (candidates.length === 0) {
     throw new Error('Impossible de generer un aller-retour exploitable autour de ce depart.');
   }
@@ -1869,14 +1888,14 @@ async function buildOutAndBackOptionsAtSinglePoint({ start, targetDistanceM, tar
       // Reserve un budget de repetitions si le scan initial de cette
       // direction suggere deja un terrain trop plat pour le D+ vise - meme
       // logique que pour les boucles, cf reserveRepairBudget.
-      const budget = reserveRepairBudget(scanResult, targetDistanceM, targetDurationMin, terrain === 'trail' ? targetAscentM : null);
+      const budget = reserveRepairBudget(scanResult, targetDistanceM, targetDurationMin, targetAscentM);
       result = await generateOutAndBack(start, bearing, budget.targetDistanceM, profile, { targetDurationMin: budget.targetDurationMin, paceMinPerKm, trailLevel, trailStyle });
     } catch (err) {
       continue; // direction non routable en aller-retour, on garde les autres
     }
     let ascentM = calibrateAscent(result.filteredAscendM);
     let repeatedSegments = null;
-    const needsMoreAscent = terrain === 'trail' && targetAscentM && ascentM < targetAscentM - ASCENT_TOLERANCE_M
+    const needsMoreAscent = targetAscentM && ascentM < targetAscentM - ASCENT_TOLERANCE_M
       && !isAtDurationCeiling(result.points, targetDurationMin, paceMinPerKm, trailLevel);
     if (needsMoreAscent) {
       const boost = await boostOutAndBackViaRepeats(result, targetAscentM, profile, paceMinPerKm, targetDurationMin, targetDistanceM, trailLevel, trailStyle);
@@ -1940,10 +1959,21 @@ async function generateOptionsAtSinglePoint({ start, targetDistanceM, targetAsce
   const options = [];
   let warning = null;
 
+  // Boucles proposees en priorite (options poussees en premier dans le
+  // tableau, jamais reordonnees ensuite) - l'aller-retour ne complete qu'en
+  // cas d'echec total de la boucle, ou en plus si 'both' (retour utilisateur
+  // explicite : privilegier les boucles quand la forme est "les deux").
   if (routeShape === 'loop' || routeShape === 'both') {
-    const loopResult = await buildLoopOptionsAtSinglePoint({ start, targetDistanceM, targetAscentM, targetDurationMin, terrain, paceMinPerKm, profile, trailLevel, trailStyle });
-    options.push(...loopResult.options);
-    warning = loopResult.warning;
+    try {
+      const loopResult = await buildLoopOptionsAtSinglePoint({ start, targetDistanceM, targetAscentM, targetDurationMin, terrain, paceMinPerKm, profile, trailLevel, trailStyle });
+      options.push(...loopResult.options);
+      warning = loopResult.warning;
+    } catch (err) {
+      // Si 'both', un echec total de la boucle (aucune boucle routable,
+      // impasse/cul-de-sac) ne doit pas faire echouer toute la recherche -
+      // l'aller-retour ci-dessous reste jouable dans ce cas precis.
+      if (routeShape === 'loop') throw err;
+    }
   }
 
   if (routeShape === 'outback' || routeShape === 'both') {
@@ -2006,7 +2036,7 @@ async function generateRouteOptions({ start, targetDistanceM, targetAscentM, tar
     // reelle) - retour utilisateur explicite : en mode route/distance,
     // aucune correspondance n'etait jamais affichee jusqu'ici.
     if (!targetDurationMin && targetDistanceM) opt.distanceMatch = distanceMatchInfoOption(opt.distanceM, targetDistanceM);
-    if (terrain === 'trail' && targetAscentM) opt.ascentMatch = ascentMatchInfo(opt.ascentM, targetAscentM);
+    if (targetAscentM) opt.ascentMatch = ascentMatchInfo(opt.ascentM, targetAscentM);
     // Correspondance globale = la pire des correspondances applicables (cf
     // worseMatchLabel) - une option ne peut pas etre "Excellente" globalement
     // si l'un des criteres vises est loin de la cible.
