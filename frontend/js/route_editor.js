@@ -613,64 +613,95 @@ function renderRouteEditorWorkspace() {
 
   const isOriginal = _routeEditorOriginal && _routeEditorData.points === _routeEditorOriginal.points;
 
+  // Mise en page carte a gauche / colonne de controles a droite (retour
+  // utilisateur explicite : trop de boutons disperses au-dessus ET en
+  // dessous de la carte, obligeant a jongler avec la molette). Tout ce qui
+  // est directement lie a l'interaction avec la carte/le profil (barre de
+  // mode, legende, hint de mode, controles de prolongement/deplacement de
+  // depart-arrivee, panneau de section A->B) reste dans la colonne de
+  // gauche, juste sous l'element concerne - tout le reste (actions,
+  // objectif, cotes, POI, variantes, strategie) part dans des sections
+  // repliables (<details>, pas de JS de toggle a maintenir) dans la colonne
+  // de droite, jamais plus au-dessus ni en dessous de la carte elle-meme.
   ws.innerHTML = `
-    <div class="gpx-profile-stats">
-      <div class="gpx-profile-stat"><b>${(stats.totalDistM / 1000).toFixed(1)}</b> km</div>
-      <div class="gpx-profile-stat"><b>+${stats.ascentM}</b> m D+</div>
-      <div class="gpx-profile-stat"><b>-${stats.descentM}</b> m D-</div>
-      <div class="gpx-profile-stat"><b>${stats.altMinM}–${stats.altMaxM}</b> m alt.</div>
-      <div class="gpx-profile-stat"><b>${stats.avgClimbGradePct}%</b> pente moy. montée</div>
-      <div class="gpx-profile-stat"><b>${stats.maxClimbGradePct}%</b> pente max</div>
-      <div class="gpx-profile-stat"><b>${climbs.length}</b> côte(s) détectée(s)</div>
-    </div>
-    <div class="route-editor-summary-card">📝 ${buildRouteEditorSummary(stats)}</div>
-    ${routeEditorModeToolbarHtml()}
-    <div class="gpx-profile-map" id="route-editor-map"></div>
-    <div class="gpx-profile-legend">
-      ${GPX_GRADE_BANDS.map(b => `<span class="gpx-profile-legend-item"><span class="gpx-profile-legend-dot" style="background:${b.color}"></span>${b.label}</span>`).join('')}
-    </div>
-    <div class="gpx-profile-elev-container"><canvas id="route-editor-elev-chart"></canvas></div>
-    <div id="route-editor-mode-hint" class="route-editor-hint"></div>
-    <div id="route-editor-extend-controls"></div>
-    <div id="route-editor-move-endpoint-controls"></div>
-    <div id="route-editor-reroute-preview"></div>
-    <div class="route-editor-actions route-editor-actions--top">
-      <button type="button" class="route-editor-btn-secondary" id="route-editor-undo-btn" ${_routeEditorHistory.length ? '' : 'disabled'}>↶ Annuler</button>
-      <button type="button" class="route-editor-btn-secondary" id="route-editor-redo-btn" ${_routeEditorFuture.length ? '' : 'disabled'}>↷ Rétablir</button>
-      <button type="button" class="route-editor-btn-secondary" id="route-editor-reverse-btn">↔ Inverser le sens</button>
-      <button type="button" class="route-editor-btn-secondary" id="route-editor-restore-btn" ${isOriginal ? 'disabled' : ''}>Restaurer l'original</button>
-      <button type="button" class="btn-plans-restart" id="route-editor-export-btn">⬇️ Exporter le GPX</button>
-    </div>
-    <div class="route-editor-objective-card">
-      <span class="route-editor-objective-title">🎯 Objectif (optionnel)</span>
-      <label>D+ cible <input type="number" id="route-editor-obj-dplus" class="routes-number-input" min="0" step="10" placeholder="m" value="${_routeEditorObjective.targetDplusM ?? ''}" /> m</label>
-      <label>Distance cible <input type="number" id="route-editor-obj-dist" class="routes-number-input" min="0" step="0.5" placeholder="km" value="${_routeEditorObjective.targetDistM ?? ''}" /> km</label>
-      <button type="button" class="route-editor-btn-secondary" id="route-editor-obj-clear">Effacer</button>
-      <span class="route-editor-objective-hint">Allure+ propose automatiquement la côte la plus efficace à répéter pour s'en approcher — ou sélectionnez vous-même une autre section (carte, profil, "🔁 Répéter").</span>
-    </div>
-    <div id="route-editor-objective-auto"></div>
-    <div id="route-editor-hint" class="route-editor-hint">Cliquez sur deux points du tracé (carte ou profil) pour choisir une section à répéter.</div>
-    <div id="route-editor-section-panel"></div>
-    <div class="route-editor-section-title">Côtes détectées</div>
-    ${climbs.length
-      ? `<table class="route-editor-climbs-table">
-          <thead><tr><th>Montée</th><th>Position</th><th>Distance</th><th>D+</th><th>Pente moy.</th><th>Pente max.</th><th></th></tr></thead>
-          <tbody>${climbsRows}</tbody>
-        </table>`
-      : `<div class="route-editor-climbs-empty">Aucune côte significative détectée sur ce parcours.</div>`}
-    <div id="route-editor-poi-table-wrap"></div>
-    <div class="route-editor-section-title">Variantes</div>
-    <div class="route-editor-actions" style="margin-top:0">
-      <button type="button" class="route-editor-btn-secondary" id="route-editor-save-variant-btn">💾 Enregistrer la version actuelle</button>
-    </div>
-    <div id="route-editor-variants-table-wrap"></div>
-    <div class="route-editor-section-title">Stratégie de course</div>
-    <div class="route-editor-strategy-card">
-      <label>Objectif de temps (optionnel) <input type="time" id="route-editor-strategy-target" class="routes-text-input" style="width:110px" /></label>
-      <button type="button" class="btn-plans-restart" id="route-editor-strategy-btn">Calculer la stratégie</button>
-      <span class="route-editor-objective-hint">Répartit l'effort section par section selon votre profil d'allure personnel (calibré sur vos sorties Garmin), avec marche active sur les pentes très fortes — pas une allure unique partout.</span>
-    </div>
-    <div id="route-editor-strategy-result"></div>`;
+    <div class="route-editor-layout">
+      <div class="route-editor-layout-map">
+        <div class="gpx-profile-stats">
+          <div class="gpx-profile-stat"><b>${(stats.totalDistM / 1000).toFixed(1)}</b> km</div>
+          <div class="gpx-profile-stat"><b>+${stats.ascentM}</b> m D+</div>
+          <div class="gpx-profile-stat"><b>-${stats.descentM}</b> m D-</div>
+          <div class="gpx-profile-stat"><b>${stats.altMinM}–${stats.altMaxM}</b> m alt.</div>
+          <div class="gpx-profile-stat"><b>${stats.avgClimbGradePct}%</b> pente moy. montée</div>
+          <div class="gpx-profile-stat"><b>${stats.maxClimbGradePct}%</b> pente max</div>
+          <div class="gpx-profile-stat"><b>${climbs.length}</b> côte(s) détectée(s)</div>
+        </div>
+        <div class="route-editor-summary-card">📝 ${buildRouteEditorSummary(stats)}</div>
+        ${routeEditorModeToolbarHtml()}
+        <div class="gpx-profile-map" id="route-editor-map"></div>
+        <div class="gpx-profile-legend">
+          ${GPX_GRADE_BANDS.map(b => `<span class="gpx-profile-legend-item"><span class="gpx-profile-legend-dot" style="background:${b.color}"></span>${b.label}</span>`).join('')}
+        </div>
+        <div class="gpx-profile-elev-container"><canvas id="route-editor-elev-chart"></canvas></div>
+        <div id="route-editor-mode-hint" class="route-editor-hint"></div>
+        <div id="route-editor-extend-controls"></div>
+        <div id="route-editor-move-endpoint-controls"></div>
+        <div id="route-editor-reroute-preview"></div>
+        <div id="route-editor-hint" class="route-editor-hint">Cliquez sur deux points du tracé (carte ou profil) pour choisir une section à répéter.</div>
+        <div id="route-editor-section-panel"></div>
+      </div>
+      <div class="route-editor-layout-sidebar">
+        <details class="route-editor-collapsible" open>
+          <summary>Actions</summary>
+          <div class="route-editor-actions route-editor-actions--top">
+            <button type="button" class="route-editor-btn-secondary" id="route-editor-undo-btn" ${_routeEditorHistory.length ? '' : 'disabled'}>↶ Annuler</button>
+            <button type="button" class="route-editor-btn-secondary" id="route-editor-redo-btn" ${_routeEditorFuture.length ? '' : 'disabled'}>↷ Rétablir</button>
+            <button type="button" class="route-editor-btn-secondary" id="route-editor-reverse-btn">↔ Inverser le sens</button>
+            <button type="button" class="route-editor-btn-secondary" id="route-editor-restore-btn" ${isOriginal ? 'disabled' : ''}>Restaurer l'original</button>
+            <button type="button" class="btn-plans-restart" id="route-editor-export-btn">⬇️ Exporter le GPX</button>
+          </div>
+        </details>
+        <details class="route-editor-collapsible" open>
+          <summary>🎯 Objectif</summary>
+          <div class="route-editor-objective-card">
+            <span class="route-editor-objective-title">Objectif (optionnel)</span>
+            <label>D+ cible <input type="number" id="route-editor-obj-dplus" class="routes-number-input" min="0" step="10" placeholder="m" value="${_routeEditorObjective.targetDplusM ?? ''}" /> m</label>
+            <label>Distance cible <input type="number" id="route-editor-obj-dist" class="routes-number-input" min="0" step="0.5" placeholder="km" value="${_routeEditorObjective.targetDistM ?? ''}" /> km</label>
+            <button type="button" class="route-editor-btn-secondary" id="route-editor-obj-clear">Effacer</button>
+            <span class="route-editor-objective-hint">Allure+ propose automatiquement la côte la plus efficace à répéter pour s'en approcher — ou sélectionnez vous-même une autre section (carte, profil, "🔁 Répéter").</span>
+          </div>
+          <div id="route-editor-objective-auto"></div>
+        </details>
+        <details class="route-editor-collapsible" open>
+          <summary>Côtes détectées${climbs.length ? ` (${climbs.length})` : ''}</summary>
+          ${climbs.length
+            ? `<table class="route-editor-climbs-table">
+                <thead><tr><th>Montée</th><th>Position</th><th>Distance</th><th>D+</th><th>Pente moy.</th><th>Pente max.</th><th></th></tr></thead>
+                <tbody>${climbsRows}</tbody>
+              </table>`
+            : `<div class="route-editor-climbs-empty">Aucune côte significative détectée sur ce parcours.</div>`}
+        </details>
+        <details class="route-editor-collapsible">
+          <summary>Points d'intérêt</summary>
+          <div id="route-editor-poi-table-wrap"></div>
+        </details>
+        <details class="route-editor-collapsible">
+          <summary>Variantes</summary>
+          <div class="route-editor-actions" style="margin-top:0">
+            <button type="button" class="route-editor-btn-secondary" id="route-editor-save-variant-btn">💾 Enregistrer la version actuelle</button>
+          </div>
+          <div id="route-editor-variants-table-wrap"></div>
+        </details>
+        <details class="route-editor-collapsible">
+          <summary>Stratégie de course</summary>
+          <div class="route-editor-strategy-card">
+            <label>Objectif de temps (optionnel) <input type="time" id="route-editor-strategy-target" class="routes-text-input" style="width:110px" /></label>
+            <button type="button" class="btn-plans-restart" id="route-editor-strategy-btn">Calculer la stratégie</button>
+            <span class="route-editor-objective-hint">Répartit l'effort section par section selon votre profil d'allure personnel (calibré sur vos sorties Garmin), avec marche active sur les pentes très fortes — pas une allure unique partout.</span>
+          </div>
+          <div id="route-editor-strategy-result"></div>
+        </details>
+      </div>
+    </div>`;
 
   const exportBtn = el('route-editor-export-btn');
   if (exportBtn) exportBtn.onclick = routeEditorExportGpx;

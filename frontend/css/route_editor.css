@@ -45,6 +45,64 @@
 .route-editor-imported-remove:hover { color: var(--red); border-color: var(--red); }
 
 #route-editor-workspace { margin-top: 18px; }
+
+/* Mise en page carte a gauche / colonne de controles repliables a droite
+   (retour utilisateur, sept. 2026 : trop de boutons au-dessus ET en dessous
+   de la carte). Meme mecanisme que .activity-detail-layout (style.css,
+   fiche Activite) : colonne fixe a droite, colonne fluide (carte) a gauche,
+   .page garde son padding standard (32/36px, ne jamais y toucher). */
+.route-editor-layout {
+  display: grid;
+  grid-template-columns: minmax(0,1fr) 360px;
+  grid-template-areas: "map sidebar";
+  gap: 16px 24px;
+  align-items: start;
+}
+.route-editor-layout-map { grid-area: map; min-width: 0; }
+.route-editor-layout-sidebar { grid-area: sidebar; min-width: 0; }
+@media (max-width: 900px) {
+  .route-editor-layout {
+    grid-template-columns: 1fr;
+    grid-template-areas: "map" "sidebar";
+  }
+}
+/* Sections repliables de la colonne de droite - <details>/<summary> natifs
+   (pas de JS de toggle a ecrire/maintenir), meme carte visuelle que le
+   reste de la page (bg-white/border/shadow-sm). */
+.route-editor-collapsible {
+  background: var(--bg-white);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+  padding: 14px 16px;
+  margin-bottom: 14px;
+}
+.route-editor-collapsible > summary {
+  font-family: var(--font);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.route-editor-collapsible > summary::-webkit-details-marker { display: none; }
+.route-editor-collapsible > summary::before {
+  content: '▸';
+  display: inline-block;
+  font-size: 11px;
+  color: var(--text-muted);
+  transition: transform 0.15s ease;
+}
+.route-editor-collapsible[open] > summary::before { transform: rotate(90deg); }
+.route-editor-collapsible > summary:hover { color: var(--accent); }
+.route-editor-collapsible > *:not(summary) { margin-top: 12px; }
+.route-editor-collapsible .route-editor-objective-card,
+.route-editor-collapsible .route-editor-strategy-card { margin-bottom: 0; }
 #route-editor-workspace .gpx-profile-map { height: 420px; margin-bottom: 14px; }
 /* Fond opaque obligatoire : contrairement à la modale GPX de la page
    Objectifs (où .gpx-profile-elev-container hérite du fond plein de la
