@@ -3798,6 +3798,18 @@ function matchZoneFromPace(paceSecKm, vma) {
 
 const LAP_BUTTON_CONDITION = { conditionTypeId: 1, conditionTypeKey: 'lap.button' };
 
+// Note textuelle ajoutee a la description d'un pas rendu "au lap" (fin
+// ouverte, plus de compte a rebours Garmin) pour que le coureur sache quand
+// meme combien de temps recuperer initialement.
+function fmtOpenEndedNote(seconds) {
+  if (!seconds || seconds <= 0) return '';
+  const m = Math.floor(seconds / 60), s = seconds % 60;
+  const parts = [];
+  if (m > 0) parts.push(m + 'min');
+  if (s > 0) parts.push(s + 's');
+  return ' (' + parts.join(' ') + ')';
+}
+
 // Rend "au lap" (bouton Lap, fin ouverte) la toute DERNIERE recuperation
 // d'une seance structuree deja assemblee (steps final, apres warmup/
 // cooldown/RepeatGroupDTO) - jamais une recuperation intermediaire. Deux cas
@@ -3820,7 +3832,7 @@ function markLastRecoveryOpenEnded(steps) {
   const idx = steps.length - 1;
   const last = steps[idx];
   if (last.type === 'ExecutableStepDTO' && ['recovery', 'cooldown'].includes(last.stepType?.stepTypeKey)) {
-    steps[idx] = { ...last, endCondition: LAP_BUTTON_CONDITION, endConditionValue: null };
+    steps[idx] = { ...last, description: (last.description || '') + fmtOpenEndedNote(last.endConditionValue), endCondition: LAP_BUTTON_CONDITION, endConditionValue: null };
     return;
   }
   if (last.type === 'RepeatGroupDTO' && last.numberOfIterations >= 2) {
@@ -3828,7 +3840,8 @@ function markLastRecoveryOpenEnded(steps) {
     const lastInner = inner[inner.length - 1];
     if (lastInner?.stepType?.stepTypeKey === 'recovery') {
       const extracted = inner.map(s => ({ ...s }));
-      extracted[extracted.length - 1] = { ...extracted[extracted.length - 1], endCondition: LAP_BUTTON_CONDITION, endConditionValue: null };
+      const li = extracted.length - 1;
+      extracted[li] = { ...extracted[li], description: (extracted[li].description || '') + fmtOpenEndedNote(extracted[li].endConditionValue), endCondition: LAP_BUTTON_CONDITION, endConditionValue: null };
       const remaining = last.numberOfIterations - 1;
       const replacement = remaining >= 1 ? [{ ...last, numberOfIterations: remaining }, ...extracted] : extracted;
       steps.splice(idx, 1, ...replacement);
@@ -3938,77 +3951,77 @@ function buildGarminWorkoutFromSession(session, weekNum, sessionDisplay, userZon
     };
   };
 
-  // Detecter warmup/cooldown et groupes de repetitions
+  // Detecter warmup/cooldown, puis regrouper en blocs Garmin (RepeatGroupDTO)
+  // directement depuis la vraie structure Campus (blockIdx/blockRepeat,
+  // injectes par annotatePaceZones/zones.js sur chaque zone) plutot que de
+  // re-deviner des motifs sur la liste aplatie. L'ancienne heuristique
+  // glissait UN SEUL pattern candidat et n'acceptait un groupe que s'il
+  // recouvrait a lui seul TOUTE la section centrale : une seance a 2 blocs
+  // distincts (ex: 3x30s VMA r=2'30 puis 4x6' S60 r=2') ne matchait jamais
+  // et ressortait entierement a plat (bug remonte par l'utilisateur). Elle
+  // ne comparait aussi que le "kind" + une tolerance de duree, jamais
+  // pace.value, ce qui pouvait a tort regrouper des iterations d'allures
+  // differentes. Suivre les vrais blocs Campus elimine les deux problemes :
+  // chaque bloc devient son propre RepeatGroupDTO (ou reste a plat si
+  // repeat=1), jamais fusionne avec un autre bloc ni tronque.
   function buildStructuredSteps(zones) {
     if (zones.length === 0) return [mkStep({ kind: '', duration: totalDuration }, 0)];
 
     const steps = zones.map(mkStep);
-    let wStart = 0, cEnd = zones.length;
 
     // Warmup: 1ere zone Z1/Z2 si duree >= 3min ET il y a d'autres zones apres
     const firstKind = (zones[0].kind || '').toUpperCase();
+    let warmupApplied = false;
     if (['Z1','Z2','WARMUP'].includes(firstKind) && (zones[0].duration || 0) >= 180 && zones.length > 1) {
       steps[0] = { ...steps[0], stepType: { stepTypeId: 1, stepTypeKey: 'warmup' } };
-      wStart = 1;
+      warmupApplied = true;
     }
 
     // Cooldown: derniere zone Z1/Z2/RECOVER si duree >= 2min ET il y a des zones avant
     const lastKind = (zones[zones.length-1].kind || '').toUpperCase();
-    if (['Z1','Z2','COOLDOWN','RECOVER','RECOVERY'].includes(lastKind) && (zones[zones.length-1].duration || 0) >= 120 && zones.length > wStart + 1) {
+    let cooldownApplied = false;
+    if (['Z1','Z2','COOLDOWN','RECOVER','RECOVERY'].includes(lastKind) && (zones[zones.length-1].duration || 0) >= 120 && zones.length > (warmupApplied ? 2 : 1)) {
       const lastIdx = zones.length - 1;
       steps[lastIdx] = { ...steps[lastIdx], stepType: { stepTypeId: 2, stepTypeKey: 'cooldown' } };
-      cEnd = lastIdx;
+      cooldownApplied = true;
     }
 
-    // Recherche de repetitions dans la partie centrale
-    const midZones = zones.slice(wStart, cEnd);
-    const midSteps = steps.slice(wStart, cEnd);
-    let midResult = midSteps;
+    // Parcourt les zones dans l'ordre et regroupe chaque plage consecutive
+    // partageant le meme blockIdx (= un bloc Campus, eventuellement repete).
+    const result = [];
     let foundRepeatGroup = false;
-
-    if (midZones.length >= 4) {
-      // Essayer des patterns de longueur 2 ou 3
-      for (let patLen = 2; patLen <= Math.min(4, Math.floor(midZones.length / 2)); patLen++) {
-        const pattern = midZones.slice(0, patLen);
-        let reps = 1, j = patLen;
-        while (j + patLen <= midZones.length) {
-          const chunk = midZones.slice(j, j + patLen);
-          const match = chunk.every((z, k) => {
-            const pk = (pattern[k].kind || '').toUpperCase();
-            const ck = (z.kind || '').toUpperCase();
-            return pk === ck && Math.abs((z.duration || 0) - (pattern[k].duration || 0)) <= 15;
-          });
-          if (match) { reps++; j += patLen; }
-          else break;
-        }
-        if (reps >= 2 && j === midZones.length) {
-          // Pattern trouve! Creer un RepeatGroupDTO (sans extraction a ce
-          // stade - voir markLastRecoveryOpenEnded, applique une fois le
-          // resultat final assemble : seul lui sait si un bloc separe, ex.
-          // un retour au calme/recuperation final, suit ce groupe ou non).
-          const repeatSteps = midSteps.slice(0, patLen).map((s, idx) => ({ ...s, stepOrder: idx + 1 }));
-          midResult = [{
-            type: 'RepeatGroupDTO',
-            stepId: null,
-            stepOrder: -1, // fixe ci-dessous
-            childStepId: 1,
-            stepType: { stepTypeId: 6, stepTypeKey: 'repeat' },
-            smartRepeat: false,
-            numberOfIterations: reps,
-            workoutSteps: repeatSteps,
-          }];
-          foundRepeatGroup = true;
-          break;
-        }
+    let i = 0;
+    while (i < zones.length) {
+      const blockIdx = zones[i].blockIdx;
+      const blockRepeat = zones[i].blockRepeat || 1;
+      let j = i;
+      while (j < zones.length && zones[j].blockIdx === blockIdx) j++;
+      const groupLen = j - i;
+      const exCount = blockRepeat >= 2 ? Math.round(groupLen / blockRepeat) : groupLen;
+      // Ne jamais repeter un bloc qui contient l'echauffement/retour au calme
+      // deja marque ci-dessus (n'arrive normalement jamais en pratique - ces
+      // blocs Campus sont toujours repeat=1 - mais on se protege quand meme).
+      const touchesWarmup = warmupApplied && i === 0;
+      const touchesCooldown = cooldownApplied && (j - 1) === zones.length - 1;
+      if (blockRepeat >= 2 && exCount >= 1 && exCount * blockRepeat === groupLen && !touchesWarmup && !touchesCooldown) {
+        const template = steps.slice(i, i + exCount).map((s, idx) => ({ ...s, stepOrder: idx + 1 }));
+        result.push({
+          type: 'RepeatGroupDTO',
+          stepId: null,
+          stepOrder: -1, // fixe plus bas
+          childStepId: 1,
+          stepType: { stepTypeId: 6, stepTypeKey: 'repeat' },
+          smartRepeat: false,
+          numberOfIterations: blockRepeat,
+          workoutSteps: template,
+        });
+        foundRepeatGroup = true;
+      } else {
+        for (let k = i; k < j; k++) result.push(steps[k]);
       }
+      i = j;
     }
 
-    // Assembler le resultat final avec stepOrder sequentiel
-    const result = [
-      ...steps.slice(0, wStart),
-      ...midResult,
-      ...steps.slice(cEnd),
-    ];
     // Seulement si une seance fractionnee a bien ete detectee (jamais sur
     // une seance continue sans repetitions - hors sujet de ce correctif).
     if (foundRepeatGroup) markLastRecoveryOpenEnded(result);
@@ -4018,11 +4031,32 @@ function buildGarminWorkoutFromSession(session, weekNum, sessionDisplay, userZon
   const workoutSteps = buildStructuredSteps(paceZones);
   const sportType = { sportTypeId: 1, sportTypeKey: 'running' };
 
+  // Estimation de la distance totale de la seance : meme cascade d'allure
+  // que mkStep (Campus calibre -> zones Allure+ -> VO2max Garmin), jamais
+  // calculee ailleurs jusqu'ici. Recuperation incluse (allure libre cote
+  // Garmin, mais parcourt quand meme de la distance a l'estimation).
+  const estimateZonePaceSecKm = (zone) => {
+    const zKey = (zone.kind || '').toUpperCase();
+    const refinedKey = zone.resolvedZone || zKey;
+    const apUserZone = userZones && userZones[refinedKey] ? userZones[refinedKey] : null;
+    if (preferAllureplusZones && apUserZone) return (apUserZone.min + apUserZone.max) / 2;
+    if (zone.pace && zone.pace.value && zone.pace.value > 0) return zone.pace.value;
+    if (userZones && userZones[zKey]) { const z = userZones[zKey]; return (z.min + z.max) / 2; }
+    if (userZones && userZones[refinedKey]) { const z = userZones[refinedKey]; return (z.min + z.max) / 2; }
+    return null;
+  };
+  let estimatedDistanceM = 0;
+  paceZones.forEach(zone => {
+    const paceSecKm = estimateZonePaceSecKm(zone);
+    if (paceSecKm > 0) estimatedDistanceM += (zone.duration || 0) / paceSecKm * 1000;
+  });
+
   return {
     workoutName,
     description: undefined,
     sportType,
     workoutSegments: [{ segmentOrder: 1, sportType, workoutSteps }],
+    estimatedDistanceM: Math.round(estimatedDistanceM),
   };
 }
 
@@ -4116,6 +4150,7 @@ app.post('/api/garmin/workout-from-session', requireSession, async (req, res) =>
       noteParts.push(dPlusStr);
     }
     if (allureplusVma) noteParts.push('VMA Allure+: ' + allureplusVma + ' km/h');
+    if (workout.estimatedDistanceM > 0) noteParts.push('Distance estimee: ' + (workout.estimatedDistanceM / 1000).toFixed(1) + ' km');
     const origName = toAsciiNote(session.displayName || session.name || '');
     if (origName) noteParts.push('Seance: ' + origName);
     if (noteParts.length > 0) workout.description = noteParts.join(' | ');

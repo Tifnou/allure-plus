@@ -1678,8 +1678,33 @@ function renderSessionDetail(session, weekId, isCurrentWeek) {
     const vmaBadge = forced
       ? '<span class="zones-source-note zones-source-note--goal">ALLURES OBJECTIF &middot; ' + goalPaceInfo.targetTime + '</span>'
       : (vma ? '<span class="zones-source-note">CALCULÉES · VMA ' + vma + ' km/h</span>' : '');
+
+    // Estimation de la distance totale parcourue : meme cascade d'allure que
+    // buildZoneRow (allure trail/route selon la zone, VMA affichee) — inclut
+    // la recuperation (allure libre cote Garmin, mais parcourt quand meme de
+    // la distance dans l'estimation), jamais calcule ailleurs jusqu'ici.
+    let estimatedDistanceKm = null;
+    if (displayVma) {
+      let distM = 0, anyRef = false;
+      zonesResolved.forEach(z => {
+        const apZone = z.resolvedZone;
+        if (!apZone) return;
+        const isEfWarmup = hasIntervals && (apZone === 'EF' || apZone === 'WARMUP' || apZone === 'COOLDOWN');
+        const useTrail = isSessTrail && !isEfWarmup;
+        const apRef = useTrail ? calcAllureRefTrail(apZone, displayVma) : calcAllureRef(apZone, displayVma);
+        if (!apRef) return;
+        anyRef = true;
+        const midPaceSecKm = (apRef.paceMin + apRef.paceMax) / 2;
+        distM += (z.duration || 0) / midPaceSecKm * 1000;
+      });
+      if (anyRef) estimatedDistanceKm = distM / 1000;
+    }
+    const distBadge = estimatedDistanceKm
+      ? '<span class="zones-source-note">&#8776;&nbsp;' + estimatedDistanceKm.toFixed(1) + ' km estim&eacute;s</span>'
+      : '';
+
     zonesHTML = '<div class="session-detail-section"><div class="session-detail-section-title">'
-      + modeBadge + "&nbsp;Zones d'allure" + trailNote + vmaBadge
+      + modeBadge + "&nbsp;Zones d'allure" + trailNote + vmaBadge + distBadge
       + '</div><div class="pace-zones-list">' + zoneRows + '</div></div>';
 
     if (goalPaceInfo) {

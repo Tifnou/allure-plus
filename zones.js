@@ -97,24 +97,36 @@ function resolveZoneFromExercise(pace, zoneKind, goalType) {
 }
 
 // Aplatit exercisesBlocks (en respectant "repeat") dans le même ordre que
-// session.paceZones, pour retrouver le pace.slug de chaque zone
-// (paceZones ne contient que kind/duration/pace.value, pas le slug).
-function flattenExercisePaces(session) {
+// session.paceZones, pour retrouver le pace.slug DE CHAQUE zone ainsi que le
+// bloc d'origine (blockIdx/blockRepeat) — nécessaire pour reconstruire les
+// vrais groupes de répétition Garmin (voir buildStructuredSteps, server.js)
+// au lieu de re-deviner des motifs sur la liste aplatie, qui ne pouvait
+// détecter qu'UN seul bloc de répétition couvrant toute la séance et
+// échouait dès qu'une séance avait 2 blocs distincts (ex: 3x30s VMA puis
+// 4x6' S60) — la vraie structure Campus (exercisesBlocks) est toujours
+// disponible mais était jusque-là relue seulement pour le pace.slug.
+function flattenExerciseInfo(session) {
   const out = [];
-  (session.exercisesBlocks || []).forEach(block => {
+  (session.exercisesBlocks || []).forEach((block, blockIdx) => {
     const repeat = block.repeat || 1;
+    const exercises = block.exercises || [];
     for (let r = 0; r < repeat; r++) {
-      (block.exercises || []).forEach(ex => out.push(ex.pace || null));
+      exercises.forEach(ex => out.push({ pace: ex.pace || null, blockIdx, blockRepeat: repeat }));
     }
   });
   return out;
 }
 
-// Annote chaque entrée de session.paceZones avec sa zone Allure+ résolue (resolvedZone)
+// Annote chaque entrée de session.paceZones avec sa zone Allure+ résolue
+// (resolvedZone) et son bloc Campus d'origine (blockIdx/blockRepeat).
 function annotatePaceZones(session, goalType) {
-  const paces = flattenExercisePaces(session);
+  const info  = flattenExerciseInfo(session);
   const zones = session.paceZones || [];
-  return zones.map((z, i) => Object.assign({}, z, { resolvedZone: resolveZoneFromExercise(paces[i], z.kind, goalType) }));
+  return zones.map((z, i) => Object.assign({}, z, {
+    resolvedZone: resolveZoneFromExercise(info[i]?.pace, z.kind, goalType),
+    blockIdx: info[i]?.blockIdx,
+    blockRepeat: info[i]?.blockRepeat || 1,
+  }));
 }
 
 module.exports = { ALLURE_PLUS_ZONES, ZONE_LABELS, getZoneRange, resolveZoneFromExercise, annotatePaceZones };
