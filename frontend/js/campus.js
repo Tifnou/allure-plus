@@ -1570,6 +1570,16 @@ function renderSessionDetail(session, weekId, isCurrentWeek) {
   const vma      = (_vo2loc && _vo2loc > 3.5)
     ? Math.round((_vo2loc - 3.5) * _factLoc * 10) / 10
     : (campusState.fitness?.vma || null); // fallback Campus si pas de VO2max Garmin
+  // FC cible indicative par zone d'allure (retour utilisateur explicite,
+  // 28/09) : reutilise TEL QUEL le meme calcul deja utilise cote analyse
+  // post-seance (getUserHRZones/approxHRBandForPaceZone/PACE_ZONE_TO_HR_ZONE_RANGE,
+  // session-analysis.js - scripts charges avant celui-ci dans index.html mais
+  // ces fonctions ne sont appelees qu'au clic sur une seance, donc toujours
+  // deja definies a ce moment). Jamais une equivalence exacte allure<->FC
+  // (dérive cardiaque, fatigue, cf commentaire de calcHRZones, app.js) - d'ou
+  // le "~" et l'icone ❤️ plutot qu'une cible presentee comme aussi fiable
+  // que l'allure elle-meme.
+  const hrZones = (typeof getUserHRZones === 'function') ? getUserHRZones() : null;
   const isCompSess = (session.trainingCategory || '').includes('competition');
   let zonesHTML    = '';
 
@@ -1633,13 +1643,20 @@ function renderSessionDetail(session, weekId, isCurrentWeek) {
       const zoneLbl = (apZone === 'RECOVER' && idx === 0)
         ? 'Échauffement'
         : (zoneDef ? zoneDef.label : fmtZoneKind(z.kind, session.displayName || session.name || ''));
+      // FC cible indicative de cette zone (~min-max bpm) - meme pour une zone
+      // "allure libre" (RECOVER), la FC reste un repere pertinent la ou
+      // l'allure n'en est pas un.
+      const hrBand = apZone ? approxHRBandForPaceZone(apZone, hrZones) : null;
+      const hrCell = hrBand
+        ? '<span class="pace-zone-hr">❤️ ~' + hrBand.low + '-' + hrBand.high + '</span>'
+        : '';
       // RECOVER → allure libre, pas de valeur cible
       if (zoneDef?.noTarget) {
         return '<div class="pace-zone-row" data-zone="' + zKey + '" style="background:' + rowBg + ';border-radius:4px;margin-bottom:2px;padding:4px 8px;">'
           + '<span class="pace-zone-kind">' + zoneLbl + '</span>'
           + '<span class="pace-zone-duration">' + fmtDuration(z.duration) + '</span>'
           + '<span class="pace-zone-pace" style="color:#94a3b8;font-style:italic;font-size:12px">Allure libre</span>'
-          + '</div>';
+          + hrCell + '</div>';
       }
       // EF en warmup (session avec intervalles) → Route ; EF sortie longue → Trail
       const isEfWarmup = hasIntervals && (apZone === 'EF' || apZone === 'WARMUP' || apZone === 'COOLDOWN');
@@ -1659,7 +1676,7 @@ function renderSessionDetail(session, weekId, isCurrentWeek) {
       return '<div class="pace-zone-row" data-zone="' + zKey + '" style="background:' + rowBg + ';border-radius:4px;margin-bottom:2px;padding:4px 8px;">'
         + '<span class="pace-zone-kind">' + zoneLbl + '</span>'
         + '<span class="pace-zone-duration">' + fmtDuration(z.duration) + '</span>'
-        + paceCell + '</div>';
+        + paceCell + hrCell + '</div>';
     };
 
     // Allures objectif (info) : si un temps cible est defini sur un objectif

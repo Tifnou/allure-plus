@@ -2166,6 +2166,19 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
   border-radius: 6px;
   padding: 1px 7px;
 }
+/* FC cible indicative par zone (~min-max bpm) - couleur distincte de
+   .pace-zone-pace (allure) pour ne jamais laisser croire a une precision
+   equivalente : la FC reelle derive avec la fatigue/chaleur, l'allure non. */
+.pace-zone-hr {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: #be123c;
+  background: rgba(225,29,72,0.10);
+  border-radius: 6px;
+  padding: 1px 7px;
+  white-space: nowrap;
+}
+[data-theme="dark"] .pace-zone-hr { color: #fb7185; background: rgba(225,29,72,0.18); }
 
 /* ── Actions en bas du détail ── */
 .session-detail-actions {
