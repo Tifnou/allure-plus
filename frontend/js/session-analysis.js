@@ -616,6 +616,44 @@ async function buildSessionAnalysis(session, week, activity) {
     ? groups.reduce((best, g) => Math.abs(g.repCount - plannedMainReps) < Math.abs((best?.repCount || 0) - plannedMainReps) ? g : best, groups[0])
     : null;
 
+  // Seance a PLUSIEURS blocs repetes distincts (ex: 3x30" puis 4x4') : chaque
+  // bloc prevu est un travail specifique a part entiere — ne regarder que le
+  // groupe de laps majoritaire ignorait les autres (7 repetitions prevues,
+  // seulement 4 retenues). On apparie donc chaque bloc prevu au groupe de laps
+  // dont la duree est la plus proche (chaque groupe une seule fois), et chaque
+  // repetition est jugee contre la zone de SON bloc. Si l'appariement est
+  // impossible (duree prevue inconnue, moins de groupes que de blocs), repli
+  // sur le seul mainGroup comme avant.
+  const plannedRepBlocks = [];
+  repeatingRunningEx.forEach(e => {
+    let b = plannedRepBlocks.find(x => x.blockIdx === e.blockIdx);
+    if (!b) { b = { blockIdx: e.blockIdx, exs: [], repIdxs: new Set() }; plannedRepBlocks.push(b); }
+    b.repIdxs.add(e.repIdx);
+    if (e.repIdx === 0) b.exs.push(e);
+  });
+  plannedRepBlocks.forEach(b => {
+    b.durSec = b.exs.reduce((s, e) => s + durationsToSeconds(e.durations), 0);
+    b.zoneKey = pickDominantZone(b.exs, goalType);
+  });
+  let matchedBlocks = null; // [{ block, group }]
+  if (useRepsPath && plannedRepBlocks.length > 1 && groups.length >= plannedRepBlocks.length
+      && plannedRepBlocks.every(b => b.durSec > 0)) {
+    const used = new Set();
+    const pairs = [];
+    for (const b of plannedRepBlocks) {
+      let best = null, bestGap = Infinity;
+      groups.forEach(g => {
+        if (used.has(g)) return;
+        const gap = Math.abs(g.anchorDuration - b.durSec) / b.durSec;
+        if (gap < bestGap) { best = g; bestGap = gap; }
+      });
+      if (!best || bestGap > 0.5) { pairs.length = 0; break; }
+      used.add(best);
+      pairs.push({ block: b, group: best });
+    }
+    if (pairs.length === plannedRepBlocks.length) matchedBlocks = pairs;
+  }
+
   // ── Volume ──
   const plannedDurationSec = session.stats?.expectedDuration || null;
   const plannedDistanceKm  = session.stats?.expectedDistance || null;
@@ -639,7 +677,7 @@ async function buildSessionAnalysis(session, week, activity) {
   // repetitions prevues qui n'existe pas dans le plan.
   const actualWarmupSec   = warmupLaps.reduce((s, l) => s + (l.elapsedDuration || l.movingDuration || l.duration || 0), 0);
   const actualCooldownSec = cooldownLap ? (cooldownLap.elapsedDuration || cooldownLap.movingDuration || cooldownLap.duration || 0) : null;
-  const actualMainReps    = hasStructuredReps ? (useRepsPath ? (mainGroup ? mainGroup.repCount : effortEntries.length) : null) : null;
+  const actualMainReps    = hasStructuredReps ? (useRepsPath ? (matchedBlocks ? matchedBlocks.reduce((s, p) => s + p.group.repCount, 0) : mainGroup ? mainGroup.repCount : effortEntries.length) : null) : null;
   const structure = {
     plannedWarmupSec, actualWarmupSec: laps.length ? actualWarmupSec : null,
     plannedMainReps: hasStructuredReps ? plannedMainReps : null, actualMainReps,
@@ -707,8 +745,18 @@ async function buildSessionAnalysis(session, week, activity) {
   // representer un tout autre segment de la seance (cf. EF + lignes droites).
   let reps = [];
   if (useRepsPath && mainGroup) {
-    reps = mainGroup.memberIdx.map((lapIdx, i) => {
+    // Une entree par repetition, chacune avec la zone de son bloc (un seul
+    // bloc = repsZoneKey comme avant ; plusieurs = zone propre a chaque bloc).
+    const repEntries = matchedBlocks
+      ? matchedBlocks.flatMap(({ block, group }) => group.memberIdx.map(lapIdx => ({ lapIdx, zoneKey: block.zoneKey || repsZoneKey })))
+          .sort((a, b) => a.lapIdx - b.lapIdx)
+      : mainGroup.memberIdx.map(lapIdx => ({ lapIdx, zoneKey: repsZoneKey }));
+    reps = repEntries.map(({ lapIdx, zoneKey }, i) => {
       const lap = laps[lapIdx];
+      const repsPaceRange = zoneKey && vma
+        ? (isTrail ? calcAllureRefTrail(zoneKey, vma) : calcAllureRef(zoneKey, vma))
+        : null;
+      const repsHRBand = zoneKey ? approxHRBandForPaceZone(zoneKey, hrZones) : null;
       const p = lap.averageSpeed > 0 ? Math.round(1000 / lap.averageSpeed) : null;
       let classification = null;
       if (p != null && repsPaceRange) {
@@ -1691,17 +1739,21 @@ function buildAnalysisModalHtml(record) {
   // Colonne FC : n'affichee que si au moins une repetition a une FC connue
   // (activite sans capteur FC) - evite une colonne "—" partout sans interet.
   const repsHaveHR = record.reps.some(r => r.actualHR != null);
+  // Blocs repetes de zones differentes : la cible FC varie d'une ligne a l'autre
+  // -> affichee par ligne plutot que dans l'en-tete.
+  const repsHRTargets = new Set(record.reps.map(r => r.targetHRMin != null ? `${r.targetHRMin}-${r.targetHRMax}` : ''));
+  const repsHRPerRow = repsHRTargets.size > 1;
   const repsTableHtml = record.reps.length ? `
     <div class="analysis-section-title">Répétitions</div>
     <table class="analysis-reps-table">
-      <thead><tr><th>#</th><th>Cible</th><th>Réalisé</th><th>Analyse</th>${repsHaveHR ? `<th>FC${record.repsHRBand ? ` (cible ~${record.repsHRBand.low}-${record.repsHRBand.high})` : ''}</th>` : ''}</tr></thead>
+      <thead><tr><th>#</th><th>Cible</th><th>Réalisé</th><th>Analyse</th>${repsHaveHR ? `<th>FC${(record.repsHRBand && !repsHRPerRow) ? ` (cible ~${record.repsHRBand.low}-${record.repsHRBand.high})` : ''}</th>` : ''}</tr></thead>
       <tbody>${record.reps.map(r => `
         <tr>
           <td>${r.index}</td>
           <td>${(r.targetPaceMinSecKm && r.targetPaceMaxSecKm) ? (fmtPace(r.targetPaceMinSecKm) + '–' + fmtPace(r.targetPaceMaxSecKm)) : '—'}</td>
           <td>${r.actualPaceSecKm ? fmtPace(r.actualPaceSecKm) : '—'}</td>
           <td>${repClassificationLabel(r.classification)}</td>
-          ${repsHaveHR ? `<td>${r.actualHR != null ? r.actualHR + ' bpm — ' + repHRClassificationLabel(r.hrClassification) : '—'}</td>` : ''}
+          ${repsHaveHR ? `<td>${r.actualHR != null ? r.actualHR + ' bpm — ' + repHRClassificationLabel(r.hrClassification) + (repsHRPerRow && r.targetHRMin != null ? ` <span class="analysis-summary-planned">(~${r.targetHRMin}-${r.targetHRMax})</span>` : '') : '—'}</td>` : ''}
         </tr>`).join('')}</tbody>
     </table>` : '';
 
