@@ -742,8 +742,11 @@ async function buildSessionAnalysis(session, week, activity) {
     // Une ligne par etape de travail prevue, dans l'ordre du plan, jugee contre
     // la zone de CETTE etape. Une etape sans lap n'a pas de ligne : elle est
     // signalee comme manquante (structure.actualMainReps < plannedMainReps).
-    const repEntries = plannedWorkSteps.filter(st => st.lapIdx != null).map(st => ({ lapIdx: st.lapIdx, zoneKey: st.zoneKey || repsZoneKey }));
-    reps = repEntries.map(({ lapIdx, zoneKey }, i) => {
+    const repEntries = plannedWorkSteps.filter(st => st.lapIdx != null).map(st => ({ lapIdx: st.lapIdx, zoneKey: st.zoneKey || repsZoneKey, step: st }));
+    // Numerotation par tour de bloc ; "1a"/"1b" quand un tour enchaine plusieurs
+    // efforts (ex: 3' puis 2'), pour ne pas gonfler le compte des repetitions.
+    const unitNo = new Map(plannedUnits.map((u, n) => [u.key, n + 1]));
+    reps = repEntries.map(({ lapIdx, zoneKey, step }, i) => {
       const lap = laps[lapIdx];
       const repsPaceRange = zoneKey && vma
         ? (isTrail ? calcAllureRefTrail(zoneKey, vma) : calcAllureRef(zoneKey, vma))
@@ -764,7 +767,7 @@ async function buildSessionAnalysis(session, week, activity) {
         ? (repHR > repsHRBand.high ? 'elevee' : repHR < repsHRBand.low ? 'basse' : 'conforme')
         : null;
       return {
-        index: i + 1,
+        index: (() => { const u = plannedUnits.find(x => x.key === step.blockIdx + "_" + step.repIdx); const n = unitNo.get(u.key); return u.steps.length > 1 ? n + String.fromCharCode(97 + step.stepPos) : n; })(),
         targetPaceMinSecKm: repsPaceRange ? repsPaceRange.paceMin : null,
         targetPaceMaxSecKm: repsPaceRange ? repsPaceRange.paceMax : null,
         actualPaceSecKm: p, classification,
