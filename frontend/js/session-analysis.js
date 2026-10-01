@@ -767,6 +767,7 @@ async function buildSessionAnalysis(session, week, activity) {
         ? (repHR > repsHRBand.high ? 'elevee' : repHR < repsHRBand.low ? 'basse' : 'conforme')
         : null;
       return {
+        unit: unitNo.get(step.blockIdx + "_" + step.repIdx),
         index: (() => { const u = plannedUnits.find(x => x.key === step.blockIdx + "_" + step.repIdx); const n = unitNo.get(u.key); return u.steps.length > 1 ? n + String.fromCharCode(97 + step.stepPos) : n; })(),
         targetPaceMinSecKm: repsPaceRange ? repsPaceRange.paceMin : null,
         targetPaceMaxSecKm: repsPaceRange ? repsPaceRange.paceMax : null,
@@ -1747,7 +1748,7 @@ function buildAnalysisModalHtml(record) {
     <table class="analysis-reps-table">
       <thead><tr><th>#</th><th>Cible</th><th>Réalisé</th><th>Analyse</th>${repsHaveHR ? `<th>FC${(record.repsHRBand && !repsHRPerRow) ? ` (cible ~${record.repsHRBand.low}-${record.repsHRBand.high})` : ''}</th>` : ''}</tr></thead>
       <tbody>${record.reps.map(r => `
-        <tr>
+        <tr${r.unit != null ? ` class="rep-unit-${r.unit % 2 ? "a" : "b"}"` : ""}>
           <td>${r.index}</td>
           <td>${(r.targetPaceMinSecKm && r.targetPaceMaxSecKm) ? (fmtPace(r.targetPaceMinSecKm) + '–' + fmtPace(r.targetPaceMaxSecKm)) : '—'}</td>
           <td>${r.actualPaceSecKm ? fmtPace(r.actualPaceSecKm) : '—'}</td>
