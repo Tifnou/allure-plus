@@ -612,7 +612,7 @@ async function buildSessionAnalysis(session, week, activity) {
 
   const groups = useRepsPath ? groupEffortsByDuration(effortEntries, vma, isTrail) : [];
   // Groupe principal = celui qui matche le mieux le nombre de repetitions prevues
-  const mainGroup = groups.length
+  let mainGroup = groups.length
     ? groups.reduce((best, g) => Math.abs(g.repCount - plannedMainReps) < Math.abs((best?.repCount || 0) - plannedMainReps) ? g : best, groups[0])
     : null;
 
@@ -652,6 +652,15 @@ async function buildSessionAnalysis(session, week, activity) {
       pairs.push({ block: b, group: best });
     }
     if (pairs.length === plannedRepBlocks.length) matchedBlocks = pairs;
+  }
+  // Avec plusieurs blocs, le groupe "principal" (ligne de synthese Allure,
+  // temps en zone, tendance FC) = celui du bloc au plus gros volume de travail
+  // prevu (duree x repetitions), coherent avec mainZoneKey (zone dominante en
+  // duree) — et non plus celui dont le NOMBRE de repetitions est le plus proche
+  // du total prevu. Chaque bloc reste juge individuellement dans le tableau.
+  if (matchedBlocks) {
+    mainGroup = matchedBlocks.reduce((best, p) =>
+      (p.block.durSec * p.block.repIdxs.size) > (best.block.durSec * best.block.repIdxs.size) ? p : best).group;
   }
 
   // ── Volume ──
@@ -786,11 +795,17 @@ async function buildSessionAnalysis(session, week, activity) {
   }
 
   // ── Regularite ──
-  const regularity = mainGroup && mainGroup.regularityMaxEcart != null ? {
-    maxEcartSecKm: mainGroup.regularityMaxEcart, label: mainGroup.regularityLabel,
-    narrative: mainGroup.splitDiffSec == null ? null
-      : mainGroup.splitDiffSec > 8 ? 'Votre rythme devient progressivement plus lent au cours de la séance.'
-      : mainGroup.splitDiffSec < -8 ? 'Vous terminez plus vite que vous n\'avez commencé.'
+  // Plusieurs blocs : regularite jugee bloc par bloc (on ne compare pas des
+  // 30" a des 4'), et c'est la moins bonne qui est retenue.
+  const regGroup = matchedBlocks
+    ? matchedBlocks.map(p => p.group).filter(g => g.regularityMaxEcart != null)
+        .reduce((w, g) => (!w || g.regularityMaxEcart > w.regularityMaxEcart) ? g : w, null)
+    : mainGroup;
+  const regularity = regGroup && regGroup.regularityMaxEcart != null ? {
+    maxEcartSecKm: regGroup.regularityMaxEcart, label: regGroup.regularityLabel,
+    narrative: regGroup.splitDiffSec == null ? null
+      : regGroup.splitDiffSec > 8 ? 'Votre rythme devient progressivement plus lent au cours de la séance.'
+      : regGroup.splitDiffSec < -8 ? 'Vous terminez plus vite que vous n\'avez commencé.'
       : 'Vos répétitions sont homogènes du début à la fin.',
   } : { maxEcartSecKm: null, label: null, narrative: null };
 
@@ -832,7 +847,7 @@ async function buildSessionAnalysis(session, week, activity) {
     hr = {
       avgHR: Math.round(activity.avgHR), maxHR: activity.maxHR ? Math.round(activity.maxHR) : null,
       approxTargetBand: approxBand, pctTimeInTargetZone, pctTimeNotOverBand,
-      trendAcrossReps: (useRepsPath && mainGroup) ? zoneRelevantLaps.map(l => l.averageHR ? Math.round(l.averageHR) : null) : [],
+      trendAcrossReps: (useRepsPath && mainGroup) ? (matchedBlocks ? matchedBlocks.flatMap(p => p.group.memberIdx).sort((a, b) => a - b).map(i => laps[i]) : zoneRelevantLaps).map(l => l.averageHR ? Math.round(l.averageHR) : null) : [],
       hrRecoveryBetweenReps: recoveryLaps.map(l => l.averageHR ? Math.round(l.averageHR) : null),
     };
   }
