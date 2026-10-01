@@ -610,58 +610,43 @@ async function buildSessionAnalysis(session, week, activity) {
     return { type: hasPlannedStructure ? (types[idx] || 'effort') : 'effort', durationSec, paceSecKm, hr: lap.averageHR ? Math.round(lap.averageHR) : null };
   }).filter(seg => seg.durationSec > 0);
 
-  const groups = useRepsPath ? groupEffortsByDuration(effortEntries, vma, isTrail) : [];
-  // Groupe principal = celui qui matche le mieux le nombre de repetitions prevues
-  let mainGroup = groups.length
-    ? groups.reduce((best, g) => Math.abs(g.repCount - plannedMainReps) < Math.abs((best?.repCount || 0) - plannedMainReps) ? g : best, groups[0])
-    : null;
-
-  // Seance a PLUSIEURS blocs repetes distincts (ex: 3x30" puis 4x4') : chaque
-  // bloc prevu est un travail specifique a part entiere — ne regarder que le
-  // groupe de laps majoritaire ignorait les autres (7 repetitions prevues,
-  // seulement 4 retenues). On apparie donc chaque bloc prevu au groupe de laps
-  // dont la duree est la plus proche (chaque groupe une seule fois), et chaque
-  // repetition est jugee contre la zone de SON bloc. Si l'appariement est
-  // impossible (duree prevue inconnue, moins de groupes que de blocs), repli
-  // sur le seul mainGroup comme avant.
-  const plannedRepBlocks = [];
+  // ── Appariement laps Garmin <-> etapes PREVUES, dans l'ordre du plan ──
+  // Le plan est explicite (ex: 3x30" r=2' puis 4x4' r=2') et Garmin recoit
+  // exactement ces etapes : le Nieme lap d'effort EST la Nieme etape de travail
+  // prevue. Aucune deduction par duree/similarite — chaque etape de travail
+  // prevue (un exercice de course d'un tour de bloc repete) prend le lap
+  // d'effort suivant, dans l'ordre. Une etape sans lap correspondant = non
+  // realisee (comptee manquante), jamais "devinee" ailleurs.
+  const plannedWorkSteps = [];   // { blockIdx, repIdx, stepPos, ex, zoneKey }
+  const plannedUnits = [];       // un tour de bloc repete : { key, steps: [...] }
   repeatingRunningEx.forEach(e => {
-    let b = plannedRepBlocks.find(x => x.blockIdx === e.blockIdx);
-    if (!b) { b = { blockIdx: e.blockIdx, exs: [], repIdxs: new Set() }; plannedRepBlocks.push(b); }
-    b.repIdxs.add(e.repIdx);
-    if (e.repIdx === 0) b.exs.push(e);
+    const key = `${e.blockIdx}_${e.repIdx}`;
+    let u = plannedUnits.find(x => x.key === key);
+    if (!u) { u = { key, blockIdx: e.blockIdx, repIdx: e.repIdx, steps: [] }; plannedUnits.push(u); }
+    const step = { blockIdx: e.blockIdx, repIdx: e.repIdx, stepPos: u.steps.length, ex: e, zoneKey: resolvePlannedExerciseZone(e, goalType), lapIdx: null };
+    u.steps.push(step);
+    plannedWorkSteps.push(step);
   });
-  plannedRepBlocks.forEach(b => {
-    b.durSec = b.exs.reduce((s, e) => s + durationsToSeconds(e.durations), 0);
-    b.zoneKey = pickDominantZone(b.exs, goalType);
-  });
-  let matchedBlocks = null; // [{ block, group }]
-  if (useRepsPath && plannedRepBlocks.length > 1 && groups.length >= plannedRepBlocks.length
-      && plannedRepBlocks.every(b => b.durSec > 0)) {
-    const used = new Set();
-    const pairs = [];
-    for (const b of plannedRepBlocks) {
-      let best = null, bestGap = Infinity;
-      groups.forEach(g => {
-        if (used.has(g)) return;
-        const gap = Math.abs(g.anchorDuration - b.durSec) / b.durSec;
-        if (gap < bestGap) { best = g; bestGap = gap; }
-      });
-      if (!best || bestGap > 0.5) { pairs.length = 0; break; }
-      used.add(best);
-      pairs.push({ block: b, group: best });
-    }
-    if (pairs.length === plannedRepBlocks.length) matchedBlocks = pairs;
+  if (useRepsPath) plannedWorkSteps.forEach((st, i) => { if (effortEntries[i]) st.lapIdx = effortEntries[i].idx; });
+  // Un groupe par etape distincte (blockIdx + position dans le tour) : ses
+  // repetitions partagent la meme consigne, donc regularite/derive jugees entre
+  // elles uniquement (jamais des 30" comparees a des 4').
+  const stepGroups = [];
+  if (useRepsPath) {
+    const keys = [...new Set(plannedWorkSteps.map(s => `${s.blockIdx}_${s.stepPos}`))];
+    keys.forEach(k => {
+      const steps = plannedWorkSteps.filter(s => `${s.blockIdx}_${s.stepPos}` === k && s.lapIdx != null);
+      if (!steps.length) return;
+      const g = buildEffortGroup(steps.map(s => ({ lap: laps[s.lapIdx], idx: s.lapIdx })), vma, isTrail);
+      g.zoneKey = steps[0].zoneKey || g.zoneKey;
+      g.workSec = steps.reduce((s, st) => s + (laps[st.lapIdx].elapsedDuration || laps[st.lapIdx].movingDuration || laps[st.lapIdx].duration || 0), 0);
+      stepGroups.push(g);
+    });
   }
-  // Avec plusieurs blocs, le groupe "principal" (ligne de synthese Allure,
-  // temps en zone, tendance FC) = celui du bloc au plus gros volume de travail
-  // prevu (duree x repetitions), coherent avec mainZoneKey (zone dominante en
-  // duree) — et non plus celui dont le NOMBRE de repetitions est le plus proche
-  // du total prevu. Chaque bloc reste juge individuellement dans le tableau.
-  if (matchedBlocks) {
-    mainGroup = matchedBlocks.reduce((best, p) =>
-      (p.block.durSec * p.block.repIdxs.size) > (best.block.durSec * best.block.repIdxs.size) ? p : best).group;
-  }
+  // Groupe principal (ligne de synthese Allure, temps en zone, tendance FC) =
+  // l'etape au plus gros volume de travail, coherent avec mainZoneKey (zone
+  // dominante en duree).
+  const mainGroup = stepGroups.length ? stepGroups.reduce((b, g) => g.workSec > b.workSec ? g : b) : null;
 
   // ── Volume ──
   const plannedDurationSec = session.stats?.expectedDuration || null;
@@ -686,7 +671,7 @@ async function buildSessionAnalysis(session, week, activity) {
   // repetitions prevues qui n'existe pas dans le plan.
   const actualWarmupSec   = warmupLaps.reduce((s, l) => s + (l.elapsedDuration || l.movingDuration || l.duration || 0), 0);
   const actualCooldownSec = cooldownLap ? (cooldownLap.elapsedDuration || cooldownLap.movingDuration || cooldownLap.duration || 0) : null;
-  const actualMainReps    = hasStructuredReps ? (useRepsPath ? (matchedBlocks ? matchedBlocks.reduce((s, p) => s + p.group.repCount, 0) : mainGroup ? mainGroup.repCount : effortEntries.length) : null) : null;
+  const actualMainReps    = hasStructuredReps ? (useRepsPath ? plannedUnits.filter(u => u.steps.every(st => st.lapIdx != null)).length : null) : null;
   const structure = {
     plannedWarmupSec, actualWarmupSec: laps.length ? actualWarmupSec : null,
     plannedMainReps: hasStructuredReps ? plannedMainReps : null, actualMainReps,
@@ -753,13 +738,11 @@ async function buildSessionAnalysis(session, week, activity) {
   // jamais contre la zone dominante globale (mainPaceRange) qui peut
   // representer un tout autre segment de la seance (cf. EF + lignes droites).
   let reps = [];
-  if (useRepsPath && mainGroup) {
-    // Une entree par repetition, chacune avec la zone de son bloc (un seul
-    // bloc = repsZoneKey comme avant ; plusieurs = zone propre a chaque bloc).
-    const repEntries = matchedBlocks
-      ? matchedBlocks.flatMap(({ block, group }) => group.memberIdx.map(lapIdx => ({ lapIdx, zoneKey: block.zoneKey || repsZoneKey })))
-          .sort((a, b) => a.lapIdx - b.lapIdx)
-      : mainGroup.memberIdx.map(lapIdx => ({ lapIdx, zoneKey: repsZoneKey }));
+  if (useRepsPath && plannedWorkSteps.length) {
+    // Une ligne par etape de travail prevue, dans l'ordre du plan, jugee contre
+    // la zone de CETTE etape. Une etape sans lap n'a pas de ligne : elle est
+    // signalee comme manquante (structure.actualMainReps < plannedMainReps).
+    const repEntries = plannedWorkSteps.filter(st => st.lapIdx != null).map(st => ({ lapIdx: st.lapIdx, zoneKey: st.zoneKey || repsZoneKey }));
     reps = repEntries.map(({ lapIdx, zoneKey }, i) => {
       const lap = laps[lapIdx];
       const repsPaceRange = zoneKey && vma
@@ -797,10 +780,8 @@ async function buildSessionAnalysis(session, week, activity) {
   // ── Regularite ──
   // Plusieurs blocs : regularite jugee bloc par bloc (on ne compare pas des
   // 30" a des 4'), et c'est la moins bonne qui est retenue.
-  const regGroup = matchedBlocks
-    ? matchedBlocks.map(p => p.group).filter(g => g.regularityMaxEcart != null)
-        .reduce((w, g) => (!w || g.regularityMaxEcart > w.regularityMaxEcart) ? g : w, null)
-    : mainGroup;
+  const regGroup = stepGroups.filter(g => g.regularityMaxEcart != null)
+    .reduce((w, g) => (!w || g.regularityMaxEcart > w.regularityMaxEcart) ? g : w, null);
   const regularity = regGroup && regGroup.regularityMaxEcart != null ? {
     maxEcartSecKm: regGroup.regularityMaxEcart, label: regGroup.regularityLabel,
     narrative: regGroup.splitDiffSec == null ? null
@@ -847,7 +828,7 @@ async function buildSessionAnalysis(session, week, activity) {
     hr = {
       avgHR: Math.round(activity.avgHR), maxHR: activity.maxHR ? Math.round(activity.maxHR) : null,
       approxTargetBand: approxBand, pctTimeInTargetZone, pctTimeNotOverBand,
-      trendAcrossReps: (useRepsPath && mainGroup) ? (matchedBlocks ? matchedBlocks.flatMap(p => p.group.memberIdx).sort((a, b) => a - b).map(i => laps[i]) : zoneRelevantLaps).map(l => l.averageHR ? Math.round(l.averageHR) : null) : [],
+      trendAcrossReps: (useRepsPath && mainGroup) ? plannedWorkSteps.filter(st => st.lapIdx != null).map(st => laps[st.lapIdx]).map(l => l.averageHR ? Math.round(l.averageHR) : null) : [],
       hrRecoveryBetweenReps: recoveryLaps.map(l => l.averageHR ? Math.round(l.averageHR) : null),
     };
   }

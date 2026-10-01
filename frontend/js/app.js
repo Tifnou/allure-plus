@@ -2184,7 +2184,25 @@ function groupEffortsByDuration(effortEntries, vma, isTrail) {
     if (lap.averageSpeed > 0) group.paces.push(1000 / lap.averageSpeed);
     if (lap.averageHR) group.hrValues.push(Math.round(lap.averageHR));
   });
-  groups.forEach(g => {
+  groups.forEach(g => finalizeEffortGroup(g, vma, isTrail));
+  return groups;
+}
+
+// Regroupement d'efforts deja connus (ex: laps apparies a une etape PREVUE du
+// plan, sans aucune heuristique de duree) — meme resultat que
+// groupEffortsByDuration pour un groupe donne.
+function buildEffortGroup(entries, vma, isTrail) {
+  const g = { anchorDuration: 0, memberIdx: [], paces: [], hrValues: [] };
+  entries.forEach(({ lap, idx }) => {
+    g.memberIdx.push(idx);
+    if (lap.averageSpeed > 0) g.paces.push(1000 / lap.averageSpeed);
+    if (lap.averageHR) g.hrValues.push(Math.round(lap.averageHR));
+  });
+  return finalizeEffortGroup(g, vma, isTrail);
+}
+
+function finalizeEffortGroup(g, vma, isTrail) {
+  {
     g.repCount = g.memberIdx.length;
     g.avgPaceSecKm = g.paces.length ? g.paces.reduce((a, b) => a + b, 0) / g.paces.length : null;
     if (g.paces.length >= 2) {
@@ -2201,8 +2219,8 @@ function groupEffortsByDuration(effortEntries, vma, isTrail) {
     g.zoneKey = (vma && g.avgPaceSecKm) ? matchZoneFromPaceTrailAware(g.avgPaceSecKm, vma, isTrail) : null;
     g.zoneLabel = (g.zoneKey && typeof ALLURE_PLUS_ZONES !== 'undefined') ? ALLURE_PLUS_ZONES[g.zoneKey]?.label : null;
     g.zoneColor = (g.zoneKey && typeof ALLURE_PLUS_ZONES !== 'undefined') ? ALLURE_PLUS_ZONES[g.zoneKey]?.color : null;
-  });
-  return groups;
+  }
+  return g;
 }
 
 async function loadActivityAnalysis(activity) {
