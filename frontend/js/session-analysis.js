@@ -489,6 +489,7 @@ function mergeLapsForStep(laps, idxs, intensity) {
 
 function fmtStepMin(sec) {
   if (!sec) return '—';
+  if (sec < 60) return `${Math.round(sec)}"`;
   const m = Math.floor(sec / 60), s = Math.round(sec % 60);
   return s ? `${m}'${String(s).padStart(2, '0')}"` : `${m}'`;
 }
@@ -977,9 +978,12 @@ async function buildSessionAnalysis(session, week, activity) {
   // affichees avec leur duree reelle. Une etape sans tour = non realisee.
   let stepRows = [];
   if (stepsMode) {
-    const unitOrder = [];
-    plannedSteps.forEach(st => {
-      if (st.role === 'work' && st.blockRepeat > 1) { const k = `${st.blockIdx}_${st.repIdx}`; if (!unitOrder.includes(k)) unitOrder.push(k); }
+    // Blocs REPETES du plan (numerotes dans l'ordre) : l'affichage les encadre
+    // ("Bloc 1" a gauche, puis repetition 1, 2, 3...). La recup finale (au lap)
+    // sort du cadre meme si elle est la derniere iteration d'un bloc.
+    const blockOrder = [];
+    plannedSteps.forEach((st, i) => {
+      if (st.blockRepeat > 1 && !(st.role === 'cooldown' && i === plannedSteps.length - 1) && !blockOrder.includes(st.blockIdx)) blockOrder.push(st.blockIdx);
     });
     const paceClass = (p, r) => {
       if (p == null || !r) return null;
@@ -989,14 +993,13 @@ async function buildSessionAnalysis(session, week, activity) {
     };
     stepRows = plannedSteps.map((st, i) => {
       const lap = stepLapByStepIdx.get(i);
-      const key = `${st.blockIdx}_${st.repIdx}`;
+      const isFinalStep = st.role === 'cooldown' && i === plannedSteps.length - 1;
       const judged = st.role === 'work' || st.role === 'warmup';
-      let unit = null, label;
-      if (st.role === 'work' && st.blockRepeat > 1) {
-        unit = unitOrder.indexOf(key) + 1;
-        const sib = plannedSteps.filter(x => x.role === 'work' && `${x.blockIdx}_${x.repIdx}` === key);
-        label = sib.length > 1 ? unit + String.fromCharCode(97 + sib.indexOf(st)) : String(unit);
-      } else if (st.role === 'work') label = `${ALLURE_PLUS_ZONES[st.zoneKey]?.label || 'Course'} ${fmtStepMin(st.durSec)}`;
+      const inBlock = st.blockRepeat > 1 && !isFinalStep;
+      const blockNo = inBlock ? blockOrder.indexOf(st.blockIdx) + 1 : null;
+      const repNo = inBlock ? st.repIdx + 1 : null;
+      let label;
+      if (st.role === 'work') label = ALLURE_PLUS_ZONES[st.zoneKey]?.label || 'Course';
       else if (st.role === 'warmup') label = 'Échauffement';
       else if (st.role === 'recovery') label = 'Récup';
       else label = st.ex.exerciseType === 'recuperation' ? 'Récup finale' : 'Retour au calme';
@@ -1005,7 +1008,7 @@ async function buildSessionAnalysis(session, week, activity) {
       const p = (lap && lap.averageSpeed > 0) ? Math.round(1000 / lap.averageSpeed) : null;
       const hrv = lap?.averageHR ? Math.round(lap.averageHR) : null;
       return {
-        role: st.role, final: st.role === 'cooldown' && i === plannedSteps.length - 1, label, unit,
+        role: st.role, final: st.role === 'cooldown' && i === plannedSteps.length - 1, label, blockNo, repNo, blockReps: inBlock ? st.blockRepeat : null,
         plannedSec: st.durSec || null, actualSec: lap ? Math.round(lapTimerSec(lap)) : null, missing: !lap,
         targetPaceMinSecKm: range ? range.paceMin : null, targetPaceMaxSecKm: range ? range.paceMax : null,
         actualPaceSecKm: p, classification: judged ? paceClass(p, range) : null,
@@ -1992,10 +1995,35 @@ function buildAnalysisModalHtml(record) {
   const stepsHaveHR = (record.steps || []).some(r => r.actualHR != null);
   const stepsHRTargets = new Set((record.steps || []).filter(r => r.targetHRMin != null).map(r => r.targetHRMin + '-' + r.targetHRMax));
   const stepsHRPerRow = stepsHRTargets.size > 1;
+  // Blocs repetes encadres : colonne "Bloc N" (rowspan sur tout le bloc) puis
+  // numero de repetition (rowspan sur les etapes de cette repetition).
+  const stepList = record.steps || [];
+  const hasBlocks = stepList.some(r => r.blockNo != null);
+  const blockSpan = {}, repSpan = {};
+  stepList.forEach(r => {
+    if (r.blockNo == null) return;
+    blockSpan[r.blockNo] = (blockSpan[r.blockNo] || 0) + 1;
+    const k = r.blockNo + '_' + r.repNo; repSpan[k] = (repSpan[k] || 0) + 1;
+  });
+  const seenBlock = new Set(), seenRep = new Set();
+  const leadCells = r => {
+    if (!hasBlocks) return '';
+    if (r.blockNo == null) return '<td colspan="2"></td>';
+    let h = '';
+    if (!seenBlock.has(r.blockNo)) {
+      seenBlock.add(r.blockNo);
+      h += `<td class="rep-block-cell" rowspan="${blockSpan[r.blockNo]}">Bloc ${r.blockNo}<small>×${r.blockReps}</small></td>`;
+    }
+    const k = r.blockNo + '_' + r.repNo;
+    if (!seenRep.has(k)) { seenRep.add(k); h += `<td class="rep-rep-cell" rowspan="${repSpan[k]}">${r.repNo}</td>`; }
+    return h;
+  };
   const stepRowHtml = r => {
     const dur = r.actualSec != null ? fmtStepMin(r.actualSec) : null;
+    const band = r.blockNo != null ? ` rep-unit-${r.blockNo % 2 ? 'a' : 'b'}` : '';
     if (r.role === 'recovery' || r.role === 'cooldown') {
-      return `<tr class="rep-step-recovery">
+      return `<tr class="rep-step-recovery${band}">
+          ${leadCells(r)}
           <td>${r.final ? 'Récup finale <span class="analysis-summary-planned">(au lap)</span>' : r.label}</td>
           <td>${r.plannedSec ? fmtStepMin(r.plannedSec) : '—'}</td>
           <td>${r.missing ? '—' : dur}</td>
@@ -2003,7 +2031,8 @@ function buildAnalysisModalHtml(record) {
           ${stepsHaveHR ? `<td>${r.actualHR != null ? r.actualHR + ' bpm' : '—'}</td>` : ''}
         </tr>`;
     }
-    return `<tr${r.unit != null ? ` class="rep-unit-${r.unit % 2 ? 'a' : 'b'}"` : ''}>
+    return `<tr class="${band.trim()}">
+          ${leadCells(r)}
           <td>${r.label}${dur ? ` <span class="analysis-summary-planned">${dur}</span>` : ''}</td>
           <td>${(r.targetPaceMinSecKm && r.targetPaceMaxSecKm) ? (fmtPace(r.targetPaceMinSecKm) + '–' + fmtPace(r.targetPaceMaxSecKm)) : '—'}</td>
           <td>${r.actualPaceSecKm ? fmtPace(r.actualPaceSecKm) : '—'}</td>
@@ -2011,11 +2040,11 @@ function buildAnalysisModalHtml(record) {
           ${stepsHaveHR ? `<td>${r.actualHR != null ? r.actualHR + ' bpm — ' + repHRClassificationLabel(r.hrClassification) + (stepsHRPerRow && r.targetHRMin != null ? ` <span class="analysis-summary-planned">(~${r.targetHRMin}-${r.targetHRMax})</span>` : '') : '—'}</td>` : ''}
         </tr>`;
   };
-  const stepsTableHtml = (record.steps && record.steps.length) ? `
+  const stepsTableHtml = stepList.length ? `
     <div class="analysis-section-title">Détail par étape</div>
-    <table class="analysis-reps-table">
-      <thead><tr><th>Étape</th><th>Cible</th><th>Réalisé</th><th>Analyse</th>${stepsHaveHR ? '<th>FC</th>' : ''}</tr></thead>
-      <tbody>${record.steps.map(stepRowHtml).join('')}</tbody>
+    <table class="analysis-reps-table analysis-steps-table">
+      <thead><tr>${hasBlocks ? '<th>Bloc</th><th>Rép.</th>' : ''}<th>Étape</th><th>Cible</th><th>Réalisé</th><th>Analyse</th>${stepsHaveHR ? '<th>FC</th>' : ''}</tr></thead>
+      <tbody>${stepList.map(stepRowHtml).join('')}</tbody>
     </table>` : '';
   const stepNoticeHtml = record.stepNotice ? `<div class="analysis-step-notice">${record.stepNotice}</div>` : '';
   const repsTableHtml = (record.steps && record.steps.length) ? stepsTableHtml : record.reps.length ? `
