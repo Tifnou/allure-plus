@@ -382,6 +382,118 @@ function verdictForScore(score) {
 }
 
 // ═══════════════════════════════════════════════════════
+// MODELE COMMUN D'ETAPES PREVUES + RAPPROCHEMENT AVEC LES TOURS GARMIN
+// ═══════════════════════════════════════════════════════
+// Une seance = liste ORDONNEE d'etapes avec un role : warmup / work / recovery
+// (entre series) / cooldown (retour au calme ou recup de fin de sortie, "au lap"
+// cote Garmin). Les roles viennent du plan lui-meme (blockType, type d'exercice,
+// position) — memes regles que l'export Garmin (buildStructuredSteps, server.js),
+// pour que ce qui est ENVOYE et ce qui est ANALYSE soient la meme chose.
+function buildPlannedSteps(plannedFlat, goalType) {
+  const steps = plannedFlat.map(e => ({
+    ex: e, blockIdx: e.blockIdx, repIdx: e.repIdx, blockRepeat: e.blockRepeat || 1,
+    durSec: durationsToSeconds(e.durations),
+    zoneKey: resolvePlannedExerciseZone(e, goalType),
+    zoneKind: (e.pace?.zoneKind || '').toUpperCase(),
+    role: 'other',
+  }));
+  steps.forEach(s => {
+    const e = s.ex;
+    if (e.blockType === 'warm-up') s.role = 'warmup';
+    else if (e.blockType === 'cool-down') s.role = 'cooldown';
+    else if (e.exerciseType === 'recuperation') s.role = 'recovery';
+    else if (e.exerciseType === 'running' && s.blockRepeat > 1 && ['easy', 'comfortable'].includes(e.pace?.perception)) s.role = 'recovery';
+    else if (e.exerciseType === 'running') s.role = 'work';
+  });
+  const active = steps.filter(s => s.role !== 'other');
+  // Sans aucun blockType (anciens plans, seances libres) : memes heuristiques
+  // premiere/derniere zone que l'export Garmin.
+  const explicit = plannedFlat.some(e => e.blockType === 'warm-up' || e.blockType === 'cool-down');
+  if (!explicit && active.length > 1) {
+    const first = active[0], last = active[active.length - 1];
+    let wu = false;
+    if (['Z1', 'Z2', 'WARMUP'].includes(first.zoneKind) && first.durSec >= 180) { first.role = 'warmup'; wu = true; }
+    if (['Z1', 'Z2', 'COOLDOWN', 'RECOVER', 'RECOVERY'].includes(last.zoneKind) && last.durSec >= 120 && active.length > (wu ? 2 : 1)) last.role = 'cooldown';
+  }
+  // Derniere etape = recuperation hors bloc retour au calme (ex: sortie longue
+  // active dont la recup finale est un exercice du bloc principal) : c'est la
+  // recup de fin de sortie, pas une recup entre series.
+  const lastActive = active[active.length - 1];
+  if (lastActive && lastActive.role === 'recovery' && lastActive.blockRepeat === 1) lastActive.role = 'cooldown';
+  return active;
+}
+
+function lapTimerSec(l) { return l.duration || l.elapsedDuration || l.movingDuration || 0; }
+function lapIntensityKey(l) {
+  const raw = (typeof l.intensityType === 'string' ? l.intensityType : l.intensityType?.typeKey) || l.intensity || '';
+  return String(raw).toLowerCase();
+}
+// Roles compatibles avec l'intensite que Garmin pose sur un tour d'activite.
+const LAP_INTENSITY_ROLES = {
+  warmup: ['warmup'], active: ['work'], interval: ['work'],
+  recovery: ['recovery', 'cooldown'], rest: ['recovery', 'cooldown'], cooldown: ['cooldown', 'recovery'],
+};
+
+// Affecte chaque tour a l'etape prevue dans laquelle il tombe, par temps cumule :
+// une seance suivie sur la montre enchaine ses etapes a la duree exacte du plan,
+// sauf la derniere (recup "au lap", ouverte) qui absorbe tout ce qui reste —
+// y compris les petits tours parasites de fin de sortie. Verifie ensuite la
+// coherence avec les types de tours poses par Garmin ; sinon renonce (pas de
+// conclusion hasardeuse).
+function alignLapsToSteps(steps, laps) {
+  const res = { ok: false, reason: null, assign: steps.map(() => []), mismatchPct: null };
+  for (let i = 0; i < steps.length - 1; i++) {
+    const unitsOk = (steps[i].ex.durations || []).every(d => ['minutes', 'seconds'].includes(d.timeUnit));
+    if (!unitsOk || !(steps[i].durSec > 0)) { res.reason = 'duree_inconnue'; return res; }
+  }
+  const knownIntens = new Set(laps.map(lapIntensityKey).filter(k => ['warmup', 'active', 'recovery', 'rest', 'cooldown'].includes(k)));
+  const hasStepInfo = laps.some(l => l.wktStepIndex != null) || knownIntens.size >= 2;
+  if (!hasStepInfo) { res.reason = 'pas_de_seance_montre'; return res; }
+  const bounds = []; let acc = 0;
+  steps.forEach((s, i) => { const start = acc; acc += (i === steps.length - 1) ? Infinity : s.durSec; bounds.push([start, acc]); });
+  let t = 0, p = 0, mism = 0, tot = 0;
+  laps.forEach((l, idx) => {
+    const d = lapTimerSec(l); const mid = t + d / 2; t += d;
+    while (p < steps.length - 1 && mid >= bounds[p][1]) p++;
+    res.assign[p].push(idx);
+    const roles = LAP_INTENSITY_ROLES[lapIntensityKey(l)];
+    if (roles && d > 0) {
+      tot += d;
+      const lenient = (p === 0 && roles.includes('warmup')) || (p === steps.length - 1 && ['cooldown', 'recovery'].some(r => roles.includes(r)));
+      if (!lenient && !roles.includes(steps[p].role)) mism += d;
+    }
+  });
+  res.mismatchPct = tot ? mism / tot : 0;
+  res.ok = res.mismatchPct <= 0.3;
+  if (!res.ok) res.reason = 'rapprochement_incoherent';
+  return res;
+}
+
+// Fusionne les tours d'UNE etape en un tour synthetique (duree/distance sommees,
+// FC et GAP ponderes par la duree).
+function mergeLapsForStep(laps, idxs, intensity) {
+  let dur = 0, dist = 0, el = 0, mv = 0, hrW = 0, hrT = 0, gapW = 0, gapT = 0;
+  idxs.forEach(i => {
+    const l = laps[i]; const d = lapTimerSec(l);
+    dur += d; dist += l.distance || 0; el += l.elapsedDuration || d; mv += l.movingDuration || d;
+    if (l.averageHR) { hrW += l.averageHR * d; hrT += d; }
+    if (l.avgGradeAdjustedSpeed > 0) { gapW += l.avgGradeAdjustedSpeed * d; gapT += d; }
+  });
+  return {
+    intensityType: intensity, duration: dur, elapsedDuration: el, movingDuration: mv, distance: dist,
+    averageSpeed: dur > 0 ? dist / dur : 0,
+    averageHR: hrT > 0 ? hrW / hrT : null,
+    avgGradeAdjustedSpeed: gapT > 0 ? gapW / gapT : null,
+  };
+}
+
+function fmtStepMin(sec) {
+  if (!sec) return '—';
+  const m = Math.floor(sec / 60), s = Math.round(sec % 60);
+  return s ? `${m}'${String(s).padStart(2, '0')}"` : `${m}'`;
+}
+
+// ═══════════════════════════════════════════════════════
 // MOTEUR DE COMPARAISON — orchestrateur principal
 // ═══════════════════════════════════════════════════════
 async function buildSessionAnalysis(session, week, activity) {
@@ -448,7 +560,7 @@ async function buildSessionAnalysis(session, week, activity) {
   // lignes droites visent la zone VMA) — sert uniquement au tableau
   // repetition par repetition, jamais a la ligne de synthese globale.
   const mainZoneKey = pickDominantZone(runningEx.length ? runningEx : mainFlat, goalType);
-  const mainPaceRange = mainZoneKey && vma
+  let mainPaceRange = mainZoneKey && vma
     ? (isTrail ? calcAllureRefTrail(mainZoneKey, vma) : calcAllureRef(mainZoneKey, vma))
     : null;
   const repsZoneKey = hasStructuredReps ? pickDominantZone(repeatingRunningEx, goalType) : null;
@@ -487,6 +599,58 @@ async function buildSessionAnalysis(session, week, activity) {
   // bloc trail/GAP juste en dessous) car les deux en ont besoin : le trail
   // pour isoler les laps d'effort du GAP moyen (voir plus bas), le chemin
   // repetitions plus loin pour les tableaux effort/recup.
+  // ── Etapes prevues <-> tours Garmin ──
+  // Quand la seance a plusieurs etapes (echauffement, travail, recups, retour au
+  // calme), on rapproche les tours Garmin des etapes PREVUES et on les fusionne
+  // en un "tour" par etape : tout le reste du moteur (types, efforts, recups,
+  // retour au calme, deroule) raisonne alors sur de vraies etapes, plus sur des
+  // tours bruts (auto-lap au km, tour parasite de fin...). Si le rapprochement
+  // est impossible ET que la seance melange plusieurs consignes, on n'invente
+  // pas de verdict (stepsUnavailable). Une seance a consigne unique garde
+  // l'analyse globale historique.
+  const plannedSteps = buildPlannedSteps(plannedFlat, goalType);
+  const rawLaps = laps;
+  const workZoneSet = new Set(plannedSteps.filter(s => s.role === 'work').map(s => s.zoneKey).filter(Boolean));
+  const alignment = (plannedSteps.length >= 2 && laps.length) ? alignLapsToSteps(plannedSteps, laps) : null;
+  const stepsMode = !!(alignment && alignment.ok);
+  const stepsUnavailable = !!(alignment && !alignment.ok && (workZoneSet.size > 1 || hasStructuredReps));
+  const stepLapByStepIdx = new Map();
+  if (stepsMode) {
+    const INTENS = { warmup: 'WARMUP', work: 'ACTIVE', recovery: 'RECOVERY', cooldown: 'COOLDOWN' };
+    const merged = [];
+    plannedSteps.forEach((st, i) => {
+      const idxs = alignment.assign[i];
+      if (!idxs.length) return;
+      const ml = mergeLapsForStep(rawLaps, idxs, INTENS[st.role]);
+      ml._stepIdx = i; ml._ex = st.ex;
+      merged.push(ml); stepLapByStepIdx.set(i, ml);
+    });
+    laps = merged;
+  }
+  // Cible du TRAVAIL : moyenne des fourchettes d'allure/FC de chaque etape de
+  // travail prevue, ponderee par sa duree prevue (une seule zone -> exactement
+  // sa fourchette). Evite de juger un enchainement Tempo + Sweet Spot sur la
+  // seule zone dominante.
+  let blendHRBand = null;
+  let workZoneLabel = null;
+  if (stepsMode && vma) {
+    const ws = plannedSteps.filter(s => s.role === 'work' && s.zoneKey && s.durSec > 0);
+    const totW = ws.reduce((a, s) => a + s.durSec, 0);
+    if (totW > 0) {
+      let pMin = 0, pMax = 0, hLow = 0, hHigh = 0, hW = 0;
+      ws.forEach(s => {
+        const r = isTrail ? calcAllureRefTrail(s.zoneKey, vma) : calcAllureRef(s.zoneKey, vma);
+        if (r) { pMin += r.paceMin * s.durSec; pMax += r.paceMax * s.durSec; }
+        const hb = approxHRBandForPaceZone(s.zoneKey, hrZones);
+        if (hb) { hLow += hb.low * s.durSec; hHigh += hb.high * s.durSec; hW += s.durSec; }
+      });
+      mainPaceRange = { paceMin: Math.round(pMin / totW), paceMax: Math.round(pMax / totW) };
+      if (hW > 0) blendHRBand = { low: Math.round(hLow / hW), high: Math.round(hHigh / hW), approx: true };
+      const labels = [...new Set(ws.map(s => ALLURE_PLUS_ZONES[s.zoneKey]?.label || s.zoneKey))];
+      workZoneLabel = labels.length === 1 ? labels[0] : (labels.length === 2 ? labels.join(' + ') : 'Allures du travail');
+    }
+  }
+  if (stepsUnavailable) mainPaceRange = null;
   const types = laps.length ? classifyLaps(laps) : [];
 
   // ── Trail : pente reelle & effort (GAP) ──
@@ -581,8 +745,8 @@ async function buildSessionAnalysis(session, week, activity) {
     }
   }
 
-  const circuits = laps.length ? isKmCircuits(laps) : false;
-  const useRepsPath = hasStructuredReps && !circuits && laps.length > 0;
+  const circuits = (!stepsMode && laps.length) ? isKmCircuits(laps) : false;
+  const useRepsPath = hasStructuredReps && !circuits && laps.length > 0 && !stepsUnavailable;
 
   const effortEntries = laps.reduce((acc, lap, idx) => { if (types[idx] === 'effort') acc.push({ lap, idx }); return acc; }, []);
   const restLaps   = laps.filter((_, i) => types[i] === 'rest');
@@ -627,7 +791,14 @@ async function buildSessionAnalysis(session, week, activity) {
     u.steps.push(step);
     plannedWorkSteps.push(step);
   });
-  if (useRepsPath) plannedWorkSteps.forEach((st, i) => { if (effortEntries[i]) st.lapIdx = effortEntries[i].idx; });
+  if (useRepsPath) {
+    if (stepsMode) {
+      // Rapprochement par etape prevue (identite de l'exercice), pas par ordre des efforts.
+      plannedWorkSteps.forEach(st => { const k = laps.findIndex(l => l._ex === st.ex); if (k >= 0) st.lapIdx = k; });
+    } else {
+      plannedWorkSteps.forEach((st, i) => { if (effortEntries[i]) st.lapIdx = effortEntries[i].idx; });
+    }
+  }
   // Un groupe par etape distincte (blockIdx + position dans le tour) : ses
   // repetitions partagent la meme consigne, donc regularite/derive jugees entre
   // elles uniquement (jamais des 30" comparees a des 4').
@@ -673,9 +844,9 @@ async function buildSessionAnalysis(session, week, activity) {
   const actualCooldownSec = cooldownLap ? (cooldownLap.elapsedDuration || cooldownLap.movingDuration || cooldownLap.duration || 0) : null;
   const actualMainReps    = hasStructuredReps ? (useRepsPath ? plannedUnits.filter(u => u.steps.every(st => st.lapIdx != null)).length : null) : null;
   const structure = {
-    plannedWarmupSec, actualWarmupSec: laps.length ? actualWarmupSec : null,
+    plannedWarmupSec, actualWarmupSec: (laps.length && !stepsUnavailable) ? actualWarmupSec : null,
     plannedMainReps: hasStructuredReps ? plannedMainReps : null, actualMainReps,
-    plannedCooldownSec, actualCooldownSec,
+    plannedCooldownSec, actualCooldownSec: stepsUnavailable ? null : actualCooldownSec,
     anomalies: circuits && hasStructuredReps ? ['Répétitions non identifiables (laps automatiques au km, pas de laps manuels)'] : [],
   };
 
@@ -689,7 +860,22 @@ async function buildSessionAnalysis(session, week, activity) {
   // la moyenne globale de l'activite — jamais les seuls laps "effort" de
   // classifyLaps, qui ne representeraient alors que quelques sprints
   // ponctuels et fausseraient totalement l'allure globale affichee.
-  const actualPaceSecKm = (repsAreMainFocus && mainGroup) ? mainGroup.avgPaceSecKm : (activity.avgPaceSecPerKm || null);
+  // Seance rapprochee etape par etape (stepsMode) : allure REELLE du travail =
+  // temps total / distance totale des etapes de travail (jamais la moyenne de
+  // toute la sortie, qui melange echauffement, recups et retour au calme).
+  const stepWorkLaps = stepsMode ? laps.filter((l, i) => types[i] === 'effort' && l.averageSpeed > 0) : [];
+  let stepWorkPaceSecKm = null, stepWorkHR = null;
+  if (stepsMode && stepWorkLaps.length) {
+    const wDur = stepWorkLaps.reduce((a, l) => a + lapTimerSec(l), 0);
+    const wDist = stepWorkLaps.reduce((a, l) => a + (l.distance || 0), 0);
+    if (wDur > 0 && wDist > 0) stepWorkPaceSecKm = wDur / wDist * 1000;
+    const hl = stepWorkLaps.filter(l => l.averageHR);
+    const hT = hl.reduce((a, l) => a + lapTimerSec(l), 0);
+    if (hT > 0) stepWorkHR = hl.reduce((a, l) => a + l.averageHR * lapTimerSec(l), 0) / hT;
+  }
+  const actualPaceSecKm = stepsUnavailable ? null
+    : stepsMode ? stepWorkPaceSecKm
+    : ((repsAreMainFocus && mainGroup) ? mainGroup.avgPaceSecKm : (activity.avgPaceSecPerKm || null));
   // Ecart par rapport a la borne la plus proche de la plage cible, jamais par
   // rapport a son milieu : une allure DANS la plage n'est pas un ecart (0),
   // et une allure hors plage n'est en retard/avance que de ce qui depasse la
@@ -708,13 +894,16 @@ async function buildSessionAnalysis(session, week, activity) {
   // ou le GAP (climbAnalysis.gapDeviationSecKm, deja normalise terrain) prend
   // le relais — cf. note sur climbAnalysis plus haut. deviationSecKm reste
   // inchange par ailleurs (ligne "Allure" mutee, purement informative).
+  if (stepsUnavailable && climbAnalysis) { climbAnalysis.gapDeviationSecKm = null; climbAnalysis.gapVerdict = null; }
   const effectiveDeviationSecKm = (isTrail && climbAnalysis?.gapDeviationSecKm != null) ? climbAnalysis.gapDeviationSecKm : deviationSecKm;
   const usingGapVerdict = isTrail && climbAnalysis?.gapDeviationSecKm != null;
   // Laps pertinents pour le temps-en-zone : meme logique — le groupe de
   // repetitions seulement si elles sont l'objectif principal, sinon TOUS les
   // laps de l'activite (une seance continue n'a pas de sous-ensemble
   // "effort" fiable — classifyLaps est concu pour les seances fractionnees).
-  const zoneRelevantLaps = (repsAreMainFocus && mainGroup) ? mainGroup.memberIdx.map(i => laps[i]) : laps.filter(l => l.averageSpeed > 0);
+  const zoneRelevantLaps = stepsUnavailable ? []
+    : stepsMode ? stepWorkLaps
+    : ((repsAreMainFocus && mainGroup) ? mainGroup.memberIdx.map(i => laps[i]) : laps.filter(l => l.averageSpeed > 0));
   let pctTimeInBand = null;
   if (mainPaceRange && zoneRelevantLaps.length) {
     let inTime = 0, totalTime = 0;
@@ -727,7 +916,7 @@ async function buildSessionAnalysis(session, week, activity) {
     pctTimeInBand = totalTime > 0 ? Math.round((inTime / totalTime) * 100) : null;
   }
   const paceAnalysis = mainPaceRange ? [{
-    segmentLabel: ALLURE_PLUS_ZONES[mainZoneKey]?.label || mainZoneKey,
+    segmentLabel: workZoneLabel || ALLURE_PLUS_ZONES[mainZoneKey]?.label || mainZoneKey,
     targetPaceMin: mainPaceRange.paceMin, targetPaceMax: mainPaceRange.paceMax,
     actualPaceSecKm: actualPaceSecKm ? Math.round(actualPaceSecKm) : null,
     deviationSecKm, deviationPct, pctTimeInBand,
@@ -781,6 +970,56 @@ async function buildSessionAnalysis(session, week, activity) {
     });
   }
 
+  // ── Detail par etape (modele commun : echauffement / travail / recups /
+  // retour au calme), une ligne par etape PREVUE dans l'ordre du plan ──
+  // Chaque etape de travail (et l'echauffement) est jugee contre SA propre zone ;
+  // les recups entre series et la recup finale (au lap) ne sont pas jugees mais
+  // affichees avec leur duree reelle. Une etape sans tour = non realisee.
+  let stepRows = [];
+  if (stepsMode) {
+    const unitOrder = [];
+    plannedSteps.forEach(st => {
+      if (st.role === 'work' && st.blockRepeat > 1) { const k = `${st.blockIdx}_${st.repIdx}`; if (!unitOrder.includes(k)) unitOrder.push(k); }
+    });
+    const paceClass = (p, r) => {
+      if (p == null || !r) return null;
+      if (p < r.paceMin) return (r.paceMin - p) > 15 ? 'too_fast' : 'slightly_fast';
+      if (p > r.paceMax) return (p - r.paceMax) > 15 ? 'too_slow' : 'slightly_slow';
+      return 'on_target';
+    };
+    stepRows = plannedSteps.map((st, i) => {
+      const lap = stepLapByStepIdx.get(i);
+      const key = `${st.blockIdx}_${st.repIdx}`;
+      const judged = st.role === 'work' || st.role === 'warmup';
+      let unit = null, label;
+      if (st.role === 'work' && st.blockRepeat > 1) {
+        unit = unitOrder.indexOf(key) + 1;
+        const sib = plannedSteps.filter(x => x.role === 'work' && `${x.blockIdx}_${x.repIdx}` === key);
+        label = sib.length > 1 ? unit + String.fromCharCode(97 + sib.indexOf(st)) : String(unit);
+      } else if (st.role === 'work') label = `${ALLURE_PLUS_ZONES[st.zoneKey]?.label || 'Course'} ${fmtStepMin(st.durSec)}`;
+      else if (st.role === 'warmup') label = 'Échauffement';
+      else if (st.role === 'recovery') label = 'Récup';
+      else label = st.ex.exerciseType === 'recuperation' ? 'Récup finale' : 'Retour au calme';
+      const range = (judged && st.zoneKey && vma) ? (isTrail ? calcAllureRefTrail(st.zoneKey, vma) : calcAllureRef(st.zoneKey, vma)) : null;
+      const hb = (judged && st.zoneKey) ? approxHRBandForPaceZone(st.zoneKey, hrZones) : null;
+      const p = (lap && lap.averageSpeed > 0) ? Math.round(1000 / lap.averageSpeed) : null;
+      const hrv = lap?.averageHR ? Math.round(lap.averageHR) : null;
+      return {
+        role: st.role, final: st.role === 'cooldown' && i === plannedSteps.length - 1, label, unit,
+        plannedSec: st.durSec || null, actualSec: lap ? Math.round(lapTimerSec(lap)) : null, missing: !lap,
+        targetPaceMinSecKm: range ? range.paceMin : null, targetPaceMaxSecKm: range ? range.paceMax : null,
+        actualPaceSecKm: p, classification: judged ? paceClass(p, range) : null,
+        actualHR: hrv, targetHRMin: hb ? hb.low : null, targetHRMax: hb ? hb.high : null,
+        hrClassification: (judged && hrv != null && hb) ? (hrv > hb.high ? 'elevee' : hrv < hb.low ? 'basse' : 'conforme') : null,
+      };
+    });
+  }
+  const stepNotice = stepsUnavailable ? ({
+    pas_de_seance_montre: 'Cette sortie n\'a pas été suivie avec la séance Garmin (la montre n\'a enregistré aucune étape) : l\'analyse étape par étape n\'est pas possible, seuls le volume et la FC globale sont évalués.',
+    rapprochement_incoherent: 'Les tours enregistrés ne correspondent pas aux étapes prévues (étape passée au bouton Lap, séance modifiée sur la montre…) : l\'analyse étape par étape n\'est pas possible, seuls le volume et la FC globale sont évalués.',
+    duree_inconnue: 'Certaines étapes sont prévues en distance : l\'analyse étape par étape n\'est pas possible, seuls le volume et la FC globale sont évalués.',
+  }[alignment.reason] || 'Analyse étape par étape indisponible pour cette sortie.') : null;
+
   // ── Regularite ──
   // Plusieurs blocs : regularite jugee bloc par bloc (on ne compare pas des
   // 30" a des 4'), et c'est la moins bonne qui est retenue.
@@ -799,7 +1038,7 @@ async function buildSessionAnalysis(session, week, activity) {
 
   // ── Recuperation ──
   const recovery = {
-    plannedDurationSec: plannedRecupSec,
+    plannedDurationSec: plannedSteps.some(s => s.role === 'recovery') ? plannedSteps.filter(s => s.role === 'recovery').reduce((a, s) => a + s.durSec, 0) / plannedSteps.filter(s => s.role === 'recovery').length : plannedRecupSec,
     actualDurationSec: recoveryLaps.length ? Math.round(recoveryLaps.reduce((s, l) => s + (l.elapsedDuration || l.movingDuration || l.duration || 0), 0) / recoveryLaps.length) : null,
     regularityLabel: recoveryLaps.length >= 2 ? regularityLabelFromDurations(recoveryLaps.map(l => l.elapsedDuration || l.movingDuration || l.duration || 0)) : null,
     standingStillDetected: recoveryLaps.some(l => (l.averageSpeed || 0) < 0.3 && recupEx.some(e => (e.pace?.slug || '') !== 'slow')),
@@ -807,7 +1046,9 @@ async function buildSessionAnalysis(session, week, activity) {
 
   // ── FC ──
   // hrZones/repsHRBand deja calcules plus haut (avant le tableau "reps").
-  const approxBand = mainZoneKey ? approxHRBandForPaceZone(mainZoneKey, hrZones) : null;
+  const approxBand = stepsUnavailable ? null
+    : (stepsMode && blendHRBand) ? blendHRBand
+    : (mainZoneKey ? approxHRBandForPaceZone(mainZoneKey, hrZones) : null);
   let hr = null;
   if (activity.avgHR) {
     let pctTimeInTargetZone = null;
@@ -830,7 +1071,7 @@ async function buildSessionAnalysis(session, week, activity) {
       pctTimeNotOverBand = totalTime > 0 ? Math.round((notOverTime / totalTime) * 100) : null;
     }
     hr = {
-      avgHR: Math.round(activity.avgHR), maxHR: activity.maxHR ? Math.round(activity.maxHR) : null,
+      avgHR: Math.round((stepsMode && stepWorkHR) ? stepWorkHR : activity.avgHR), maxHR: activity.maxHR ? Math.round(activity.maxHR) : null,
       approxTargetBand: approxBand, pctTimeInTargetZone, pctTimeNotOverBand,
       trendAcrossReps: (useRepsPath && mainGroup) ? plannedWorkSteps.filter(st => st.lapIdx != null).map(st => laps[st.lapIdx]).map(l => l.averageHR ? Math.round(l.averageHR) : null) : [],
       hrRecoveryBetweenReps: recoveryLaps.map(l => l.averageHR ? Math.round(l.averageHR) : null),
@@ -850,7 +1091,9 @@ async function buildSessionAnalysis(session, week, activity) {
   // le tronquer en cours de route).
   const WARMUP_DRIFT_EXCLUDE_SEC = 300;
   let driftCumSec = 0;
-  const driftLaps = laps.filter(l => {
+  // Tours BRUTS (pas les etapes fusionnees) : la derive a besoin de la granularite fine.
+  const driftSource = rawLaps;
+  const driftLaps = driftSource.filter(l => {
     const dur = l.elapsedDuration || l.movingDuration || l.duration || 0;
     const endSec = driftCumSec + dur;
     driftCumSec = endSec;
@@ -866,7 +1109,7 @@ async function buildSessionAnalysis(session, week, activity) {
   // sont quasiment tous a 100% maintenant"). Mieux vaut une derive
   // legerement biaisee par les 5 premieres minutes (comportement d'avant)
   // que pas de derive du tout.
-  const cardiacDrift = computeCardiacDrift(driftLaps.length >= 4 ? driftLaps : laps);
+  const cardiacDrift = computeCardiacDrift(driftLaps.length >= 4 ? driftLaps : driftSource);
 
   // ── Coherence allure / FC ──
   const paceVerdict = effectiveDeviationSecKm == null ? null : (Math.abs(effectiveDeviationSecKm) <= 10 ? 'conforme' : effectiveDeviationSecKm < 0 ? 'rapide' : 'lente');
@@ -947,7 +1190,7 @@ async function buildSessionAnalysis(session, week, activity) {
   if (plannedWarmupSec && structure.actualWarmupSec != null && structure.actualWarmupSec < plannedWarmupSec * 0.6) {
     anomalies.push({ code: 'ECHAUFFEMENT_INSUFFISANT', severity: 'ATTENTION', message: 'Échauffement nettement plus court que prévu.' });
   }
-  if (plannedCooldownSec && (structure.actualCooldownSec == null || structure.actualCooldownSec < plannedCooldownSec * 0.5)) {
+  if (plannedCooldownSec && !stepsUnavailable && (structure.actualCooldownSec == null || structure.actualCooldownSec < plannedCooldownSec * 0.5)) {
     anomalies.push({ code: 'RETOUR_AU_CALME_INSUFFISANT', severity: 'INFO', message: 'Retour au calme raccourci ou absent.' });
   }
   if (regularity.maxEcartSecKm != null && regularity.maxEcartSecKm > 25) {
@@ -1030,7 +1273,8 @@ async function buildSessionAnalysis(session, week, activity) {
     },
     sessionTypeKey, score, verdict,
     volume, structure, paceAnalysis, reps, repsHRBand, regularity, pacingStrategy, recovery, hr, cardiacDrift,
-    coherenceNarrative, timeInZoneBreakdown, trail, anomalies, positives, improvements, commentary, timeline,
+    coherenceNarrative, timeInZoneBreakdown, trail, anomalies, positives, improvements, commentary, timeline: stepsUnavailable ? [] : timeline,
+    steps: stepRows, stepNotice,
     pairingKey: computePairingKey(session),
     // Detail du calcul du score, pour la modale "Comprendre votre score" —
     // composants bruts + ponderations effectivement utilisees (celles a null
@@ -1743,7 +1987,38 @@ function buildAnalysisModalHtml(record) {
   // -> affichee par ligne plutot que dans l'en-tete.
   const repsHRTargets = new Set(record.reps.map(r => r.targetHRMin != null ? `${r.targetHRMin}-${r.targetHRMax}` : ''));
   const repsHRPerRow = repsHRTargets.size > 1;
-  const repsTableHtml = record.reps.length ? `
+  // Detail par etape (modele commun) : une ligne par etape prevue, dans l'ordre
+  // du plan ; recups en retrait (non jugees), recup finale marquee "au lap".
+  const stepsHaveHR = (record.steps || []).some(r => r.actualHR != null);
+  const stepsHRTargets = new Set((record.steps || []).filter(r => r.targetHRMin != null).map(r => r.targetHRMin + '-' + r.targetHRMax));
+  const stepsHRPerRow = stepsHRTargets.size > 1;
+  const stepRowHtml = r => {
+    const dur = r.actualSec != null ? fmtStepMin(r.actualSec) : null;
+    if (r.role === 'recovery' || r.role === 'cooldown') {
+      return `<tr class="rep-step-recovery">
+          <td>${r.final ? 'Récup finale <span class="analysis-summary-planned">(au lap)</span>' : r.label}</td>
+          <td>${r.plannedSec ? fmtStepMin(r.plannedSec) : '—'}</td>
+          <td>${r.missing ? '—' : dur}</td>
+          <td>${r.missing ? 'non réalisée' : '—'}</td>
+          ${stepsHaveHR ? `<td>${r.actualHR != null ? r.actualHR + ' bpm' : '—'}</td>` : ''}
+        </tr>`;
+    }
+    return `<tr${r.unit != null ? ` class="rep-unit-${r.unit % 2 ? 'a' : 'b'}"` : ''}>
+          <td>${r.label}${dur ? ` <span class="analysis-summary-planned">${dur}</span>` : ''}</td>
+          <td>${(r.targetPaceMinSecKm && r.targetPaceMaxSecKm) ? (fmtPace(r.targetPaceMinSecKm) + '–' + fmtPace(r.targetPaceMaxSecKm)) : '—'}</td>
+          <td>${r.actualPaceSecKm ? fmtPace(r.actualPaceSecKm) : '—'}</td>
+          <td>${r.missing ? 'non réalisée' : repClassificationLabel(r.classification)}</td>
+          ${stepsHaveHR ? `<td>${r.actualHR != null ? r.actualHR + ' bpm — ' + repHRClassificationLabel(r.hrClassification) + (stepsHRPerRow && r.targetHRMin != null ? ` <span class="analysis-summary-planned">(~${r.targetHRMin}-${r.targetHRMax})</span>` : '') : '—'}</td>` : ''}
+        </tr>`;
+  };
+  const stepsTableHtml = (record.steps && record.steps.length) ? `
+    <div class="analysis-section-title">Détail par étape</div>
+    <table class="analysis-reps-table">
+      <thead><tr><th>Étape</th><th>Cible</th><th>Réalisé</th><th>Analyse</th>${stepsHaveHR ? '<th>FC</th>' : ''}</tr></thead>
+      <tbody>${record.steps.map(stepRowHtml).join('')}</tbody>
+    </table>` : '';
+  const stepNoticeHtml = record.stepNotice ? `<div class="analysis-step-notice">${record.stepNotice}</div>` : '';
+  const repsTableHtml = (record.steps && record.steps.length) ? stepsTableHtml : record.reps.length ? `
     <div class="analysis-section-title">Répétitions</div>
     <table class="analysis-reps-table">
       <thead><tr><th>#</th><th>Cible</th><th>Réalisé</th><th>Analyse</th>${repsHaveHR ? `<th>FC${(record.repsHRBand && !repsHRPerRow) ? ` (cible ~${record.repsHRBand.low}-${record.repsHRBand.high})` : ''}</th>` : ''}</tr></thead>
@@ -1849,6 +2124,7 @@ function buildAnalysisModalHtml(record) {
     ${elevationProfileHtml}
     ${climbDetailHtml}
     ${climbFocusHtml}
+    ${stepNoticeHtml}
     ${timelineHtml}
     ${repsTableHtml}
     ${positivesHtml}

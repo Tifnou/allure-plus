@@ -3710,7 +3710,9 @@ app.post('/api/campus/export', requireCampusToken, async (req, res) => {
         return {
           ...step,
           description: (step.description || '') + paceHint,
-          stepType: isRecovery
+          // Un retour au calme Campus reste "cooldown" (vert) : seule une vraie
+          // recup entre series est forcee en "recovery" (grise).
+          stepType: (isRecovery && step.stepType?.stepTypeKey !== 'cooldown')
             ? { stepTypeId: 4, stepTypeKey: 'recovery' }
             : (step.stepType || { stepTypeId: 3, stepTypeKey: 'interval' }),
           targetType:     { workoutTargetTypeId: 6, workoutTargetTypeKey: 'pace.zone' },
@@ -3832,7 +3834,7 @@ function markLastRecoveryOpenEnded(steps) {
   const idx = steps.length - 1;
   const last = steps[idx];
   if (last.type === 'ExecutableStepDTO' && ['recovery', 'cooldown'].includes(last.stepType?.stepTypeKey)) {
-    steps[idx] = { ...last, description: (last.description || '') + fmtOpenEndedNote(last.endConditionValue), endCondition: LAP_BUTTON_CONDITION, endConditionValue: null };
+    steps[idx] = { ...last, stepType: { stepTypeId: 2, stepTypeKey: 'cooldown' }, description: (last.description || '') + fmtOpenEndedNote(last.endConditionValue), endCondition: LAP_BUTTON_CONDITION, endConditionValue: null };
     return;
   }
   if (last.type === 'RepeatGroupDTO' && last.numberOfIterations >= 2) {
@@ -3841,7 +3843,9 @@ function markLastRecoveryOpenEnded(steps) {
     if (lastInner?.stepType?.stepTypeKey === 'recovery') {
       const extracted = inner.map(s => ({ ...s }));
       const li = extracted.length - 1;
-      extracted[li] = { ...extracted[li], description: (extracted[li].description || '') + fmtOpenEndedNote(extracted[li].endConditionValue), endCondition: LAP_BUTTON_CONDITION, endConditionValue: null };
+      // Recup de FIN de sortie => type "retour au calme" (vert dans Garmin), les
+      // recups des iterations restantes du groupe gardent leur type "recup" (gris).
+      extracted[li] = { ...extracted[li], stepType: { stepTypeId: 2, stepTypeKey: 'cooldown' }, description: (extracted[li].description || '') + fmtOpenEndedNote(extracted[li].endConditionValue), endCondition: LAP_BUTTON_CONDITION, endConditionValue: null };
       const remaining = last.numberOfIterations - 1;
       const replacement = remaining >= 1 ? [{ ...last, numberOfIterations: remaining }, ...extracted] : extracted;
       steps.splice(idx, 1, ...replacement);
@@ -3969,21 +3973,45 @@ function buildGarminWorkoutFromSession(session, weekNum, sessionDisplay, userZon
 
     const steps = zones.map(mkStep);
 
-    // Warmup: 1ere zone Z1/Z2 si duree >= 3min ET il y a d'autres zones apres
-    const firstKind = (zones[0].kind || '').toUpperCase();
+    const COOLDOWN_TYPE = { stepTypeId: 2, stepTypeKey: 'cooldown' };
+    const WARMUP_TYPE   = { stepTypeId: 1, stepTypeKey: 'warmup' };
     let warmupApplied = false;
-    if (['Z1','Z2','WARMUP'].includes(firstKind) && (zones[0].duration || 0) >= 180 && zones.length > 1) {
-      steps[0] = { ...steps[0], stepType: { stepTypeId: 1, stepTypeKey: 'warmup' } };
-      warmupApplied = true;
-    }
-
-    // Cooldown: derniere zone Z1/Z2/RECOVER si duree >= 2min ET il y a des zones avant
-    const lastKind = (zones[zones.length-1].kind || '').toUpperCase();
     let cooldownApplied = false;
-    if (['Z1','Z2','COOLDOWN','RECOVER','RECOVERY'].includes(lastKind) && (zones[zones.length-1].duration || 0) >= 120 && zones.length > (warmupApplied ? 2 : 1)) {
-      const lastIdx = zones.length - 1;
-      steps[lastIdx] = { ...steps[lastIdx], stepType: { stepTypeId: 2, stepTypeKey: 'cooldown' } };
-      cooldownApplied = true;
+    // Roles EXPLICITES du plan (blockType 'warm-up'/'cool-down', fournis par
+    // annotatePaceZones) : source de verite des qu'ils existent. Les heuristiques
+    // ci-dessous (premiere/derniere zone) ne servent qu'aux seances sans aucun
+    // blockType (seances libres, anciens plans) — elles typaient a tort en
+    // "echauffement" un premier footing facile de 55' sans bloc d'echauffement.
+    const hasExplicitRoles = zones.some(z => z.blockType === 'warm-up' || z.blockType === 'cool-down');
+    if (hasExplicitRoles) {
+      zones.forEach((z, k) => {
+        if (z.blockType === 'warm-up') { steps[k] = { ...steps[k], stepType: WARMUP_TYPE }; if (k === 0) warmupApplied = true; }
+        else if (z.blockType === 'cool-down') { steps[k] = { ...steps[k], stepType: COOLDOWN_TYPE }; if (k === zones.length - 1) cooldownApplied = true; }
+      });
+    } else {
+      // Warmup: 1ere zone Z1/Z2 si duree >= 3min ET il y a d'autres zones apres
+      const firstKind = (zones[0].kind || '').toUpperCase();
+      if (['Z1','Z2','WARMUP'].includes(firstKind) && (zones[0].duration || 0) >= 180 && zones.length > 1) {
+        steps[0] = { ...steps[0], stepType: WARMUP_TYPE };
+        warmupApplied = true;
+      }
+      // Cooldown: derniere zone Z1/Z2/RECOVER si duree >= 2min ET il y a des zones avant
+      const lastKind = (zones[zones.length-1].kind || '').toUpperCase();
+      if (['Z1','Z2','COOLDOWN','RECOVER','RECOVERY'].includes(lastKind) && (zones[zones.length-1].duration || 0) >= 120 && zones.length > (warmupApplied ? 2 : 1)) {
+        steps[zones.length - 1] = { ...steps[zones.length - 1], stepType: COOLDOWN_TYPE };
+        cooldownApplied = true;
+      }
+    }
+    // Derniere etape = exercice de recuperation hors bloc "retour au calme"
+    // (ex: sortie longue active dont la recup finale est un exercice du bloc
+    // principal) : c'est la recup de fin de sortie, donc "retour au calme" (vert
+    // dans Garmin), pas une recup entre series (grise).
+    if (!cooldownApplied && zones.length > 1) {
+      const lz = zones[zones.length - 1];
+      if (lz.exerciseType === 'recuperation' && lz.blockType == null && (lz.blockRepeat || 1) === 1) {
+        steps[zones.length - 1] = { ...steps[zones.length - 1], stepType: COOLDOWN_TYPE };
+        cooldownApplied = true;
+      }
     }
 
     // Parcourt les zones dans l'ordre et regroupe chaque plage consecutive
@@ -4022,9 +4050,10 @@ function buildGarminWorkoutFromSession(session, weekNum, sessionDisplay, userZon
       i = j;
     }
 
-    // Seulement si une seance fractionnee a bien ete detectee (jamais sur
-    // une seance continue sans repetitions - hors sujet de ce correctif).
-    if (foundRepeatGroup) markLastRecoveryOpenEnded(result);
+    // Recuperation de fin de sortie au lap (bouton Lap + duree en note) : sur
+    // toute seance qui en a une — fractionnee (bloc repete) OU continue avec un
+    // retour au calme / une recup finale explicite (ex: sortie longue active).
+    if (foundRepeatGroup || cooldownApplied) markLastRecoveryOpenEnded(result);
     return result.map((s, idx) => ({ ...s, stepOrder: idx + 1 }));
   }
 

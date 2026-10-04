@@ -111,7 +111,7 @@ function flattenExerciseInfo(session) {
     const repeat = block.repeat || 1;
     const exercises = block.exercises || [];
     for (let r = 0; r < repeat; r++) {
-      exercises.forEach(ex => out.push({ pace: ex.pace || null, blockIdx, blockRepeat: repeat }));
+      exercises.forEach(ex => out.push({ pace: ex.pace || null, blockIdx, blockRepeat: repeat, blockType: block.blockType || null, exerciseType: ex.exerciseType || null }));
     }
   });
   return out;
@@ -126,6 +126,11 @@ function annotatePaceZones(session, goalType) {
     resolvedZone: resolveZoneFromExercise(info[i]?.pace, z.kind, goalType),
     blockIdx: info[i]?.blockIdx,
     blockRepeat: info[i]?.blockRepeat || 1,
+    // Roles explicites du plan (echauffement / retour au calme / recuperation),
+    // lus par le builder Garmin : source de verite plutot que des heuristiques
+    // sur la premiere/derniere zone.
+    blockType: info[i]?.blockType || null,
+    exerciseType: info[i]?.exerciseType || null,
   }));
 }
 

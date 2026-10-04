@@ -2394,6 +2394,8 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
 /* Fond alterne par tour de bloc (1a/1b, 2a/2b...) : teintes translucides, lisibles en clair comme en sombre */
 .analysis-reps-table tr.rep-unit-a td { background: rgba(59,130,246,0.07); }
 .analysis-reps-table tr.rep-unit-b td { background: rgba(128,128,128,0.09); }
+.analysis-reps-table tr.rep-step-recovery td { color: var(--text-muted); font-style: italic; background: rgba(128,128,128,0.045); }
+.analysis-step-notice { font-family: var(--font-body); font-size: 12px; color: var(--text-muted); background: rgba(128,128,128,0.09); border-radius: 8px; padding: 10px 12px; margin: 10px 0; line-height: 1.45; }
 .analysis-list { margin: 0; padding: 0; list-style: none; font-family: var(--font-body); font-size: 12.5px; }
 .analysis-list li { padding: 3px 0; }
 .analysis-list--positive li { color: #2e7d32; }
