@@ -4179,7 +4179,9 @@ function renderGpxProfileVisuals(profile) {
         backgroundColor: 'rgba(22,163,74,0.08)',
         segment: { borderColor: ctx => gpxGradeBand(gradeAtIdx[ctx.p0DataIndex]).color },
       }] },
-      options: { ...baseOptions, scales: { ...(baseOptions.scales || {}), x: { ...(baseOptions.scales?.x || {}), ticks: { maxTicksLimit: 8 } } } },
+      options: { ...baseOptions,
+        plugins: { ...(baseOptions.plugins || {}), tooltip: { ...(baseOptions.plugins?.tooltip || {}), displayColors: false, callbacks: elevationTooltipCallbacks(cum, data) } },
+        scales: { ...(baseOptions.scales || {}), x: { ...(baseOptions.scales?.x || {}), ticks: { maxTicksLimit: 8 } } } },
     });
   }
 }

@@ -2396,6 +2396,11 @@ button.nav-item{background:none;border:none;width:100%;text-align:left;font-fami
 .analysis-reps-table tr.rep-unit-b td { background: rgba(128,128,128,0.09); }
 .analysis-reps-table tr.rep-step-recovery td { color: var(--text-muted); font-style: italic; }
 .analysis-reps-table tr.rep-step-recovery:not(.rep-unit-a):not(.rep-unit-b) td { background: rgba(128,128,128,0.045); }
+/* Tableau par etape compact : une ligne par etape, pas de retour a la ligne */
+.analysis-steps-table { font-size: 11.5px; }
+.analysis-steps-table th { padding: 3px 6px; white-space: nowrap; }
+.analysis-steps-table td { padding: 2px 6px; white-space: nowrap; line-height: 1.25; }
+.analysis-steps-table tr.rep-step-recovery td { font-size: 10.5px; padding-top: 1px; padding-bottom: 1px; }
 /* Cadre de bloc (colonnes Bloc / Rep.) : cellules fusionnees, teinte un cran au-dessus de celle des lignes */
 .analysis-steps-table td.rep-block-cell, .analysis-steps-table td.rep-rep-cell { text-align: center; vertical-align: middle; font-style: normal; font-weight: 700; color: var(--text-primary); border-right: 1px solid var(--border-light); }
 .analysis-steps-table td.rep-block-cell small { display: block; font-weight: 500; font-size: 10px; color: var(--text-muted); }

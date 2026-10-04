@@ -1146,9 +1146,11 @@ function renderElevationChart(canvasId, points, onHoverIndex) {
   let cum = 0;
   const labels = [];
   const data = [];
+  const cumKm = [];
   for (let i = 0; i < points.length; i++) {
     if (i > 0) cum += haversineKm(points[i - 1], points[i]);
     labels.push(cum.toFixed(1) + ' km');
+    cumKm.push(cum);
     data.push(Math.round(points[i].ele));
   }
   const baseOptions = typeof chartOptions === 'function' ? chartOptions() : { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } };
@@ -1157,6 +1159,7 @@ function renderElevationChart(canvasId, points, onHoverIndex) {
     data: { labels, datasets: [{ data, borderColor: '#16A34A', backgroundColor: 'rgba(22,163,74,0.12)', borderWidth: 1.5, pointRadius: 0, tension: 0.3, fill: true }] },
     options: {
       ...baseOptions,
+      plugins: { ...(baseOptions.plugins || {}), tooltip: { ...(baseOptions.plugins?.tooltip || {}), displayColors: false, callbacks: elevationTooltipCallbacks(cumKm, data) } },
       onHover: (evt, activeElements) => {
         if (typeof onHoverIndex === 'function') onHoverIndex(activeElements.length ? activeElements[0].index : null);
       },

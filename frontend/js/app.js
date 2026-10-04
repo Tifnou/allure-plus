@@ -1818,10 +1818,8 @@ function renderElevationProfile(elevation) {
       maintainAspectRatio: false,
       interaction: { mode: 'index', intersect: false },
       plugins: { legend: { display: false }, tooltip: {
-        callbacks: {
-          title: (items) => `${items[0].label} km`,
-          label: (item) => `${Math.round(item.raw)} m`,
-        }
+        displayColors: false,
+        callbacks: elevationTooltipCallbacks(elevation.map(p => p.distKm), data),
       }},
       scales: {
         x: { ticks: { color: 'rgba(255,255,255,0.5)', maxTicksLimit: 6, font: { size: 10 } }, grid: { color: 'rgba(255,255,255,0.06)' } },
@@ -2531,6 +2529,48 @@ async function loadActivityAnalysis(activity) {
 // ═══════════════════════════════════════════════
 // CHARTS OPTIONS
 // ═══════════════════════════════════════════════
+
+// ─── Survol d'un profil d'altitude : altitude, pente locale, D+ / D- cumules ───
+// Partage par tous les profils (detail d'activite, analyse de seance, itineraires,
+// editeur de parcours, GPX). distKm/alt : tableaux paralleles (alt deja lisse si
+// besoin). D+/D- cumules depuis le depart avec un seuil d'hysteresis de 2 m
+// (ignore le bruit barometrique/GPS, comme le font les montres) ; pente locale
+// = denivele / distance sur une fenetre d'environ 100 m centree sur le point.
+function computeElevationStats(distKm, alt) {
+  const n = alt.length, up = new Array(n).fill(0), down = new Array(n).fill(0);
+  const THR = 2;
+  let u = 0, d = 0, ref = alt[0];
+  for (let i = 1; i < n; i++) {
+    const diff = alt[i] - ref;
+    if (diff >= THR) { u += diff; ref = alt[i]; }
+    else if (diff <= -THR) { d += -diff; ref = alt[i]; }
+    up[i] = u; down[i] = d;
+  }
+  return { up, down };
+}
+function elevationGradeAt(distKm, alt, i, spanM = 100) {
+  const n = alt.length;
+  let a = i, b = i;
+  while (a > 0 && (distKm[i] - distKm[a]) * 1000 < spanM / 2) a--;
+  while (b < n - 1 && (distKm[b] - distKm[i]) * 1000 < spanM / 2) b++;
+  const dm = (distKm[b] - distKm[a]) * 1000;
+  return dm > 5 ? (alt[b] - alt[a]) / dm * 100 : null;
+}
+function elevationTooltipCallbacks(distKm, alt) {
+  const st = computeElevationStats(distKm, alt);
+  const fr = v => v.toFixed(1).replace('.', ',');
+  return {
+    title: items => `${distKm[items[0].dataIndex].toFixed(2).replace('.', ',')} km`,
+    label: item => {
+      const i = item.dataIndex;
+      const g = elevationGradeAt(distKm, alt, i);
+      const lines = [`Altitude : ${Math.round(alt[i])} m`];
+      if (g != null) lines.push(`Pente : ${g > 0 ? '+' : ''}${fr(g)} %`);
+      lines.push(`D+ ${Math.round(st.up[i])} m  ·  D− ${Math.round(st.down[i])} m`);
+      return lines;
+    },
+  };
+}
 
 function chartOptions() {
   return {

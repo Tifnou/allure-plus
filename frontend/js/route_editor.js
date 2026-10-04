@@ -913,6 +913,7 @@ function renderRouteEditorVisuals() {
       }] : [],
       options: {
         ...baseOptions,
+        plugins: { ...(baseOptions.plugins || {}), tooltip: { ...(baseOptions.plugins?.tooltip || {}), displayColors: false, callbacks: elevationTooltipCallbacks(cum, dataPts) } },
         layout: { padding: { top: repeatBracketRows ? 12 + repeatBracketRows * 13 : 0 } },
         scales: { ...(baseOptions.scales || {}), x: { ...(baseOptions.scales?.x || {}), ticks: { maxTicksLimit: 8 } } },
         onHover: (evt, activeElements) => {

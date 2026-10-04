@@ -2033,11 +2033,11 @@ function buildAnalysisModalHtml(record) {
     }
     return `<tr class="${band.trim()}">
           ${leadCells(r)}
-          <td>${r.label}${dur ? ` <span class="analysis-summary-planned">${dur}</span>` : ''}</td>
+          <td>${String(r.label).split(' — ')[0]}${dur ? ` <span class="analysis-summary-planned">${dur}</span>` : ''}</td>
           <td>${(r.targetPaceMinSecKm && r.targetPaceMaxSecKm) ? (fmtPace(r.targetPaceMinSecKm) + '–' + fmtPace(r.targetPaceMaxSecKm)) : '—'}</td>
           <td>${r.actualPaceSecKm ? fmtPace(r.actualPaceSecKm) : '—'}</td>
           <td>${r.missing ? 'non réalisée' : repClassificationLabel(r.classification)}</td>
-          ${stepsHaveHR ? `<td>${r.actualHR != null ? r.actualHR + ' bpm — ' + repHRClassificationLabel(r.hrClassification) + (stepsHRPerRow && r.targetHRMin != null ? ` <span class="analysis-summary-planned">(~${r.targetHRMin}-${r.targetHRMax})</span>` : '') : '—'}</td>` : ''}
+          ${stepsHaveHR ? `<td${r.targetHRMin != null ? ` title="Cible FC ~${r.targetHRMin}-${r.targetHRMax} bpm"` : ''}>${r.actualHR != null ? r.actualHR + ' · ' + repHRClassificationLabel(r.hrClassification) : '—'}</td>` : ''}
         </tr>`;
   };
   const stepsTableHtml = stepList.length ? `
@@ -2509,7 +2509,7 @@ function renderAnalysisElevationChart(elevation) {
       options: {
         ...base,
         plugins: { ...base.plugins, tooltip: { ...base.plugins.tooltip, displayColors: false,
-          callbacks: { title: (items) => `${items[0].label} km`, label: (item) => `${Math.round(item.raw)} m` } } },
+          callbacks: elevationTooltipCallbacks(elevation.map(p => p.distKm), data) } },
         scales: { ...base.scales, x: { ...base.scales.x, ticks: { ...base.scales.x.ticks, maxTicksLimit: 6 } } },
       }
     });
