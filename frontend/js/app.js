@@ -1115,8 +1115,11 @@ function activityMatchesSportFilter(activityType, filter) {
     if (f === 'running') return (t === 'running' || t === 'treadmill_running' || (t.includes('run') && !t.includes('trail')));
     if (f === 'trail')   return t.includes('trail');
     if (f === 'cycling') return t === 'cycling' || t.includes('cycl') || t.includes('bik');
-    if (f === 'cardio')  return t.includes('cardio') || t.includes('fitness') || t.includes('indoor') || t.includes('strength') || t.includes('hiit') || t.includes('muscul');
-    if (f === 'walking') return t.includes('walk') || t === 'walking';
+    // Marche = TOUTES les activites marchees (marche, marche sur tapis/indoor, marche rapide, randonnee...) ;
+    // une marche indoor ne compte pas comme cardio.
+    const isWalk = t.includes('walk') || t.includes('hik');
+    if (f === 'cardio')  return !isWalk && (t.includes('cardio') || t.includes('fitness') || t.includes('indoor') || t.includes('strength') || t.includes('hiit') || t.includes('muscul'));
+    if (f === 'walking') return isWalk;
     if (f === 'swimming') return t.includes('swim');
     return true;
   });
@@ -2980,7 +2983,7 @@ function initHeatmapTooltip(wrapper) {
     if (t.includes('trail'))    return SPORT_ICON.trail;
     if (t.includes('run'))      return personEmoji('running');
     if (t.includes('cycl') || t.includes('bik')) return personEmoji('cycling');
-    if (t.includes('walk'))     return personEmoji('walking');
+    if (t.includes('walk') || t.includes('hik')) return personEmoji('walking');
     if (t.includes('strength') || t.includes('muscul')) return personEmoji('strength');
     if (t.includes('hiit'))     return SPORT_ICON.hiit;
     if (t.includes('cardio') || t.includes('fitness') || t.includes('indoor')) return SPORT_ICON.cardio;
