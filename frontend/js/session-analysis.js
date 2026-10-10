@@ -2046,7 +2046,10 @@ function buildAnalysisModalHtml(record) {
   stepList.forEach((r, i) => {
     displayRows.push(r);
     const next = stepList[i + 1];
-    if (r.blockNo != null && r.blockReps > 1 && (!next || next.blockNo !== r.blockNo)) blockAverages(r.blockNo).forEach(a => displayRows.push(a));
+    if (r.blockNo != null && r.blockReps > 1 && (!next || next.blockNo !== r.blockNo)) {
+      const avgs = blockAverages(r.blockNo);
+      avgs.forEach((a, idx) => { a.firstAvg = idx === 0; a.lastAvg = idx === avgs.length - 1; displayRows.push(a); });
+    }
   });
   const blockSpan = {}, repSpan = {}, avgSpan = {};
   displayRows.forEach(r => {
@@ -2078,7 +2081,7 @@ function buildAnalysisModalHtml(record) {
     if (r.isAvg) {
       const isRec = r.role === 'recovery';
       const rangeTip = (r.paceMin && r.paceMax) ? ` title="Moyenne de ${r.n} répétitions — de ${fmtPace(r.paceMin)} à ${fmtPace(r.paceMax)} (écart ${r.paceMax - r.paceMin}s/km)"` : '';
-      return `<tr class="rep-step-avg${isRec ? ' rep-step-recovery' : ''}${band}">
+      return `<tr class="rep-step-avg${isRec ? ' rep-step-recovery' : ''}${r.firstAvg ? ' rep-avg-first' : ''}${r.lastAvg ? ' rep-avg-last' : ''}${band}">
           ${leadCells(r)}
           <td>Moy. ${isRec ? 'Récup' : String(r.label).split(' — ')[0]} <span class="analysis-summary-planned">${fmtStepMin(r.actualSec)}</span></td>
           <td>${(!isRec && r.targetPaceMinSecKm && r.targetPaceMaxSecKm) ? (fmtPace(r.targetPaceMinSecKm) + '–' + fmtPace(r.targetPaceMaxSecKm)) : (isRec && r.plannedSec ? fmtStepMin(r.plannedSec) : '—')}</td>
