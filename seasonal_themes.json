@@ -1,10 +1,25 @@
 {
   "version": 1,
-  "updatedAt": null,
+  "updatedAt": "2026-10-10T16:34:16.509Z",
   "force": null,
   "themes": [
-    { "id": "halloween", "enabled": true, "start": "10-20", "end": "11-02" },
-    { "id": "noel", "enabled": true, "start": "12-01", "end": "12-26" },
-    { "id": "saint-valentin", "enabled": true, "start": "02-07", "end": "02-15" }
+    {
+      "id": "halloween",
+      "enabled": true,
+      "start": "10-20",
+      "end": "11-01"
+    },
+    {
+      "id": "noel",
+      "enabled": true,
+      "start": "12-01",
+      "end": "12-31"
+    },
+    {
+      "id": "saint-valentin",
+      "enabled": true,
+      "start": "02-12",
+      "end": "02-15"
+    }
   ]
 }
