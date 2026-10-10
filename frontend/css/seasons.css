@@ -116,3 +116,30 @@ html[data-season] #bg-slideshow { position: fixed; }
 .season-result { margin-top: 10px; font-family: var(--font-body); font-size: 12px; min-height: 16px; }
 .season-result.is-ok { color: var(--green-text, #15803d); }
 .season-result.is-err { color: var(--red, #dc2626); }
+
+/* ─── Scène illustrée de bas de page (Halloween / Noël / Saint-Valentin) ─── */
+.season-scene { --sc: 1.4; position: fixed; left: var(--sidebar-w); right: 0; bottom: 0; height: calc(132px * var(--sc)); pointer-events: none; z-index: 55; overflow: hidden; }
+.sc-items { position: absolute; inset: 0; z-index: 1; }
+.sc-item { position: absolute; width: calc(var(--w) * var(--sc)); bottom: calc(var(--b) * var(--sc)); }
+.sc-item svg { display: block; width: 100%; height: auto; overflow: visible; }
+.sc-ground { position: absolute; left: 0; right: 0; bottom: 0; height: calc(44px * var(--sc)); background-repeat: repeat-x; background-size: calc(240px * var(--sc)) calc(44px * var(--sc)); background-position: left bottom; z-index: 2; }
+/* le contenu de la page garde de la place au-dessus de la scène */
+html[data-season] .page { padding-bottom: 200px; }
+@media (max-width: 720px) { .season-scene { display: none; } html[data-season] .page { padding-bottom: 60px; } }
+
+.sc-glow { animation: sc-flicker 2.6s ease-in-out infinite; filter: drop-shadow(0 0 5px rgba(253,224,71,0.9)); }
+@keyframes sc-flicker { 0%,100% { opacity: 1; } 42% { opacity: .72; } 58% { opacity: .95; } 80% { opacity: .8; } }
+.sc-sway { transform-box: fill-box; transform-origin: 50% 100%; animation: sc-sway 3.4s ease-in-out infinite; }
+@keyframes sc-sway { 0%,100% { transform: rotate(-3deg); } 50% { transform: rotate(3deg); } }
+.sc-wave { transform-box: fill-box; transform-origin: 0% 100%; animation: sc-wave 1.5s ease-in-out infinite; }
+@keyframes sc-wave { 0%,100% { transform: rotate(-7deg); } 50% { transform: rotate(9deg); } }
+.sc-twinkle { animation: sc-twinkle 1.7s ease-in-out infinite; }
+@keyframes sc-twinkle { 0%,100% { opacity: .45; } 50% { opacity: 1; } }
+.sc-bauble { animation: sc-blink 1.9s ease-in-out infinite; animation-delay: var(--d, 0s); }
+@keyframes sc-blink {
+  0%,100% { filter: brightness(.82) drop-shadow(0 0 0 transparent); }
+  50%     { filter: brightness(1.45) drop-shadow(0 0 7px var(--c, #fff)); }
+}
+.sc-float { animation: sc-floaty 3.8s ease-in-out infinite; }
+@keyframes sc-floaty { 0%,100% { transform: translateY(0) rotate(-2deg); } 50% { transform: translateY(-9px) rotate(2deg); } }
+@media (prefers-reduced-motion: reduce) { .sc-glow, .sc-sway, .sc-wave, .sc-twinkle, .sc-bauble, .sc-float { animation: none; } }

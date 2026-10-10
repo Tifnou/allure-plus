@@ -62,6 +62,7 @@
 
   function clearDecor() {
     document.getElementById('season-fx')?.remove();
+    document.getElementById('season-scene')?.remove();
     document.getElementById('season-hat')?.remove();
     document.getElementById('season-badge')?.remove();
   }
@@ -85,6 +86,15 @@
         fx.appendChild(p);
       }
       document.body.appendChild(fx);
+      // Scène illustrée en bas de page (season_scenes.js)
+      if (typeof buildSeasonScene === 'function') {
+        const sc = document.createElement('div');
+        sc.id = 'season-scene';
+        sc.className = 'season-scene';
+        sc.setAttribute('aria-hidden', '1');
+        sc.innerHTML = buildSeasonScene(id);
+        document.body.appendChild(sc);
+      }
     }
     const brand = document.querySelector('.sidebar-brand');
     if (brand) {
