@@ -1999,10 +1999,60 @@ function buildAnalysisModalHtml(record) {
   // numero de repetition (rowspan sur les etapes de cette repetition).
   const stepList = record.steps || [];
   const hasBlocks = stepList.some(r => r.blockNo != null);
-  const blockSpan = {}, repSpan = {};
-  stepList.forEach(r => {
+  // Moyennes par bloc : pour chaque etape distincte du bloc (ex: 6 x Tempo 3'),
+  // une ligne "Moy." en fin de bloc — allure moyenne ponderee par la duree
+  // (temps total / distance totale), FC moyenne ponderee, duree moyenne, jugees
+  // contre la meme cible. Les recups entre series ont aussi leur moyenne (FC de
+  // recuperation, duree).
+  const avgPaceClass = (p, lo, hi) => {
+    if (p == null || !lo || !hi) return null;
+    if (p < lo) return (lo - p) > 15 ? 'too_fast' : 'slightly_fast';
+    if (p > hi) return (p - hi) > 15 ? 'too_slow' : 'slightly_slow';
+    return 'on_target';
+  };
+  const blockAverages = blockNo => {
+    const rows = stepList.filter(r => r.blockNo === blockNo && !r.missing && r.actualSec);
+    const order = [];
+    rows.forEach(r => { const k = r.role + '|' + r.label + '|' + r.plannedSec; if (!order.includes(k)) order.push(k); });
+    const out = [];
+    order.forEach(k => {
+      const g = rows.filter(r => r.role + '|' + r.label + '|' + r.plannedSec === k);
+      if (g.length < 2) return;
+      const first = g[0];
+      const totT = g.reduce((a, r) => a + r.actualSec, 0);
+      const paced = g.filter(r => r.actualPaceSecKm);
+      // allure moyenne = temps total / distance totale (distance_i = temps_i / allure_i)
+      const pT = paced.reduce((a, r) => a + r.actualSec, 0);
+      const pD = paced.reduce((a, r) => a + r.actualSec / r.actualPaceSecKm, 0);
+      const avgPace = (pT > 0 && pD > 0) ? Math.round(pT / pD) : null;
+      const hrs = g.filter(r => r.actualHR != null);
+      const hT = hrs.reduce((a, r) => a + r.actualSec, 0);
+      const avgHR = hT > 0 ? Math.round(hrs.reduce((a, r) => a + r.actualHR * r.actualSec, 0) / hT) : null;
+      const judged = first.role === 'work';
+      out.push({
+        isAvg: true, role: first.role, label: first.label, blockNo, n: g.length, plannedSec: first.plannedSec,
+        actualSec: Math.round(totT / g.length), actualPaceSecKm: avgPace,
+        paceMin: paced.length ? Math.min(...paced.map(r => r.actualPaceSecKm)) : null,
+        paceMax: paced.length ? Math.max(...paced.map(r => r.actualPaceSecKm)) : null,
+        targetPaceMinSecKm: first.targetPaceMinSecKm, targetPaceMaxSecKm: first.targetPaceMaxSecKm,
+        classification: judged ? avgPaceClass(avgPace, first.targetPaceMinSecKm, first.targetPaceMaxSecKm) : null,
+        actualHR: avgHR, targetHRMin: first.targetHRMin, targetHRMax: first.targetHRMax,
+        hrClassification: (judged && avgHR != null && first.targetHRMin != null) ? (avgHR > first.targetHRMax ? 'elevee' : avgHR < first.targetHRMin ? 'basse' : 'conforme') : null,
+      });
+    });
+    return out;
+  };
+  const displayRows = [];
+  stepList.forEach((r, i) => {
+    displayRows.push(r);
+    const next = stepList[i + 1];
+    if (r.blockNo != null && r.blockReps > 1 && (!next || next.blockNo !== r.blockNo)) blockAverages(r.blockNo).forEach(a => displayRows.push(a));
+  });
+  const blockSpan = {}, repSpan = {}, avgSpan = {};
+  displayRows.forEach(r => {
     if (r.blockNo == null) return;
     blockSpan[r.blockNo] = (blockSpan[r.blockNo] || 0) + 1;
+    if (r.isAvg) { avgSpan[r.blockNo] = (avgSpan[r.blockNo] || 0) + 1; return; }
     const k = r.blockNo + '_' + r.repNo; repSpan[k] = (repSpan[k] || 0) + 1;
   });
   const seenBlock = new Set(), seenRep = new Set();
@@ -2014,6 +2064,10 @@ function buildAnalysisModalHtml(record) {
       seenBlock.add(r.blockNo);
       h += `<td class="rep-block-cell" rowspan="${blockSpan[r.blockNo]}">Bloc ${r.blockNo}<small>×${r.blockReps}</small></td>`;
     }
+    if (r.isAvg) {
+      if (!seenRep.has('avg_' + r.blockNo)) { seenRep.add('avg_' + r.blockNo); h += `<td class="rep-rep-cell rep-avg-cell" rowspan="${avgSpan[r.blockNo]}">Moy.</td>`; }
+      return h;
+    }
     const k = r.blockNo + '_' + r.repNo;
     if (!seenRep.has(k)) { seenRep.add(k); h += `<td class="rep-rep-cell" rowspan="${repSpan[k]}">${r.repNo}</td>`; }
     return h;
@@ -2021,6 +2075,18 @@ function buildAnalysisModalHtml(record) {
   const stepRowHtml = r => {
     const dur = r.actualSec != null ? fmtStepMin(r.actualSec) : null;
     const band = r.blockNo != null ? ` rep-unit-${r.blockNo % 2 ? 'a' : 'b'}` : '';
+    if (r.isAvg) {
+      const isRec = r.role === 'recovery';
+      const rangeTip = (r.paceMin && r.paceMax) ? ` title="Moyenne de ${r.n} répétitions — de ${fmtPace(r.paceMin)} à ${fmtPace(r.paceMax)} (écart ${r.paceMax - r.paceMin}s/km)"` : '';
+      return `<tr class="rep-step-avg${isRec ? ' rep-step-recovery' : ''}${band}">
+          ${leadCells(r)}
+          <td>Moy. ${isRec ? 'Récup' : String(r.label).split(' — ')[0]} <span class="analysis-summary-planned">${fmtStepMin(r.actualSec)}</span></td>
+          <td>${(!isRec && r.targetPaceMinSecKm && r.targetPaceMaxSecKm) ? (fmtPace(r.targetPaceMinSecKm) + '–' + fmtPace(r.targetPaceMaxSecKm)) : (isRec && r.plannedSec ? fmtStepMin(r.plannedSec) : '—')}</td>
+          <td${rangeTip}>${(!isRec && r.actualPaceSecKm) ? fmtPace(r.actualPaceSecKm) : (isRec ? fmtStepMin(r.actualSec) : '—')}</td>
+          <td>${isRec ? '—' : repClassificationLabel(r.classification)}</td>
+          ${stepsHaveHR ? `<td${r.targetHRMin != null && !isRec ? ` title="Cible FC ~${r.targetHRMin}-${r.targetHRMax} bpm"` : ''}>${r.actualHR != null ? (isRec ? r.actualHR + ' bpm' : r.actualHR + ' · ' + repHRClassificationLabel(r.hrClassification)) : '—'}</td>` : ''}
+        </tr>`;
+    }
     if (r.role === 'recovery' || r.role === 'cooldown') {
       return `<tr class="rep-step-recovery${band}">
           ${leadCells(r)}
@@ -2044,7 +2110,7 @@ function buildAnalysisModalHtml(record) {
     <div class="analysis-section-title">Détail par étape</div>
     <table class="analysis-reps-table analysis-steps-table">
       <thead><tr>${hasBlocks ? '<th>Bloc</th><th>Rép.</th>' : ''}<th>Étape</th><th>Cible</th><th>Réalisé</th><th>Analyse</th>${stepsHaveHR ? '<th>FC</th>' : ''}</tr></thead>
-      <tbody>${stepList.map(stepRowHtml).join('')}</tbody>
+      <tbody>${displayRows.map(stepRowHtml).join('')}</tbody>
     </table>` : '';
   const stepNoticeHtml = record.stepNotice ? `<div class="analysis-step-notice">${record.stepNotice}</div>` : '';
   const repsTableHtml = (record.steps && record.steps.length) ? stepsTableHtml : record.reps.length ? `
