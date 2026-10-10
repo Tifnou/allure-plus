@@ -277,7 +277,7 @@ function navigateTo(pageId) {
   if (pageId === 'health')     renderHealthPage();
   if (pageId === 'stats')      renderStatsPage();
   if (pageId === 'profile')    renderProfile();
-  if (pageId === 'admin')      { loadAdminInfo(); loadAdminLogs(); loadAdminUsers(); }
+  if (pageId === 'admin')      { loadAdminInfo(); loadAdminLogs(); loadAdminUsers(); if (typeof loadAdminSeasons === 'function') loadAdminSeasons(); }
   if (pageId === 'support-admin' && typeof loadSupportAdminPage === 'function') loadSupportAdminPage();
   if (pageId === 'goals')      { if (typeof loadGoalsPage === 'function') loadGoalsPage(); }
   if (pageId === 'routes')     { if (typeof initRoutesPage === 'function') initRoutesPage(); }
@@ -3895,11 +3895,14 @@ async function connectCampusFromProfile() {
 // THÈME DARK / LIGHT
 // ══════════════════════════════════════════════════════
 function applyTheme(theme) {
-  document.documentElement.dataset.theme = theme;
+  // Theme de saison actif (themes.js) : il impose clair/sombre ; la preference
+  // de l'utilisateur reste enregistree telle quelle et revient a la fin.
+  const effective = window.__activeSeasonBase || theme;
+  document.documentElement.dataset.theme = effective;
   localStorage.setItem('allure_theme', theme);
   // Swap logo sidebar
   const logo = document.getElementById('sidebar-logo-img');
-  if (logo) logo.src = theme === 'dark' ? 'images/logo-allure-blanc.png' : 'images/logo-allure-noir.png';
+  if (logo) logo.src = effective === 'dark' ? 'images/logo-allure-blanc.png' : 'images/logo-allure-noir.png';
   // Le curseur de l'interrupteur (theme-toggle-thumb) glisse via CSS
   // ([data-theme="dark"] .theme-toggle-thumb, style.css) - rien a faire ici,
   // seul l'attribut data-theme compte.

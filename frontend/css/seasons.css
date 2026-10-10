@@ -1,0 +1,118 @@
+/* ═══════════════════════════════════════════════════════════════════════
+   THEMES DE SAISON — palettes + décors (activation : js/themes.js)
+   html[data-season="..."] se superpose aux variables de :root / [data-theme].
+   Chaque thème impose son ambiance (data-theme forcé par themes.js) : les
+   règles [data-theme="dark"] existantes continuent donc de s'appliquer.
+═══════════════════════════════════════════════════════════════════════ */
+
+/* ─── Halloween (sombre) ─── */
+html[data-season="halloween"] {
+  --bg: #0E0912; --bg-white: #171021; --bg-hover: #241733;
+  --border: #3A2552; --border-light: #2A1A3D;
+  --accent: #F97316; --accent-light: #2A1606; --accent-text: #FDBA74;
+  --orange: #FB923C; --orange-bg: #2A1606; --purple: #A855F7;
+  --text-primary: #F3E8FF; --text-secondary: #B9A3D6; --text-muted: #9C86BC;
+  --nav-text: #E9D8FD; --card-bg: rgba(23,16,33,0.92);
+  --brand-green: #F97316;
+}
+html[data-season="halloween"] #bg-slideshow::after {
+  background: linear-gradient(180deg, rgba(76,29,149,0.42), rgba(249,115,22,0.16));
+}
+
+/* ─── Noël (sombre) ─── */
+html[data-season="noel"] {
+  --bg: #08140F; --bg-white: #0F1F18; --bg-hover: #17302A;
+  --border: #24473A; --border-light: #183226;
+  --accent: #EF4444; --accent-light: #2A0F12; --accent-text: #FCA5A5;
+  --green: #22C55E; --green-bg: #0B2417; --green-text: #86EFAC;
+  --orange: #FBBF24; --orange-bg: #2A1F06;
+  --text-primary: #F1F7F2; --text-secondary: #9DBBAA; --text-muted: #86A895;
+  --nav-text: #DCEFE2; --card-bg: rgba(15,31,24,0.92);
+  --brand-green: #EF4444;
+}
+html[data-season="noel"] #bg-slideshow::after {
+  background: linear-gradient(180deg, rgba(6,40,24,0.5), rgba(185,28,28,0.18));
+}
+
+/* ─── Saint-Valentin (clair) ─── */
+html[data-season="saint-valentin"] {
+  --bg: #FFF4F6; --bg-white: #FFFFFF; --bg-hover: #FFE4EA;
+  --border: #F9C9D4; --border-light: #FDE7EC;
+  --accent: #E11D48; --accent-light: #FFF1F3; --accent-text: #BE123C;
+  --purple: #C026D3;
+  --text-primary: #2A0A12; --text-secondary: #8A4B5A; --text-muted: #9C6070;
+  --nav-text: #3B0D1A; --card-bg: rgba(255,255,255,0.9);
+  --brand-green: #E11D48;
+}
+html[data-season="saint-valentin"] #bg-slideshow::after {
+  background: linear-gradient(180deg, rgba(255,228,234,0.45), rgba(244,114,182,0.16));
+}
+
+/* Voile de teinte par-dessus le fond d'écran défilant */
+html[data-season] #bg-slideshow::after {
+  content: ''; position: absolute; inset: 0; pointer-events: none;
+}
+html[data-season] #bg-slideshow { position: fixed; }
+
+/* ─── Interrupteur clair/sombre verrouillé pendant un thème ─── */
+.theme-toggle--locked { opacity: 0.45; pointer-events: none; filter: grayscale(0.6); }
+
+/* ─── Décors : bonnet sur le logo + pastille du thème ─── */
+.sidebar-brand { position: relative; }
+.season-hat {
+  position: absolute; left: 4px; top: 0; width: 34px; height: 28px;
+  transform: rotate(-16deg); pointer-events: none; z-index: 2;
+  filter: drop-shadow(0 1px 2px rgba(0,0,0,0.35));
+}
+.season-hat svg { width: 100%; height: 100%; display: block; }
+.season-badge {
+  display: inline-block; margin-top: 3px; padding: 1px 8px; border-radius: 999px; line-height: 1.25; white-space: nowrap;
+  font-family: var(--font-body); font-size: 10px; font-weight: 600; letter-spacing: .02em;
+  color: var(--accent-text); background: var(--accent-light); border: 1px solid var(--border);
+}
+@media (max-width: 720px) { .season-badge { display: none; } }
+
+/* ─── Particules (flocons, feuilles, cœurs…) : CSS pur, sans interaction ─── */
+.season-fx {
+  position: fixed; inset: 0; overflow: hidden; pointer-events: none; z-index: 60;
+}
+.season-particle {
+  position: absolute; top: -8%; line-height: 1; will-change: transform;
+  animation-name: season-fall; animation-timing-function: linear; animation-iteration-count: infinite;
+  user-select: none;
+}
+.season-fx--rise .season-particle { top: auto; bottom: -8%; animation-name: season-rise; }
+@keyframes season-fall {
+  0%   { transform: translate3d(0, -6vh, 0) rotate(0deg); }
+  50%  { transform: translate3d(var(--sway), 55vh, 0) rotate(160deg); }
+  100% { transform: translate3d(calc(var(--sway) * -1), 112vh, 0) rotate(320deg); }
+}
+@keyframes season-rise {
+  0%   { transform: translate3d(0, 6vh, 0) scale(.8); }
+  50%  { transform: translate3d(var(--sway), -55vh, 0) scale(1); }
+  100% { transform: translate3d(calc(var(--sway) * -1), -112vh, 0) scale(.85); }
+}
+@media (prefers-reduced-motion: reduce) { .season-fx { display: none; } }
+
+/* ─── Admin : section Thèmes de saison ─── */
+.season-status { font-family: var(--font-body); font-size: 12.5px; line-height: 1.6; color: var(--text-secondary); margin-bottom: 12px; }
+.season-status strong { color: var(--text-primary); }
+.season-table { width: 100%; border-collapse: collapse; font-family: var(--font-body); font-size: 12.5px; }
+.season-table th { text-align: left; color: var(--text-muted); font-weight: 600; padding: 4px 8px; border-bottom: 1px solid var(--border-light); }
+.season-table td { padding: 6px 8px; border-bottom: 1px solid var(--border-light); color: var(--text-primary); vertical-align: middle; }
+.season-name { font-weight: 600; white-space: nowrap; }
+.season-date { display: inline-flex; gap: 4px; align-items: center; }
+.season-date input[type="number"] { width: 46px; }
+.season-table input, .season-table select, .season-force input[type="date"], .season-force select {
+  font-family: var(--font-body); font-size: 12px; padding: 3px 6px; border-radius: 6px;
+  border: 1px solid var(--border); background: var(--bg-white); color: var(--text-primary);
+}
+.season-prev-btn.is-on { background: var(--accent); color: #fff; border-color: var(--accent); }
+.season-force { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; margin-top: 12px; font-family: var(--font-body); font-size: 12.5px; color: var(--text-primary); }
+.season-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 14px; }
+.season-publish-btn:not([disabled]) { border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
+.season-hint { font-family: var(--font-body); font-size: 11px; color: var(--text-muted); }
+.season-hint code { font-size: 10.5px; }
+.season-result { margin-top: 10px; font-family: var(--font-body); font-size: 12px; min-height: 16px; }
+.season-result.is-ok { color: var(--green-text, #15803d); }
+.season-result.is-err { color: var(--red, #dc2626); }

@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "updatedAt": null,
+  "force": null,
+  "themes": [
+    { "id": "halloween", "enabled": true, "start": "10-20", "end": "11-02" },
+    { "id": "noel", "enabled": true, "start": "12-01", "end": "12-26" },
+    { "id": "saint-valentin", "enabled": true, "start": "02-07", "end": "02-15" }
+  ]
+}

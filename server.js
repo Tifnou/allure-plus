@@ -5,7 +5,7 @@ const path     = require('path');
 const fs       = require('fs');
 const crypto   = require('crypto');
 const os       = require('os');
-const { spawn } = require('child_process');
+const { spawn, execFile } = require('child_process');
 
 // â?,â?,â?, Logger fichier (admin /api/logs) â?,â?,â?,â?,â?,â?,â?,â?,â?,â?,â?,â?,â?,â?,â?,â?,â?,â?,â?,â?,â?,â?,â?,â?,
 const _logFile = path.join(__dirname, 'server.log');
@@ -4711,6 +4711,160 @@ app.get('/api/plans/load/:id', (req, res) => {
 // theorie) est definie cote client (frontend/js/plans.js), ce endpoint se
 // contente de rapporter ce qui existe reellement sur disque, jamais une
 // liste figee qui deriverait des vrais fichiers.
+// ═══════════════════════════════════════════════════════════════════════
+// THEMES DE SAISON — calendrier partage via le depot Git
+// ═══════════════════════════════════════════════════════════════════════
+// Allure+ est distribue en .exe, un poste par compte : pour que la programmation
+// faite dans l'Admin atteigne tout le monde sans nouvelle version ni relais a
+// redeployer, le calendrier vit dans un fichier du depot (seasonal_themes.json,
+// racine) que chaque instance relit sur raw.githubusercontent.com — meme
+// principe que la verification des mises a jour (releases GitHub). L'Admin edite
+// le fichier local du depot puis "Publie" (git commit + push de CE seul
+// fichier, action explicite). Cote client, la palette/les decors vivent dans le
+// code (themes.js) : le fichier ne transporte que des identifiants et des
+// dates, jamais de code ni d'URL — un fichier malforme ne peut au pire
+// qu'activer/desactiver un theme existant.
+const SEASON_FILE = path.join(__dirname, 'seasonal_themes.json');
+const SEASON_REMOTE_URL = `https://raw.githubusercontent.com/${UPDATE_REPO}/master/seasonal_themes.json`;
+const SEASON_REMOTE_CACHE_FILE = path.join(__dirname, 'data', 'season_remote_cache.json');
+const SEASON_THEME_IDS = ['halloween', 'noel', 'saint-valentin'];
+const SEASON_REMOTE_TTL_MS = 10 * 60 * 1000;
+let _seasonRemoteCache = null; // { config, ts }
+
+function defaultSeasonConfig() {
+  return {
+    version: 1, updatedAt: null, force: null,
+    themes: [
+      { id: 'halloween', enabled: true, start: '10-20', end: '11-02' },
+      { id: 'noel', enabled: true, start: '12-01', end: '12-26' },
+      { id: 'saint-valentin', enabled: true, start: '02-07', end: '02-15' },
+    ],
+  };
+}
+
+function isValidMonthDay(s) {
+  const m = /^(\d{2})-(\d{2})$/.exec(String(s || ''));
+  if (!m) return false;
+  const mo = +m[1], d = +m[2];
+  if (mo < 1 || mo > 12 || d < 1) return false;
+  return d <= new Date(2024, mo, 0).getDate(); // 2024 bissextile : 02-29 accepte
+}
+function isValidIsoDate(s) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(s || '')) && !isNaN(new Date(s + 'T00:00:00').getTime());
+}
+
+// Valide/normalise : ids inconnus ignores, champs invalides remplaces par les
+// valeurs par defaut — jamais d'exception, jamais de champ libre propage.
+function sanitizeSeasonConfig(raw) {
+  const def = defaultSeasonConfig();
+  const out = { version: 1, updatedAt: null, force: null, themes: [] };
+  if (!raw || typeof raw !== 'object') return def;
+  out.updatedAt = typeof raw.updatedAt === 'string' ? raw.updatedAt.slice(0, 40) : null;
+  def.themes.forEach(d => {
+    const src = Array.isArray(raw.themes) ? raw.themes.find(t => t && t.id === d.id) : null;
+    out.themes.push({
+      id: d.id,
+      enabled: src ? src.enabled !== false : d.enabled,
+      start: src && isValidMonthDay(src.start) ? src.start : d.start,
+      end: src && isValidMonthDay(src.end) ? src.end : d.end,
+    });
+  });
+  const f = raw.force;
+  if (f && SEASON_THEME_IDS.includes(f.id)) {
+    out.force = { id: f.id, until: isValidIsoDate(f.until) ? f.until : null };
+  }
+  return out;
+}
+
+function readLocalSeasonFile() {
+  try { return sanitizeSeasonConfig(JSON.parse(fs.readFileSync(SEASON_FILE, 'utf8'))); }
+  catch (e) { return null; }
+}
+
+async function fetchRemoteSeasonConfig() {
+  if (_seasonRemoteCache && (Date.now() - _seasonRemoteCache.ts) < SEASON_REMOTE_TTL_MS) return _seasonRemoteCache.config;
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 4000);
+  try {
+    const r = await fetch(SEASON_REMOTE_URL + '?t=' + Math.floor(Date.now() / 60000), { signal: ctrl.signal, cache: 'no-store', headers: { 'User-Agent': 'AllurePlus-App' } });
+    if (!r.ok) return null;
+    const config = sanitizeSeasonConfig(await r.json());
+    _seasonRemoteCache = { config, ts: Date.now() };
+    try { fs.mkdirSync(path.dirname(SEASON_REMOTE_CACHE_FILE), { recursive: true }); fs.writeFileSync(SEASON_REMOTE_CACHE_FILE, JSON.stringify(config)); } catch (e) { /* cache optionnel */ }
+    return config;
+  } catch (e) { return null; }
+  finally { clearTimeout(timer); }
+}
+
+// Config EFFECTIVE (ce que voient les utilisateurs) : depot distant, sinon
+// derniere copie recue (hors-ligne), sinon fichier livre avec l'appli, sinon
+// calendrier integre. Publique : aucune donnee sensible.
+app.get('/api/season-config', async (req, res) => {
+  const remote = await fetchRemoteSeasonConfig();
+  if (remote) return res.json({ config: remote, source: 'remote' });
+  try {
+    const cached = sanitizeSeasonConfig(JSON.parse(fs.readFileSync(SEASON_REMOTE_CACHE_FILE, 'utf8')));
+    return res.json({ config: cached, source: 'cache' });
+  } catch (e) { /* pas de cache */ }
+  const bundled = readLocalSeasonFile();
+  if (bundled) return res.json({ config: bundled, source: 'bundled' });
+  res.json({ config: defaultSeasonConfig(), source: 'default' });
+});
+
+app.get('/api/admin/season-config', requireAdmin, async (req, res) => {
+  _seasonRemoteCache = null; // l'admin veut l'etat reel du depot, pas un cache de 10 min
+  const local = readLocalSeasonFile() || defaultSeasonConfig();
+  const remote = await fetchRemoteSeasonConfig();
+  const strip = c => JSON.stringify({ force: c.force, themes: c.themes });
+  res.json({
+    local, remote,
+    inSync: !!remote && strip(remote) === strip(local),
+    canPublish: fs.existsSync(path.join(__dirname, '.git')),
+  });
+});
+
+app.post('/api/admin/season-config', requireAdmin, (req, res) => {
+  try {
+    const cfg = sanitizeSeasonConfig(req.body && req.body.config);
+    cfg.updatedAt = new Date().toISOString();
+    fs.writeFileSync(SEASON_FILE, JSON.stringify(cfg, null, 2) + '\n', 'utf8');
+    res.json({ ok: true, config: cfg });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Publication : commit + push de seasonal_themes.json UNIQUEMENT (jamais
+// d'autre fichier du depot), branche master uniquement, sans shell
+// (execFile + arguments fixes). Reserve a un poste qui contient le depot Git
+// (la machine de developpement) — une installation .exe n'a pas de .git.
+app.post('/api/admin/season-config/publish', requireAdmin, async (req, res) => {
+  if (!fs.existsSync(path.join(__dirname, '.git'))) {
+    return res.status(400).json({ error: "Publication impossible : ce poste ne contient pas le dépôt Git d'Allure+." });
+  }
+  const run = (args) => new Promise((resolve, reject) => {
+    execFile('git', args, { cwd: __dirname, timeout: 60000, windowsHide: true }, (err, stdout, stderr) => {
+      if (err) { err.stderr = stderr; return reject(err); }
+      resolve((stdout || '') + (stderr || ''));
+    });
+  });
+  try {
+    const branch = (await run(['rev-parse', '--abbrev-ref', 'HEAD'])).trim();
+    if (branch !== 'master') return res.status(400).json({ error: `Publication refusée : la branche courante est "${branch}", pas "master".` });
+    if (!fs.existsSync(SEASON_FILE)) return res.status(400).json({ error: 'Aucun calendrier enregistré à publier.' });
+    await run(['add', '--', 'seasonal_themes.json']);
+    const pending = (await run(['status', '--porcelain', '--', 'seasonal_themes.json'])).trim();
+    let committed = false;
+    if (pending) {
+      await run(['commit', '-m', 'Chore: calendrier des themes de saison (publie depuis l\'admin)', '--', 'seasonal_themes.json']);
+      committed = true;
+    }
+    const pushOut = await run(['push', 'origin', 'master']);
+    _seasonRemoteCache = null;
+    res.json({ ok: true, committed, output: pushOut.trim().slice(-400) });
+  } catch (e) {
+    res.status(500).json({ error: 'Échec de la publication : ' + String(e.stderr || e.message).trim().slice(-400) });
+  }
+});
+
 app.get('/api/admin/plans-catalog', requireAdmin, (req, res) => {
   try {
     const files = getAllPlanFiles(PLANS_DIR);
