@@ -58,7 +58,7 @@ const {
 } = require('./garmin_client');
 const { getZoneRange, annotatePaceZones, ZONE_LABELS } = require('./zones');
 const { isBrouterConfigured, isTilePresent, getTileRemoteSize, downloadTile } = require('./brouter_manager');
-const { geocode, getCommunesForPostcode, getCommunesForDepartment, searchStreet, getTownHall, getPlacesForPostcodeIntl, searchStreetIntl, generateRouteOptions, buildGpxXml, trailLevelMidKmh, TRAIL_STYLE_PARAMS, routeThroughPoints, routeThroughViaPoint, TERRAIN_PROFILES } = require('./route_generator');
+const { geocode, getCommunesForPostcode, getCommunesForDepartment, searchStreet, getTownHall, getPlacesForPostcodeIntl, searchStreetIntl, generateRouteOptions, normalizeAscentBand, targetFromAscentBand, buildGpxXml, trailLevelMidKmh, TRAIL_STYLE_PARAMS, routeThroughPoints, routeThroughViaPoint, TERRAIN_PROFILES } = require('./route_generator');
 const { getPaceProfile, refreshPaceProfile, migratePaceProfileToScoped, efFastPaceMinPerKm, applyEfPaceAnchor, bucketForGrade } = require('./pace_profile');
 const { analyzeGpx, computeElevationProfile, computeSections } = require('./gpx_parser');
 const { getElevations } = require('./geoportail_client');
@@ -1593,13 +1593,17 @@ app.post('/api/routes/tile-download', requireSession, async (req, res) => {
 
 app.post('/api/routes/generate', requireSession, async (req, res) => {
   try {
-    const { start, targetDistanceM, targetDurationMin, targetAscentM, terrain, searchRadiusKm, routeShape, trailLevel, trailStyle, paceMinPerKm: requestedPaceMinPerKm } = req.body || {};
+    const { start, targetDistanceM, targetDurationMin, targetAscentM: rawTargetAscentM, ascentBand, terrain, searchRadiusKm, routeShape, trailLevel, trailStyle, paceMinPerKm: requestedPaceMinPerKm } = req.body || {};
     if (!start || typeof start.lat !== 'number' || typeof start.lon !== 'number') {
       return res.status(400).json({ error: 'Point de départ invalide (adresse non confirmée ?)' });
     }
     if ((!targetDistanceM || targetDistanceM < 500) && (!targetDurationMin || targetDurationMin < 5)) {
       return res.status(400).json({ error: 'Distance ou durée cible invalide' });
     }
+    // Tranche de D+ (route) : la cible ponctuelle en est deduite (cf
+    // normalizeAscentBand) ; sans tranche ni valeur, aucune cible de D+.
+    const bandNorm = normalizeAscentBand(ascentBand);
+    const targetAscentM = bandNorm ? targetFromAscentBand(bandNorm) : rawTargetAscentM;
     const paceProfile = getPaceProfile(req.session.email);
     // Ancre le profil d'allure par tranche de pente sur l'allure EF rapide de
     // l'utilisateur plutot que sur la moyenne (tous efforts confondus) de ses
@@ -1643,6 +1647,7 @@ app.post('/api/routes/generate', requireSession, async (req, res) => {
       targetDistanceM: distanceEstimateM,
       targetDurationMin: targetDurationMin || null,
       targetAscentM: targetAscentM || null,
+      ascentBand: bandNorm,
       terrain: isTrail ? 'trail' : 'route',
       paceMinPerKm,
       searchRadiusM: (searchRadiusKm && searchRadiusKm > 0) ? searchRadiusKm * 1000 : null,

@@ -458,3 +458,45 @@
    variable globale, utilisee ailleurs dans l'app sans ce probleme visuel
    (fonds plus clairs). */
 [data-theme="dark"] #page-routes { --text-muted: #8890b4; }
+
+/* ─── Formulaire en sections (même esprit que l'Éditeur Parcours) ─── */
+.routes-form-card { background: none; border: none; box-shadow: none; padding: 0; gap: 14px; }
+.rt-head { grid-column: 1 / -1; display: flex; align-items: center; justify-content: flex-end; gap: 12px; }
+.rt-head-text { font-family: var(--font-body); font-size: 12px; color: var(--text-muted); line-height: 1.4; }
+.rt-head .routes-reset-corner-btn { flex-shrink: 0; }
+.rt-sec { background: var(--bg-white); border: 1px solid var(--border); border-radius: var(--radius-md); box-shadow: var(--shadow-sm); padding: 14px 16px 16px; min-width: 0; }
+.rt-sec--full { grid-column: 1 / -1; }
+.rt-sec-title { display: flex; align-items: center; gap: 8px; margin: 0 0 12px; font-family: var(--font); font-size: 13px; font-weight: 700; color: var(--text-primary); }
+.rt-sec-num { width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; flex-shrink: 0; font-size: 11px; font-weight: 700; background: var(--accent-light); color: var(--accent-text); }
+.rt-group + .rt-group { margin-top: 14px; }
+.rt-lbl { display: flex; align-items: center; gap: 6px; margin-bottom: 7px; font-family: var(--font); font-size: 10.5px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-muted); }
+.rt-help { margin-top: 8px; font-family: var(--font-body); font-size: 11.5px; line-height: 1.45; color: var(--text-muted); }
+.rt-help b { color: var(--text-primary); }
+.rt-two { display: grid; grid-template-columns: 1fr 1fr; gap: 18px 24px; }
+@media (max-width: 680px) { .rt-two { grid-template-columns: 1fr; } .rt-head { flex-direction: column; align-items: flex-start; } }
+
+/* Pastille « i » : même carte d'infobulle que l'Éditeur (.route-editor-tip) */
+.rt-info { width: 15px; height: 15px; border-radius: 50%; display: inline-grid; place-items: center; flex-shrink: 0; font-family: var(--font-body); font-size: 10px; font-weight: 700; font-style: normal; letter-spacing: 0; text-transform: none; color: var(--text-muted); background: var(--bg-hover); border: 1px solid var(--border); cursor: help; outline: none; }
+.rt-info:hover, .rt-info:focus-visible { color: var(--accent-text); background: var(--accent-light); border-color: var(--accent); }
+
+/* Boutons segmentés (même vocabulaire que .re-tool-btn) */
+.rt-seg { display: flex; flex-wrap: wrap; gap: 6px; }
+.rt-seg-btn { display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-body); font-size: 12.5px; padding: 7px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-white); color: var(--text-secondary); cursor: pointer; transition: var(--transition); }
+.rt-seg-btn:hover { background: var(--bg-hover); }
+.rt-seg-btn.active { background: var(--accent-light); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
+.rt-seg-icon { font-size: 13px; line-height: 1; }
+.rt-seg-btn:first-child::after, .rt-seg-btn:first-child::before { left: 0; }
+
+/* Tranches de D+ */
+.rt-bands { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 8px; }
+.rt-band { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-white); color: var(--text-secondary); cursor: pointer; text-align: left; transition: var(--transition); }
+.rt-band:hover { background: var(--bg-hover); }
+.rt-band.active { background: var(--accent-light); border-color: var(--accent); color: var(--accent-text); box-shadow: 0 0 0 1px var(--accent) inset; }
+.rt-band-label { font-family: var(--font); font-size: 12.5px; font-weight: 700; }
+.rt-band-range { font-family: var(--font-body); font-size: 11px; font-variant-numeric: tabular-nums; color: var(--text-muted); }
+.rt-band.active .rt-band-range { color: inherit; opacity: 0.85; }
+/* l'infobulle des bandes est alignée à gauche de la tuile, sans déborder du cadre */
+.rt-band::after, .rt-band::before { left: 12px; transform: translateX(0) translateY(4px); }
+.rt-band:hover::after, .rt-band:hover::before, .rt-band:focus-visible::after, .rt-band:focus-visible::before { transform: translateX(0) translateY(0); }
+
+.routes-address-row { grid-template-columns: 140px 1fr; }

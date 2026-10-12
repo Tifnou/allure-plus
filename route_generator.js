@@ -78,7 +78,23 @@ const TRAIL_STYLE_PARAMS = {
   technique: { Offroad_factor: '2.0', path_preference: '20' },
 };
 const DEFAULT_TRAIL_STYLE = 'mixte';
+// Mode "Route" pour un COUREUR (retour utilisateur, 10/2026) : l'ancien profil
+// velo 'fastbike-lowtraffic' cherchait la meilleure route pour un cycliste, donc
+// privilegiait l'asphalte et les axes routiers, alors qu'un coureur prefere
+// chemins, voies vertes, trottoirs larges et petites rues, et ne peut souvent
+// pas courir sur une route passante. Pseudo-profil 'runner-road' = le profil
+// pieton 'hiking-mountain' (deja tres dissuasif envers primary/secondary/
+// tertiary, cf couts dans le .brf) avec des reglages "ville/campagne" :
+// pas d'Offroad_factor (l'asphalte d'une voie verte ou d'une rue calme reste
+// parfaitement bon), path_preference modere (prefere piste/sentier/voie
+// pietonne a une rue ordinaire), escaliers interdits.
+const RUNNER_ROAD_PROFILE = 'runner-road';
+const RUNNER_ROAD_BASE_PROFILE = 'hiking-mountain';
+const RUNNER_ROAD_PARAMS = { Offroad_factor: '0', path_preference: '2', allow_steps: 'false', hiking_routes_preference: '0' };
 function routeThroughPoints(waypoints, profile, opts = {}) {
+  if (profile === RUNNER_ROAD_PROFILE) {
+    return routeThroughPointsRaw(waypoints, RUNNER_ROAD_BASE_PROFILE, { ...opts, profileParams: RUNNER_ROAD_PARAMS });
+  }
   const profileParams = profile === 'hiking-mountain'
     ? (TRAIL_STYLE_PARAMS[opts.trailStyle] || TRAIL_STYLE_PARAMS[DEFAULT_TRAIL_STYLE])
     : (PROFILE_PARAMS[profile] || null);
@@ -568,7 +584,12 @@ async function scanDirections(start, targetDistanceM, profile, targetAscentM, tr
   if (targetAscentM) {
     candidates.sort((a, b) => Math.abs(a.result.filteredAscendM - targetAscentM) - Math.abs(b.result.filteredAscendM - targetAscentM));
   } else {
-    candidates.sort((a, b) => b.result.filteredAscendM - a.result.filteredAscendM);
+    // Pas de D+ vise (ou tranche "plat" : cf normalizeAscentBand) : AUCUNE
+    // preference de denivele - on garde les directions dont la boucle de scan
+    // retombe le plus pres de la distance visee (= le reseau local boucle bien
+    // dans ce sens). L'ancien tri "le plus de D+ d'abord" poussait vers le
+    // relief sans que personne ne l'ait demande.
+    candidates.sort((a, b) => Math.abs(a.result.distanceM - targetDistanceM) - Math.abs(b.result.distanceM - targetDistanceM));
   }
   return { candidates, radius };
 }
@@ -1245,6 +1266,35 @@ function durationMatchInfo(predictedMin, targetMin) {
 // que de ne regarder que la duree.
 const ASCENT_MATCH_EXCELLENT_RATIO = 0.06;
 const ASCENT_MATCH_GOOD_RATIO = 0.13;
+// Tranches de D+ (retour utilisateur, 10/2026) : un D+ "ponctuel" pousse le
+// generateur a viser un chiffre precis, absurde quand on demande "peu" (0 m de
+// D+ n'existe pas : la recherche tirait vers le plat absolu et deformait les
+// boucles). Le client envoie une tranche {min, max} (max=null : "et plus").
+// - min = 0 : "au plus max m" - AUCUNE cible (targetAscentM=null), tout ce qui
+//   reste dans la tranche est equivalent ; le D+ ne sert qu'a etiqueter.
+// - min > 0 : cible = milieu de la tranche (ou min x 1,15 pour "et plus"),
+//   l'etiquette "Excellente" couvrant toute la tranche.
+function normalizeAscentBand(band) {
+  if (!band || typeof band !== 'object') return null;
+  const min = Number(band.min), max = band.max == null ? null : Number(band.max);
+  if (!Number.isFinite(min) || min < 0 || (max !== null && (!Number.isFinite(max) || max <= min))) return null;
+  return { min: Math.round(min), max: max === null ? null : Math.round(max) };
+}
+function targetFromAscentBand(band) {
+  if (!band || band.min === 0) return null;
+  return band.max === null ? Math.round(band.min * 1.15) : Math.round((band.min + band.max) / 2);
+}
+function ascentBandMatchInfo(ascentM, band) {
+  const { min, max } = band;
+  const bandLabel = max === null ? `${min} m et plus` : `${min}–${max} m`;
+  let gap = 0;
+  if (ascentM < min) gap = ascentM - min;
+  else if (max !== null && ascentM > max) gap = ascentM - max;
+  const ref = max !== null ? max : min;
+  const rel = Math.abs(gap) / Math.max(ref, 50);
+  const label = gap === 0 ? 'Excellente' : rel <= 0.25 ? 'Bonne' : 'Compromis';
+  return { targetM: targetFromAscentBand(band), deltaM: Math.round(gap), label, bandLabel, inBand: gap === 0 };
+}
 function ascentMatchInfo(ascentM, targetAscentM) {
   const deltaM = Math.round(ascentM - targetAscentM);
   const relDelta = Math.abs(ascentM - targetAscentM) / targetAscentM;
@@ -1362,7 +1412,7 @@ async function computeSurfaceBreakdown(points, profile, trailStyle) {
   }
 }
 
-const TERRAIN_PROFILES = { trail: 'hiking-mountain', route: 'fastbike-lowtraffic' };
+const TERRAIN_PROFILES = { trail: 'hiking-mountain', route: RUNNER_ROAD_PROFILE };
 // Jusqu'a 3 côtes DISTINCTES enchainees plutot qu'une seule repetee en
 // boucle (cf findSteepestSegments) - un vrai parcours de trail ambitieux
 // varie ses montées, une répétition unique gonfle la distance bien plus
@@ -2045,7 +2095,9 @@ async function generateOptionsAtSinglePoint({ start, targetDistanceM, targetAsce
 // (recherche simple au point demande), puis applique la correction finale de
 // D+ via l'API Altimetrie IGN a toutes les options obtenues, quel que soit
 // le chemin emprunte.
-async function generateRouteOptions({ start, targetDistanceM, targetAscentM, targetDurationMin, terrain = 'trail', paceMinPerKm, searchRadiusM, routeShape = 'loop', trailLevel, trailStyle }) {
+async function generateRouteOptions({ start, targetDistanceM, targetAscentM, ascentBand, targetDurationMin, terrain = 'trail', paceMinPerKm, searchRadiusM, routeShape = 'loop', trailLevel, trailStyle }) {
+  const band = normalizeAscentBand(ascentBand);
+  if (band) targetAscentM = targetFromAscentBand(band);
   // Verifie l'infrastructure avant toute tentative de routage : sans ca, les
   // echecs de generateLoop (qui retente avec un rayon reduit, pensant a un
   // probleme de terrain) masqueraient un message clair du type "BRouter non
@@ -2055,7 +2107,7 @@ async function generateRouteOptions({ start, targetDistanceM, targetAscentM, tar
   }
 
   const profile = TERRAIN_PROFILES[terrain] || TERRAIN_PROFILES.trail;
-  const { options, warning } = searchRadiusM
+  let { options, warning } = searchRadiusM
     ? await generateOptionsAcrossSearchRadius({ start, targetDistanceM, targetAscentM, targetDurationMin, terrain, paceMinPerKm, searchRadiusM, profile, routeShape, trailLevel, trailStyle })
     : await generateOptionsAtSinglePoint({ start, targetDistanceM, targetAscentM, targetDurationMin, terrain, paceMinPerKm, profile, routeShape, trailLevel, trailStyle });
 
@@ -2083,7 +2135,8 @@ async function generateRouteOptions({ start, targetDistanceM, targetAscentM, tar
     // reelle) - retour utilisateur explicite : en mode route/distance,
     // aucune correspondance n'etait jamais affichee jusqu'ici.
     if (!targetDurationMin && targetDistanceM) opt.distanceMatch = distanceMatchInfoOption(opt.distanceM, targetDistanceM);
-    if (targetAscentM) opt.ascentMatch = ascentMatchInfo(opt.ascentM, targetAscentM);
+    if (band) opt.ascentMatch = ascentBandMatchInfo(opt.ascentM, band);
+    else if (targetAscentM) opt.ascentMatch = ascentMatchInfo(opt.ascentM, targetAscentM);
     // Correspondance globale = la pire des correspondances applicables (cf
     // worseMatchLabel) - une option ne peut pas etre "Excellente" globalement
     // si l'un des criteres vises est loin de la cible.
@@ -2098,11 +2151,31 @@ async function generateRouteOptions({ start, targetDistanceM, targetAscentM, tar
     opt.surfaceBreakdown = await computeSurfaceBreakdown(opt.points, profile, trailStyle);
   }
 
+  // Avec une tranche de D+, les options qui y tombent passent devant (tri stable :
+  // a correspondance egale, l'ordre de generation est conserve).
+  if (band) {
+    const rank = o => ({ Excellente: 0, Bonne: 1, Compromis: 2 }[o.matchLabel] ?? 3);
+    options.sort((x, y) => (rank(x) - rank(y)) || (Math.abs(x.ascentMatch.deltaM) - Math.abs(y.ascentMatch.deltaM)));
+  }
+  // Une option tombe dans la tranche : le message "plus vallonne que vise" (calcule sur la 1ere option) serait trompeur.
+  if (band && finalWarningCandidate(warning) && options.some(o => o.ascentMatch && o.ascentMatch.inBand)) warning = null;
+  // Tranche "plat" sans cible : le secteur peut etre plus vallonne que demande -
+  // le dire plutot que de laisser un "Compromis" muet.
+  let finalWarning = warning;
+  // Les messages internes parlent d'un D+ ponctuel : en mode tranche, on cite la tranche.
+  if (band && finalWarning && targetAscentM) {
+    const bl = band.max === null ? band.min + ' m et plus' : band.min + '–' + band.max + ' m';
+    finalWarning = finalWarning.split('D+ visé (' + targetAscentM + ' m').join('D+ visé (tranche ' + bl).split(targetAscentM + ' m de D+').join(bl + ' de D+');
+  }
+  if (band && band.min === 0 && !finalWarning && options.length && options.every(o => o.ascentMatch && o.ascentMatch.label === 'Compromis')) {
+    const lowest = Math.min(...options.map(o => o.ascentM));
+    finalWarning = `Ce secteur est plus vallonné que la tranche demandée (0–${band.max} m de D+) : le tracé le plus plat trouvé fait ${lowest} m de D+ — essayez un autre point de départ ou une tranche supérieure.`;
+  }
   // requestedStart (toujours le point litteralement demande) + searchRadiusM
   // (si la recherche elargie etait active) - transmis pour que l'UI affiche
   // ce point et le rayon sur la carte, sans que l'utilisateur ait a deviner
   // pourquoi le départ affiché n'est pas exactement l'adresse saisie.
-  return { options, warning, requestedStart: { lat: start.lat, lon: start.lon }, searchRadiusM: searchRadiusM || null };
+  return { options, warning: finalWarning, requestedStart: { lat: start.lat, lon: start.lon }, searchRadiusM: searchRadiusM || null };
 }
 
 // waypoints (optionnel) : {lat, lon, name, sym} - deviennent des "Course
@@ -2168,7 +2241,11 @@ module.exports = {
   buildGpxXml,
   routeThroughPoints,
   TERRAIN_PROFILES,
+  normalizeAscentBand,
+  targetFromAscentBand,
   TRAIL_STYLE_PARAMS,
   DEFAULT_TRAIL_STYLE,
   ASCENT_CALIBRATION_FACTOR,
 };
+
+function finalWarningCandidate(w) { return !!w && /plus vallonn/.test(w); }

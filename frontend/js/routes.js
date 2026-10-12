@@ -16,7 +16,8 @@ function routesDefaultState() {
     routePaceMinPerKm: 6,    // allure visée (route + durée uniquement) - voir routesHasPaceField()
     terrain: 'trail',        // 'trail' | 'route'
     routeShape: 'loop',      // 'loop' | 'outback' | 'both'
-    ascentM: 300,
+    ascentM: 300,            // D+ visé précis (trail uniquement)
+    ascentBand: 'any',       // tranche de D+ (route uniquement) - voir ROUTES_ASCENT_BANDS
     trailLevel: 'moyenplus', // niveau de traileur (trail uniquement) - voir ROUTES_TRAIL_LEVELS
     trailStyle: 'mixte',     // style de chemin en trail (roulant/mixte/technique) - voir ROUTES_TRAIL_STYLES
     searchWider: false,
@@ -28,6 +29,40 @@ function routesDefaultState() {
 }
 
 const routesState = routesDefaultState();
+
+// Tranches de D+ (route) : un D+ précis n'a pas de sens sur route ("0 m" n'existe
+// pas, et viser un chiffre bas déformait la recherche des boucles). Envoyées au
+// serveur sous forme {min,max} (max=null : "et plus"), cf normalizeAscentBand
+// dans route_generator.js. 'any' = aucune préférence de dénivelé.
+const ROUTES_ASCENT_BANDS = [
+  { key: 'any',  label: 'Indifférent', range: 'sans préférence', band: null,
+    hint: "Aucune préférence de dénivelé : le tracé est choisi pour sa forme (boucle propre, distance respectée), pas pour son relief." },
+  { key: 'flat', label: 'Plat',        range: '0 – 50 m',   band: { min: 0, max: 50 },
+    hint: "Quasi plat. Un parcours à 0 m de D+ n'existe pas — la tranche accepte tout ce qui reste sous 50 m, sans tirer vers le plat absolu." },
+  { key: 'b50',  label: 'Léger',       range: '50 – 100 m', band: { min: 50, max: 100 },
+    hint: "Quelques faux plats et petites bosses." },
+  { key: 'b100', label: 'Vallonné',    range: '100 – 200 m', band: { min: 100, max: 200 },
+    hint: "Ça monte et ça descend régulièrement, sans longue côte." },
+  { key: 'b200', label: 'Soutenu',     range: '200 – 400 m', band: { min: 200, max: 400 },
+    hint: "Plusieurs vraies côtes — des répétitions de côte peuvent être ajoutées si le secteur ne suffit pas." },
+  { key: 'b400', label: 'Montagneux',  range: '400 – 700 m', band: { min: 400, max: 700 },
+    hint: "Beaucoup de dénivelé : prévoyez une recherche élargie si le secteur est plat." },
+  { key: 'b700', label: 'Très montagneux', range: '700 m et plus', band: { min: 700, max: null },
+    hint: "Dénivelé important : souvent atteignable seulement en montagne ou avec de nombreuses répétitions." },
+];
+function routesBandByKey(key) { return ROUTES_ASCENT_BANDS.find(b => b.key === key) || ROUTES_ASCENT_BANDS[0]; }
+// Tranche correspondant à un D+ précis (pré-remplissage depuis une séance).
+function routesBandKeyForAscent(m) {
+  if (!m) return 'any';
+  const hit = ROUTES_ASCENT_BANDS.find(b => b.band && m >= b.band.min && (b.band.max === null || m < b.band.max));
+  return hit ? hit.key : 'any';
+}
+// Cible de D+ active ? (trail : valeur précise > 0 ; route : une tranche qui monte)
+function routesTargetsAscent() {
+  if (routesIsTrail()) return !!routesState.ascentM;
+  const b = routesBandByKey(routesState.ascentBand).band;
+  return !!(b && b.min > 0);
+}
 
 // Niveau de traileur -> vitesse A PLAT (km/h), appliquee a la distance
 // equivalente plat (distance + D+/100, cf equivalentFlatKm) - table fournie
@@ -102,6 +137,7 @@ function goToRoutesWithPrefill(prefill = {}) {
   }
   if (prefill.ascentM) {
     routesState.ascentM = Math.round(prefill.ascentM);
+    routesState.ascentBand = routesBandKeyForAscent(routesState.ascentM);
   }
   if (prefill.terrain) {
     routesState.terrain = prefill.terrain;
@@ -150,13 +186,20 @@ function wireNumericInput(id, onChange) {
 
 function renderRoutesForm() {
   const content = el('routes-form-content');
+  const tip = t => escapeHtml(t);
+  const segBtn = (attr, val, active, icon, label, tipText) =>
+    `<button type="button" class="rt-seg-btn route-editor-tip ${active ? 'active' : ''}" ${attr}="${val}" data-tip="${tip(tipText)}"><span class="rt-seg-icon" aria-hidden="true">${icon}</span>${label}</button>`;
+  const info = tipText => `<span class="rt-info route-editor-tip" tabindex="0" data-tip="${tip(tipText)}" aria-label="${tip(tipText)}">i</span>`;
+  const isTrailNow = routesIsTrail();
+  const curBand = routesBandByKey(routesState.ascentBand);
+
   content.innerHTML = `
-    <div class="routes-field--full routes-reset-row">
+    <div class="rt-head">
       <button type="button" class="routes-reset-corner-btn" onclick="routesResetForm()">↺ Réinitialiser</button>
     </div>
 
-    <div class="routes-field routes-field--full">
-      <div class="routes-field-label">Point de départ</div>
+    <section class="rt-sec rt-sec--full">
+      <h3 class="rt-sec-title"><span class="rt-sec-num">1</span>Point de départ</h3>
       <div class="routes-address-row">
         <!-- Code postal/rue : Chrome propose ses adresses enregistrees
              (autofill "Adresses") meme avec autocomplete="off", des que le
@@ -167,7 +210,7 @@ function renderRoutesForm() {
              ou il declenche habituellement la suggestion. -->
         <div>
           <div class="routes-microlabel">Code postal</div>
-          <input type="text" id="routes-input-postcode" class="routes-text-input" inputmode="text" maxlength="5" placeholder="ex: 75015 ou 33" title="Code postal complet, ou 2 chiffres du département si vous ne le connaissez pas" autocomplete="off" readonly onfocus="this.removeAttribute('readonly')" value="${routesState.postcode}">
+          <input type="text" id="routes-input-postcode" class="routes-text-input" inputmode="text" maxlength="5" placeholder="ex: 75015 ou 33" autocomplete="off" readonly onfocus="this.removeAttribute('readonly')" value="${routesState.postcode}">
         </div>
         <div>
           <div class="routes-microlabel">Ville</div>
@@ -179,88 +222,101 @@ function renderRoutesForm() {
         <input type="text" id="routes-input-street" class="routes-text-input" autocomplete="off" readonly onfocus="this.removeAttribute('readonly')" value="${routesState.street}" ${routesState.selectedCommune ? '' : 'disabled'}>
         <div id="routes-street-suggestions" class="routes-suggestions" style="display:none"></div>
       </div>
+      <div class="rt-help">Code postal complet, ou seulement 2 chiffres du département si vous ne le connaissez pas.</div>
       <div id="routes-start-confirm" class="routes-start-confirm" style="display:none"></div>
-    </div>
+    </section>
 
-    <div class="routes-field">
-      <div class="routes-field-label">Distance ou durée visée</div>
-      <div class="routes-toggle">
-        <button type="button" class="routes-toggle-btn ${routesState.mode === 'distance' ? 'active' : ''}" data-mode="distance">Distance</button>
-        <button type="button" class="routes-toggle-btn ${routesState.mode === 'duration' ? 'active' : ''}" data-mode="duration">Durée</button>
+    <section class="rt-sec">
+      <h3 class="rt-sec-title"><span class="rt-sec-num">2</span>Objectif</h3>
+
+      <div class="rt-group">
+        <div class="rt-lbl">Viser une${info("Choisissez ce qui compte pour vous : une distance précise, ou un temps de sortie.")}</div>
+        <div class="rt-seg">
+          ${segBtn('data-mode', 'distance', routesState.mode === 'distance', '📏', 'Distance', 'Le tracé fait la distance demandée ; la durée est estimée ensuite.')}
+          ${segBtn('data-mode', 'duration', routesState.mode === 'duration', '⏱', 'Durée', "Le tracé tient dans le temps demandé ; la distance en est déduite (avec votre allure en route, votre niveau en trail).")}
+        </div>
+        <div id="routes-mode-input" class="routes-number-row" style="margin-top:8px"></div>
       </div>
-      <div id="routes-mode-input" class="routes-number-row" style="margin-top:8px"></div>
-    </div>
 
-    <div class="routes-field">
-      <div class="routes-field-label">Terrain</div>
-      <div class="routes-toggle">
-        <button type="button" class="routes-toggle-btn ${routesState.terrain === 'trail' ? 'active' : ''}" data-terrain="trail">Trail (chemins, sentiers, sous-bois)</button>
-        <button type="button" class="routes-toggle-btn ${routesState.terrain === 'route' ? 'active' : ''}" data-terrain="route">Route (asphalte, chemin)</button>
+      <div class="rt-group" id="routes-pace-field" style="display:${routesHasPaceField() ? '' : 'none'}">
+        <div class="rt-lbl">Allure visée${info("Sert à convertir la durée en distance réelle — on ne parcourt pas la même distance en 30 min à 5'40\"/km qu'à 6'45\"/km.")}</div>
+        <div class="routes-number-row" id="routes-pace-input"></div>
       </div>
-      ${routesState.terrain === 'route' ? `<div class="routes-hint">⚠️ Le tracé évite autant que possible les grands axes, mais peut encore emprunter une portion de route sans trottoir ni accotement séparé — vérifiez la sécurité du parcours avant de partir.</div>` : ''}
-    </div>
 
-    <div class="routes-field" id="routes-pace-field" style="display:${routesHasPaceField() ? '' : 'none'}">
-      <div class="routes-field-label">Allure visée</div>
-      <div class="routes-hint">Utilisée pour convertir la durée visée en distance réelle — vous ne parcourez pas la même distance en 30 min à 5'40"/km qu'à 6'45"/km.</div>
-      <div class="routes-number-row" style="margin-top:6px" id="routes-pace-input"></div>
-    </div>
-
-    <div class="routes-field">
-      <div class="routes-field-label">Forme du parcours</div>
-      <div class="routes-toggle">
-        <button type="button" class="routes-toggle-btn ${routesState.routeShape === 'loop' ? 'active' : ''}" data-shape="loop">Boucle</button>
-        <button type="button" class="routes-toggle-btn ${routesState.routeShape === 'outback' ? 'active' : ''}" data-shape="outback">Aller-retour</button>
-        <button type="button" class="routes-toggle-btn ${routesState.routeShape === 'both' ? 'active' : ''}" data-shape="both">Les deux</button>
+      <div class="rt-group">
+        <div class="rt-lbl">Forme du parcours</div>
+        <div class="rt-seg">
+          ${segBtn('data-shape', 'loop', routesState.routeShape === 'loop', '⟳', 'Boucle', "Un chemin différent à l'aller et au retour.")}
+          ${segBtn('data-shape', 'outback', routesState.routeShape === 'outback', '⇄', 'Aller-retour', "Le retour reprend exactement le tracé de l'aller — pratique sur un sentier sans boucle naturelle (impasse, cul-de-sac).")}
+          ${segBtn('data-shape', 'both', routesState.routeShape === 'both', '⟳⇄', 'Les deux', 'Boucles et allers-retours sont testés ; les meilleures options des deux formes sont proposées ensemble.')}
+        </div>
       </div>
-      <div class="routes-hint">${routesState.routeShape === 'outback'
-        ? "L'aller-retour reprend exactement le même tracé au retour — reste jouable même sur un sentier sans boucle naturelle (impasse, cul-de-sac)."
-        : routesState.routeShape === 'both'
-          ? 'Les deux formes sont testées, les meilleures options (boucle ou aller-retour) sont proposées ensemble.'
-          : "La boucle explore un chemin différent à l'aller et au retour."}</div>
-    </div>
 
-    <div class="routes-field" id="routes-ascent-field" style="display:${routesHasAscentField() ? '' : 'none'}">
-      <div class="routes-field-label">D+ visé</div>
-      <div class="routes-number-row">
-        <input type="text" inputmode="numeric" id="routes-input-ascent" class="routes-number-input" value="${routesState.ascentM}"> m
+      <div class="rt-group">
+        <div class="rt-lbl">Terrain</div>
+        <div class="rt-seg">
+          ${segBtn('data-terrain', 'trail', isTrailNow, '🌲', 'Trail', 'Chemins, sentiers, sous-bois. Style de chemin et niveau de traileur réglables.')}
+          ${segBtn('data-terrain', 'route', !isTrailNow, '🏙', 'Route', "Pensé pour la course à pied : voies vertes, chemins, trottoirs larges et petites rues sont préférés ; les axes routiers passants sont évités autant que possible.")}
+        </div>
+        ${isTrailNow ? '' : `<div class="rt-help">Priorité aux chemins, voies vertes et petites rues plutôt qu'à l'asphalte des grands axes. Un passage sur route reste possible faute d'alternative — vérifiez la sécurité avant de partir.</div>`}
       </div>
-    </div>
+    </section>
 
-    <div class="routes-field routes-field--full" id="routes-level-field" style="display:${routesIsTrail() ? '' : 'none'}">
-      <div class="routes-field-label">Niveau de traileur</div>
-      <div class="routes-hint">Utilisé pour estimer une durée réaliste sur un parcours avec du D+ — une allure unique se trompe largement dès que le terrain devient très pentu.</div>
-      <select id="routes-input-level" class="routes-select" style="margin-top:6px;max-width:280px">
-        ${Object.entries(ROUTES_TRAIL_LEVELS).map(([key, lvl]) =>
-          `<option value="${key}" ${routesState.trailLevel === key ? 'selected' : ''}>${lvl.label} (${lvl.minKmh}–${lvl.maxKmh} km/h)</option>`
-        ).join('')}
-      </select>
-      <button type="button" class="btn-text-link" id="routes-level-table-toggle" style="display:block;margin-top:8px">ⓘ Voir le tableau des niveaux</button>
-      <div id="routes-level-table" style="display:none;margin-top:8px"></div>
-    </div>
+    <section class="rt-sec" id="routes-ascent-field">
+      <h3 class="rt-sec-title"><span class="rt-sec-num">3</span>Dénivelé${info(isTrailNow ? 'Dénivelé positif visé, en mètres.' : "Une tranche plutôt qu'un chiffre : un parcours à 0 m de D+ n'existe pas, et viser un chiffre trop bas faussait la recherche de boucles.")}</h3>
+      ${isTrailNow ? `
+        <div class="rt-group">
+          <div class="rt-lbl">D+ visé</div>
+          <div class="routes-number-row">
+            <input type="text" inputmode="numeric" id="routes-input-ascent" class="routes-number-input" value="${routesState.ascentM}"> m
+          </div>
+          <div class="rt-help">Le D+ sert aussi à estimer la durée avec votre niveau de traileur.</div>
+        </div>` : `
+        <div class="rt-bands" role="radiogroup" aria-label="Tranche de D+">
+          ${ROUTES_ASCENT_BANDS.map(b => `
+          <button type="button" role="radio" aria-checked="${b.key === curBand.key}" class="rt-band route-editor-tip ${b.key === curBand.key ? 'active' : ''}" data-band="${b.key}" data-tip="${tip(b.hint)}">
+            <span class="rt-band-label">${b.label}</span>
+            <span class="rt-band-range">${b.range}</span>
+          </button>`).join('')}
+        </div>
+        <div class="rt-help">${curBand.band ? `Tranche retenue : <b>${curBand.range}</b> de D+ — toute option dans cette tranche est jugée « Excellente ».` : "Sans préférence : le relief ne guide pas le choix du tracé."}</div>`}
+    </section>
 
-    <div class="routes-field routes-field--full" id="routes-style-field" style="display:${routesIsTrail() ? '' : 'none'}">
-      <div class="routes-field-label">Style de chemin</div>
-      <div class="routes-hint">${(ROUTES_TRAIL_STYLES[routesState.trailStyle] || {}).hint || ''}</div>
-      <div class="routes-toggle" style="margin-top:6px">
-        ${Object.entries(ROUTES_TRAIL_STYLES).map(([key, s]) =>
-          `<button type="button" class="routes-toggle-btn ${routesState.trailStyle === key ? 'active' : ''}" data-style="${key}">${s.label}</button>`
-        ).join('')}
+    ${isTrailNow ? `
+    <section class="rt-sec rt-sec--full" id="routes-level-field">
+      <h3 class="rt-sec-title"><span class="rt-sec-num">4</span>Niveau &amp; style de chemin</h3>
+      <div class="rt-two">
+        <div class="rt-group">
+          <div class="rt-lbl">Niveau de traileur${info("Sert à estimer une durée réaliste avec du D+ — une allure unique se trompe largement dès que le terrain devient pentu.")}</div>
+          <select id="routes-input-level" class="routes-select">
+            ${Object.entries(ROUTES_TRAIL_LEVELS).map(([key, lvl]) =>
+              `<option value="${key}" ${routesState.trailLevel === key ? 'selected' : ''}>${lvl.label} (${lvl.minKmh}–${lvl.maxKmh} km/h)</option>`
+            ).join('')}
+          </select>
+          <button type="button" class="btn-text-link" id="routes-level-table-toggle" style="display:block;margin-top:8px">ⓘ Voir le tableau des niveaux</button>
+          <div id="routes-level-table" style="display:none;margin-top:8px"></div>
+        </div>
+        <div class="rt-group" id="routes-style-field">
+          <div class="rt-lbl">Style de chemin</div>
+          <div class="rt-seg">
+            ${Object.entries(ROUTES_TRAIL_STYLES).map(([key, s]) =>
+              segBtn('data-style', key, routesState.trailStyle === key, '', s.label, s.hint)
+            ).join('')}
+          </div>
+          <div class="rt-help">${(ROUTES_TRAIL_STYLES[routesState.trailStyle] || {}).hint || ''}</div>
+        </div>
       </div>
-    </div>
+    </section>` : ''}
 
-    <div class="routes-field routes-field--full">
-      <div class="routes-field-label">Recherche élargie</div>
-      <div class="routes-hint">${routesHasAscentField()
-        ? "Si le secteur ne permet pas d'atteindre le D+ (ou la distance/durée) visés sans trop s'écarter, la meilleure option trouvée sera proposée avec un message clair."
-        : "Si le secteur ne permet pas d'atteindre la distance/durée visée sans trop s'écarter (impasse, réseau clairsemé…), la meilleure option trouvée sera proposée avec un message clair."}</div>
-      <label class="routes-checkbox-row">
+    <section class="rt-sec rt-sec--full">
+      <h3 class="rt-sec-title"><span class="rt-sec-num">${isTrailNow ? 5 : 4}</span>Recherche élargie${info("Si le secteur ne permet pas d'atteindre la distance, la durée ou le D+ visés sans trop s'écarter, d'autres points de départ voisins sont testés ; la meilleure option est proposée avec un message clair.")}</h3>
+      <label class="routes-checkbox-row" style="margin-top:0">
         <input type="checkbox" id="routes-input-search-wider" ${routesState.searchWider ? 'checked' : ''}>
         Chercher dans un rayon de
         <input type="text" inputmode="numeric" id="routes-input-search-radius" class="routes-number-input routes-number-input--xs" value="${routesState.searchRadiusKm}" ${routesState.searchWider ? '' : 'disabled'}> km
         si rien n'est disponible à l'adresse demandée
       </label>
-    </div>
+    </section>
   `;
 
   wireRoutesAddressFields();
@@ -309,7 +365,10 @@ function renderRoutesForm() {
     wireNumericInput('routes-input-pace-sec', updatePace);
   }
 
-  if (routesHasAscentField()) {
+  content.querySelectorAll('[data-band]').forEach(btn => {
+    btn.onclick = () => { routesState.ascentBand = btn.dataset.band; renderRoutesForm(); };
+  });
+  if (routesIsTrail()) {
     wireNumericInput('routes-input-ascent', v => { routesState.ascentM = parseInt(v, 10) || 0; });
   }
   if (routesIsTrail()) {
@@ -575,7 +634,7 @@ let _routesProgressBarTimer = null;
 let _routesProgressPct = 0;
 function routesStartProgress() {
   const steps = ['Recherche de directions autour du départ…', 'Analyse du relief du secteur…', 'Construction du tracé…', 'Recherche de tracés alternatifs…'];
-  if (routesHasAscentField() && routesState.ascentM) {
+  if (routesTargetsAscent()) {
     steps.push('Vérification du dénivelé…');
     if (routesState.searchWider) steps.push('Recherche élargie de points de départ plus vallonnés…');
     steps.push('Recherche de côtes à répéter pour compléter le D+…');
@@ -733,7 +792,8 @@ async function routesGenerateClicked() {
 
     const body = {
       start: { lat: start.lat, lon: start.lon },
-      targetAscentM: routesState.ascentM || null,
+      targetAscentM: routesIsTrail() ? (routesState.ascentM || null) : null,
+      ascentBand: routesIsTrail() ? null : routesBandByKey(routesState.ascentBand).band,
       terrain: routesState.terrain,
       routeShape: routesState.routeShape,
       trailLevel: routesIsTrail() ? routesState.trailLevel : null,
@@ -917,11 +977,11 @@ function renderRoutesResults(data) {
       const parts = [];
       if (opt.durationMatch) parts.push(`${opt.durationMatch.deltaMin >= 0 ? '+' : ''}${opt.durationMatch.deltaMin} min`);
       if (opt.distanceMatch) parts.push(`${opt.distanceMatch.deltaM >= 0 ? '+' : ''}${(opt.distanceMatch.deltaM / 1000).toFixed(1)} km`);
-      if (opt.ascentMatch) parts.push(`D+ ${opt.ascentMatch.deltaM >= 0 ? '+' : ''}${opt.ascentMatch.deltaM} m`);
+      if (opt.ascentMatch) parts.push(opt.ascentMatch.inBand ? `D+ dans ${opt.ascentMatch.bandLabel}` : `D+ ${opt.ascentMatch.deltaM >= 0 ? '+' : ''}${opt.ascentMatch.deltaM} m`);
       const titleParts = [];
       if (opt.durationMatch) titleParts.push(`Durée visée : ${Math.floor(opt.durationMatch.targetMin / 60)}h${String(opt.durationMatch.targetMin % 60).padStart(2, '0')}`);
       if (opt.distanceMatch) titleParts.push(`Distance visée : ${(opt.distanceMatch.targetM / 1000).toFixed(1)} km`);
-      if (opt.ascentMatch) titleParts.push(`D+ visé : ${opt.ascentMatch.targetM} m`);
+      if (opt.ascentMatch) titleParts.push(opt.ascentMatch.bandLabel ? `Tranche de D+ visée : ${opt.ascentMatch.bandLabel}` : `D+ visé : ${opt.ascentMatch.targetM} m`);
       matchBadge = `<span class="routes-match-badge routes-match-badge--${opt.matchLabel.toLowerCase()}" title="${titleParts.join(' — ')}">${opt.matchLabel} (${parts.join(', ')})</span>`;
     }
     // Allure moyenne estimee sur l'ensemble du parcours (D+ deja inclus dans
