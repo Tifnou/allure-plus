@@ -4227,6 +4227,7 @@ body.plans-active {
 /* ── Allures à tenir par terrain (plat/montée/descente), depuis un GPX importé ── */
 .goals-gpx-paces { margin-top: 10px; }
 .goals-gpx-pace-title { font-size: 0.75rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.02em; margin-bottom: 6px; }
+.goals-gpx-pace-note { margin-top: 8px; font-size: 0.7rem; line-height: 1.45; color: var(--text-muted); font-family: var(--font-body); }
 .goals-gpx-pace-hint { cursor: help; font-weight: 400; text-transform: none; letter-spacing: normal; }
 /* Grille à colonnes fixes plutôt qu'un simple flex : les valeurs "Plat"/
    "Montée"/"Descente" n'ont pas la même largeur (ex: 7'04"/km vs

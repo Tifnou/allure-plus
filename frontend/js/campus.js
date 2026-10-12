@@ -987,7 +987,7 @@ async function exportPlanXlsx() {
     if (savedDist > 0 && vma) {
       const weeksTotal = goal.durationInWeeks || weeks.length;
       const vmaEnd = vma * (1 + getRemainingVmaGainPct(weeksTotal, weeks));
-      raceDayDurationSec = estimateRaceTime(vmaEnd, savedDist, savedDplus, isTrailGoal);
+      raceDayDurationSec = estimateGoalTimeSecs(vmaEnd, getGoalRaceParams(goal, savedDplus, savedDist));
     }
 
     const res = await fetch(`${API}/api/campus/export-plan-xlsx`, {
@@ -1287,7 +1287,7 @@ function renderSessionCard(session, idx, weekIdx, weekId, isCurrentWeek) {
     if (savedDist > 0 && vma && compWeeks) {
       const weeksTotal = compGoal?.durationInWeeks || compWeeks.length;
       const vmaEnd = vma * (1 + getRemainingVmaGainPct(weeksTotal, compWeeks));
-      displayDuration = estimateRaceTime(vmaEnd, savedDist, savedDplus, isTrailGoal);
+      displayDuration = estimateGoalTimeSecs(vmaEnd, getGoalRaceParams(compGoal, savedDplus, savedDist));
       isTrailEstimate = isTrailGoal;
     }
   }
@@ -2774,9 +2774,16 @@ function computeGoalPaceInfo() {
   if (isTrailGoal) {
     const savedDplus = parseInt(localStorage.getItem('suivi_objectif_dplus_' + planId)) || 0;
     const dplusM = savedDplus || goal.specificData?.elevationGain || 0;
-    const equivKm = dplusM > 0 ? distKm + dplusM / 100 : distKm;
+    // Même modèle que le bloc Estimations (getGoalRaceParams/estimateGoalTimeSecs :
+    // saisie + forme du GPX) et sur le temps de MOUVEMENT (cible - pauses) : le
+    // temps estimé est inversement proportionnel à la VMA, donc la VMA qui donne
+    // exactement ce temps se déduit d'une estimation de référence. Les allures
+    // des séances et la carte "Estimations" racontent ainsi la même course.
+    const movingSecs = Math.max(targetSecs - getPauseSec(goal), 60);
+    const refVma = 15;
+    const refSecs = estimateGoalTimeSecs(refVma, getGoalRaceParams(goal, dplusM, distKm));
     const pctVma = distKm <= 21 ? 0.70 : distKm <= 42 ? 0.65 : distKm <= 80 ? 0.58 : 0.50;
-    const impliedVma = Math.round((equivKm * 3600 / (pctVma * targetSecs)) * 100) / 100;
+    const impliedVma = Math.round((refSecs ? refVma * refSecs / movingSecs : (distKm + dplusM / 100) * 3600 / (pctVma * movingSecs)) * 100) / 100;
     return {
       targetSecs, targetTime: saved.targetTime, distKm, dplusM, impliedVma, isTrailGoal: true,
       zoneLabel: `${distKm} km · ${dplusM} m D+ (~${Math.round(pctVma * 100)}% VMA)`,
@@ -2843,8 +2850,8 @@ function renderEstimations(goal, weeks, dplusM, distKmOverride) {
   // 10 m plat" - cf estimateRaceTimeFromGpxProfile. goalGpxStatsForEstimate
   // (pas campusState.gpxProfile?.stats directement) respecte le choix
   // "Garder mes valeurs" de la modale d'import GPX.
-  const gpxStats = goalGpxStatsForEstimate();
-  const secsNow = gpxStats ? estimateRaceTimeFromGpxProfile(vma, gpxStats, isTrail)?.totalSecs : estimateRaceTime(vma, distKm, dplusM, isTrail);
+  const raceParams = getGoalRaceParams(goal, dplusM, distKm);
+  const secsNow = estimateGoalTimeSecs(vma, raceParams);
   const vo2Color = vo2max >= 55 ? '#22c55e' : vo2max >= 45 ? '#3b82f6' : vo2max >= 35 ? '#f59e0b' : '#ef4444';
   const vo2El = el('goals-vo2-current');
   if (vo2El) { vo2El.textContent = vo2max; vo2El.style.color = vo2Color; vo2El.style.fontWeight = '700'; }
@@ -2858,7 +2865,7 @@ function renderEstimations(goal, weeks, dplusM, distKmOverride) {
   let secsStart = null;
   if (vo2Start != null && weeks.length > 0) {
     const vmaStart = vo2ToVmaCalibrated(vo2Start);
-    secsStart = estimateRaceTime(vmaStart, distKm, dplusM, isTrail);
+    secsStart = estimateGoalTimeSecs(vmaStart, raceParams);
     el('goals-vo2-start') && (el('goals-vo2-start').textContent = Math.round(vo2Start * 10) / 10);
     setRangeText(el('goals-time-start'), secsStart);
     el('goals-start-date') && (el('goals-start-date').textContent =
@@ -2872,7 +2879,7 @@ function renderEstimations(goal, weeks, dplusM, distKmOverride) {
   const gainPct = getRemainingVmaGainPct(weeksTotal, weeks);
   const vmaEnd = vma * (1 + gainPct);
   const vo2maxEnd = parseFloat(vmaToVo2Calibrated(vmaEnd).toFixed(1));
-  const secsEnd = gpxStats ? estimateRaceTimeFromGpxProfile(vmaEnd, gpxStats, isTrail)?.totalSecs : estimateRaceTime(vmaEnd, distKm, dplusM, isTrail);
+  const secsEnd = estimateGoalTimeSecs(vmaEnd, raceParams);
   // Le delta "gain attendu" n'est pas affecté par les pauses (offset constant
   // ajouté aux deux termes, s'annule dans la différence).
   const delta = secsNow && secsEnd ? secsNow - secsEnd : null;
@@ -2931,7 +2938,7 @@ function renderEstimations(goal, weeks, dplusM, distKmOverride) {
     targetEl.innerHTML = '';
   }
 
-  renderGoalGpxPaces(vma, isTrail, targetSecs);
+  renderGoalGpxPaces(vma, raceParams, targetSecs, pauseSec);
 }
 
 let _goalsChartInst = null;
@@ -2962,13 +2969,13 @@ function buildProjectionLine(weeks, goal, distKm, dplusM, isTrail, weeksTotal, v
   // le profil GPX, les deux restent donc déjà cohérents tels quels.
   // goalGpxStatsForEstimate (pas campusState.gpxProfile?.stats directement) :
   // respecte le choix "Garder mes valeurs" de la modale d'import GPX.
-  const gpxStats = goalGpxStatsForEstimate();
+  const raceParams = getGoalRaceParams(goal, dplusM, distKm);
   const vo2Start = getStartVo2(weeks, buildAnchoredVo2History(), goal._id || 'plan');
   const vmaStart = vo2Start != null ? vo2ToVmaCalibrated(vo2Start) : vma;
-  const startMins = Math.round((estimateRaceTime(vmaStart, distKm, dplusM, isTrail) || 0) / 60);
+  const startMins = Math.round((estimateGoalTimeSecs(vmaStart, raceParams) || 0) / 60);
 
   const vmaEnd = vma * (1 + getRemainingVmaGainPct(weeksTotal, weeks));
-  const endSecs = gpxStats ? estimateRaceTimeFromGpxProfile(vmaEnd, gpxStats, isTrail)?.totalSecs : estimateRaceTime(vmaEnd, distKm, dplusM, isTrail);
+  const endSecs = estimateGoalTimeSecs(vmaEnd, raceParams);
   const endMins = Math.round((endSecs || 0) / 60);
 
   const values = [];
@@ -3019,8 +3026,8 @@ function renderObjectifsChart(weeks, goal, dplusM, distKmOverride) {
   // secsNow) - profil GPX importé si disponible (et retenu pour
   // l'estimation, cf goalGpxStatsForEstimate), sinon repli générique (cf
   // commentaire équivalent dans buildProjectionLine).
-  const gpxStatsNow = goalGpxStatsForEstimate();
-  const currentSecs = gpxStatsNow ? estimateRaceTimeFromGpxProfile(vma, gpxStatsNow, isTrail)?.totalSecs : estimateRaceTime(vma, distKm, dplusM, isTrail);
+  const raceParams = getGoalRaceParams(goal, dplusM, distKm);
+  const currentSecs = estimateGoalTimeSecs(vma, raceParams);
   const currentMins = Math.round((currentSecs || 0) / 60);
 
   // Projection : ligne droite début de plan → fin de plan projetée (voir
@@ -3040,7 +3047,7 @@ function renderObjectifsChart(weeks, goal, dplusM, distKmOverride) {
       const vo2Week = weekEndTs != null ? vo2ValueAtDate(vo2History, weekEndTs) : null;
       if (vo2Week != null) {
         const vmaWeek = vo2ToVma(vo2Week);
-        real.push(Math.round((estimateRaceTime(vmaWeek, distKm, dplusM, isTrail) || 0) / 60));
+        real.push(Math.round((estimateGoalTimeSecs(vmaWeek, raceParams) || 0) / 60));
       } else {
         real.push(null);
       }
@@ -3825,6 +3832,75 @@ function goalGpxStatsForEstimate() {
   return localStorage.getItem('suivi_objectif_gpx_use_estimate_' + planId) === '0' ? null : stats;
 }
 
+// ═══════════════════════════════════════════════════════════════════════
+// MODELE UNIQUE D'ESTIMATION DE L'OBJECTIF (distance, D+, GPX, pauses)
+// ═══════════════════════════════════════════════════════════════════════
+// Avant : DEUX estimateurs coexistaient selon l'endroit — le profil GPX
+// (distance/D+ FIGES du fichier importé) pour "Estimation actuelle", "Fin de
+// plan" et les allures à tenir, la formule générique (distance/D+ SAISIS) pour
+// "Début de plan", les semaines passées de la courbe, la durée du jour de
+// course... Changer la distance (33,5 -> 40 km) ne bougeait donc que la moitié
+// des chiffres : même temps estimé pour 33,5 et 40 km, courbe qui chute au
+// dernier point, allures calculées sur 33 km pour un objectif de 40.
+// Désormais : la saisie de l'utilisateur (distance, D+, pauses, temps cible)
+// fait TOUJOURS foi, et le GPX n'apporte que la FORME du terrain (répartition
+// plat/montée/descente, pentes moyennes) — rééchelonnée aux totaux saisis. Un
+// seul couple getGoalRaceParams / estimateGoalTimeSecs sert à TOUS les points.
+const GPX_ADAPT_MAX_DEVIATION = 0.35; // au-delà, le GPX n'est plus représentatif de la course saisie
+
+function getGoalRaceParams(goal, dplusM, distKm) {
+  const isTrail = ((goal && goal.goalType) || '').toLowerCase().includes('trail');
+  const params = { distKm, dplusM, isTrail, gpx: null, gpxMode: null, gpxRaw: null };
+  const raw = goalGpxStatsForEstimate();
+  if (!raw || !raw.totalDistM || !distKm) return params;
+  params.gpxRaw = raw;
+  const gpxKm = raw.totalDistM / 1000;
+  const gpxUp = raw.ascentM || 0;
+  const devDist = Math.abs(distKm - gpxKm) / gpxKm;
+  const devUp = (gpxUp > 0 && dplusM > 0) ? Math.abs(dplusM - gpxUp) / gpxUp : 0;
+  // Saisie ≈ GPX : profil tel quel.
+  if (devDist <= 0.02 && devUp <= 0.05) { params.gpx = raw; params.gpxMode = 'raw'; return params; }
+  // Saisie trop éloignée du GPX : sa forme n'est plus représentative -> formule générique.
+  if (devDist > GPX_ADAPT_MAX_DEVIATION || devUp > 0.6) { params.gpxMode = 'ignored'; return params; }
+  // Saisie proche mais différente : on garde la composition du terrain (% plat/
+  // montée/descente) et on recalcule les pentes moyennes pour que le D+/D- ET la
+  // distance collent à la saisie (même D+ sur plus de km = pentes plus douces).
+  const scaled = Object.assign({}, raw);
+  scaled.totalDistM = distKm * 1000;
+  const climbM = scaled.totalDistM * (raw.pctClimb || 0) / 100;
+  const descM = scaled.totalDistM * (raw.pctDescent || 0) / 100;
+  if (dplusM > 0 && climbM > 0) scaled.avgClimbGradePct = dplusM / climbM * 100;
+  const ratioDown = (raw.ascentM > 0 && raw.descentM > 0) ? raw.descentM / raw.ascentM : 1;
+  const downM = (dplusM > 0 ? dplusM : raw.ascentM) * ratioDown;
+  if (downM > 0 && descM > 0) scaled.avgDescentGradePct = -(downM / descM * 100);
+  scaled.ascentM = dplusM > 0 ? dplusM : raw.ascentM;
+  scaled.descentM = downM;
+  params.gpx = scaled; params.gpxMode = 'scaled';
+  return params;
+}
+
+/** Temps de MOUVEMENT estimé (sans pauses) pour une VMA donnée — l'UNIQUE
+ *  fonction d'estimation de l'objectif, pour tous les points (début de plan,
+ *  semaines passées, aujourd'hui, fin de plan, courbe, jour de course). */
+function estimateGoalTimeSecs(vma, params) {
+  if (!vma || !params || !params.distKm) return null;
+  if (params.gpx) {
+    const r = estimateRaceTimeFromGpxProfile(vma, params.gpx, params.isTrail);
+    if (r && r.totalSecs) return r.totalSecs;
+  }
+  return estimateRaceTime(vma, params.distKm, params.dplusM, params.isTrail);
+}
+
+/** Courte phrase expliquant ce qui est utilisé (affichée sous les allures). */
+function describeGoalRaceModel(params) {
+  const fmtKm = v => (Math.round(v * 10) / 10).toString().replace('.', ',');
+  const g = params.gpxRaw;
+  if (params.gpxMode === 'raw') return 'Profil du GPX importé utilisé tel quel.';
+  if (params.gpxMode === 'scaled' && g) return `Profil du GPX adapté à votre saisie (${fmtKm(params.distKm)} km · ${params.dplusM} m D+) — GPX d'origine : ${fmtKm(g.totalDistM / 1000)} km · ${g.ascentM} m D+. La répartition plat/montée/descente est conservée, les pentes sont recalculées.`;
+  if (params.gpxMode === 'ignored' && g) return `GPX non utilisé : sa distance (${fmtKm(g.totalDistM / 1000)} km · ${g.ascentM} m D+) est trop différente de votre saisie (${fmtKm(params.distKm)} km · ${params.dplusM} m D+) — estimation générique distance + D+.`;
+  return '';
+}
+
 // État du profil GPX importe pour le plan actuellement affiche - null si
 // aucun import, sinon {points, stats, filename, importedAt} (cf reponse de
 // GET /api/goals/gpx/:planId).
@@ -4023,19 +4099,30 @@ function fmtPaceShort(secKm) {
 /** Bloc "Allures à tenir" (plat/montée/descente) - affiché sous les
  *  estimations quand un GPX est importé : l'allure actuelle projetée ET,
  *  si un temps cible est saisi, l'allure nécessaire pour l'atteindre. */
-function renderGoalGpxPaces(vma, isTrail, targetSecs) {
+function renderGoalGpxPaces(vma, raceParams, targetSecs, pauseSec) {
   const box = document.getElementById('goals-gpx-paces');
   if (!box) return;
+  const isTrail = raceParams.isTrail;
   // Tableau des allures par terrain (plat/montée/descente) : dérivé du
   // profil GPX par construction, donc lui aussi masqué si l'utilisateur a
   // choisi "Garder mes valeurs" - l'afficher quand même reviendrait à
   // montrer une répartition GPX que l'estimation elle-même n'utilise plus
   // (même cohérence que goalGpxStatsForEstimate ailleurs dans ce fichier).
-  const stats = goalGpxStatsForEstimate();
-  if (!stats || !vma) { box.innerHTML = ''; return; }
+  const stats = raceParams.gpx;
+  if (!vma) { box.innerHTML = ''; return; }
+  if (!stats) {
+    // GPX importé mais écarté (trop éloigné de la saisie) : on le dit au lieu de masquer sans explication.
+    const why = describeGoalRaceModel(raceParams);
+    box.innerHTML = why ? `<div class="goals-gpx-pace-note">ⓘ ${why}</div>` : '';
+    return;
+  }
   const now = estimateRaceTimeFromGpxProfile(vma, stats, isTrail);
   if (!now) { box.innerHTML = ''; return; }
-  const target = targetSecs ? scaleGpxPacesToTarget(now, targetSecs) : null;
+  // Le temps cible saisi est un chrono TOTAL (pauses comprises) : les allures
+  // à tenir portent sur le temps de MOUVEMENT = cible - pauses (même logique
+  // que la comparaison "estimation + pauses vs objectif" plus haut).
+  const targetMoving = targetSecs ? Math.max(targetSecs - (pauseSec || 0), 60) : null;
+  const target = targetMoving ? scaleGpxPacesToTarget(now, targetMoving) : null;
   const row = (label, nowVal, targetVal) => `
     <div class="goals-gpx-pace-row">
       <span class="goals-gpx-pace-label">${label}</span>
@@ -4047,6 +4134,7 @@ function renderGoalGpxPaces(vma, isTrail, targetSecs) {
     ${row('Plat', now.paceFlatSecKm, target?.paceFlatSecKm)}
     ${row('Montée', now.paceClimbSecKm, target?.paceClimbSecKm)}
     ${row('Descente', now.paceDescentSecKm, target?.paceDescentSecKm)}
+    <div class="goals-gpx-pace-note">ⓘ ${describeGoalRaceModel(raceParams)}${pauseSec ? ` Allures à tenir calculées sur le temps de mouvement (objectif − ${Math.round(pauseSec / 60)} min de pauses).` : ''}</div>
   `;
 }
 
