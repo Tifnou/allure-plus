@@ -49,28 +49,31 @@ function initRouteEditorPage() {
 
 function renderRouteEditorImportStatus() {
   const box = el('route-editor-import-status');
+  const wrap = el('route-editor-import');
   if (!box) return;
-  if (!_routeEditorData) {
-    box.innerHTML = `
-      <button type="button" class="routes-generate-btn-wide route-editor-import-btn" id="route-editor-import-btn">📎 Importer un GPX</button>
-      <button type="button" class="route-editor-btn-secondary route-editor-create-btn" id="route-editor-create-btn">✏️ Créer un nouveau parcours</button>
-      <div class="route-editor-import-hint">Le fichier original n'est jamais modifié — l'analyse porte sur une copie en mémoire.</div>`;
-    const btn = el('route-editor-import-btn');
-    if (btn) btn.onclick = () => el('route-editor-file-input')?.click();
-    const createBtn = el('route-editor-create-btn');
-    if (createBtn) createBtn.onclick = routeEditorStartCreation;
-    return;
-  }
+  // Parcours chargé : le fichier et ses actions (importer un autre, fermer)
+  // vivent dans la barre du document (renderRouteEditorWorkspace) - l'écran
+  // d'accueil n'a plus rien à afficher.
+  if (_routeEditorData) { box.innerHTML = ''; if (wrap) wrap.style.display = 'none'; return; }
+  if (wrap) wrap.style.display = '';
   box.innerHTML = `
-    <div class="route-editor-imported">
-      <span title="${_routeEditorData.filename}">✅ <b>${_routeEditorData.filename}</b></span>
-      <button type="button" class="route-editor-imported-remove" id="route-editor-import-another">Importer un autre GPX</button>
-      <button type="button" class="route-editor-imported-remove" id="route-editor-close-btn">✕ Fermer</button>
-    </div>`;
-  const again = el('route-editor-import-another');
-  if (again) again.onclick = () => el('route-editor-file-input')?.click();
-  const closeBtn = el('route-editor-close-btn');
-  if (closeBtn) closeBtn.onclick = routeEditorClose;
+    <div class="re-start-grid">
+      <button type="button" class="re-start-card" id="route-editor-import-btn">
+        <span class="re-start-icon" aria-hidden="true">📎</span>
+        <span class="re-start-title">Importer un GPX</span>
+        <span class="re-start-text">Analysez un parcours existant : carte, profil, côtes, stratégie de course.</span>
+      </button>
+      <button type="button" class="re-start-card" id="route-editor-create-btn">
+        <span class="re-start-icon" aria-hidden="true">✏️</span>
+        <span class="re-start-title">Créer un parcours</span>
+        <span class="re-start-text">Posez les points sur la carte : le tracé suit les chemins.</span>
+      </button>
+    </div>
+    <div class="route-editor-import-hint">Le fichier original n'est jamais modifié — tout se passe sur une copie en mémoire. Vous pourrez ensuite répéter des côtes, déplacer des points, ajouter des repères et exporter un GPX.</div>`;
+  const btn = el('route-editor-import-btn');
+  if (btn) btn.onclick = () => el('route-editor-file-input')?.click();
+  const createBtn = el('route-editor-create-btn');
+  if (createBtn) createBtn.onclick = routeEditorStartCreation;
 }
 
 // Démarre un parcours vide (PDF §26, "Créer un parcours" de A à Z) - pas
@@ -122,6 +125,8 @@ function routeEditorClose() {
 
 async function handleRouteEditorFileSelected(file) {
   const box = el('route-editor-import-status');
+  const wrap = el('route-editor-import');
+  if (wrap) wrap.style.display = ''; // visible pendant l'import (peut être masqué si un parcours est déjà chargé)
   if (box) box.innerHTML = `<div class="route-editor-imported">⏳ Import…</div>`;
   try {
     const fd = new FormData();
@@ -159,34 +164,47 @@ async function handleRouteEditorFileSelected(file) {
 // usage - demande explicite ("des infos sur les menus... qu'on sache à quoi
 // ça correspond").
 const ROUTE_EDITOR_MODES = [
-  { mode: 'extend', icon: '➕', label: 'Prolonger le tracé', minPoints: 0,
+  { mode: 'extend', group: 'edit', icon: '➕', label: 'Prolonger', minPoints: 0,
     title: 'Cliquez sur la carte pour ajouter des points à la suite du tracé (ou pour poser le tout premier point).' },
-  { mode: 'select', icon: '🖱️', label: 'Sélectionner A→B', minPoints: 2,
+  { mode: 'select', group: 'explore', icon: '🖱️', label: 'Sélectionner A→B', minPoints: 2,
     title: 'Cliquez deux points du tracé (carte ou profil) pour choisir une section : la répéter, lui appliquer un objectif D+/distance...' },
-  { mode: 'move-point', icon: '✏️', label: 'Déplacer un point', minPoints: 3,
+  { mode: 'move-point', group: 'edit', icon: '✏️', label: 'Déplacer un point', minPoints: 3,
     title: 'Cliquez un point du tracé à déplacer, puis cliquez son nouvel emplacement. Astuce : les points de départ/arrivée et ceux posés en « Prolonger le tracé » se déplacent aussi directement à la souris (glisser-déposer).' },
-  { mode: 'add-waypoint', icon: '📍', label: 'Ajouter un point de passage', minPoints: 2,
+  { mode: 'add-waypoint', group: 'edit', icon: '📍', label: 'Point de passage', minPoints: 2,
     title: 'Force le tracé à passer par un endroit précis entre A et B - sélectionnez d\'abord une section avec « Sélectionner A→B ».' },
-  { mode: 'poi', icon: '📌', label: 'Point d\'intérêt', minPoints: 1,
+  { mode: 'poi', group: 'explore', icon: '📌', label: 'Point d\'intérêt', minPoints: 1,
     title: 'Cliquez un point du tracé pour y ajouter un ravitaillement, un point d\'eau, un sommet...' },
 ];
 function routeEditorModeToolbarHtml() {
   const count = (_routeEditorData?.points || []).length;
-  const buttons = ROUTE_EDITOR_MODES.map(m => {
+  const hasStats = !!_routeEditorData?.stats;
+  const btn = m => {
     const disabled = count < m.minPoints;
-    return `<button type="button" class="routes-toggle-btn route-editor-mode-btn route-editor-tip ${_routeEditorMode === m.mode ? 'active' : ''}" data-mode="${m.mode}" data-tip="${escapeHtml(m.title)}" ${disabled ? 'disabled' : ''}>${m.icon} ${escapeHtml(m.label)}</button>`;
-  }).join('');
+    return `<button type="button" class="re-tool-btn route-editor-mode-btn route-editor-tip ${_routeEditorMode === m.mode ? 'active' : ''}" data-mode="${m.mode}" data-tip="${escapeHtml(m.title)}" ${disabled ? 'disabled' : ''}><span class="re-tool-icon" aria-hidden="true">${m.icon}</span>${escapeHtml(m.label)}</button>`;
+  };
+  const group = g => ROUTE_EDITOR_MODES.filter(m => m.group === g).map(btn).join('');
+  const profileOptions = [['trail:mixte', 'Trail (mixte)'], ['trail:roulant', 'Trail (roulant)'], ['trail:technique', 'Trail (technique)'], ['route', 'Route']]
+    .map(([v, l]) => `<option value="${v}"${v === _routeEditorProfileValue ? ' selected' : ''}>${l}</option>`).join('');
   return `
-    <div class="route-editor-mode-toolbar routes-toggle">
-      ${buttons}
-      <label class="route-editor-profile-select-label route-editor-tip" data-tip="Type de terrain utilisé pour calculer les tronçons (Prolonger le tracé, Déplacer un point...).">Profil de routage
-        <select id="route-editor-profile-select" class="routes-select">
-          <option value="trail:mixte">Trail (mixte)</option>
-          <option value="trail:roulant">Trail (roulant)</option>
-          <option value="trail:technique">Trail (technique)</option>
-          <option value="route">Route</option>
-        </select>
-      </label>
+    <div class="re-tools">
+      <div class="re-tool-group">
+        <span class="re-tool-group-label">Explorer</span>
+        <div class="re-tool-group-row">${group('explore')}</div>
+      </div>
+      <div class="re-tool-group">
+        <span class="re-tool-group-label">Modifier le tracé</span>
+        <div class="re-tool-group-row">
+          ${group('edit')}
+          ${hasStats ? `<span id="route-editor-move-endpoint-controls" class="re-endpoint-controls"></span>
+          <button type="button" class="re-tool-btn route-editor-tip" id="route-editor-reverse-btn" data-tip="Inverse le sens de parcours (le départ devient l'arrivée) sans changer le tracé."><span class="re-tool-icon" aria-hidden="true">↔</span>Inverser le sens</button>` : ''}
+        </div>
+      </div>
+      <div class="re-tool-group re-tool-group--routing">
+        <span class="re-tool-group-label">Routage</span>
+        <label class="route-editor-profile-select-label route-editor-tip" data-tip="Type de terrain utilisé pour calculer les tronçons (Prolonger le tracé, Déplacer un point, Recalculer une section...).">
+          <select id="route-editor-profile-select" class="routes-select">${profileOptions}</select>
+        </label>
+      </div>
     </div>`;
 }
 
@@ -196,7 +214,9 @@ function routeEditorModeToolbarHtml() {
 // section, déplacer un point, ajouter un point de passage, prolonger le
 // tracé), un seul sélecteur dans la barre d'outils plutôt qu'un par mode.
 function routeEditorCurrentProfile() {
-  const [terrain, trailStyle] = (el('route-editor-profile-select')?.value || 'trail:mixte').split(':');
+  const sel = el('route-editor-profile-select');
+  if (sel) _routeEditorProfileValue = sel.value;
+  const [terrain, trailStyle] = (sel?.value || _routeEditorProfileValue || 'trail:mixte').split(':');
   return { terrain, trailStyle };
 }
 
@@ -204,6 +224,8 @@ function wireRouteEditorModeToolbar(ws) {
   ws.querySelectorAll('.route-editor-mode-btn').forEach(btn => {
     btn.onclick = () => setRouteEditorMode(btn.dataset.mode);
   });
+  const profileSel = ws.querySelector('#route-editor-profile-select');
+  if (profileSel) profileSel.onchange = () => { _routeEditorProfileValue = profileSel.value; };
   renderRouteEditorModeHint();
 }
 
@@ -229,11 +251,24 @@ function renderRouteEditorWorkspaceInProgress() {
       ${routeEditorStartFinderHtml()}
     </div>` : '';
   ws.innerHTML = `
-    ${routeEditorModeToolbarHtml()}
+    <div class="re-docbar">
+      <div class="re-docbar-title">
+        <span class="re-docbar-icon" aria-hidden="true">✏️</span>
+        <div class="re-docbar-text">
+          <div class="re-docbar-name">Nouveau parcours</div>
+          <div class="re-docbar-stats"><span>${points.length === 0 ? 'Aucun point posé' : points.length + ' point' + (points.length > 1 ? 's' : '') + ' posé' + (points.length > 1 ? 's' : '')}</span></div>
+        </div>
+      </div>
+    </div>
     ${startCta}
-    <div class="gpx-profile-map" id="route-editor-map"></div>
-    <div id="route-editor-mode-hint" class="route-editor-hint"></div>
-    <div id="route-editor-extend-controls"></div>
+    <div class="re-main">
+      ${routeEditorModeToolbarHtml()}
+      <div class="re-tool-context">
+        <div id="route-editor-mode-hint" class="route-editor-hint"></div>
+        <div id="route-editor-extend-controls"></div>
+      </div>
+      <div class="gpx-profile-map" id="route-editor-map"></div>
+    </div>
     <div class="route-editor-actions">
       ${points.length ? `<button type="button" class="route-editor-btn-secondary" id="route-editor-undo-inprogress-btn">↶ Annuler le dernier point</button>` : ''}
       <button type="button" class="route-editor-btn-secondary" id="route-editor-close-creation-btn">✕ Annuler la création</button>
@@ -457,7 +492,7 @@ function renderRouteEditorExtendControls() {
   if (!box) return;
   const points = _routeEditorData?.points || [];
   if (_routeEditorMode !== 'extend' || points.length < 2) { box.innerHTML = ''; return; }
-  box.innerHTML = `<button type="button" class="route-editor-btn-secondary" id="route-editor-close-loop-btn">🔁 Fermer la boucle</button>`;
+  box.innerHTML = `<button type="button" class="route-editor-btn-secondary" id="route-editor-close-loop-btn">🔁 Fermer la boucle (retour au départ)</button>`;
   const btn = el('route-editor-close-loop-btn');
   if (btn) btn.onclick = () => routeEditorExtendTrack(points[points.length - 1], { lat: points[0].lat, lon: points[0].lon });
 }
@@ -478,9 +513,9 @@ function renderRouteEditorMoveEndpointControls() {
   if (points.length < 2) { box.innerHTML = ''; return; }
   const loop = isClosedLoopTrack(points);
   box.innerHTML = loop
-    ? `<button type="button" class="route-editor-btn-secondary${_routeEditorMode === 'move-loop' ? ' active' : ''}" id="route-editor-move-loop-btn">📍 Déplacer le départ/l'arrivée</button>`
-    : `<button type="button" class="route-editor-btn-secondary${_routeEditorMode === 'move-start' ? ' active' : ''}" id="route-editor-move-start-btn">📍 Déplacer le départ</button>
-       <button type="button" class="route-editor-btn-secondary${_routeEditorMode === 'move-finish' ? ' active' : ''}" id="route-editor-move-finish-btn">🏁 Déplacer l'arrivée</button>`;
+    ? `<button type="button" class="re-tool-btn route-editor-tip${_routeEditorMode === 'move-loop' ? ' active' : ''}" id="route-editor-move-loop-btn" data-tip="Choisissez un point du tracé comme nouveau départ = arrivée : la boucle garde exactement la même forme."><span class="re-tool-icon" aria-hidden="true">📍</span>Départ/arrivée</button>`
+    : `<button type="button" class="re-tool-btn route-editor-tip${_routeEditorMode === 'move-start' ? ' active' : ''}" id="route-editor-move-start-btn" data-tip="Choisissez un point du tracé comme nouveau départ : la portion avant ce point est supprimée."><span class="re-tool-icon" aria-hidden="true">📍</span>Départ</button>
+       <button type="button" class="re-tool-btn route-editor-tip${_routeEditorMode === 'move-finish' ? ' active' : ''}" id="route-editor-move-finish-btn" data-tip="Choisissez un point du tracé comme nouvelle arrivée : la portion après ce point est supprimée."><span class="re-tool-icon" aria-hidden="true">🏁</span>Arrivée</button>`;
   const loopBtn = el('route-editor-move-loop-btn');
   if (loopBtn) loopBtn.onclick = () => setRouteEditorMode(_routeEditorMode === 'move-loop' ? 'select' : 'move-loop');
   const startBtn = el('route-editor-move-start-btn');
@@ -584,6 +619,99 @@ function computeRouteEditorRepeatBrackets(points) {
   }).filter(Boolean);
 }
 
+// ═══════════════════════════════════════════════════════════════════════
+// STRUCTURE DE LA PAGE (refonte 10/2026)
+// ═══════════════════════════════════════════════════════════════════════
+// Trois zones, une logique "document -> outils -> analyse" :
+//  1. BARRE DU DOCUMENT (haut) : nom du parcours, chiffres clés, Annuler/
+//     Rétablir, Exporter, et un menu "⋯" (restaurer l'original, importer un
+//     autre GPX, fermer). Tout ce qui concerne le FICHIER, rien d'autre.
+//  2. COLONNE GAUCHE = la carte et ses OUTILS : barre d'outils groupée
+//     (Explorer / Modifier le tracé / Routage), bandeau contextuel de l'outil
+//     actif (consigne + options), carte, profil altimétrique, panneau de la
+//     section A->B sélectionnée. Tout ce qui agit SUR la carte est ici.
+//  3. COLONNE DROITE = 5 ONGLETS (un seul visible à la fois, pas de pile de
+//     sections à faire défiler) : Analyse (résumé + côtes), Objectif (D+/
+//     distance cible), Repères (points d'intérêt), Versions (variantes),
+//     Stratégie (course). L'onglet actif est mémorisé d'un rendu à l'autre.
+let _routeEditorTab = 'analyse';
+let _routeEditorClimbSort = 'position'; // 'position' | 'dplus' | 'pente'
+let _routeEditorProfileValue = 'trail:mixte'; // survit aux re-rendus (le <select> est recréé à chaque rendu)
+
+const ROUTE_EDITOR_TABS = [
+  { id: 'analyse',   icon: '📊', label: 'Analyse' },
+  { id: 'objectif',  icon: '🎯', label: 'Objectif' },
+  { id: 'reperes',   icon: '📌', label: 'Repères' },
+  { id: 'versions',  icon: '🗂️', label: 'Versions' },
+  { id: 'strategie', icon: '🏁', label: 'Stratégie' },
+];
+
+function setRouteEditorTab(id) {
+  if (!ROUTE_EDITOR_TABS.some(t => t.id === id)) return;
+  _routeEditorTab = id;
+  document.querySelectorAll('#route-editor-workspace .re-tab').forEach(b => {
+    const on = b.dataset.tab === id;
+    b.classList.toggle('active', on);
+    b.setAttribute('aria-selected', on ? 'true' : 'false');
+  });
+  document.querySelectorAll('#route-editor-workspace .re-tab-panel').forEach(p => { p.hidden = p.dataset.tab !== id; });
+}
+
+// Pastilles de comptage sur les onglets (côtes, repères, versions).
+function updateRouteEditorTabBadges() {
+  const set = (id, n) => { const b = el('re-badge-' + id); if (b) { b.textContent = n > 0 ? String(n) : ''; b.hidden = !(n > 0); } };
+  set('analyse', (_routeEditorData?.stats?.climbs || []).length);
+  set('reperes', (_routeEditorData?.pois || []).length);
+  set('versions', _routeEditorVariants.length);
+}
+
+// Liste des côtes : lignes compactes (nom + position / chiffres / bouton)
+// plutôt qu'un tableau à 7 colonnes, qui débordait de la colonne latérale.
+function renderRouteEditorClimbsList() {
+  const box = el('route-editor-climbs-wrap');
+  if (!box || !_routeEditorData?.stats) return;
+  const climbs = _routeEditorData.stats.climbs || [];
+  if (!climbs.length) {
+    box.innerHTML = `<div class="re-empty">Aucune côte significative détectée sur ce parcours.</div>`;
+    return;
+  }
+  const brackets = computeRouteEditorRepeatBrackets(_routeEditorData.points);
+  const order = climbs.map((_, i) => i);
+  if (_routeEditorClimbSort === 'dplus') order.sort((a, b) => climbs[b].gainM - climbs[a].gainM);
+  else if (_routeEditorClimbSort === 'pente') order.sort((a, b) => climbs[b].avgGradePct - climbs[a].avgGradePct);
+  const sortBtn = (id, label) => `<button type="button" class="re-sort-btn${_routeEditorClimbSort === id ? ' active' : ''}" data-sort="${id}">${label}</button>`;
+  const rows = order.map(i => {
+    const c = climbs[i];
+    const bracket = brackets.find(b => c.startKm <= b.endKm && c.endKm >= b.startKm);
+    const band = gpxGradeBand(c.avgGradePct);
+    const badge = bracket ? `<span class="route-editor-repeat-badge" style="background:${bracket.color}">répétée ×${bracket.totalPasses}</span>` : '';
+    return `
+      <div class="re-climb"${bracket ? ` style="background:${bracket.color}1f"` : ''}>
+        <div class="re-climb-head">
+          <span class="re-climb-dot" style="background:${band.color}" title="${band.label}"></span>
+          <span class="re-climb-name">Côte ${i + 1}</span>${badge}
+          <span class="re-climb-pos">km ${c.startKm.toFixed(1)} → ${c.endKm.toFixed(1)}</span>
+        </div>
+        <div class="re-climb-stats">
+          <span><b>${(c.distM / 1000).toFixed(2).replace('.', ',')}</b> km</span>
+          <span><b>+${c.gainM}</b> m</span>
+          <span><b>${c.avgGradePct.toFixed(1).replace('.', ',')}</b> % moy.</span>
+          <span><b>${c.maxGradePct.toFixed(1).replace('.', ',')}</b> % max</span>
+        </div>
+        <button type="button" class="route-editor-climb-repeat-btn re-climb-btn" data-climb-idx="${i}" title="Sélectionne cette côte comme section à répéter">🔁 Répéter</button>
+      </div>`;
+  }).join('');
+  box.innerHTML = `
+    <div class="re-sort"><span>Trier par</span>${sortBtn('position', 'Position')}${sortBtn('dplus', 'D+')}${sortBtn('pente', 'Pente')}</div>
+    <div class="re-climbs">${rows}</div>`;
+  box.querySelectorAll('.re-sort-btn').forEach(b => {
+    b.onclick = () => { _routeEditorClimbSort = b.dataset.sort; renderRouteEditorClimbsList(); };
+  });
+  box.querySelectorAll('.route-editor-climb-repeat-btn').forEach(btn => {
+    btn.onclick = () => selectClimbForRepeat(parseInt(btn.dataset.climbIdx, 10));
+  });
+}
+
 function renderRouteEditorWorkspace() {
   const ws = el('route-editor-workspace');
   if (!ws || !_routeEditorData) return;
@@ -592,117 +720,109 @@ function renderRouteEditorWorkspace() {
   ws.style.display = '';
 
   const climbs = stats.climbs || [];
-  const repeatBrackets = computeRouteEditorRepeatBrackets(_routeEditorData.points);
-  const climbsRows = climbs.map((c, i) => {
-    // Chevauchement KM entre cette côte et une répétition détectée - une
-    // côte étendue en va-et-vient chevauche forcément la portion d'origine.
-    const bracket = repeatBrackets.find(b => c.startKm <= b.endKm && c.endKm >= b.startKm);
-    const rowStyle = bracket ? ` style="background:${bracket.color}1f"` : '';
-    const badge = bracket ? ` <span class="route-editor-repeat-badge" style="background:${bracket.color}">répétée ×${bracket.totalPasses}</span>` : '';
-    return `
-    <tr${rowStyle}>
-      <td>Côte ${i + 1}${badge}</td>
-      <td>KM ${c.startKm.toFixed(1)} → ${c.endKm.toFixed(1)}</td>
-      <td>${(c.distM / 1000).toFixed(2)} km</td>
-      <td>+${c.gainM} m</td>
-      <td>${c.avgGradePct.toFixed(1)} %</td>
-      <td>${c.maxGradePct.toFixed(1)} %</td>
-      <td><button type="button" class="route-editor-climb-repeat-btn" data-climb-idx="${i}">🔁 Répéter</button></td>
-    </tr>`;
-  }).join('');
-
   const isOriginal = _routeEditorOriginal && _routeEditorData.points === _routeEditorOriginal.points;
+  const fmt1 = v => String(v).replace('.', ',');
 
-  // Mise en page carte a gauche / colonne de controles a droite (retour
-  // utilisateur explicite : trop de boutons disperses au-dessus ET en
-  // dessous de la carte, obligeant a jongler avec la molette). Tout ce qui
-  // est directement lie a l'interaction avec la carte/le profil (barre de
-  // mode, legende, hint de mode, controles de prolongement/deplacement de
-  // depart-arrivee, panneau de section A->B) reste dans la colonne de
-  // gauche, juste sous l'element concerne - tout le reste (actions,
-  // objectif, cotes, POI, variantes, strategie) part dans des sections
-  // repliables (<details>, pas de JS de toggle a maintenir) dans la colonne
-  // de droite, jamais plus au-dessus ni en dessous de la carte elle-meme.
   ws.innerHTML = `
-    <div class="route-editor-layout">
-      <div class="route-editor-layout-map">
-        <div class="gpx-profile-stats">
-          <div class="gpx-profile-stat"><b>${(stats.totalDistM / 1000).toFixed(1)}</b> km</div>
-          <div class="gpx-profile-stat"><b>+${stats.ascentM}</b> m D+</div>
-          <div class="gpx-profile-stat"><b>-${stats.descentM}</b> m D-</div>
-          <div class="gpx-profile-stat"><b>${stats.altMinM}–${stats.altMaxM}</b> m alt.</div>
-          <div class="gpx-profile-stat"><b>${stats.avgClimbGradePct}%</b> pente moy. montée</div>
-          <div class="gpx-profile-stat"><b>${stats.maxClimbGradePct}%</b> pente max</div>
-          <div class="gpx-profile-stat"><b>${climbs.length}</b> côte(s) détectée(s)</div>
+    <div class="re-docbar">
+      <div class="re-docbar-title">
+        <span class="re-docbar-icon" aria-hidden="true">🗺️</span>
+        <div class="re-docbar-text">
+          <div class="re-docbar-name" title="${escapeHtml(_routeEditorData.filename || '')}">${escapeHtml(_routeEditorData.filename || 'Parcours')}</div>
+          <div class="re-docbar-stats">
+            <span><b>${fmt1((stats.totalDistM / 1000).toFixed(1))}</b> km</span>
+            <span><b>+${stats.ascentM}</b> m D+</span>
+            <span><b>−${stats.descentM}</b> m D−</span>
+            <span><b>${stats.altMinM}–${stats.altMaxM}</b> m alt.</span>
+            <span><b>${fmt1(stats.avgClimbGradePct)}</b> % moy. montée</span>
+            <span><b>${fmt1(stats.maxClimbGradePct)}</b> % max</span>
+          </div>
         </div>
-        <div class="route-editor-summary-card">📝 ${buildRouteEditorSummary(stats)}</div>
+      </div>
+      <div class="re-docbar-actions">
+        <button type="button" class="re-icon-btn" id="route-editor-undo-btn" ${_routeEditorHistory.length ? '' : 'disabled'} title="Annuler la dernière modification">↶ <span>Annuler</span></button>
+        <button type="button" class="re-icon-btn" id="route-editor-redo-btn" ${_routeEditorFuture.length ? '' : 'disabled'} title="Rétablir la modification annulée">↷ <span>Rétablir</span></button>
+        <button type="button" class="btn-plans-restart re-export-btn" id="route-editor-export-btn" title="Télécharge le parcours modifié au format GPX (alertes de répétition et points d'intérêt inclus)">⬇️ Exporter le GPX</button>
+        <details class="re-more">
+          <summary aria-label="Plus d'actions" title="Plus d'actions">⋯</summary>
+          <div class="re-more-menu">
+            <button type="button" id="route-editor-restore-btn" ${isOriginal ? 'disabled' : ''}>↺ Restaurer l'original</button>
+            <button type="button" id="route-editor-import-another">📎 Importer un autre GPX</button>
+            <button type="button" id="route-editor-close-btn">✕ Fermer le parcours</button>
+          </div>
+        </details>
+      </div>
+    </div>
+
+    <div class="re-layout">
+      <div class="re-main">
         ${routeEditorModeToolbarHtml()}
+        <div class="re-tool-context">
+          <div id="route-editor-mode-hint" class="route-editor-hint"></div>
+          <div id="route-editor-extend-controls"></div>
+        </div>
         <div class="gpx-profile-map" id="route-editor-map"></div>
         <div class="gpx-profile-legend">
           ${GPX_GRADE_BANDS.map(b => `<span class="gpx-profile-legend-item"><span class="gpx-profile-legend-dot" style="background:${b.color}"></span>${b.label}</span>`).join('')}
         </div>
         <div class="gpx-profile-elev-container"><canvas id="route-editor-elev-chart"></canvas></div>
-        <div id="route-editor-mode-hint" class="route-editor-hint"></div>
         <div id="route-editor-reroute-preview"></div>
         <div id="route-editor-hint" class="route-editor-hint">Cliquez sur deux points du tracé (carte ou profil) pour choisir une section à répéter.</div>
         <div id="route-editor-section-panel"></div>
       </div>
-      <div class="route-editor-layout-sidebar">
-        <details class="route-editor-collapsible" open>
-          <summary>Actions</summary>
-          <div id="route-editor-extend-controls"></div>
-          <div id="route-editor-move-endpoint-controls"></div>
-          <div class="route-editor-actions route-editor-actions--top">
-            <button type="button" class="route-editor-btn-secondary" id="route-editor-undo-btn" ${_routeEditorHistory.length ? '' : 'disabled'}>↶ Annuler</button>
-            <button type="button" class="route-editor-btn-secondary" id="route-editor-redo-btn" ${_routeEditorFuture.length ? '' : 'disabled'}>↷ Rétablir</button>
-            <button type="button" class="route-editor-btn-secondary" id="route-editor-reverse-btn">↔ Inverser le sens</button>
-            <button type="button" class="route-editor-btn-secondary" id="route-editor-restore-btn" ${isOriginal ? 'disabled' : ''}>Restaurer l'original</button>
-            <button type="button" class="btn-plans-restart" id="route-editor-export-btn">⬇️ Exporter le GPX</button>
-          </div>
-        </details>
-        <details class="route-editor-collapsible" open>
-          <summary>🎯 Objectif</summary>
-          <div class="route-editor-objective-card">
-            <span class="route-editor-objective-title">Objectif (optionnel)</span>
-            <label>D+ cible <input type="number" id="route-editor-obj-dplus" class="routes-number-input" min="0" step="10" placeholder="m" value="${_routeEditorObjective.targetDplusM ?? ''}" /> m</label>
-            <label>Distance cible <input type="number" id="route-editor-obj-dist" class="routes-number-input" min="0" step="0.5" placeholder="km" value="${_routeEditorObjective.targetDistM ?? ''}" /> km</label>
+
+      <aside class="re-side">
+        <div class="re-tabs" role="tablist" aria-label="Panneaux d'analyse">
+          ${ROUTE_EDITOR_TABS.map(t => `
+            <button type="button" class="re-tab${_routeEditorTab === t.id ? ' active' : ''}" role="tab" aria-selected="${_routeEditorTab === t.id}" data-tab="${t.id}">
+              <span class="re-tab-icon" aria-hidden="true">${t.icon}</span><span class="re-tab-label">${t.label}</span><span class="re-tab-badge" id="re-badge-${t.id}" hidden></span>
+            </button>`).join('')}
+        </div>
+
+        <section class="re-tab-panel" data-tab="analyse" ${_routeEditorTab === 'analyse' ? '' : 'hidden'}>
+          <div class="route-editor-summary-card">📝 ${buildRouteEditorSummary(stats)}</div>
+          <div class="re-block-title">Côtes détectées${climbs.length ? ` <span class="re-count">${climbs.length}</span>` : ''}</div>
+          <div id="route-editor-climbs-wrap"></div>
+        </section>
+
+        <section class="re-tab-panel" data-tab="objectif" ${_routeEditorTab === 'objectif' ? '' : 'hidden'}>
+          <div class="re-block-title">Atteindre un D+ ou une distance</div>
+          <p class="re-help">Fixez une cible : Allure+ propose la ou les côtes à répéter pour s'en approcher. Vous pouvez aussi choisir vous-même une section (outil « Sélectionner A→B », ou « 🔁 Répéter » dans l'onglet Analyse).</p>
+          <div class="re-objective">
+            <label>D+ cible <span class="re-input-unit"><input type="number" id="route-editor-obj-dplus" class="routes-number-input" min="0" step="10" placeholder="—" value="${_routeEditorObjective.targetDplusM ?? ''}" /> m</span></label>
+            <label>Distance cible <span class="re-input-unit"><input type="number" id="route-editor-obj-dist" class="routes-number-input" min="0" step="0.5" placeholder="—" value="${_routeEditorObjective.targetDistM ?? ''}" /> km</span></label>
             <button type="button" class="route-editor-btn-secondary" id="route-editor-obj-clear">Effacer</button>
-            <span class="route-editor-objective-hint">Allure+ propose automatiquement la côte la plus efficace à répéter pour s'en approcher — ou sélectionnez vous-même une autre section (carte, profil, "🔁 Répéter").</span>
           </div>
           <div id="route-editor-objective-auto"></div>
-        </details>
-        <details class="route-editor-collapsible" open>
-          <summary>Côtes détectées${climbs.length ? ` (${climbs.length})` : ''}</summary>
-          ${climbs.length
-            ? `<table class="route-editor-climbs-table">
-                <thead><tr><th>Montée</th><th>Position</th><th>Distance</th><th>D+</th><th>Pente moy.</th><th>Pente max.</th><th></th></tr></thead>
-                <tbody>${climbsRows}</tbody>
-              </table>`
-            : `<div class="route-editor-climbs-empty">Aucune côte significative détectée sur ce parcours.</div>`}
-        </details>
-        <details class="route-editor-collapsible">
-          <summary>Points d'intérêt</summary>
+        </section>
+
+        <section class="re-tab-panel" data-tab="reperes" ${_routeEditorTab === 'reperes' ? '' : 'hidden'}>
+          <div class="re-block-title">Points d'intérêt</div>
+          <p class="re-help">Ravitaillements, points d'eau, sommets… Ils apparaissent sur la carte et sont exportés dans le GPX (alerte sur la montre).</p>
           <div id="route-editor-poi-table-wrap"></div>
-        </details>
-        <details class="route-editor-collapsible">
-          <summary>Variantes</summary>
-          <div class="route-editor-actions" style="margin-top:0">
-            <button type="button" class="route-editor-btn-secondary" id="route-editor-save-variant-btn">💾 Enregistrer la version actuelle</button>
-          </div>
+        </section>
+
+        <section class="re-tab-panel" data-tab="versions" ${_routeEditorTab === 'versions' ? '' : 'hidden'}>
+          <div class="re-block-title">Variantes du parcours</div>
+          <p class="re-help">Gardez plusieurs versions nommées (avec ou sans répétitions…) pour les comparer et revenir de l'une à l'autre.</p>
+          <button type="button" class="route-editor-btn-secondary" id="route-editor-save-variant-btn">💾 Enregistrer la version actuelle</button>
           <div id="route-editor-variants-table-wrap"></div>
-        </details>
-        <details class="route-editor-collapsible">
-          <summary>Stratégie de course</summary>
+        </section>
+
+        <section class="re-tab-panel" data-tab="strategie" ${_routeEditorTab === 'strategie' ? '' : 'hidden'}>
+          <div class="re-block-title">Stratégie de course</div>
           <div class="route-editor-strategy-card">
             <label>Objectif de temps (optionnel) <input type="time" id="route-editor-strategy-target" class="routes-text-input" style="width:110px" /></label>
             <button type="button" class="btn-plans-restart" id="route-editor-strategy-btn">Calculer la stratégie</button>
             <span class="route-editor-objective-hint">Répartit l'effort section par section selon votre profil d'allure personnel (calibré sur vos sorties Garmin), avec marche active sur les pentes très fortes — pas une allure unique partout.</span>
           </div>
           <div id="route-editor-strategy-result"></div>
-        </details>
-      </div>
+        </section>
+      </aside>
     </div>`;
 
+  // ── Câblage ──
+  const closeMore = () => { const d = ws.querySelector('.re-more'); if (d) d.open = false; };
   const exportBtn = el('route-editor-export-btn');
   if (exportBtn) exportBtn.onclick = routeEditorExportGpx;
   const strategyBtn = el('route-editor-strategy-btn');
@@ -712,19 +832,23 @@ function renderRouteEditorWorkspace() {
   const redoBtn = el('route-editor-redo-btn');
   if (redoBtn) redoBtn.onclick = routeEditorRedo;
   const restoreBtn = el('route-editor-restore-btn');
-  if (restoreBtn) restoreBtn.onclick = routeEditorRestoreOriginal;
+  if (restoreBtn) restoreBtn.onclick = () => { closeMore(); routeEditorRestoreOriginal(); };
   const reverseBtn = el('route-editor-reverse-btn');
   if (reverseBtn) reverseBtn.onclick = routeEditorReverseDirection;
-  ws.querySelectorAll('.route-editor-climb-repeat-btn').forEach(btn => {
-    btn.onclick = () => selectClimbForRepeat(parseInt(btn.dataset.climbIdx, 10));
-  });
+  const anotherBtn = el('route-editor-import-another');
+  if (anotherBtn) anotherBtn.onclick = () => { closeMore(); el('route-editor-file-input')?.click(); };
+  const closeBtn = el('route-editor-close-btn');
+  if (closeBtn) closeBtn.onclick = () => { closeMore(); routeEditorClose(); };
+  ws.querySelectorAll('.re-tab').forEach(b => { b.onclick = () => setRouteEditorTab(b.dataset.tab); });
   wireRouteEditorModeToolbar(ws);
   renderRouteEditorExtendControls();
   renderRouteEditorMoveEndpointControls();
+  renderRouteEditorClimbsList();
   renderRouteEditorPoiTable();
   const saveVariantBtn = el('route-editor-save-variant-btn');
   if (saveVariantBtn) saveVariantBtn.onclick = onRouteEditorSaveVariantClick;
   renderRouteEditorVariantsTable();
+  updateRouteEditorTabBadges();
   const objDplusInput = el('route-editor-obj-dplus');
   const objDistInput = el('route-editor-obj-dist');
   const onObjectiveChange = () => {
@@ -1744,7 +1868,11 @@ function renderRouteEditorPoiTable() {
   const box = el('route-editor-poi-table-wrap');
   if (!box) return;
   const pois = _routeEditorData?.pois || [];
-  if (!pois.length) { box.innerHTML = ''; return; }
+  if (typeof updateRouteEditorTabBadges === 'function') updateRouteEditorTabBadges();
+  if (!pois.length) {
+    box.innerHTML = `<div class="re-empty">Aucun point d'intérêt pour l'instant. Choisissez l'outil <b>📌 Point d'intérêt</b> au-dessus de la carte, puis cliquez sur le tracé.</div>`;
+    return;
+  }
   const points = _routeEditorData.points;
   // Distance cumulée au point idx - calcul direct (pas besoin des bins de
   // computeGpxDisplayBins, juste la position kilométrique de chaque POI).
@@ -1760,7 +1888,6 @@ function renderRouteEditorPoiTable() {
     </tr>`;
   }).join('');
   box.innerHTML = `
-    <div class="route-editor-section-title">Points d'intérêt</div>
     <table class="route-editor-climbs-table">
       <thead><tr><th>Point</th><th>Type</th><th>Position</th><th></th></tr></thead>
       <tbody>${rows}</tbody>
@@ -1849,6 +1976,7 @@ function renderRouteEditorVariantsTable() {
     rowHtml('original', 'Original', _routeEditorOriginal.stats, _routeEditorData.points === _routeEditorOriginal.points, false),
     ..._routeEditorVariants.map(v => rowHtml(v.id, v.name, v.stats, v.points === _routeEditorData.points, true)),
   ].join('');
+  if (typeof updateRouteEditorTabBadges === 'function') updateRouteEditorTabBadges();
   box.innerHTML = `
     <table class="route-editor-climbs-table">
       <thead><tr><th>Variante</th><th>Distance</th><th>D+</th><th></th></tr></thead>

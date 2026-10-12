@@ -467,3 +467,173 @@
   color: var(--text-secondary);
 }
 .route-editor-summary-card b { color: var(--text-primary); }
+
+
+/* ═══════════════════════════════════════════════════════════════════════
+   REFONTE 10/2026 — barre du document / outils / onglets d'analyse
+   (structure expliquée en tête de renderRouteEditorWorkspace, route_editor.js)
+═══════════════════════════════════════════════════════════════════════ */
+
+/* ─── Écran d'accueil : deux cartes d'action ─── */
+.re-start-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; max-width: 720px; margin: 0 auto; }
+.re-start-card {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 6px; text-align: left;
+  padding: 20px; border: 1px solid var(--border); border-radius: var(--radius-md);
+  background: var(--bg-white); cursor: pointer; font-family: var(--font-body);
+  box-shadow: var(--shadow-sm); transition: border-color var(--transition), box-shadow var(--transition), transform var(--transition);
+}
+.re-start-card:hover { border-color: var(--accent); box-shadow: var(--shadow-md); transform: translateY(-1px); }
+.re-start-icon { font-size: 26px; line-height: 1; }
+.re-start-title { font-family: var(--font); font-size: 15px; font-weight: 700; color: var(--text-primary); }
+.re-start-text { font-size: 12.5px; color: var(--text-secondary); line-height: 1.45; }
+@media (max-width: 640px) { .re-start-grid { grid-template-columns: 1fr; } }
+#route-editor-import .route-editor-import-hint { max-width: 720px; margin: 14px auto 0; line-height: 1.5; }
+
+/* ─── Barre du document ─── */
+.re-docbar {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px 16px; flex-wrap: wrap;
+  background: var(--bg-white); border: 1px solid var(--border); border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm); padding: 12px 16px; margin-bottom: 14px;
+}
+.re-docbar-title { display: flex; align-items: center; gap: 12px; min-width: 0; flex: 1 1 320px; }
+.re-docbar-icon { font-size: 22px; line-height: 1; flex-shrink: 0; }
+.re-docbar-text { min-width: 0; }
+.re-docbar-name { font-family: var(--font); font-size: 15px; font-weight: 700; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.re-docbar-stats { display: flex; flex-wrap: wrap; gap: 2px 14px; margin-top: 3px; font-family: var(--font-body); font-size: 12px; color: var(--text-muted); }
+.re-docbar-stats b { color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.re-docbar-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.re-icon-btn {
+  display: inline-flex; align-items: center; gap: 5px; padding: 7px 11px; border: 1px solid var(--border);
+  border-radius: var(--radius-sm); background: var(--bg-white); color: var(--text-secondary);
+  font-family: var(--font-body); font-size: 12.5px; cursor: pointer; transition: all var(--transition);
+}
+.re-icon-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent-text); }
+.re-icon-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.re-export-btn { margin: 0 !important; background: var(--accent) !important; border-color: var(--accent) !important; color: #fff !important; font-weight: 600; padding: 8px 14px !important; }
+.re-export-btn:hover { filter: brightness(1.08); }
+.re-more { position: relative; }
+.re-more > summary {
+  list-style: none; cursor: pointer; width: 34px; height: 34px; display: grid; place-items: center;
+  border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-white);
+  font-size: 18px; line-height: 1; color: var(--text-secondary);
+}
+.re-more > summary::-webkit-details-marker { display: none; }
+.re-more[open] > summary, .re-more > summary:hover { border-color: var(--accent); color: var(--accent-text); }
+.re-more-menu {
+  position: absolute; right: 0; top: calc(100% + 6px); z-index: 40; min-width: 230px; display: flex; flex-direction: column;
+  background: var(--bg-white); border: 1px solid var(--border); border-radius: var(--radius-md); box-shadow: var(--shadow-md); padding: 6px;
+}
+.re-more-menu button {
+  text-align: left; padding: 9px 11px; border: none; background: none; border-radius: 6px;
+  font-family: var(--font-body); font-size: 12.5px; color: var(--text-primary); cursor: pointer;
+}
+.re-more-menu button:hover:not(:disabled) { background: var(--bg-hover); }
+.re-more-menu button:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* ─── Disposition : carte + outils à gauche, onglets à droite ─── */
+.re-layout { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 16px 20px; align-items: start; }
+.re-main { min-width: 0; }
+.re-side {
+  min-width: 0; background: var(--bg-white); border: 1px solid var(--border);
+  border-radius: var(--radius-md); box-shadow: var(--shadow-sm); overflow: hidden;
+}
+@media (max-width: 1000px) { .re-layout { grid-template-columns: 1fr; } }
+.re-main .gpx-profile-map { height: 480px; margin-bottom: 10px; }
+.re-main .gpx-profile-legend { margin: 0 0 4px; }
+.re-main .gpx-profile-elev-container { margin-top: 8px; }
+
+/* ─── Barre d'outils groupée ─── */
+.re-tools {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "explore routing" "edit edit"; align-items: end; gap: 10px 20px;
+  background: var(--bg-white); border: 1px solid var(--border); border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm); padding: 10px 12px; margin-bottom: 10px;
+}
+.re-tool-group { display: flex; flex-direction: column; gap: 5px; }
+.re-tool-group-label { font-family: var(--font-body); font-size: 9.5px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; color: var(--text-muted); }
+.re-tool-group-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.re-tool-group:nth-child(1) { grid-area: explore; }
+.re-tool-group:nth-child(2) { grid-area: edit; }
+.re-tool-group--routing { grid-area: routing; }
+.re-tool-group--routing .route-editor-profile-select-label { margin: 0; padding: 0; }
+.re-tool-btn {
+  display: inline-flex; align-items: center; gap: 5px; padding: 7px 9px; border: 1px solid var(--border);
+  border-radius: var(--radius-sm); background: var(--bg-white); color: var(--text-primary);
+  font-family: var(--font-body); font-size: 12.5px; font-weight: 500; cursor: pointer; transition: all var(--transition);
+}
+.re-tool-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent-text); }
+.re-tool-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; box-shadow: 0 2px 8px rgba(0,0,0,0.18); }
+.re-tool-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.re-tool-icon { font-size: 13px; line-height: 1; }
+.re-endpoint-controls { display: contents; }
+
+/* Bandeau contextuel : consigne de l'outil actif + options propres à l'outil */
+.re-tool-context { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin-bottom: 10px; }
+.re-tool-context:not(:has(.route-editor-hint:not(:empty))):not(:has(#route-editor-extend-controls:not(:empty))) { display: none; }
+.re-tool-context .route-editor-hint {
+  flex: 1 1 280px; margin: 0; text-align: left; padding: 8px 12px; border-radius: var(--radius-sm);
+  background: var(--accent-light); color: var(--accent-text); border: 1px solid var(--border); line-height: 1.45;
+}
+.re-tool-context .route-editor-hint:empty { display: none; }
+.re-tool-context #route-editor-extend-controls { margin: 0 !important; }
+#route-editor-hint:empty { display: none; }
+.re-main > .route-editor-hint { text-align: left; margin: 6px 2px 10px; }
+
+/* ─── Onglets ─── */
+.re-tabs { display: grid; grid-template-columns: repeat(5, 1fr); background: var(--bg-hover); border-bottom: 1px solid var(--border); }
+.re-tab {
+  position: relative; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 9px 2px 8px;
+  border: none; border-bottom: 2px solid transparent; background: none; cursor: pointer;
+  font-family: var(--font-body); font-size: 10.5px; font-weight: 600; color: var(--text-muted); transition: color var(--transition), background var(--transition);
+}
+.re-tab-icon { font-size: 15px; line-height: 1; }
+.re-tab:hover { color: var(--text-primary); }
+.re-tab.active { color: var(--accent-text); border-bottom-color: var(--accent); background: var(--bg-white); }
+.re-tab-badge {
+  position: absolute; top: 4px; right: 5px; min-width: 15px; height: 15px; padding: 0 4px; border-radius: 999px;
+  background: var(--accent); color: #fff; font-size: 9px; font-weight: 700; display: grid; place-items: center;
+}
+.re-tab-badge[hidden] { display: none; }
+.re-tab-panel { padding: 14px 14px 16px; }
+.re-tab-panel[hidden] { display: none; }
+.re-tab-panel .route-editor-summary-card { margin-bottom: 4px; font-size: 12.5px; padding: 12px 14px; box-shadow: none; }
+.re-block-title {
+  display: flex; align-items: center; gap: 6px; margin: 16px 0 8px; font-family: var(--font); font-size: 12.5px;
+  font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; color: var(--text-secondary);
+}
+.re-tab-panel > .re-block-title:first-child { margin-top: 0; }
+.re-count { padding: 1px 7px; border-radius: 999px; background: var(--bg-hover); font-size: 11px; font-weight: 600; color: var(--text-secondary); }
+.re-help { margin: 0 0 12px; font-family: var(--font-body); font-size: 12px; line-height: 1.5; color: var(--text-muted); }
+.re-empty { padding: 14px 12px; border: 1px dashed var(--border); border-radius: var(--radius-sm); font-family: var(--font-body); font-size: 12.5px; line-height: 1.5; color: var(--text-muted); }
+.re-empty b { color: var(--text-primary); }
+
+/* ─── Liste des côtes (remplace le tableau à 7 colonnes) ─── */
+.re-sort { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; font-family: var(--font-body); font-size: 11px; color: var(--text-muted); }
+.re-sort-btn {
+  padding: 3px 10px; border: 1px solid var(--border); border-radius: 999px; background: none; cursor: pointer;
+  font-family: var(--font-body); font-size: 11px; color: var(--text-secondary);
+}
+.re-sort-btn.active { background: var(--accent-light); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
+.re-climbs { display: flex; flex-direction: column; gap: 6px; max-height: 560px; overflow-y: auto; padding-right: 2px; }
+.re-climb {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "head btn" "stats btn";
+  gap: 3px 10px; padding: 8px 10px; border: 1px solid var(--border-light); border-radius: var(--radius-sm); background: var(--bg);
+}
+.re-climb-head { grid-area: head; display: flex; align-items: center; flex-wrap: wrap; gap: 4px 7px; min-width: 0; }
+.re-climb-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+.re-climb-name { font-family: var(--font-body); font-size: 12.5px; font-weight: 700; color: var(--text-primary); }
+.re-climb-pos { font-family: var(--font-body); font-size: 11px; color: var(--text-muted); }
+.re-climb-stats { grid-area: stats; display: flex; flex-wrap: wrap; gap: 1px 9px; font-family: var(--font-body); font-size: 11px; color: var(--text-secondary); }
+.re-climb-stats b { color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.re-climb-btn { grid-area: btn; align-self: center; white-space: nowrap; }
+
+/* ─── Onglet Objectif ─── */
+.re-objective { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px 14px; margin-bottom: 12px; }
+.re-objective label { display: flex; flex-direction: column; gap: 4px; font-family: var(--font-body); font-size: 11.5px; color: var(--text-secondary); }
+.re-input-unit { display: inline-flex; align-items: center; gap: 5px; color: var(--text-muted); }
+.re-input-unit input { width: 78px; }
+
+/* Tableaux compacts (repères, variantes) dans la colonne latérale */
+.re-tab-panel .route-editor-climbs-table { font-size: 11.5px; }
+.re-tab-panel .route-editor-climbs-table th, .re-tab-panel .route-editor-climbs-table td { padding: 6px 6px; }
+.re-tab-panel .route-editor-strategy-card { margin-bottom: 12px; }
+.re-tab-panel .route-editor-strategy-table-wrap { margin: 0 -14px; padding: 0 14px; }
