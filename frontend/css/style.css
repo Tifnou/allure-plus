@@ -5707,3 +5707,12 @@ body { background: var(--bg) !important; }
 .admin-panel-title { margin: 0; font-family: var(--font); font-size: 15px; font-weight: 700; color: var(--text-primary); }
 .admin-panel-body { padding: 14px 16px 16px; }
 @media (max-width: 820px) { .admin-layout { grid-template-columns: 1fr; } .admin-nav { position: static; } }
+
+/* Admin : état « rien choisi » et utilisateur déplié mis en évidence */
+.admin-empty { padding: 36px 20px; text-align: center; font-family: var(--font-body); font-size: 13px; color: var(--text-secondary); background: var(--bg-white); border: 1px dashed var(--border); border-radius: var(--radius-md); }
+.admin-empty[hidden] { display: none; }
+.admin-users-name { font-weight: 600; color: var(--text-primary); }
+.admin-users-table tr.admin-users-row--selected > td { background: var(--accent-light); }
+.admin-users-table tr.admin-users-row--selected > td:first-child { box-shadow: inset 4px 0 0 var(--accent); }
+.admin-users-table tr.admin-users-detail-row--selected > td { background: var(--accent-light); box-shadow: inset 4px 0 0 var(--accent); border-bottom: 2px solid var(--accent); }
+.admin-users-detail-row--selected .admin-users-detail-item { background: var(--bg-white); }

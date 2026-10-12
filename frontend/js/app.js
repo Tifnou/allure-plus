@@ -4409,6 +4409,8 @@ function showAdminSection(id, persist = true) {
   const page = document.getElementById('page-admin');
   if (!page) return;
   page.querySelectorAll('.admin-panel').forEach(p => { p.hidden = p.dataset.section !== id; });
+  const empty = document.getElementById('admin-empty');
+  if (empty) empty.hidden = !!id;
   page.querySelectorAll('.admin-nav-item').forEach(b => {
     const on = b.dataset.section === id;
     b.classList.toggle('admin-nav-item--active', on);
@@ -4424,12 +4426,12 @@ function updateAdminToggleAllLabel() {
   const groups = [...document.querySelectorAll('#page-admin .admin-nav-group')];
   btn.textContent = groups.every(g => !g.classList.contains('admin-nav-group--closed')) ? 'Tout replier' : 'Tout déplier';
 }
-// À chaque arrivée sur la page Admin : tous les groupes repliés, section par défaut = Utilisateurs.
+// À chaque arrivée sur la page Admin : tous les groupes repliés, aucune section affichée.
 function resetAdminNav() {
   const page = document.getElementById('page-admin');
   if (!page || !page.dataset.sectionsWired) return;
   page.querySelectorAll('.admin-nav-group').forEach(g => setAdminGroupOpen(g, false, false));
-  showAdminSection('users', false);
+  showAdminSection(null, false);
   updateAdminToggleAllLabel();
 }
 function wireAdminSections() {
@@ -4452,7 +4454,7 @@ function wireAdminSections() {
     updateAdminToggleAllLabel();
   });
   const valid = [...page.querySelectorAll('.admin-nav-item')].map(b => b.dataset.section);
-  showAdminSection('users', false);
+  showAdminSection(null, false);
   page.querySelectorAll('.admin-nav-group').forEach(g => setAdminGroupOpen(g, false, false));
   updateAdminToggleAllLabel();
 }
@@ -4547,8 +4549,8 @@ async function loadAdminUsers() {
         <table class="admin-users-table">
           <thead>
             <tr>
+              <th>Utilisateur</th>
               <th>Compte</th>
-              <th>Nom Garmin</th>
               <th>1ère connexion</th>
               <th>Dernière connexion</th>
               <th>Version</th>
@@ -4560,8 +4562,8 @@ async function loadAdminUsers() {
           <tbody>
             ${users.map(u => `
               <tr class="admin-users-row-clickable ${u.blocked ? 'admin-users-row--blocked' : ''}" data-email="${escapeHtml(u.email)}">
-                <td class="admin-users-email"><span class="admin-users-chevron">&#9656;</span>${escapeHtml(u.email)}</td>
-                <td>${escapeHtml(u.displayName || '—')}</td>
+                <td class="admin-users-name"><span class="admin-users-chevron">&#9656;</span>${escapeHtml(u.displayName || '—')}</td>
+                <td class="admin-users-email">${escapeHtml(u.email)}</td>
                 <td>${formatDate(u.firstSeen)}</td>
                 <td>${formatDateTime(u.lastSeen)}</td>
                 <td class="admin-users-version" title="${u.appVersion ? 'Version d\'Allure+ installée' : 'Version inconnue : ancienne version ou pas encore reconnectée depuis la mise à jour'}">${u.appVersion ? 'v' + escapeHtml(u.appVersion) : '—'}</td>
@@ -4676,11 +4678,15 @@ async function toggleAdminUserDetail(row) {
   document.querySelectorAll('.admin-users-detail-panel--open').forEach(p => {
     if (p !== panel) {
       p.classList.remove('admin-users-detail-panel--open');
+      p.closest('tr').classList.remove('admin-users-detail-row--selected');
+      p.closest('tr').previousElementSibling?.classList.remove('admin-users-row--selected');
       p.closest('tr').previousElementSibling?.querySelector('.admin-users-chevron')?.classList.remove('admin-users-chevron--open');
     }
   });
 
   panel.classList.toggle('admin-users-detail-panel--open', !isOpen);
+  row.classList.toggle('admin-users-row--selected', !isOpen);
+  detailRow.classList.toggle('admin-users-detail-row--selected', !isOpen);
   row.querySelector('.admin-users-chevron')?.classList.toggle('admin-users-chevron--open', !isOpen);
 
   if (!isOpen && !panel.dataset.loaded) {
