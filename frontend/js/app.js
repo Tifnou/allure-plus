@@ -277,7 +277,7 @@ function navigateTo(pageId) {
   if (pageId === 'health')     renderHealthPage();
   if (pageId === 'stats')      renderStatsPage();
   if (pageId === 'profile')    renderProfile();
-  if (pageId === 'admin')      { loadAdminInfo(); loadAdminLogs(); loadAdminUsers(); if (typeof loadAdminSeasons === 'function') loadAdminSeasons(); }
+  if (pageId === 'admin')      { wireAdminSections(); resetAdminNav(); loadAdminInfo(); loadAdminLogs(); loadAdminUsers(); if (typeof loadAdminSeasons === 'function') loadAdminSeasons(); }
   if (pageId === 'support-admin' && typeof loadSupportAdminPage === 'function') loadSupportAdminPage();
   if (pageId === 'goals')      { if (typeof loadGoalsPage === 'function') loadGoalsPage(); }
   if (pageId === 'routes')     { if (typeof initRoutesPage === 'function') initRoutesPage(); }
@@ -4404,7 +4404,6 @@ function setAdminGroupOpen(group, open, persist = true) {
   const head = group.querySelector('.admin-nav-group-head');
   group.classList.toggle('admin-nav-group--closed', !open);
   head.setAttribute('aria-expanded', open ? 'true' : 'false');
-  if (persist) { const st = adminNavState(); st.groups = st.groups || {}; st.groups[group.dataset.group] = open; saveAdminNavState(st); }
 }
 function showAdminSection(id, persist = true) {
   const page = document.getElementById('page-admin');
@@ -4417,8 +4416,7 @@ function showAdminSection(id, persist = true) {
   });
   // l'entrée active doit rester visible : on déplie son groupe
   const g = page.querySelector('.admin-nav-item--active')?.closest('.admin-nav-group');
-  if (g && g.classList.contains('admin-nav-group--closed')) setAdminGroupOpen(g, true, persist);
-  if (persist) { const st = adminNavState(); st.active = id; saveAdminNavState(st); }
+  if (g && persist && g.classList.contains('admin-nav-group--closed')) setAdminGroupOpen(g, true, false);
 }
 function updateAdminToggleAllLabel() {
   const btn = document.getElementById('admin-toggle-all');
@@ -4426,13 +4424,21 @@ function updateAdminToggleAllLabel() {
   const groups = [...document.querySelectorAll('#page-admin .admin-nav-group')];
   btn.textContent = groups.every(g => !g.classList.contains('admin-nav-group--closed')) ? 'Tout replier' : 'Tout déplier';
 }
+// À chaque arrivée sur la page Admin : tous les groupes repliés, section par défaut = Utilisateurs.
+function resetAdminNav() {
+  const page = document.getElementById('page-admin');
+  if (!page || !page.dataset.sectionsWired) return;
+  page.querySelectorAll('.admin-nav-group').forEach(g => setAdminGroupOpen(g, false, false));
+  showAdminSection('users', false);
+  updateAdminToggleAllLabel();
+}
 function wireAdminSections() {
   const page = document.getElementById('page-admin');
   if (!page || page.dataset.sectionsWired) return;
   page.dataset.sectionsWired = '1';
   const st = adminNavState();
   page.querySelectorAll('.admin-nav-group').forEach(g => {
-    setAdminGroupOpen(g, !(st.groups && st.groups[g.dataset.group] === false), false);
+    setAdminGroupOpen(g, false, false);
     g.querySelector('.admin-nav-group-head').addEventListener('click', () => {
       setAdminGroupOpen(g, g.classList.contains('admin-nav-group--closed'));
       updateAdminToggleAllLabel();
@@ -4446,7 +4452,8 @@ function wireAdminSections() {
     updateAdminToggleAllLabel();
   });
   const valid = [...page.querySelectorAll('.admin-nav-item')].map(b => b.dataset.section);
-  showAdminSection(valid.includes(st.active) ? st.active : 'users', false);
+  showAdminSection('users', false);
+  page.querySelectorAll('.admin-nav-group').forEach(g => setAdminGroupOpen(g, false, false));
   updateAdminToggleAllLabel();
 }
 // Résumé affiché dans l'en-tête de section (visible replié).
@@ -4729,13 +4736,12 @@ function renderAdminUserDetail(d) {
   } else if (d.plan?.type === 'free') planLabel = 'Séances libres (par défaut)';
   else if (d.plan?.type === 'campus') planLabel = 'Plan Campus Coach';
   else if (d.plan?.type === 'default') planLabel = 'Plan par défaut Allure+';
-  items.push({ label: 'Plan suivi', value: planLabel + (planSub ? `<br>${planSub}` : '') });
-
-  items.push({ label: 'Assiduité course', value: d.adherenceCardio != null ? d.adherenceCardio + '%' : '—', color: adminAssiduityColor(d.adherenceCardio) });
-  items.push({ label: 'Assiduité renfo', value: d.adherenceStrength != null ? d.adherenceStrength + '%' : '—', color: adminAssiduityColor(d.adherenceStrength) });
+  items.push({ label: 'Course', value: d.adherenceCardio != null ? d.adherenceCardio + '%' : '—', color: adminAssiduityColor(d.adherenceCardio), title: 'Assiduité aux séances de course' });
+  items.push({ label: 'Renfo', value: d.adherenceStrength != null ? d.adherenceStrength + '%' : '—', color: adminAssiduityColor(d.adherenceStrength), title: 'Assiduité aux séances de renforcement' });
+  items.push({ label: 'Plan suivi', value: planLabel + (planSub ? ` ${planSub}` : ''), wide: true });
 
   return `<div class="admin-users-detail-grid">${items.map(i => `
-    <div class="admin-users-detail-item">
+    <div class="admin-users-detail-item${i.wide ? ' admin-users-detail-item--wide' : ''}"${i.title ? ` title="${i.title}"` : ''}>
       <div class="admin-users-detail-label">${i.label}</div>
       <div class="admin-users-detail-value"${i.color ? ` style="color:${i.color}"` : ''}>${i.value}</div>
     </div>`).join('')}</div>`;
