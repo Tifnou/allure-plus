@@ -16,7 +16,7 @@
   <script>window.CESIUM_BASE_URL = 'https://cdn.jsdelivr.net/npm/cesium@1.120.0/Build/Cesium/';</script>
   <script src="https://cdn.jsdelivr.net/npm/cesium@1.120.0/Build/Cesium/Cesium.js"></script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cesium@1.120.0/Build/Cesium/Widgets/widgets.css" />
-  <link rel="stylesheet" href="css/style.css?v=1789488270018" />
+  <link rel="stylesheet" href="css/style.css?v=1789488270019" />
   <link rel="stylesheet" href="css/seasons.css?v=1790000000004" />
   <link rel="stylesheet" href="css/plans.css?v=1787132767394" />
   <link rel="stylesheet" href="css/routes.css?v=1787650000004" />
@@ -1340,95 +1340,122 @@
       <div class="admin-status-strip" id="admin-status-strip">
         <span class="admin-status-strip-dot" id="admin-strip-dot"></span>
         <span id="admin-strip-text">Chargement…</span>
-        <button class="admin-diag-toggle" id="admin-toggle-all" type="button">Tout déplier</button>
+        <button class="admin-diag-toggle" id="admin-toggle-all" type="button">Tout replier</button>
       </div>
 
-      <!-- ══ COMPTES ══ -->
-      <h2 class="admin-group-title">Comptes</h2>
-      <section class="card admin-section" data-section="users">
-        <button class="admin-section-head" type="button" aria-expanded="false" aria-controls="admin-sec-users">
-          <span class="admin-section-icon">&#x1F465;</span>
-          <span class="admin-section-title">Utilisateurs</span>
-          <span class="admin-section-meta" id="admin-meta-users"></span>
-          <span class="admin-section-chev" aria-hidden="true">&#9662;</span>
-        </button>
-        <div class="admin-section-body" id="admin-sec-users" hidden>
-          <!-- Répertoire des comptes ayant déjà lancé Allure+ (seule visibilité
-               possible sur une appli distribuée en .exe) - voir server.js
-               checkUserDirectory / support-relay routes /users/*. -->
-          <div id="admin-users-table"><div class="table-loading">Chargement…</div></div>
-        </div>
-      </section>
-
-      <!-- ══ APPARENCE ══ -->
-      <h2 class="admin-group-title">Apparence</h2>
-      <section class="card admin-section" data-section="seasons">
-        <button class="admin-section-head" type="button" aria-expanded="false" aria-controls="admin-sec-seasons">
-          <span class="admin-section-icon">&#x1F3A8;</span>
-          <span class="admin-section-title">Thèmes de saison</span>
-          <span class="admin-section-meta" id="admin-meta-seasons"></span>
-          <span class="admin-section-chev" aria-hidden="true">&#9662;</span>
-        </button>
-        <div class="admin-section-body" id="admin-sec-seasons" hidden>
-          <!-- Tester, programmer, forcer, publier (calendrier partagé via le dépôt Git) : themes.js -->
-          <div id="admin-seasons"><div class="table-loading">Chargement…</div></div>
-        </div>
-      </section>
-
-      <!-- ══ RÉFÉRENCE ══ -->
-      <h2 class="admin-group-title">Référence</h2>
-      <section class="card admin-section" data-section="dplus">
-        <button class="admin-section-head" type="button" aria-expanded="false" aria-controls="admin-sec-dplus">
-          <span class="admin-section-icon">&#x26F0;&#xFE0F;</span>
-          <span class="admin-section-title">Référence D+ trail</span>
-          <span class="admin-section-meta">pour la création de plans</span>
-          <span class="admin-section-chev" aria-hidden="true">&#9662;</span>
-        </button>
-        <div class="admin-section-body" id="admin-sec-dplus" hidden>
-          <div id="admin-dplus-tiers"><div class="table-loading">Chargement…</div></div>
-        </div>
-      </section>
-
-      <!-- ══ SYSTÈME ══ -->
-      <h2 class="admin-group-title">Système</h2>
-      <section class="card admin-section" data-section="system">
-        <button class="admin-section-head" type="button" aria-expanded="false" aria-controls="admin-sec-system">
-          <span class="admin-section-icon">&#x1F5A5;&#xFE0F;</span>
-          <span class="admin-section-title">Serveur et connexions</span>
-          <span class="admin-section-meta" id="admin-meta-system"></span>
-          <span class="admin-section-chev" aria-hidden="true">&#9662;</span>
-        </button>
-        <div class="admin-section-body" id="admin-sec-system" hidden>
-          <div class="admin-twocol">
-            <div>
-              <div class="admin-subtitle">Serveur</div>
-              <div id="admin-server-info"><div class="table-loading">Chargement…</div></div>
-              <button class="btn-admin-action" id="restart-btn">&#x1F504; Redémarrer le serveur</button>
-            </div>
-            <div>
-              <div class="admin-subtitle">Connexions</div>
-              <div id="admin-connections"><div class="table-loading">Chargement…</div></div>
-              <button class="btn-admin-action" id="admin-refresh-data-btn" onclick="refreshAll()" style="border-color:var(--accent);background:var(--accent-light);color:var(--accent-text)">
-                &#x1F504; Actualiser les données
-              </button>
+      <!-- Navigation à gauche en groupes repliables, un seul panneau à droite
+           (wireAdminSections, app.js) : groupe replié/déplié et section active
+           mémorisés. Les loaders chargent tout en arrière-plan ; setAdminSectionMeta
+           écrit le résumé dans #admin-meta-<id> (sous l'entrée du menu). -->
+      <div class="admin-layout">
+        <nav class="card admin-nav" aria-label="Sections d'administration">
+          <div class="admin-nav-group" data-group="comptes">
+            <button type="button" class="admin-nav-group-head" aria-expanded="true">
+              <span class="admin-nav-group-label">Comptes</span><span class="admin-section-chev" aria-hidden="true">&#9662;</span>
+            </button>
+            <div class="admin-nav-items">
+            <button type="button" class="admin-nav-item" data-section="users">
+              <span class="admin-nav-icon">&#x1F465;</span>
+              <span class="admin-nav-label">Utilisateurs</span>
+              <span class="admin-nav-meta" id="admin-meta-users"></span>
+            </button>
             </div>
           </div>
-        </div>
-      </section>
-
-      <section class="card admin-section" data-section="logs">
-        <button class="admin-section-head" type="button" aria-expanded="false" aria-controls="admin-sec-logs">
-          <span class="admin-section-icon">&#x1F4CB;</span>
-          <span class="admin-section-title">Logs serveur</span>
-          <span class="admin-section-chev" aria-hidden="true">&#9662;</span>
-        </button>
-        <div class="admin-section-body" id="admin-sec-logs" hidden>
-          <div style="text-align:right;margin-bottom:8px">
-            <button class="btn-admin-refresh" id="admin-refresh-logs" onclick="loadAdminLogs()">&#x21BB; Rafraîchir</button>
+          <div class="admin-nav-group" data-group="apparence">
+            <button type="button" class="admin-nav-group-head" aria-expanded="true">
+              <span class="admin-nav-group-label">Apparence</span><span class="admin-section-chev" aria-hidden="true">&#9662;</span>
+            </button>
+            <div class="admin-nav-items">
+            <button type="button" class="admin-nav-item" data-section="seasons">
+              <span class="admin-nav-icon">&#x1F3A8;</span>
+              <span class="admin-nav-label">Thèmes de saison</span>
+              <span class="admin-nav-meta" id="admin-meta-seasons"></span>
+            </button>
+            </div>
           </div>
-          <div class="admin-logs-pre" id="admin-logs-content">Chargement…</div>
+          <div class="admin-nav-group" data-group="reference">
+            <button type="button" class="admin-nav-group-head" aria-expanded="true">
+              <span class="admin-nav-group-label">Référence</span><span class="admin-section-chev" aria-hidden="true">&#9662;</span>
+            </button>
+            <div class="admin-nav-items">
+            <button type="button" class="admin-nav-item" data-section="dplus">
+              <span class="admin-nav-icon">&#x26F0;&#xFE0F;</span>
+              <span class="admin-nav-label">D+ trail</span>
+              <span class="admin-nav-meta" id="admin-meta-dplus"></span>
+            </button>
+            </div>
+          </div>
+          <div class="admin-nav-group" data-group="systeme">
+            <button type="button" class="admin-nav-group-head" aria-expanded="true">
+              <span class="admin-nav-group-label">Système</span><span class="admin-section-chev" aria-hidden="true">&#9662;</span>
+            </button>
+            <div class="admin-nav-items">
+            <button type="button" class="admin-nav-item" data-section="system">
+              <span class="admin-nav-icon">&#x1F5A5;&#xFE0F;</span>
+              <span class="admin-nav-label">Serveur et connexions</span>
+              <span class="admin-nav-meta" id="admin-meta-system"></span>
+            </button>
+            <button type="button" class="admin-nav-item" data-section="logs">
+              <span class="admin-nav-icon">&#x1F4CB;</span>
+              <span class="admin-nav-label">Logs serveur</span>
+              <span class="admin-nav-meta" id="admin-meta-logs"></span>
+            </button>
+            </div>
+          </div>
+        </nav>
+        <div class="admin-panels">
+        <section class="card admin-panel" data-section="users" id="admin-panel-users" hidden>
+          <header class="admin-panel-head"><span class="admin-section-icon">&#x1F465;</span><h2 class="admin-panel-title">Utilisateurs</h2></header>
+          <div class="admin-panel-body">
+        <!-- Répertoire des comptes ayant déjà lancé Allure+ (seule visibilité
+             possible sur une appli distribuée en .exe) - voir server.js
+             checkUserDirectory / support-relay routes /users/*. -->
+        <div id="admin-users-table"><div class="table-loading">Chargement…</div></div>
+          </div>
+        </section>
+        <section class="card admin-panel" data-section="seasons" id="admin-panel-seasons" hidden>
+          <header class="admin-panel-head"><span class="admin-section-icon">&#x1F3A8;</span><h2 class="admin-panel-title">Thèmes de saison</h2></header>
+          <div class="admin-panel-body">
+        <!-- Tester, programmer, forcer, publier (calendrier partagé via le dépôt Git) : themes.js -->
+        <div id="admin-seasons"><div class="table-loading">Chargement…</div></div>
+          </div>
+        </section>
+        <section class="card admin-panel" data-section="dplus" id="admin-panel-dplus" hidden>
+          <header class="admin-panel-head"><span class="admin-section-icon">&#x26F0;&#xFE0F;</span><h2 class="admin-panel-title">Référence D+ trail</h2></header>
+          <div class="admin-panel-body">
+        <div id="admin-dplus-tiers"><div class="table-loading">Chargement…</div></div>
+          </div>
+        </section>
+        <section class="card admin-panel" data-section="system" id="admin-panel-system" hidden>
+          <header class="admin-panel-head"><span class="admin-section-icon">&#x1F5A5;&#xFE0F;</span><h2 class="admin-panel-title">Serveur et connexions</h2></header>
+          <div class="admin-panel-body">
+        <div class="admin-twocol">
+          <div>
+            <div class="admin-subtitle">Serveur</div>
+            <div id="admin-server-info"><div class="table-loading">Chargement…</div></div>
+            <button class="btn-admin-action" id="restart-btn">&#x1F504; Redémarrer le serveur</button>
+          </div>
+          <div>
+            <div class="admin-subtitle">Connexions</div>
+            <div id="admin-connections"><div class="table-loading">Chargement…</div></div>
+            <button class="btn-admin-action" id="admin-refresh-data-btn" onclick="refreshAll()" style="border-color:var(--accent);background:var(--accent-light);color:var(--accent-text)">
+              &#x1F504; Actualiser les données
+            </button>
+          </div>
         </div>
-      </section>
+          </div>
+        </section>
+        <section class="card admin-panel" data-section="logs" id="admin-panel-logs" hidden>
+          <header class="admin-panel-head"><span class="admin-section-icon">&#x1F4CB;</span><h2 class="admin-panel-title">Logs serveur</h2></header>
+          <div class="admin-panel-body">
+        <div style="text-align:right;margin-bottom:8px">
+          <button class="btn-admin-refresh" id="admin-refresh-logs" onclick="loadAdminLogs()">&#x21BB; Rafraîchir</button>
+        </div>
+        <div class="admin-logs-pre" id="admin-logs-content">Chargement…</div>
+          </div>
+        </section>
+        </div>
+      </div>
     </div>
 
     <!-- 📌 PAGE : CENTRE DE SUPPORT (admin) 📌 -->
@@ -1467,7 +1494,7 @@
     <span class="support-fab-dot" id="support-fab-dot" style="display:none"></span>
   </button>
 
-  <script src="js/app.js?v=1789488240013"></script>
+  <script src="js/app.js?v=1789488240014"></script>
   <script src="js/season_scenes.js?v=1790000000004"></script>
   <script src="js/themes.js?v=1790000000004"></script>
   <script src="js/gear.js?v=1786459105634"></script>

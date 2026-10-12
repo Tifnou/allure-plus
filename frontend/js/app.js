@@ -4393,46 +4393,60 @@ async function loadPref2State() {
 // 20/08), puis l'état de chacune est mémorisé. Le contenu se charge quand même
 // en arrière-plan (les loaders ne dépendent pas de la visibilité) ; un résumé
 // (setAdminSectionMeta) reste visible dans l'en-tête quand la section est repliée.
-const ADMIN_SECTIONS_LS = 'allure_admin_sections';
-function adminSectionsState() {
-  try { return JSON.parse(localStorage.getItem(ADMIN_SECTIONS_LS) || '{}') || {}; } catch (e) { return {}; }
+const ADMIN_NAV_LS = 'allure_admin_nav';
+function adminNavState() {
+  try { return JSON.parse(localStorage.getItem(ADMIN_NAV_LS) || '{}') || {}; } catch (e) { return {}; }
 }
-function setAdminSectionOpen(sec, open, persist = true) {
-  const head = sec.querySelector('.admin-section-head');
-  const body = sec.querySelector('.admin-section-body');
-  if (!head || !body) return;
-  body.hidden = !open;
+function saveAdminNavState(st) {
+  try { localStorage.setItem(ADMIN_NAV_LS, JSON.stringify(st)); } catch (e) { /* silencieux */ }
+}
+function setAdminGroupOpen(group, open, persist = true) {
+  const head = group.querySelector('.admin-nav-group-head');
+  group.classList.toggle('admin-nav-group--closed', !open);
   head.setAttribute('aria-expanded', open ? 'true' : 'false');
-  sec.classList.toggle('admin-section--open', open);
-  if (persist) {
-    const st = adminSectionsState(); st[sec.dataset.section] = open;
-    try { localStorage.setItem(ADMIN_SECTIONS_LS, JSON.stringify(st)); } catch (e) { /* silencieux */ }
-  }
+  if (persist) { const st = adminNavState(); st.groups = st.groups || {}; st.groups[group.dataset.group] = open; saveAdminNavState(st); }
+}
+function showAdminSection(id, persist = true) {
+  const page = document.getElementById('page-admin');
+  if (!page) return;
+  page.querySelectorAll('.admin-panel').forEach(p => { p.hidden = p.dataset.section !== id; });
+  page.querySelectorAll('.admin-nav-item').forEach(b => {
+    const on = b.dataset.section === id;
+    b.classList.toggle('admin-nav-item--active', on);
+    b.setAttribute('aria-current', on ? 'true' : 'false');
+  });
+  // l'entrée active doit rester visible : on déplie son groupe
+  const g = page.querySelector('.admin-nav-item--active')?.closest('.admin-nav-group');
+  if (g && g.classList.contains('admin-nav-group--closed')) setAdminGroupOpen(g, true, persist);
+  if (persist) { const st = adminNavState(); st.active = id; saveAdminNavState(st); }
 }
 function updateAdminToggleAllLabel() {
   const btn = document.getElementById('admin-toggle-all');
   if (!btn) return;
-  const secs = [...document.querySelectorAll('#page-admin .admin-section')];
-  btn.textContent = secs.every(s => s.classList.contains('admin-section--open')) ? 'Tout replier' : 'Tout déplier';
+  const groups = [...document.querySelectorAll('#page-admin .admin-nav-group')];
+  btn.textContent = groups.every(g => !g.classList.contains('admin-nav-group--closed')) ? 'Tout replier' : 'Tout déplier';
 }
 function wireAdminSections() {
   const page = document.getElementById('page-admin');
   if (!page || page.dataset.sectionsWired) return;
   page.dataset.sectionsWired = '1';
-  const st = adminSectionsState();
-  page.querySelectorAll('.admin-section').forEach(sec => {
-    setAdminSectionOpen(sec, st[sec.dataset.section] === true, false);
-    sec.querySelector('.admin-section-head').addEventListener('click', () => {
-      setAdminSectionOpen(sec, !sec.classList.contains('admin-section--open'));
+  const st = adminNavState();
+  page.querySelectorAll('.admin-nav-group').forEach(g => {
+    setAdminGroupOpen(g, !(st.groups && st.groups[g.dataset.group] === false), false);
+    g.querySelector('.admin-nav-group-head').addEventListener('click', () => {
+      setAdminGroupOpen(g, g.classList.contains('admin-nav-group--closed'));
       updateAdminToggleAllLabel();
     });
   });
+  page.querySelectorAll('.admin-nav-item').forEach(b => b.addEventListener('click', () => showAdminSection(b.dataset.section)));
   document.getElementById('admin-toggle-all')?.addEventListener('click', () => {
-    const secs = [...page.querySelectorAll('.admin-section')];
-    const openAll = !secs.every(s => s.classList.contains('admin-section--open'));
-    secs.forEach(s => setAdminSectionOpen(s, openAll));
+    const groups = [...page.querySelectorAll('.admin-nav-group')];
+    const openAll = !groups.every(g => !g.classList.contains('admin-nav-group--closed'));
+    groups.forEach(g => setAdminGroupOpen(g, openAll));
     updateAdminToggleAllLabel();
   });
+  const valid = [...page.querySelectorAll('.admin-nav-item')].map(b => b.dataset.section);
+  showAdminSection(valid.includes(st.active) ? st.active : 'users', false);
   updateAdminToggleAllLabel();
 }
 // Résumé affiché dans l'en-tête de section (visible replié).
