@@ -4530,6 +4530,7 @@ async function loadAdminUsers() {
               <th>Nom Garmin</th>
               <th>1ère connexion</th>
               <th>Dernière connexion</th>
+              <th>Version</th>
               <th>Accès tickets</th>
               <th>Export Excel</th>
               <th>Accès Allure+</th>
@@ -4542,6 +4543,7 @@ async function loadAdminUsers() {
                 <td>${escapeHtml(u.displayName || '—')}</td>
                 <td>${formatDate(u.firstSeen)}</td>
                 <td>${formatDateTime(u.lastSeen)}</td>
+                <td class="admin-users-version" title="${u.appVersion ? 'Version d\'Allure+ installée' : 'Version inconnue : ancienne version ou pas encore reconnectée depuis la mise à jour'}">${u.appVersion ? 'v' + escapeHtml(u.appVersion) : '—'}</td>
                 <td>
                   <label class="admin-users-checkbox" onclick="event.stopPropagation()">
                     <input type="checkbox" data-email="${escapeHtml(u.email)}" data-field="ticketAccess" ${u.ticketAccess !== false ? 'checked' : ''} title="Peut prendre jusqu'à 2 minutes pour s'appliquer si ce compte est déjà connecté">
@@ -4559,7 +4561,7 @@ async function loadAdminUsers() {
                 </td>
               </tr>
               <tr class="admin-users-detail-row">
-                <td colspan="7">
+                <td colspan="8">
                   <div class="admin-users-detail-panel"></div>
                 </td>
               </tr>`).join('')}

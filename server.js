@@ -1131,7 +1131,7 @@ async function checkUserDirectory(email, displayName) {
     const isAdmin = (email || '').toLowerCase() === ADMIN_EMAIL.toLowerCase();
     const data = await callSupportRelay('/users/ping', {
       method: 'POST',
-      body: JSON.stringify({ email, displayName, isAdmin, clientKey: SUPPORT_CLIENT_KEY }),
+      body: JSON.stringify({ email, displayName, isAdmin, appVersion: APP_VERSION, clientKey: SUPPORT_CLIENT_KEY }),
     });
     if (data.blocked) {
       const err = new Error("Accès à Allure+ suspendu pour ce compte. Contactez l'administrateur.");

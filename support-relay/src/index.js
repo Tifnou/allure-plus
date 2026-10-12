@@ -362,6 +362,8 @@ async function handleUserPing(req, env) {
   const record = existing || { email, firstSeen: now, blocked: false, ticketAccess: !!body.isAdmin, xlsxExportAccess: !!body.isAdmin };
   record.lastSeen = now;
   if (displayName) record.displayName = displayName;
+  // Version d'Allure+ installee (signalee par les clients recents ; absente = ancienne version)
+  if (body.appVersion) record.appVersion = String(body.appVersion).slice(0, 20).trim();
   await env.USERS_KV.put(key, JSON.stringify(record));
   return json({ blocked: !!record.blocked, ticketAccess: record.ticketAccess !== false, xlsxExportAccess: !!record.xlsxExportAccess });
 }
