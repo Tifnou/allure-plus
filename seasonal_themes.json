@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updatedAt": "2026-10-10T16:34:16.509Z",
+  "updatedAt": "2026-10-12T06:27:02.638Z",
   "force": null,
   "themes": [
     {
@@ -18,7 +18,7 @@
     {
       "id": "saint-valentin",
       "enabled": true,
-      "start": "02-12",
+      "start": "02-13",
       "end": "02-15"
     }
   ]
