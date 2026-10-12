@@ -696,6 +696,27 @@ function drawRouteEditorTrack() {
   }
 }
 
+// Répartition de la distance par raideur (voir gradeBuckets, gpx_parser.js).
+// Renvoie null si la section n'a pas ces données (ancienne variante en mémoire).
+function routeEditorSteepInfo(item) {
+  const edges = _routeEditorData?.stats?.gradeBucketEdges || [10, 20, 30, 40];
+  const b = item && item.gradeBuckets;
+  if (!b || b.length !== edges.length + 1) return null;
+  const total = b.reduce((a, v) => a + v, 0) || 1;
+  const above = k => b.slice(k + 1).reduce((a, v) => a + v, 0); // distance dont la pente est >= edges[k]
+  // seuil le plus élevé réellement atteint : "≥ 40 % sur 100 m"
+  let top = null;
+  for (let k = edges.length - 1; k >= 0; k--) { if (above(k) > 0) { top = { edge: edges[k], distM: above(k) }; break; } }
+  const labels = b.map((_, k) => k === 0 ? `< ${edges[0]} %` : k === edges.length ? `≥ ${edges[k - 1]} %` : `${edges[k - 1]}–${edges[k]} %`);
+  const fmt = m => m >= 1000 ? (m / 1000).toFixed(2).replace('.', ',') + ' km' : m + ' m';
+  const detail = b.map((m, k) => `${labels[k]} : ${fmt(m)} (${Math.round(m / total * 100)} %)`).join('\n');
+  return { buckets: b, total, top, detail, edges };
+}
+const ROUTE_EDITOR_BUCKET_COLORS = {
+  climb: ['#fecaca', '#fca5a5', '#f87171', '#ef4444', '#991b1b'],
+  descent: ['#bfdbfe', '#93c5fd', '#60a5fa', '#3b82f6', '#1e3a8a'],
+};
+
 const routeEditorFmtGrade = v => String(v.toFixed(1)).replace('-', '−').replace('.', ',');
 
 // Applique l'état de mise en évidence partout (carte, profil, liste, bandeau).
@@ -717,11 +738,14 @@ function applyRouteEditorFocus() {
   if (note) {
     if (!f) { note.innerHTML = ''; note.style.display = 'none'; return; }
     const c = f.item, isDesc = f.kind === 'descent';
+    const steep = routeEditorSteepInfo(c);
+    const steepSentence = steep && steep.top
+      ? ` · <b>≥ ${steep.top.edge} % sur ${steep.top.distM} m</b> (${Math.round(steep.top.distM / steep.total * 100)} % de la ${isDesc ? 'descente' : 'côte'})` : '';
     note.style.display = '';
     note.style.setProperty('--focus-color', f.color);
     note.innerHTML = `
       <span class="re-focus-swatch" aria-hidden="true"></span>
-      <span class="re-focus-text"><b>${isDesc ? 'Descente' : 'Côte'} ${_routeEditorFocus.idx + 1}</b> — km ${c.startKm.toFixed(1)} → ${c.endKm.toFixed(1)} · ${isDesc ? '−' + c.lossM : '+' + c.gainM} m · ${routeEditorFmtGrade(c.avgGradePct)} % moy. · ${routeEditorFmtGrade(c.maxGradePct)} % max</span>
+      <span class="re-focus-text"><b>${isDesc ? 'Descente' : 'Côte'} ${_routeEditorFocus.idx + 1}</b> — km ${c.startKm.toFixed(1)} → ${c.endKm.toFixed(1)} · ${isDesc ? '−' + c.lossM : '+' + c.gainM} m · ${routeEditorFmtGrade(c.avgGradePct)} % moy. · ${routeEditorFmtGrade(c.maxGradePct)} % max (sur ~50 m)${steepSentence}</span>
       <button type="button" class="re-focus-clear" id="route-editor-focus-clear">✕ Afficher toutes les pentes</button>`;
     const clear = el('route-editor-focus-clear');
     if (clear) clear.onclick = () => setRouteEditorFocus(null);
@@ -810,6 +834,13 @@ function renderRouteEditorClimbsList() {
     const bracket = isDesc ? null : brackets.find(b => c.startKm <= b.endKm && c.endKm >= b.startKm);
     const badge = bracket ? `<span class="route-editor-repeat-badge" style="background:${bracket.color}">répétée ×${bracket.totalPasses}</span>` : '';
     const focused = _routeEditorFocus && _routeEditorFocus.kind === kind && _routeEditorFocus.idx === i;
+    const steep = routeEditorSteepInfo(c);
+    const colors = ROUTE_EDITOR_BUCKET_COLORS[kind];
+    const steepHtml = steep ? `
+        <div class="re-steep" title="Répartition de la distance par raideur — le « max » ne porte que sur un tronçon d'environ 50 m :&#10;${steep.detail}">
+          <span class="re-steep-text">${steep.top ? `dont <b>${steep.top.distM} m</b> à ≥ ${steep.top.edge} %` : `aucun passage ≥ ${steep.edges[0]} %`}</span>
+          <span class="re-gradebar" aria-hidden="true">${steep.buckets.map((m, k) => m > 0 ? `<span style="flex:${m};background:${colors[k]}"></span>` : '').join('')}</span>
+        </div>` : '';
     return `
       <div class="re-climb${focused ? ' re-climb--focus' : ''}${isDesc ? ' re-climb--descent' : ''}" data-kind="${kind}" data-idx="${i}" title="Cliquez pour voir où se trouve cette ${isDesc ? 'descente' : 'côte'} sur la carte et le profil"${bracket ? ` style="background:${bracket.color}1f"` : ''}>
         <div class="re-climb-head">
@@ -822,7 +853,7 @@ function renderRouteEditorClimbsList() {
           <span class="re-stat${hl('deniv')}"><b>${isDesc ? '−' + c.lossM : '+' + c.gainM}</b> m</span>
           <span class="re-stat${hl('pente')}"><b>${routeEditorFmtGrade(c.avgGradePct)}</b> % moy.</span>
           <span><b>${routeEditorFmtGrade(c.maxGradePct)}</b> % max</span>
-        </div>
+        </div>${steepHtml}
         <button type="button" class="route-editor-climb-repeat-btn re-climb-btn" data-kind="${kind}" data-idx="${i}" title="${isDesc ? 'Pose A et B aux bornes de cette descente (la recalculer, y ajouter un point de passage…)' : 'Sélectionne cette côte comme section à répéter'}">${isDesc ? '📍 Section A→B' : '🔁 Répéter'}</button>
       </div>`;
   }).join('');

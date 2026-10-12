@@ -615,7 +615,7 @@
 .re-sort-btn.active { background: var(--accent-light); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
 .re-climbs { display: flex; flex-direction: column; gap: 6px; max-height: 560px; overflow-y: auto; padding-right: 2px; }
 .re-climb {
-  display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "head btn" "stats btn";
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "head btn" "stats btn" "steep steep";
   gap: 3px 10px; padding: 8px 10px; border: 1px solid var(--border-light); border-radius: var(--radius-sm); background: var(--bg);
 }
 .re-climb-head { grid-area: head; display: flex; align-items: center; flex-wrap: wrap; gap: 4px 7px; min-width: 0; }
@@ -676,3 +676,10 @@
 .re-kind-btn:hover { background: var(--bg-hover); }
 .re-kind-btn.active { background: var(--accent-light); color: var(--accent-text); }
 .re-kind-btn .re-count { font-weight: 600; }
+
+/* ─── Répartition de la distance par raideur (sous les chiffres d'une côte/descente) ─── */
+.re-steep { grid-area: steep; display: flex; align-items: center; gap: 8px; margin-top: 3px; }
+.re-steep-text { flex-shrink: 0; font-family: var(--font-body); font-size: 10.5px; color: var(--text-muted); white-space: nowrap; }
+.re-steep-text b { color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.re-gradebar { display: flex; flex: 1; min-width: 40px; height: 6px; border-radius: 3px; overflow: hidden; background: var(--border-light); }
+.re-gradebar > span { display: block; height: 100%; }

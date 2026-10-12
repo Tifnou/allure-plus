@@ -57,6 +57,23 @@ const CLIMB_GRADE_PCT = 3;
 const DESCENT_GRADE_PCT = -3;
 const BIN_SIZE_M = 50;
 
+// Classes de raideur (|pente| en %) pour la repartition de la distance d'une
+// cote/descente : <10, 10-20, 20-30, 30-40, >=40. La "pente max" d'une section
+// est celle d'un SEUL troncon de ~BIN_SIZE_M : sans cette repartition, on ne sait
+// pas si elle dure 50 m ou 500 m (retour utilisateur). Les bornes sont aussi
+// exposees au client (stats.gradeBucketEdges) : une seule source de verite.
+const GRADE_BUCKET_EDGES = [10, 20, 30, 40];
+function gradeBuckets(bins) {
+  const out = new Array(GRADE_BUCKET_EDGES.length + 1).fill(0);
+  bins.forEach(b => {
+    const g = Math.abs(b.gradePct);
+    let k = 0;
+    while (k < GRADE_BUCKET_EDGES.length && g >= GRADE_BUCKET_EDGES[k]) k++;
+    out[k] += b.distM;
+  });
+  return out.map(Math.round);
+}
+
 // Seuil minimal (m) avant de valider une montee/descente comme "reelle" -
 // meme principe (algorithme a hysteresis/seuil) que la plupart des outils
 // GPS/fitness grand public (Garmin, Strava...) pour calculer un D+ total :
@@ -201,6 +218,7 @@ function computeElevationProfile(points) {
     maxDescentGradePct: maxDescentBin ? Math.round(maxDescentBin.gradePct * 10) / 10 : 0,
     climbs,
     descents,
+    gradeBucketEdges: GRADE_BUCKET_EDGES,
     // Bins conserves (index dans le trace sous-echantillonne, pas le trace
     // brut original) pour la coloration par pente de la carte/du graphique
     // cote client (cf renderGoalProfileModal, campus.js) - recalcules par
@@ -245,6 +263,7 @@ function groupClimbs(bins, points, cumKm) {
       gainM: Math.round(gainM),
       avgGradePct: Math.round(avgGradePct * 10) / 10,
       maxGradePct: Math.round(maxGradePct * 10) / 10,
+      gradeBuckets: gradeBuckets(run.bins),
     };
   }).filter(c => c.gainM >= ELEV_GAIN_THRESHOLD_M);
 }
@@ -283,6 +302,7 @@ function groupDescents(bins, points, cumKm) {
       lossM: Math.round(lossM),
       avgGradePct: Math.round(avgGradePct * 10) / 10,
       maxGradePct: Math.round(maxGradePct * 10) / 10,
+      gradeBuckets: gradeBuckets(run.bins),
     };
   }).filter(d => d.lossM >= ELEV_GAIN_THRESHOLD_M);
 }
