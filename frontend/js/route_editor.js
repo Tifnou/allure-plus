@@ -102,6 +102,8 @@ function routeEditorStartCreation() {
 // fallait donc obligatoirement choisir un nouveau fichier pour quitter
 // l'analyse en cours (retour utilisateur).
 function routeEditorClose() {
+  _routeEditorFocusClimb = null;
+  _routeEditorTrackGroup = null;
   _routeEditorData = null;
   _routeEditorOriginal = null;
   _routeEditorHistory = [];
@@ -634,6 +636,88 @@ function computeRouteEditorRepeatBrackets(points) {
 //     sections à faire défiler) : Analyse (résumé + côtes), Objectif (D+/
 //     distance cible), Repères (points d'intérêt), Versions (variantes),
 //     Stratégie (course). L'onglet actif est mémorisé d'un rendu à l'autre.
+// ── Mise en évidence d'une côte (clic dans la liste des côtes) ──
+// Le tracé (carte ET profil) passe en une seule couleur neutre et seule la côte
+// choisie ressort dans une couleur distincte : on voit tout de suite OÙ elle se
+// trouve sur le parcours. Un second clic (ou la croix du bandeau) rétablit les
+// couleurs de pente. Les index viennent de stats.climbs : l'état est remis à
+// zéro à chaque nouveau rendu du workspace (le tracé a pu changer).
+const ROUTE_EDITOR_FOCUS_BASE = '#94a3b8';   // tracé en retrait (ardoise)
+const ROUTE_EDITOR_FOCUS_HL = '#7c3aed';     // côte mise en évidence (violet : absent de l'échelle des pentes)
+let _routeEditorFocusClimb = null;           // index dans stats.climbs, ou null
+let _routeEditorTrackGroup = null;           // layerGroup Leaflet du tracé coloré
+
+function routeEditorFocusRange() {
+  if (_routeEditorFocusClimb == null) return null;
+  const c = _routeEditorData?.stats?.climbs?.[_routeEditorFocusClimb];
+  return c ? { startIdx: c.startIdx, endIdx: c.endIdx, climb: c } : null;
+}
+function routeEditorSegmentColor(i, gradeAtIdx) {
+  const f = routeEditorFocusRange();
+  if (!f) return gpxGradeBand(gradeAtIdx[i]).color;
+  return (i >= f.startIdx && i < f.endIdx) ? ROUTE_EDITOR_FOCUS_HL : ROUTE_EDITOR_FOCUS_BASE;
+}
+function routeEditorSegmentWidth(i) {
+  const f = routeEditorFocusRange();
+  return (f && i >= f.startIdx && i < f.endIdx) ? 4.5 : 2;
+}
+
+// Dessine (ou redessine) le tracé coloré de la carte selon l'état de mise en évidence.
+function drawRouteEditorTrack() {
+  if (!_routeEditorTrackGroup || !_routeEditorData) return;
+  _routeEditorTrackGroup.clearLayers();
+  const points = _routeEditorData.points;
+  const latLngs = _routeEditorLatLngs;
+  if (!latLngs || latLngs.length < 2) return;
+  const f = routeEditorFocusRange();
+  if (!f) {
+    computeGpxDisplayBins(points).forEach(bin => {
+      const seg = latLngs.slice(bin.startIdx, bin.endIdx + 1);
+      if (seg.length > 1) L.polyline(seg, { color: gpxGradeBand(bin.gradePct).color, weight: 4 }).addTo(_routeEditorTrackGroup);
+    });
+    return;
+  }
+  L.polyline(latLngs, { color: ROUTE_EDITOR_FOCUS_BASE, weight: 4, opacity: 0.9 }).addTo(_routeEditorTrackGroup);
+  const seg = latLngs.slice(f.startIdx, f.endIdx + 1);
+  if (seg.length > 1) {
+    L.polyline(seg, { color: '#ffffff', weight: 11, opacity: 0.95 }).addTo(_routeEditorTrackGroup); // liseré blanc : contraste sur toute carte
+    L.polyline(seg, { color: ROUTE_EDITOR_FOCUS_HL, weight: 6 }).addTo(_routeEditorTrackGroup);
+  }
+}
+
+// Applique l'état de mise en évidence partout (carte, profil, liste, bandeau).
+function applyRouteEditorFocus() {
+  drawRouteEditorTrack();
+  if (_routeEditorChart) _routeEditorChart.update('none');
+  const f = routeEditorFocusRange();
+  // la côte doit être visible : si elle sort de la vue courante, recadrer dessus
+  if (f && _routeEditorMap && _routeEditorLatLngs) {
+    const b = L.latLngBounds(_routeEditorLatLngs.slice(f.startIdx, f.endIdx + 1));
+    if (b.isValid() && !_routeEditorMap.getBounds().contains(b)) _routeEditorMap.fitBounds(b, { padding: [40, 40], maxZoom: 16 });
+  }
+  document.querySelectorAll('#route-editor-workspace .re-climb').forEach(row => {
+    row.classList.toggle('re-climb--focus', f != null && parseInt(row.dataset.climbIdx, 10) === _routeEditorFocusClimb);
+  });
+  const legend = document.querySelector('#route-editor-workspace .gpx-profile-legend');
+  if (legend) legend.style.display = f ? 'none' : '';
+  const note = el('route-editor-focus-note');
+  if (note) {
+    if (!f) { note.innerHTML = ''; note.style.display = 'none'; return; }
+    const c = f.climb;
+    note.style.display = '';
+    note.innerHTML = `
+      <span class="re-focus-swatch" aria-hidden="true"></span>
+      <span class="re-focus-text"><b>Côte ${_routeEditorFocusClimb + 1}</b> — km ${c.startKm.toFixed(1)} → ${c.endKm.toFixed(1)} · +${c.gainM} m · ${c.avgGradePct.toFixed(1).replace('.', ',')} % moy. · ${c.maxGradePct.toFixed(1).replace('.', ',')} % max</span>
+      <button type="button" class="re-focus-clear" id="route-editor-focus-clear">✕ Afficher toutes les pentes</button>`;
+    const clear = el('route-editor-focus-clear');
+    if (clear) clear.onclick = () => setRouteEditorClimbFocus(null);
+  }
+}
+function setRouteEditorClimbFocus(idx) {
+  _routeEditorFocusClimb = idx;
+  applyRouteEditorFocus();
+}
+
 let _routeEditorTab = 'analyse';
 let _routeEditorClimbSort = 'position'; // 'position' | 'dplus' | 'pente'
 let _routeEditorProfileValue = 'trail:mixte'; // survit aux re-rendus (le <select> est recréé à chaque rendu)
@@ -689,7 +773,7 @@ function renderRouteEditorClimbsList() {
     const band = gpxGradeBand(c.avgGradePct);
     const badge = bracket ? `<span class="route-editor-repeat-badge" style="background:${bracket.color}">répétée ×${bracket.totalPasses}</span>` : '';
     return `
-      <div class="re-climb"${bracket ? ` style="background:${bracket.color}1f"` : ''}>
+      <div class="re-climb${_routeEditorFocusClimb === i ? ' re-climb--focus' : ''}" data-climb-idx="${i}" title="Cliquez pour voir où se trouve cette côte sur la carte et le profil"${bracket ? ` style="background:${bracket.color}1f"` : ''}>
         <div class="re-climb-head">
           <span class="re-climb-dot" style="background:${band.color}" title="${band.label}"></span>
           <span class="re-climb-name">Côte ${i + 1}</span>${badge}
@@ -711,7 +795,13 @@ function renderRouteEditorClimbsList() {
     b.onclick = () => { _routeEditorClimbSort = b.dataset.sort; renderRouteEditorClimbsList(); };
   });
   box.querySelectorAll('.route-editor-climb-repeat-btn').forEach(btn => {
-    btn.onclick = () => selectClimbForRepeat(parseInt(btn.dataset.climbIdx, 10));
+    btn.onclick = e => { e.stopPropagation(); selectClimbForRepeat(parseInt(btn.dataset.climbIdx, 10)); };
+  });
+  box.querySelectorAll('.re-climb').forEach(row => {
+    row.onclick = () => {
+      const i = parseInt(row.dataset.climbIdx, 10);
+      setRouteEditorClimbFocus(_routeEditorFocusClimb === i ? null : i);
+    };
   });
 }
 
@@ -721,6 +811,7 @@ function renderRouteEditorWorkspace() {
   const stats = _routeEditorData.stats;
   if (!stats) { renderRouteEditorWorkspaceInProgress(); return; }
   ws.style.display = '';
+  _routeEditorFocusClimb = null; // le tracé a pu changer : les index de côtes ne sont plus fiables
 
   const climbs = stats.climbs || [];
   const isOriginal = _routeEditorOriginal && _routeEditorData.points === _routeEditorOriginal.points;
@@ -764,6 +855,7 @@ function renderRouteEditorWorkspace() {
           <div id="route-editor-mode-hint" class="route-editor-hint"></div>
           <div id="route-editor-extend-controls"></div>
         </div>
+        <div id="route-editor-focus-note" class="re-focus-note" style="display:none"></div>
         <div class="gpx-profile-map" id="route-editor-map"></div>
         <div class="gpx-profile-legend">
           ${GPX_GRADE_BANDS.map(b => `<span class="gpx-profile-legend-item"><span class="gpx-profile-legend-dot" style="background:${b.color}"></span>${b.label}</span>`).join('')}
@@ -935,11 +1027,9 @@ function renderRouteEditorVisuals() {
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19, attribution: '&copy; <a href="https://openstreetmap.org">OSM</a>',
     }).addTo(map);
+    _routeEditorTrackGroup = L.layerGroup().addTo(map);
     if (latLngs.length > 1) {
-      bins.forEach(bin => {
-        const seg = latLngs.slice(bin.startIdx, bin.endIdx + 1);
-        if (seg.length > 1) L.polyline(seg, { color: gpxGradeBand(bin.gradePct).color, weight: 4 }).addTo(map);
-      });
+      drawRouteEditorTrack();
       addDirectionChevrons(map, latLngs);
     }
     if (_routeEditorMapView) {
@@ -999,7 +1089,7 @@ function renderRouteEditorVisuals() {
       data: { labels, datasets: [{
         data: dataPts, borderWidth: 2, tension: 0.25, fill: true,
         backgroundColor: 'rgba(22,163,74,0.08)',
-        segment: { borderColor: ctx => gpxGradeBand(gradeAtIdx[ctx.p0DataIndex]).color },
+        segment: { borderColor: ctx => routeEditorSegmentColor(ctx.p0DataIndex, gradeAtIdx), borderWidth: ctx => routeEditorSegmentWidth(ctx.p0DataIndex) },
         pointRadius: ctx => (ctx.dataIndex === _routeEditorSelection.aIdx || ctx.dataIndex === _routeEditorSelection.bIdx) ? 5 : 0,
         pointBackgroundColor: ctx => ctx.dataIndex === _routeEditorSelection.aIdx ? '#16a34a' : '#dc2626',
         pointBorderColor: '#fff',
