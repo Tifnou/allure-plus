@@ -710,7 +710,74 @@ function routeEditorSteepInfo(item) {
   const labels = b.map((_, k) => k === 0 ? `< ${edges[0]} %` : k === edges.length ? `≥ ${edges[k - 1]} %` : `${edges[k - 1]}–${edges[k]} %`);
   const fmt = m => m >= 1000 ? (m / 1000).toFixed(2).replace('.', ',') + ' km' : m + ' m';
   const detail = b.map((m, k) => `${labels[k]} : ${fmt(m)} (${Math.round(m / total * 100)} %)`).join('\n');
-  return { buckets: b, total, top, detail, edges };
+  return { buckets: b, total, top, detail, edges, labels };
+}
+
+// ── Infobulle "sexy" de la répartition par raideur (remplace le title natif) ──
+// Une carte flottante unique, positionnée sous/sur la ligne survolée : une
+// ligne par classe (pastille + libellé + barre proportionnelle + mètres + %),
+// et la pente max (mesurée sur ~50 m) en pied. Au survol OU au focus clavier.
+let _routeEditorSteepTip = null;
+// Défilement de la page (ou de la liste) : l'infobulle ancrée à une ligne n'a plus de sens, on la masque.
+window.addEventListener('scroll', () => { if (_routeEditorSteepTip && _routeEditorSteepTip.classList.contains('is-open')) hideRouteEditorSteepTip(); }, true);
+function hideRouteEditorSteepTip() {
+  if (!_routeEditorSteepTip) return;
+  _routeEditorSteepTip.classList.remove('is-open');
+  const tip = _routeEditorSteepTip;
+  setTimeout(() => { if (!tip.classList.contains('is-open')) tip.style.display = 'none'; }, 140);
+}
+function showRouteEditorSteepTip(anchor) {
+  const row = anchor.closest('.re-climb');
+  if (!row) return;
+  const kind = row.dataset.kind;
+  const item = routeEditorFocusItems(kind)[parseInt(row.dataset.idx, 10)];
+  const steep = routeEditorSteepInfo(item);
+  if (!steep) return;
+  const isDesc = kind === 'descent';
+  const colors = ROUTE_EDITOR_BUCKET_COLORS[kind];
+  const fmtM = m => m >= 1000 ? (m / 1000).toFixed(2).replace('.', ',') + ' km' : m + ' m';
+  // classe la plus raide réellement présente : mise en avant
+  let hotIdx = -1;
+  steep.buckets.forEach((m, k) => { if (m > 0) hotIdx = k; });
+  const rows = steep.buckets.map((m, k) => {
+    const pct = Math.round(m / steep.total * 100);
+    return `<div class="re-steep-tip-row${m === 0 ? ' is-empty' : ''}${k === hotIdx ? ' is-hot' : ''}">
+      <span class="re-steep-tip-dot" style="background:${colors[k]}"></span>
+      <span class="re-steep-tip-lbl">${steep.labels[k]}</span>
+      <span class="re-steep-tip-track"><span class="re-steep-tip-fill" style="--w:${pct}%;background:${colors[k]}"></span></span>
+      <span class="re-steep-tip-val">${m > 0 ? fmtM(m) : '—'}</span>
+      <span class="re-steep-tip-pct">${m > 0 ? pct + ' %' : ''}</span>
+    </div>`;
+  }).join('');
+  if (!_routeEditorSteepTip) {
+    _routeEditorSteepTip = document.createElement('div');
+    _routeEditorSteepTip.className = 're-steep-tip';
+    _routeEditorSteepTip.setAttribute('role', 'tooltip');
+    document.body.appendChild(_routeEditorSteepTip);
+  }
+  const tip = _routeEditorSteepTip;
+  tip.innerHTML = `
+    <div class="re-steep-tip-head">
+      <span class="re-steep-tip-badge" style="background:${colors[3]}">${isDesc ? '▼' : '▲'}</span>
+      <div class="re-steep-tip-titles">
+        <div class="re-steep-tip-title">${isDesc ? 'Descente' : 'Côte'} ${parseInt(row.dataset.idx, 10) + 1}</div>
+        <div class="re-steep-tip-sub">km ${item.startKm.toFixed(1)} → ${item.endKm.toFixed(1)} · ${fmtM(item.distM)}</div>
+      </div>
+    </div>
+    <div class="re-steep-tip-caption">Distance par raideur</div>
+    <div class="re-steep-tip-rows">${rows}</div>
+    <div class="re-steep-tip-foot">Pente max <b>${routeEditorFmtGrade(item.maxGradePct)} %</b> · mesurée sur un tronçon d'environ 50 m</div>`;
+  tip.style.display = 'block';
+  tip.classList.remove('is-open');
+  // positionnement : sous la ligne si la place le permet, sinon au-dessus ; aligné à droite de la ligne
+  const r = anchor.getBoundingClientRect();
+  const w = tip.offsetWidth, h = tip.offsetHeight;
+  let top = r.bottom + 8;
+  if (top + h > window.innerHeight - 8) top = Math.max(8, r.top - h - 8);
+  let left = Math.min(Math.max(8, r.right - w), window.innerWidth - w - 8);
+  tip.style.top = top + 'px';
+  tip.style.left = left + 'px';
+  requestAnimationFrame(() => tip.classList.add('is-open'));
 }
 const ROUTE_EDITOR_BUCKET_COLORS = {
   climb: ['#fecaca', '#fca5a5', '#f87171', '#ef4444', '#991b1b'],
@@ -837,7 +904,7 @@ function renderRouteEditorClimbsList() {
     const steep = routeEditorSteepInfo(c);
     const colors = ROUTE_EDITOR_BUCKET_COLORS[kind];
     const steepHtml = steep ? `
-        <div class="re-steep" title="Répartition de la distance par raideur — le « max » ne porte que sur un tronçon d'environ 50 m :&#10;${steep.detail}">
+        <div class="re-steep" tabindex="0" aria-label="Répartition de la distance par raideur">
           <span class="re-steep-text">${steep.top ? `dont <b>${steep.top.distM} m</b> à ≥ ${steep.top.edge} %` : `aucun passage ≥ ${steep.edges[0]} %`}</span>
           <span class="re-gradebar" aria-hidden="true">${steep.buckets.map((m, k) => m > 0 ? `<span style="flex:${m};background:${colors[k]}"></span>` : '').join('')}</span>
         </div>` : '';
@@ -875,6 +942,15 @@ function renderRouteEditorClimbsList() {
       } else selectClimbForRepeat(idx);
     };
   });
+  hideRouteEditorSteepTip();
+  box.querySelectorAll('.re-steep').forEach(st => {
+    st.onmouseenter = () => showRouteEditorSteepTip(st);
+    st.onmouseleave = hideRouteEditorSteepTip;
+    st.onfocus = () => showRouteEditorSteepTip(st);
+    st.onblur = hideRouteEditorSteepTip;
+  });
+  const scroller = box.querySelector('.re-climbs');
+  if (scroller) scroller.onscroll = hideRouteEditorSteepTip;
   box.querySelectorAll('.re-climb').forEach(row => {
     row.onclick = () => {
       const idx = parseInt(row.dataset.idx, 10);
