@@ -788,6 +788,7 @@ const routeEditorFmtGrade = v => String(v.toFixed(1)).replace('-', '−').replac
 
 // Applique l'état de mise en évidence partout (carte, profil, liste, bandeau).
 function applyRouteEditorFocus() {
+  routeEditorUpdateListHint();
   drawRouteEditorTrack();
   if (_routeEditorChart) _routeEditorChart.update('none');
   const f = routeEditorFocusRange();
@@ -817,6 +818,17 @@ function applyRouteEditorFocus() {
     const clear = el('route-editor-focus-clear');
     if (clear) clear.onclick = () => setRouteEditorFocus(null);
   }
+}
+// Consigne au-dessus de la liste : explique le clic sur une ligne (remplace
+// l'ancien title natif, lent et peu lisible) et change dès qu'une section est affichée.
+function routeEditorUpdateListHint() {
+  const h = el('re-list-hint');
+  if (!h) return;
+  const isDesc = _routeEditorListKind === 'descent';
+  h.innerHTML = _routeEditorFocus
+    ? `<span class="re-list-hint-icon" aria-hidden="true">👁</span> Section affichée sur la carte et le profil — recliquez sur sa ligne, ou sur ✕ au-dessus de la carte, pour revenir aux couleurs de pente.`
+    : `<span class="re-list-hint-icon" aria-hidden="true">📍</span> Cliquez sur ${isDesc ? 'une descente' : 'une côte'} pour la situer sur la carte et le profil.`;
+  h.classList.toggle('is-active', !!_routeEditorFocus);
 }
 function setRouteEditorFocus(focus) {
   _routeEditorFocus = focus;
@@ -909,7 +921,7 @@ function renderRouteEditorClimbsList() {
           <span class="re-gradebar" aria-hidden="true">${steep.buckets.map((m, k) => m > 0 ? `<span style="flex:${m};background:${colors[k]}"></span>` : '').join('')}</span>
         </div>` : '';
     return `
-      <div class="re-climb${focused ? ' re-climb--focus' : ''}${isDesc ? ' re-climb--descent' : ''}" data-kind="${kind}" data-idx="${i}" title="Cliquez pour voir où se trouve cette ${isDesc ? 'descente' : 'côte'} sur la carte et le profil"${bracket ? ` style="background:${bracket.color}1f"` : ''}>
+      <div class="re-climb${focused ? ' re-climb--focus' : ''}${isDesc ? ' re-climb--descent' : ''}" data-kind="${kind}" data-idx="${i}"${bracket ? ` style="background:${bracket.color}1f"` : ''}>
         <div class="re-climb-head">
           <span class="re-climb-dot" style="background:${band.color}" title="${band.label}"></span>
           <span class="re-climb-name">${isDesc ? 'Descente' : 'Côte'} ${i + 1}</span>${badge}
@@ -927,7 +939,9 @@ function renderRouteEditorClimbsList() {
 
   box.innerHTML = switchHtml + `
     <div class="re-sort"><span>Trier par</span>${sortBtn('position', 'Position')}${sortBtn('deniv', isDesc ? 'D−' : 'D+')}${sortBtn('pente', 'Pente')}</div>
+    <div class="re-list-hint" id="re-list-hint"></div>
     <div class="re-climbs">${rows}</div>`;
+  routeEditorUpdateListHint();
   wireSwitch();
   box.querySelectorAll('.re-sort-btn').forEach(b => {
     b.onclick = () => { _routeEditorClimbSort = b.dataset.sort; renderRouteEditorClimbsList(); };
