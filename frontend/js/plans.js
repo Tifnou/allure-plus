@@ -57,6 +57,7 @@ async function initPlansPage() {
   showView('wizard');
   renderStepper();
   renderPlansInfoBanner();
+  renderPlansActiveSlot();
 }
 
 function showPlansLoading(show) { /* no-op — spinner supprimé */ }
@@ -71,58 +72,63 @@ const PLANS_INFO_ICON = '<svg class="plans-info-card-icon" viewBox="0 0 24 24" f
 // une repartition par niveau - plus concret pour se projeter, et recalcule
 // a chaque chargement depuis le catalogue reel (allPlans), jamais fige.
 function renderPlansInfoBanner() {
-  const el = id => document.getElementById(id);
-  const banner = el('plans-info-banner');
+  const banner = document.getElementById('plans-info-banner');
   if (!banner) return;
-
   const plans = plansState.allPlans;
-  const total = plans.length;
-  const routePlans = plans.filter(p => p.sport === 'R');
-  const trailPlans = plans.filter(p => p.sport === 'T');
+  const ans = plansState.answers;
+  const ORDER = { R: ['5k', '10k', '20k', 'semi', 'marathon'], T: ['court', 'moyen', 'long', 'ultra'] };
 
-  // Ordre "naturel" des distances plutôt qu'alphabétique
-  const ROUTE_ORDER = ['5 km', '10 km', '20 km', 'Semi-marathon', 'Marathon'];
-  const TRAIL_ORDER = ['Court (< 21 km)', 'Moyen (21–42 km)', 'Long (42–80 km)', 'Ultra (> 80 km)'];
-
-  function groupByDistance(list, order) {
+  const groupsFor = sport => {
+    const list = plans.filter(p => p.sport === sport && p.distCat);
     const map = new Map();
-    list.forEach(p => {
-      if (!p.distLabel) return;
-      if (!map.has(p.distLabel)) map.set(p.distLabel, []);
-      map.get(p.distLabel).push(p);
+    list.forEach(p => { if (!map.has(p.distCat)) map.set(p.distCat, []); map.get(p.distCat).push(p); });
+    const keys = [...ORDER[sport].filter(k => map.has(k)), ...[...map.keys()].filter(k => !ORDER[sport].includes(k))];
+    return keys.map(k => {
+      const g = map.get(k);
+      const durees = g.map(p => p.duree).filter(Boolean);
+      const min = durees.length ? Math.min(...durees) : null, max = durees.length ? Math.max(...durees) : null;
+      return { distCat: k, label: g[0].distLabel || k, count: g.length, min, max };
     });
-    const known = order.filter(l => map.has(l));
-    const rest = [...map.keys()].filter(l => !order.includes(l));
-    return [...known, ...rest].map(label => {
-      const group = map.get(label);
-      const durees = group.map(p => p.duree).filter(Boolean);
-      const min = durees.length ? Math.min(...durees) : null;
-      const max = durees.length ? Math.max(...durees) : null;
-      return { label, count: group.length, min, max };
-    });
-  }
+  };
+  const section = (sport, label, iconClass) => {
+    const groups = groupsFor(sport);
+    if (!groups.length) return '';
+    const total = groups.reduce((n, g) => n + g.count, 0);
+    return `
+      <div class="plans-pick-group">
+        <div class="plans-pick-head"><span class="sport-icon ${iconClass} plans-info-sport-icon"></span><span>${label}</span><span class="plans-pick-count">${total} plans</span></div>
+        <div class="plans-pick-grid">
+          ${groups.map(g => {
+            const on = ans.sport === sport && ans.distCat === g.distCat;
+            return `<button type="button" class="plans-pick-tile${on ? ' on' : ''}" aria-pressed="${on}" onclick="plansPickDistance('${sport}','${g.distCat}')">
+              <b>${g.label}</b>
+              <small>${g.count} plan${g.count > 1 ? 's' : ''}${g.min != null ? ' · ' + (g.min === g.max ? g.min : g.min + '–' + g.max) + ' sem.' : ''}</small>
+            </button>`;
+          }).join('')}
+        </div>
+      </div>`;
+  };
+  banner.innerHTML = `
+    <div class="plans-pick-card">
+      <div class="plans-pick-title">${PLANS_INFO_ICON} Quelle course préparez-vous ? <span class="plans-pick-total">${plans.length} plans au catalogue</span></div>
+      ${section('R', 'Route', 'sport-icon--running')}
+      ${section('T', 'Trail', 'sport-icon--trail')}
+    </div>`;
+}
 
-  const rowsHtml = (groups) => groups.map(g => `
-    <span class="plans-info-stat-chip">${g.count} plan${g.count > 1 ? 's' : ''} · ${g.label}${g.min != null ? ' · ' + (g.min === g.max ? g.min : g.min + '–' + g.max) + ' sem.' : ''}</span>
-  `).join('');
+// Clic sur une tuile : fixe le sport ET la distance d'un coup (les anciennes
+// étapes 1 et 2), les étapes suivantes se réinitialisent.
+function plansPickDistance(sport, distCat) {
+  plansState.answers = { sport, distCat };
+  plansState.editingStep = null;
+  renderPlansInfoBanner();
+  renderStepper();
+}
 
-  const sectionHtml = (label, iconClass, groups) => groups.length ? `
-    <div class="plans-info-section">
-      <div class="plans-info-section-head"><span class="sport-icon ${iconClass} plans-info-sport-icon"></span> ${label}</div>
-      <div class="plans-info-stats">${rowsHtml(groups)}</div>
-    </div>
-  ` : '';
-
-  const statsHtml = `
-    <div class="plans-info-card">
-      <div class="plans-info-card-title">${PLANS_INFO_ICON} Ce que vous trouverez ici</div>
-      <div class="plans-info-card-text">Un catalogue de ${total} plans d'entraînement prêts à l'emploi.</div>
-      ${sectionHtml('Route', 'sport-icon--running', groupByDistance(routePlans, ROUTE_ORDER))}
-      ${sectionHtml('Trail', 'sport-icon--trail', groupByDistance(trailPlans, TRAIL_ORDER))}
-    </div>
-  `;
-
-  banner.innerHTML = statsHtml;
+// Plan en cours : pastille de la barre d'outils (toujours visible tant qu'un plan est actif).
+function renderPlansActiveSlot() {
+  const slot = document.getElementById('plans-active-slot');
+  if (slot) slot.innerHTML = activeGoalBadgeHtml();
 }
 
 function showView(view) {
@@ -307,7 +313,17 @@ function renderStepper() {
   const stepperEl = el('plans-stepper');
   if (!stepperEl) return;
   const a = plansState.answers;
-  const steps = activeWizardSteps();
+  // Le sport et la distance se choisissent via les tuiles (renderPlansInfoBanner) :
+  // le stepper ne montre que les étapes suivantes, une fois une tuile choisie.
+  if (!a.sport || !a.distCat) {
+    stepperEl.innerHTML = '';
+    stepperEl.style.display = 'none';
+    const rl = el('plans-restart-link');
+    if (rl) rl.style.display = 'none';
+    return;
+  }
+  stepperEl.style.display = '';
+  const steps = activeWizardSteps().filter(st => st !== 'sport' && st !== 'dist');
   let allDone = true;
   let html = '';
 
@@ -374,11 +390,10 @@ function renderStepper() {
     html += `
       <div class="step-row ${rowClass}">
         <div class="step-marker">
-          <div class="step-num">${rowClass === 'done' ? '✓' : i + 1}</div>
+          <div class="step-num">${rowClass === 'done' ? '✓' : i + 2}</div>
           ${i < steps.length - 1 ? '<div class="step-line"></div>' : ''}
         </div>
         ${body}
-        ${i === 0 && rowClass !== 'done' ? activeGoalBadgeHtml() : ''}
       </div>`;
   });
 
@@ -421,6 +436,7 @@ function plansRestart() {
   plansState.editingStep = null;
   showView('wizard');
   renderStepper();
+  renderPlansInfoBanner();
 }
 
 // ─── RÉSULTATS ────────────────────────────────────────────────

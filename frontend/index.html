@@ -18,7 +18,7 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cesium@1.120.0/Build/Cesium/Widgets/widgets.css" />
   <link rel="stylesheet" href="css/style.css?v=1789488270021" />
   <link rel="stylesheet" href="css/seasons.css?v=1790000000004" />
-  <link rel="stylesheet" href="css/plans.css?v=1787132767394" />
+  <link rel="stylesheet" href="css/plans.css?v=1787132767395" />
   <link rel="stylesheet" href="css/routes.css?v=1787650000004" />
   <link rel="stylesheet" href="css/route_editor.css?v=1787650000014" />
   <link rel="stylesheet" href="css/nutrition.css?v=1787990000002" />
@@ -1232,18 +1232,19 @@
         </div>
       </div>
 
-      <div id="plans-info-banner" class="plans-info-banner"></div>
-
-      <!-- Suivi du catalogue de plans (Admin, compte auteur uniquement -
-           showAdminNav bascule le display, app.js) -->
-      <div id="plans-admin-tracker" style="display:none;margin-bottom:20px;">
-        <button type="button" class="btn-plans-restart" id="plans-admin-tracker-toggle" onclick="togglePlansAdminTracker()">📋 Suivi de mon catalogue de plans</button>
-        <div id="plans-admin-tracker-body" class="plans-admin-tracker-body" style="display:none;"></div>
-      </div>
-
-      <!-- WIZARD : cadre unique, les 6 etapes s'affichent empilees et
-           s'activent progressivement (voir renderStepper, plans.js) -->
+      <!-- WIZARD : barre d'outils (plan en cours + suivi du catalogue, admin),
+           sélecteur de distance par tuiles (= le catalogue, cliquable) puis les
+           étapes restantes (D+, durée, séances, niveau) - voir renderStepper, plans.js -->
       <div id="plans-wizard">
+        <div class="plans-toolbar">
+          <div id="plans-active-slot"></div>
+          <div id="plans-admin-tracker" style="display:none">
+            <button type="button" class="plans-tracker-btn" id="plans-admin-tracker-toggle" onclick="togglePlansAdminTracker()">📋 Suivi du catalogue <span class="plans-tracker-tag">admin</span></button>
+          </div>
+        </div>
+        <div id="plans-admin-tracker-body" class="plans-admin-tracker-body" style="display:none;"></div>
+
+        <div id="plans-info-banner" class="plans-info-banner"></div>
         <div id="plans-stepper" class="plans-stepper"></div>
         <button type="button" class="plans-restart-link" id="plans-restart-link" onclick="plansRestart()" style="display:none">↺ Recommencer</button>
       </div>
@@ -1506,7 +1507,7 @@
   <script src="js/stats.js?v=1787231562110"></script>
   <script src="js/records.js?v=1787231562110"></script>
   <script src="js/health.js?v=1787710000003"></script>
-  <script src="js/plans.js?v=1787050930665"></script>
+  <script src="js/plans.js?v=1787050930666"></script>
   <script src="js/routes.js?v=1787670000008"></script>
   <script src="js/route_editor.js?v=1787660000022"></script>
   <script src="js/support.js?v=1789488260007"></script>

@@ -357,3 +357,26 @@
 .plans-admin-legend-dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin:0 2px -1px 0; }
 .plans-admin-legend-dot--present { background:var(--green); }
 .plans-admin-legend-dot--excluded { background:var(--red); }
+
+/* ─── Barre d'outils + sélecteur de distance par tuiles ─── */
+.plans-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; min-height: 4px; }
+.plans-toolbar:empty { display: none; }
+.plans-toolbar .plan-active-badge { position: relative; top: auto; right: auto; max-width: none; }
+.plans-tracker-btn { display: inline-flex; align-items: center; gap: 8px; padding: 7px 13px; font-family: var(--font-body); font-size: 12.5px; color: var(--text-primary); background: var(--bg-white); border: 1px solid var(--border); border-radius: 999px; cursor: pointer; box-shadow: var(--shadow-sm); transition: var(--transition); }
+.plans-tracker-btn:hover { border-color: var(--accent); background: var(--accent-light); color: var(--accent-text); }
+.plans-tracker-tag { font-size: 10px; font-weight: 700; padding: 1px 7px; border-radius: 6px; background: var(--accent-light); color: var(--accent-text); }
+.plans-info-banner { margin-bottom: 14px; }
+.plans-pick-card { background: var(--bg-white); border: 1px solid var(--border); border-radius: 14px; padding: 16px 18px 18px; box-shadow: var(--shadow-sm); }
+.plans-pick-title { display: flex; align-items: center; gap: 8px; font-family: var(--font); font-size: 15px; font-weight: 700; margin-bottom: 12px; }
+.plans-pick-total { margin-left: auto; font-family: var(--font-body); font-size: 12px; font-weight: 400; color: var(--text-muted); }
+.plans-pick-group + .plans-pick-group { margin-top: 14px; }
+.plans-pick-head { display: flex; align-items: center; gap: 7px; font-size: 10.5px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-secondary); margin-bottom: 8px; }
+.plans-pick-count { font-weight: 400; letter-spacing: 0; text-transform: none; color: var(--text-muted); }
+.plans-pick-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(165px, 1fr)); gap: 8px; }
+.plans-pick-tile { text-align: left; padding: 10px 12px; font-family: var(--font-body); color: var(--text-primary); background: var(--bg-white); border: 1px solid var(--border); border-radius: 10px; cursor: pointer; transition: var(--transition); }
+.plans-pick-tile b { display: block; font-size: 13.5px; font-weight: 600; }
+.plans-pick-tile small { display: block; margin-top: 2px; font-size: 11.5px; color: var(--text-muted); }
+.plans-pick-tile:hover { border-color: var(--accent); background: var(--accent-light); }
+.plans-pick-tile:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.plans-pick-tile.on { border: 2px solid var(--accent); background: var(--accent-light); padding: 9px 11px; }
+.plans-pick-tile.on b { color: var(--accent-text); }
