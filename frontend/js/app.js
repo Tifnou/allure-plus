@@ -2559,8 +2559,12 @@ function elevationGradeAt(distKm, alt, i, spanM = 100) {
   const dm = (distKm[b] - distKm[a]) * 1000;
   return dm > 5 ? (alt[b] - alt[a]) / dm * 100 : null;
 }
-function elevationTooltipCallbacks(distKm, alt) {
+// refAscentM (optionnel) : D+ officiel affiche ailleurs (ex: mesure IGN d'un itineraire genere) ;
+// les cumuls survoles sont mis a l'echelle pour que la fin du profil retombe sur ce meme chiffre.
+function elevationTooltipCallbacks(distKm, alt, refAscentM) {
   const st = computeElevationStats(distKm, alt);
+  const lastUp = st.up[st.up.length - 1];
+  const k = (refAscentM > 0 && lastUp > 0) ? refAscentM / lastUp : 1;
   const fr = v => v.toFixed(1).replace('.', ',');
   return {
     title: items => `${distKm[items[0].dataIndex].toFixed(2).replace('.', ',')} km`,
@@ -2569,7 +2573,7 @@ function elevationTooltipCallbacks(distKm, alt) {
       const g = elevationGradeAt(distKm, alt, i);
       const lines = [`Altitude : ${Math.round(alt[i])} m`];
       if (g != null) lines.push(`Pente : ${g > 0 ? '+' : ''}${fr(g)} %`);
-      lines.push(`D+ ${Math.round(st.up[i])} m  ·  D− ${Math.round(st.down[i])} m`);
+      lines.push(`D+ ${Math.round(st.up[i] * k)} m  ·  D− ${Math.round(st.down[i] * k)} m`);
       return lines;
     },
   };

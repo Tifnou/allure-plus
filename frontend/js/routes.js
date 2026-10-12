@@ -1061,7 +1061,7 @@ function renderRoutesResults(data) {
         if (!mapCtrl) return;
         if (index === null || !mapCtrl.latLngs[index]) mapCtrl.hideCursor();
         else mapCtrl.showCursorAt(mapCtrl.latLngs[index]);
-      });
+      }, opt.ascentM);
     }, 0);
   }
 }
@@ -1200,7 +1200,7 @@ function routesSurfaceSlug(label) {
 // onHoverIndex(index|null) est rappelé à chaque déplacement de la souris sur
 // le graphique (index du point survolé, ou null en sortie) - permet de
 // synchroniser un curseur sur la carte (cf renderRouteMap/showCursorAt).
-function renderElevationChart(canvasId, points, onHoverIndex) {
+function renderElevationChart(canvasId, points, onHoverIndex, refAscentM) {
   const canvas = el(canvasId);
   if (!canvas || typeof Chart === 'undefined' || !points || points.length === 0) return null;
   let cum = 0;
@@ -1219,7 +1219,7 @@ function renderElevationChart(canvasId, points, onHoverIndex) {
     data: { labels, datasets: [{ data, borderColor: '#16A34A', backgroundColor: 'rgba(22,163,74,0.12)', borderWidth: 1.5, pointRadius: 0, tension: 0.3, fill: true }] },
     options: {
       ...baseOptions,
-      plugins: { ...(baseOptions.plugins || {}), tooltip: { ...(baseOptions.plugins?.tooltip || {}), displayColors: false, callbacks: elevationTooltipCallbacks(cumKm, data) } },
+      plugins: { ...(baseOptions.plugins || {}), tooltip: { ...(baseOptions.plugins?.tooltip || {}), displayColors: false, callbacks: elevationTooltipCallbacks(cumKm, data, refAscentM) } },
       onHover: (evt, activeElements) => {
         if (typeof onHoverIndex === 'function') onHoverIndex(activeElements.length ? activeElements[0].index : null);
       },

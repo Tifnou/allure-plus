@@ -20,6 +20,7 @@ const { isBrouterConfigured } = require('./brouter_manager');
 const { bucketForGrade } = require('./pace_profile');
 const { getRouteAscent, getElevations } = require('./geoportail_client');
 const { queryNaturalAreas, isPointInAnyPolygon } = require('./overpass_client');
+const { AsyncLocalStorage } = require('async_hooks');
 const fs = require('fs');
 const path = require('path');
 
@@ -275,6 +276,41 @@ const BASE_LOOP_REPAIR_FRACTION = 0.85;
 const DENSITY_SHORTFALL_MARGIN = 0.85;
 
 const R_EARTH = 6371000;
+
+// Supprime les "culs-de-sac" : excursion qui repasse exactement par ses propres
+// points a l'envers (aller puis retour sur le meme chemin) et revient au point de
+// depart de l'excursion. Longueur maximale SPUR_MAX_M ; la boucle elle-meme
+// (premier/dernier point) n'est jamais consideree comme une excursion.
+const SPUR_MAX_M = 600, SPUR_MIN_M = 25, SPUR_CLOSE_M = 14;
+function removeSpurs(points) {
+  if (!Array.isArray(points) || points.length < 6) return { points, removed: 0 };
+  let pts = points.slice();
+  let removed = 0;
+  let again = true;
+  while (again) {
+    again = false;
+    for (let i = 1; i < pts.length - 3 && !again; i++) {
+      let len = 0;
+      for (let j = i + 1; j < pts.length - 1; j++) {
+        len += haversineDistance(pts[j - 1], pts[j]);
+        if (len > SPUR_MAX_M) break;
+        if (len < SPUR_MIN_M || haversineDistance(pts[i], pts[j]) > SPUR_CLOSE_M) continue;
+        // point le plus eloigne de l'excursion
+        let m = i, far = 0;
+        for (let k = i + 1; k < j; k++) { const d = haversineDistance(pts[i], pts[k]); if (d > far) { far = d; m = k; } }
+        if (m === i || far < SPUR_MIN_M / 2) continue;
+        // l'aller (i..m) est-il re-parcouru au retour (m..j) ?
+        let hit = 0, tot = 0;
+        for (let k = i + 1; k < m; k++) {
+          tot++;
+          for (let q = m; q <= j; q++) { if (haversineDistance(pts[k], pts[q]) <= SPUR_CLOSE_M) { hit++; break; } }
+        }
+        if (tot >= 1 && hit / tot >= 0.85) { pts.splice(i + 1, j - i); removed++; again = true; break; }
+      }
+    }
+  }
+  return { points: pts, removed };
+}
 
 function haversineDistance(a, b) {
   const dLat = (b.lat - a.lat) * Math.PI / 180;
@@ -564,6 +600,11 @@ const SEARCH_DIRECTIONS = 8;
 // D+, comportement inchange - la boucle "boostAscentViaRepeats" prend le
 // relais ensuite si besoin) que le nouveau cas "toutes au-dessus" (la plus
 // proche devient la MOINS pentue), sans code separe pour les deux cas.
+// Plafond de D+ de la tranche demandee (ex: 50 pour "0-50 m"), transmis par
+// generateRouteOptions sans alourdir les signatures : une tranche qui commence
+// a 0 n'a pas de cible, mais elle a bien un PLAFOND - les directions qui le
+// depassent sont classees apres les autres.
+const ascentCapStore = new AsyncLocalStorage();
 async function scanDirections(start, targetDistanceM, profile, targetAscentM, trailStyle) {
   const radius = targetDistanceM / 4;
   const bearingsToTry = Array.from({ length: SEARCH_DIRECTIONS }, (_, k) => (360 / SEARCH_DIRECTIONS) * k);
@@ -589,7 +630,16 @@ async function scanDirections(start, targetDistanceM, profile, targetAscentM, tr
     // retombe le plus pres de la distance visee (= le reseau local boucle bien
     // dans ce sens). L'ancien tri "le plus de D+ d'abord" poussait vers le
     // relief sans que personne ne l'ait demande.
-    candidates.sort((a, b) => Math.abs(a.result.distanceM - targetDistanceM) - Math.abs(b.result.distanceM - targetDistanceM));
+    const cap = (ascentCapStore.getStore() || {}).ascentCapM;
+    const distErr = c => Math.round(Math.abs(c.result.distanceM - targetDistanceM) / targetDistanceM * 10); // paliers de 10 %
+    candidates.sort((a, b) => {
+      if (cap) {
+        const oa = a.result.filteredAscendM > cap ? 1 : 0, ob = b.result.filteredAscendM > cap ? 1 : 0;
+        if (oa !== ob) return oa - ob;
+      }
+      return (distErr(a) - distErr(b))
+        || (cap ? a.result.filteredAscendM - b.result.filteredAscendM : Math.abs(a.result.distanceM - targetDistanceM) - Math.abs(b.result.distanceM - targetDistanceM));
+    });
   }
   return { candidates, radius };
 }
@@ -2107,9 +2157,28 @@ async function generateRouteOptions({ start, targetDistanceM, targetAscentM, asc
   }
 
   const profile = TERRAIN_PROFILES[terrain] || TERRAIN_PROFILES.trail;
-  let { options, warning } = searchRadiusM
-    ? await generateOptionsAcrossSearchRadius({ start, targetDistanceM, targetAscentM, targetDurationMin, terrain, paceMinPerKm, searchRadiusM, profile, routeShape, trailLevel, trailStyle })
-    : await generateOptionsAtSinglePoint({ start, targetDistanceM, targetAscentM, targetDurationMin, terrain, paceMinPerKm, profile, routeShape, trailLevel, trailStyle });
+  const ascentCapM = band && band.min === 0 ? band.max : null;
+  let { options, warning } = await ascentCapStore.run({ ascentCapM }, () => searchRadiusM
+    ? generateOptionsAcrossSearchRadius({ start, targetDistanceM, targetAscentM, targetDurationMin, terrain, paceMinPerKm, searchRadiusM, profile, routeShape, trailLevel, trailStyle })
+    : generateOptionsAtSinglePoint({ start, targetDistanceM, targetAscentM, targetDurationMin, terrain, paceMinPerKm, profile, routeShape, trailLevel, trailStyle }));
+
+  // Petits allers-retours parasites (impasse empruntee puis re-parcourue en sens
+  // inverse) : supprimes sur les boucles sans repetition (les repetitions
+  // reposent sur des index de points precis, on n'y touche pas).
+  for (const opt of options) {
+    if (opt.shape !== 'loop' || opt.repeatedSegments || !opt.points) continue;
+    const cleaned = removeSpurs(opt.points);
+    if (cleaned.removed > 0) {
+      const oldDist = opt.distanceM;
+      opt.points = cleaned.points;
+      let d = 0;
+      for (let i = 1; i < opt.points.length; i++) d += haversineDistance(opt.points[i - 1], opt.points[i]);
+      opt.distanceM = Math.round(d);
+      if (oldDist > 0 && opt.predictedDurationMin) opt.predictedDurationMin = opt.predictedDurationMin * (opt.distanceM / oldDist);
+      opt.spursRemoved = cleaned.removed;
+      opt.commentary = (opt.commentary || '') + ` ${cleaned.removed} petit(s) aller-retour(s) parasite(s) supprimé(s) du tracé.`;
+    }
+  }
 
   // Correction finale du D+ affiche via l'API Altimetrie IGN (donnees RGE
   // ALTI, precision LIDAR) - remplace le D+ estime par BRouter (MNT
