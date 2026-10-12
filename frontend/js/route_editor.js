@@ -102,7 +102,7 @@ function routeEditorStartCreation() {
 // fallait donc obligatoirement choisir un nouveau fichier pour quitter
 // l'analyse en cours (retour utilisateur).
 function routeEditorClose() {
-  _routeEditorFocusClimb = null;
+  _routeEditorFocus = null;
   _routeEditorTrackGroup = null;
   _routeEditorData = null;
   _routeEditorOriginal = null;
@@ -636,26 +636,36 @@ function computeRouteEditorRepeatBrackets(points) {
 //     sections à faire défiler) : Analyse (résumé + côtes), Objectif (D+/
 //     distance cible), Repères (points d'intérêt), Versions (variantes),
 //     Stratégie (course). L'onglet actif est mémorisé d'un rendu à l'autre.
-// ── Mise en évidence d'une côte (clic dans la liste des côtes) ──
-// Le tracé (carte ET profil) passe en une seule couleur neutre et seule la côte
-// choisie ressort dans une couleur distincte : on voit tout de suite OÙ elle se
-// trouve sur le parcours. Un second clic (ou la croix du bandeau) rétablit les
-// couleurs de pente. Les index viennent de stats.climbs : l'état est remis à
-// zéro à chaque nouveau rendu du workspace (le tracé a pu changer).
-const ROUTE_EDITOR_FOCUS_BASE = '#94a3b8';   // tracé en retrait (ardoise)
-const ROUTE_EDITOR_FOCUS_HL = '#7c3aed';     // côte mise en évidence (violet : absent de l'échelle des pentes)
-let _routeEditorFocusClimb = null;           // index dans stats.climbs, ou null
+// ── Mise en évidence d'une côte ou d'une descente (clic dans la liste) ──
+// Le tracé (carte ET profil) passe en une seule couleur franche et seule la
+// côte/descente choisie ressort dans une couleur distincte : on voit tout de
+// suite OÙ elle se trouve sur le parcours. Un second clic (ou la croix du
+// bandeau) rétablit les couleurs de pente. Les index viennent de
+// stats.climbs / stats.descents : l'état est remis à zéro à chaque nouveau
+// rendu du workspace (le tracé a pu changer).
+// Couleurs : bleu profond pour le tracé (net sur n'importe quel fond de carte,
+// avec liseré blanc), fuchsia pour une montée, orange pour une descente —
+// aucune n'est la couleur de base du tracé, et la légende des pentes est
+// masquée pendant la mise en évidence.
+const ROUTE_EDITOR_FOCUS_BASE = '#1e40af';
+const ROUTE_EDITOR_FOCUS_HL = { climb: '#d946ef', descent: '#f97316' };
+let _routeEditorFocus = null;                // { kind: 'climb' | 'descent', idx } ou null
 let _routeEditorTrackGroup = null;           // layerGroup Leaflet du tracé coloré
+let _routeEditorListKind = 'climb';          // liste affichée : 'climb' | 'descent'
 
+function routeEditorFocusItems(kind) {
+  const st = _routeEditorData?.stats;
+  return (kind === 'descent' ? st?.descents : st?.climbs) || [];
+}
 function routeEditorFocusRange() {
-  if (_routeEditorFocusClimb == null) return null;
-  const c = _routeEditorData?.stats?.climbs?.[_routeEditorFocusClimb];
-  return c ? { startIdx: c.startIdx, endIdx: c.endIdx, climb: c } : null;
+  if (!_routeEditorFocus) return null;
+  const item = routeEditorFocusItems(_routeEditorFocus.kind)[_routeEditorFocus.idx];
+  return item ? { startIdx: item.startIdx, endIdx: item.endIdx, item, kind: _routeEditorFocus.kind, color: ROUTE_EDITOR_FOCUS_HL[_routeEditorFocus.kind] } : null;
 }
 function routeEditorSegmentColor(i, gradeAtIdx) {
   const f = routeEditorFocusRange();
   if (!f) return gpxGradeBand(gradeAtIdx[i]).color;
-  return (i >= f.startIdx && i < f.endIdx) ? ROUTE_EDITOR_FOCUS_HL : ROUTE_EDITOR_FOCUS_BASE;
+  return (i >= f.startIdx && i < f.endIdx) ? f.color : ROUTE_EDITOR_FOCUS_BASE;
 }
 function routeEditorSegmentWidth(i) {
   const f = routeEditorFocusRange();
@@ -677,49 +687,53 @@ function drawRouteEditorTrack() {
     });
     return;
   }
-  L.polyline(latLngs, { color: ROUTE_EDITOR_FOCUS_BASE, weight: 4, opacity: 0.9 }).addTo(_routeEditorTrackGroup);
+  L.polyline(latLngs, { color: '#ffffff', weight: 7, opacity: 0.9 }).addTo(_routeEditorTrackGroup);   // liseré blanc du tracé
+  L.polyline(latLngs, { color: ROUTE_EDITOR_FOCUS_BASE, weight: 4 }).addTo(_routeEditorTrackGroup);
   const seg = latLngs.slice(f.startIdx, f.endIdx + 1);
   if (seg.length > 1) {
-    L.polyline(seg, { color: '#ffffff', weight: 11, opacity: 0.95 }).addTo(_routeEditorTrackGroup); // liseré blanc : contraste sur toute carte
-    L.polyline(seg, { color: ROUTE_EDITOR_FOCUS_HL, weight: 6 }).addTo(_routeEditorTrackGroup);
+    L.polyline(seg, { color: '#ffffff', weight: 12, opacity: 0.95 }).addTo(_routeEditorTrackGroup);   // liseré blanc : contraste sur toute carte
+    L.polyline(seg, { color: f.color, weight: 7 }).addTo(_routeEditorTrackGroup);
   }
 }
+
+const routeEditorFmtGrade = v => String(v.toFixed(1)).replace('-', '−').replace('.', ',');
 
 // Applique l'état de mise en évidence partout (carte, profil, liste, bandeau).
 function applyRouteEditorFocus() {
   drawRouteEditorTrack();
   if (_routeEditorChart) _routeEditorChart.update('none');
   const f = routeEditorFocusRange();
-  // la côte doit être visible : si elle sort de la vue courante, recadrer dessus
+  // la section doit être visible : si elle sort de la vue courante, recadrer dessus
   if (f && _routeEditorMap && _routeEditorLatLngs) {
     const b = L.latLngBounds(_routeEditorLatLngs.slice(f.startIdx, f.endIdx + 1));
     if (b.isValid() && !_routeEditorMap.getBounds().contains(b)) _routeEditorMap.fitBounds(b, { padding: [40, 40], maxZoom: 16 });
   }
   document.querySelectorAll('#route-editor-workspace .re-climb').forEach(row => {
-    row.classList.toggle('re-climb--focus', f != null && parseInt(row.dataset.climbIdx, 10) === _routeEditorFocusClimb);
+    row.classList.toggle('re-climb--focus', f != null && row.dataset.kind === f.kind && parseInt(row.dataset.idx, 10) === _routeEditorFocus.idx);
   });
   const legend = document.querySelector('#route-editor-workspace .gpx-profile-legend');
   if (legend) legend.style.display = f ? 'none' : '';
   const note = el('route-editor-focus-note');
   if (note) {
     if (!f) { note.innerHTML = ''; note.style.display = 'none'; return; }
-    const c = f.climb;
+    const c = f.item, isDesc = f.kind === 'descent';
     note.style.display = '';
+    note.style.setProperty('--focus-color', f.color);
     note.innerHTML = `
       <span class="re-focus-swatch" aria-hidden="true"></span>
-      <span class="re-focus-text"><b>Côte ${_routeEditorFocusClimb + 1}</b> — km ${c.startKm.toFixed(1)} → ${c.endKm.toFixed(1)} · +${c.gainM} m · ${c.avgGradePct.toFixed(1).replace('.', ',')} % moy. · ${c.maxGradePct.toFixed(1).replace('.', ',')} % max</span>
+      <span class="re-focus-text"><b>${isDesc ? 'Descente' : 'Côte'} ${_routeEditorFocus.idx + 1}</b> — km ${c.startKm.toFixed(1)} → ${c.endKm.toFixed(1)} · ${isDesc ? '−' + c.lossM : '+' + c.gainM} m · ${routeEditorFmtGrade(c.avgGradePct)} % moy. · ${routeEditorFmtGrade(c.maxGradePct)} % max</span>
       <button type="button" class="re-focus-clear" id="route-editor-focus-clear">✕ Afficher toutes les pentes</button>`;
     const clear = el('route-editor-focus-clear');
-    if (clear) clear.onclick = () => setRouteEditorClimbFocus(null);
+    if (clear) clear.onclick = () => setRouteEditorFocus(null);
   }
 }
-function setRouteEditorClimbFocus(idx) {
-  _routeEditorFocusClimb = idx;
+function setRouteEditorFocus(focus) {
+  _routeEditorFocus = focus;
   applyRouteEditorFocus();
 }
 
 let _routeEditorTab = 'analyse';
-let _routeEditorClimbSort = 'position'; // 'position' | 'dplus' | 'pente'
+let _routeEditorClimbSort = 'position'; // 'position' | 'deniv' (D+ ou D- selon la liste) | 'pente'
 let _routeEditorProfileValue = 'trail:mixte'; // survit aux re-rendus (le <select> est recréé à chaque rendu)
 
 const ROUTE_EDITOR_TABS = [
@@ -744,7 +758,7 @@ function setRouteEditorTab(id) {
 // Pastilles de comptage sur les onglets (côtes, repères, versions).
 function updateRouteEditorTabBadges() {
   const set = (id, n) => { const b = el('re-badge-' + id); if (b) { b.textContent = n > 0 ? String(n) : ''; b.hidden = !(n > 0); } };
-  set('analyse', (_routeEditorData?.stats?.climbs || []).length);
+  set('analyse', (_routeEditorData?.stats?.climbs || []).length + (_routeEditorData?.stats?.descents || []).length);
   set('reperes', (_routeEditorData?.pois || []).length);
   set('versions', _routeEditorVariants.length);
 }
@@ -754,53 +768,87 @@ function updateRouteEditorTabBadges() {
 function renderRouteEditorClimbsList() {
   const box = el('route-editor-climbs-wrap');
   if (!box || !_routeEditorData?.stats) return;
-  const climbs = _routeEditorData.stats.climbs || [];
-  if (!climbs.length) {
-    box.innerHTML = `<div class="re-empty">Aucune côte significative détectée sur ce parcours.</div>`;
+  const stats = _routeEditorData.stats;
+  const climbs = stats.climbs || [];
+  const descents = stats.descents || [];
+  const kind = _routeEditorListKind;
+  const isDesc = kind === 'descent';
+  const items = isDesc ? descents : climbs;
+
+  const kindBtn = (k, label, n) => `<button type="button" class="re-kind-btn${kind === k ? ' active' : ''}" data-kind="${k}" role="tab" aria-selected="${kind === k}">${label} <span class="re-count">${n}</span></button>`;
+  const switchHtml = `<div class="re-kind-switch" role="tablist" aria-label="Type de section">${kindBtn('climb', '▲ Montées', climbs.length)}${kindBtn('descent', '▼ Descentes', descents.length)}</div>`;
+  const wireSwitch = () => box.querySelectorAll('.re-kind-btn').forEach(b => {
+    b.onclick = () => {
+      _routeEditorListKind = b.dataset.kind;
+      renderRouteEditorClimbsList();
+    };
+  });
+  if (!items.length) {
+    box.innerHTML = switchHtml + `<div class="re-empty">Aucune ${isDesc ? 'descente' : 'côte'} significative détectée sur ce parcours.</div>`;
+    wireSwitch();
     return;
   }
-  const brackets = computeRouteEditorRepeatBrackets(_routeEditorData.points);
-  const order = climbs.map((_, i) => i);
-  if (_routeEditorClimbSort === 'dplus') order.sort((a, b) => climbs[b].gainM - climbs[a].gainM);
-  else if (_routeEditorClimbSort === 'pente') order.sort((a, b) => climbs[b].avgGradePct - climbs[a].avgGradePct);
-  const SORT_TIPS = { position: 'Dans l\'ordre du parcours (kilomètre de départ de la côte)', dplus: 'Dénivelé positif : la hauteur gagnée en montant, en mètres', pente: 'Pente moyenne : la raideur, en % (mètres gagnés pour 100 m parcourus)' };
+
+  const brackets = isDesc ? [] : computeRouteEditorRepeatBrackets(_routeEditorData.points);
+  const order = items.map((_, i) => i);
+  if (_routeEditorClimbSort === 'deniv') order.sort((a, b) => isDesc ? items[b].lossM - items[a].lossM : items[b].gainM - items[a].gainM);
+  else if (_routeEditorClimbSort === 'pente') order.sort((a, b) => isDesc ? items[a].avgGradePct - items[b].avgGradePct : items[b].avgGradePct - items[a].avgGradePct);
+
+  const SORT_TIPS = {
+    position: 'Dans l\'ordre du parcours (kilomètre de départ)',
+    deniv: isDesc ? 'Dénivelé négatif : la hauteur perdue en descendant, en mètres' : 'Dénivelé positif : la hauteur gagnée en montant, en mètres',
+    pente: isDesc ? 'Pente moyenne : la raideur de la descente, en %' : 'Pente moyenne : la raideur, en % (mètres gagnés pour 100 m parcourus)',
+  };
   const sortBtn = (id, label) => `<button type="button" class="re-sort-btn${_routeEditorClimbSort === id ? ' active' : ''}" data-sort="${id}" title="${SORT_TIPS[id]}">${label}</button>`;
   // La valeur correspondant au tri actif est mise en évidence dans chaque ligne.
   const hl = id => (_routeEditorClimbSort === id ? ' re-hl' : '');
+  const fmtDist = m => (m / 1000).toFixed(2).replace('.', ',');
+
   const rows = order.map(i => {
-    const c = climbs[i];
-    const bracket = brackets.find(b => c.startKm <= b.endKm && c.endKm >= b.startKm);
+    const c = items[i];
     const band = gpxGradeBand(c.avgGradePct);
+    const bracket = isDesc ? null : brackets.find(b => c.startKm <= b.endKm && c.endKm >= b.startKm);
     const badge = bracket ? `<span class="route-editor-repeat-badge" style="background:${bracket.color}">répétée ×${bracket.totalPasses}</span>` : '';
+    const focused = _routeEditorFocus && _routeEditorFocus.kind === kind && _routeEditorFocus.idx === i;
     return `
-      <div class="re-climb${_routeEditorFocusClimb === i ? ' re-climb--focus' : ''}" data-climb-idx="${i}" title="Cliquez pour voir où se trouve cette côte sur la carte et le profil"${bracket ? ` style="background:${bracket.color}1f"` : ''}>
+      <div class="re-climb${focused ? ' re-climb--focus' : ''}${isDesc ? ' re-climb--descent' : ''}" data-kind="${kind}" data-idx="${i}" title="Cliquez pour voir où se trouve cette ${isDesc ? 'descente' : 'côte'} sur la carte et le profil"${bracket ? ` style="background:${bracket.color}1f"` : ''}>
         <div class="re-climb-head">
           <span class="re-climb-dot" style="background:${band.color}" title="${band.label}"></span>
-          <span class="re-climb-name">Côte ${i + 1}</span>${badge}
+          <span class="re-climb-name">${isDesc ? 'Descente' : 'Côte'} ${i + 1}</span>${badge}
           <span class="re-climb-pos${hl('position')}">km ${c.startKm.toFixed(1)} → ${c.endKm.toFixed(1)}</span>
         </div>
         <div class="re-climb-stats">
-          <span><b>${(c.distM / 1000).toFixed(2).replace('.', ',')}</b> km</span>
-          <span class="re-stat${hl('dplus')}"><b>+${c.gainM}</b> m</span>
-          <span class="re-stat${hl('pente')}"><b>${c.avgGradePct.toFixed(1).replace('.', ',')}</b> % moy.</span>
-          <span><b>${c.maxGradePct.toFixed(1).replace('.', ',')}</b> % max</span>
+          <span><b>${fmtDist(c.distM)}</b> km</span>
+          <span class="re-stat${hl('deniv')}"><b>${isDesc ? '−' + c.lossM : '+' + c.gainM}</b> m</span>
+          <span class="re-stat${hl('pente')}"><b>${routeEditorFmtGrade(c.avgGradePct)}</b> % moy.</span>
+          <span><b>${routeEditorFmtGrade(c.maxGradePct)}</b> % max</span>
         </div>
-        <button type="button" class="route-editor-climb-repeat-btn re-climb-btn" data-climb-idx="${i}" title="Sélectionne cette côte comme section à répéter">🔁 Répéter</button>
+        <button type="button" class="route-editor-climb-repeat-btn re-climb-btn" data-kind="${kind}" data-idx="${i}" title="${isDesc ? 'Pose A et B aux bornes de cette descente (la recalculer, y ajouter un point de passage…)' : 'Sélectionne cette côte comme section à répéter'}">${isDesc ? '📍 Section A→B' : '🔁 Répéter'}</button>
       </div>`;
   }).join('');
-  box.innerHTML = `
-    <div class="re-sort"><span>Trier par</span>${sortBtn('position', 'Position')}${sortBtn('dplus', 'D+')}${sortBtn('pente', 'Pente')}</div>
+
+  box.innerHTML = switchHtml + `
+    <div class="re-sort"><span>Trier par</span>${sortBtn('position', 'Position')}${sortBtn('deniv', isDesc ? 'D−' : 'D+')}${sortBtn('pente', 'Pente')}</div>
     <div class="re-climbs">${rows}</div>`;
+  wireSwitch();
   box.querySelectorAll('.re-sort-btn').forEach(b => {
     b.onclick = () => { _routeEditorClimbSort = b.dataset.sort; renderRouteEditorClimbsList(); };
   });
   box.querySelectorAll('.route-editor-climb-repeat-btn').forEach(btn => {
-    btn.onclick = e => { e.stopPropagation(); selectClimbForRepeat(parseInt(btn.dataset.climbIdx, 10)); };
+    btn.onclick = e => {
+      e.stopPropagation();
+      const idx = parseInt(btn.dataset.idx, 10);
+      if (btn.dataset.kind === 'descent') {
+        const d = (_routeEditorData.stats.descents || [])[idx];
+        if (d) routeEditorSelectSection(d.startIdx, d.endIdx);
+      } else selectClimbForRepeat(idx);
+    };
   });
   box.querySelectorAll('.re-climb').forEach(row => {
     row.onclick = () => {
-      const i = parseInt(row.dataset.climbIdx, 10);
-      setRouteEditorClimbFocus(_routeEditorFocusClimb === i ? null : i);
+      const idx = parseInt(row.dataset.idx, 10);
+      const same = _routeEditorFocus && _routeEditorFocus.kind === row.dataset.kind && _routeEditorFocus.idx === idx;
+      setRouteEditorFocus(same ? null : { kind: row.dataset.kind, idx });
     };
   });
 }
@@ -811,7 +859,7 @@ function renderRouteEditorWorkspace() {
   const stats = _routeEditorData.stats;
   if (!stats) { renderRouteEditorWorkspaceInProgress(); return; }
   ws.style.display = '';
-  _routeEditorFocusClimb = null; // le tracé a pu changer : les index de côtes ne sont plus fiables
+  _routeEditorFocus = null; // le tracé a pu changer : les index de côtes/descentes ne sont plus fiables
 
   const climbs = stats.climbs || [];
   const isOriginal = _routeEditorOriginal && _routeEditorData.points === _routeEditorOriginal.points;
@@ -876,7 +924,7 @@ function renderRouteEditorWorkspace() {
 
         <section class="re-tab-panel" data-tab="analyse" ${_routeEditorTab === 'analyse' ? '' : 'hidden'}>
           <div class="route-editor-summary-card">📝 ${buildRouteEditorSummary(stats)}</div>
-          <div class="re-block-title">Côtes détectées${climbs.length ? ` <span class="re-count">${climbs.length}</span>` : ''}</div>
+          <div class="re-block-title">Sections détectées</div>
           <div id="route-editor-climbs-wrap"></div>
         </section>
 
@@ -1867,7 +1915,10 @@ function clearRouteEditorSelection() {
 function selectClimbForRepeat(climbIdx) {
   const c = _routeEditorData?.stats?.climbs?.[climbIdx];
   if (!c) return;
-  _routeEditorSelection = { aIdx: c.startIdx, bIdx: c.endIdx };
+  routeEditorSelectSection(c.startIdx, c.endIdx);
+}
+function routeEditorSelectSection(startIdx, endIdx) {
+  _routeEditorSelection = { aIdx: startIdx, bIdx: endIdx };
   renderRouteEditorSelectionOverlay();
   if (_routeEditorChart) _routeEditorChart.update();
   renderRouteEditorSectionPanel();

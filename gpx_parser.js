@@ -184,6 +184,7 @@ function computeElevationProfile(points) {
 
   const altitudes = points.map(p => p.ele);
   const climbs = groupClimbs(bins, points, cumKm);
+  const descents = groupDescents(bins, points, cumKm);
 
   return {
     totalDistM: Math.round(totalDistM),
@@ -199,6 +200,7 @@ function computeElevationProfile(points) {
     maxClimbGradePct: maxClimbBin ? Math.round(maxClimbBin.gradePct * 10) / 10 : 0,
     maxDescentGradePct: maxDescentBin ? Math.round(maxDescentBin.gradePct * 10) / 10 : 0,
     climbs,
+    descents,
     // Bins conserves (index dans le trace sous-echantillonne, pas le trace
     // brut original) pour la coloration par pente de la carte/du graphique
     // cote client (cf renderGoalProfileModal, campus.js) - recalcules par
@@ -245,6 +247,44 @@ function groupClimbs(bins, points, cumKm) {
       maxGradePct: Math.round(maxGradePct * 10) / 10,
     };
   }).filter(c => c.gainM >= ELEV_GAIN_THRESHOLD_M);
+}
+
+// Symetrique de groupClimbs : regroupe les bins contigus "en descente"
+// (gradePct <= DESCENT_GRADE_PCT) en descentes distinctes (liste "Descentes
+// detectees" de l'Editeur Parcours). lossM = perte d'altitude brute entre le
+// premier et le dernier point (meme principe anti-bruit que groupClimbs) ;
+// avgGradePct/maxGradePct sont NEGATIFS (maxGradePct = la pente la plus
+// marquee, donc la plus negative) ; descentes sous le seuil de D- ecartees.
+function groupDescents(bins, points, cumKm) {
+  const descents = [];
+  let run = null;
+  bins.forEach(bin => {
+    if (bin.gradePct <= DESCENT_GRADE_PCT) {
+      if (!run) run = { startIdx: bin.startIdx, endIdx: bin.endIdx, bins: [bin] };
+      else { run.endIdx = bin.endIdx; run.bins.push(bin); }
+    } else if (run) {
+      descents.push(run);
+      run = null;
+    }
+  });
+  if (run) descents.push(run);
+
+  return descents.map(run => {
+    const distM = run.bins.reduce((sum, b) => sum + b.distM, 0);
+    const lossM = Math.max(0, points[run.startIdx].ele - points[run.endIdx].ele);
+    const avgGradePct = distM > 0 ? run.bins.reduce((sum, b) => sum + b.gradePct * b.distM, 0) / distM : 0;
+    const maxGradePct = run.bins.reduce((m, b) => Math.min(m, b.gradePct), 0);
+    return {
+      startIdx: run.startIdx,
+      endIdx: run.endIdx,
+      startKm: Math.round(cumKm[run.startIdx] * 10) / 10,
+      endKm: Math.round(cumKm[run.endIdx] * 10) / 10,
+      distM: Math.round(distM),
+      lossM: Math.round(lossM),
+      avgGradePct: Math.round(avgGradePct * 10) / 10,
+      maxGradePct: Math.round(maxGradePct * 10) / 10,
+    };
+  }).filter(d => d.lossM >= ELEV_GAIN_THRESHOLD_M);
 }
 
 // Distance minimale (m) d'une section avant d'etre fusionnee dans la
