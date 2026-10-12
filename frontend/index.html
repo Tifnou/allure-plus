@@ -16,7 +16,7 @@
   <script>window.CESIUM_BASE_URL = 'https://cdn.jsdelivr.net/npm/cesium@1.120.0/Build/Cesium/';</script>
   <script src="https://cdn.jsdelivr.net/npm/cesium@1.120.0/Build/Cesium/Cesium.js"></script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cesium@1.120.0/Build/Cesium/Widgets/widgets.css" />
-  <link rel="stylesheet" href="css/style.css?v=1789488270015" />
+  <link rel="stylesheet" href="css/style.css?v=1789488270017" />
   <link rel="stylesheet" href="css/seasons.css?v=1790000000004" />
   <link rel="stylesheet" href="css/plans.css?v=1787132767394" />
   <link rel="stylesheet" href="css/routes.css?v=1787650000001" />
@@ -1345,96 +1345,105 @@
       <div class="page-header">
         <div>
           <h1 class="page-title">&#x2699;&#xFE0F; Administration</h1>
-          <div class="page-subtitle">Utilisateurs, accès et diagnostics</div>
+          <div class="page-subtitle">Comptes, apparence et système</div>
         </div>
       </div>
 
-      <!-- Bandeau compact toujours visible (statut serveur en un coup d'oeil)
-           + repli des cartes techniques ci-dessous, moins utiles au
-           quotidien que le tableau des utilisateurs (retour utilisateur
-           14/08 : "les infos prennent enormement de place"). -->
+      <!-- Bandeau d'état toujours visible (serveur en un coup d'oeil) + tout
+           déplier/replier. Les sections ci-dessous sont repliables, regroupées
+           par thème ; leur état est mémorisé (localStorage, wireAdminSections)
+           et un résumé reste visible quand elles sont repliées. Les données se
+           chargent en arrière-plan même repliées. -->
       <div class="admin-status-strip" id="admin-status-strip">
         <span class="admin-status-strip-dot" id="admin-strip-dot"></span>
         <span id="admin-strip-text">Chargement…</span>
-        <button class="admin-diag-toggle" id="admin-diag-toggle" type="button">Diagnostics <span id="admin-diag-chevron">▾</span></button>
+        <button class="admin-diag-toggle" id="admin-toggle-all" type="button">Tout déplier</button>
       </div>
 
-      <!-- Thèmes de saison : tester, programmer, forcer, publier (calendrier partagé via le dépôt Git) -->
-      <section class="card admin-seasons-card" style="margin-bottom:16px">
-        <div class="card-header">
-          <h2 class="card-title"><span class="card-title-icon">&#x1F3A8;</span> Thèmes de saison</h2>
+      <!-- ══ COMPTES ══ -->
+      <h2 class="admin-group-title">Comptes</h2>
+      <section class="card admin-section" data-section="users">
+        <button class="admin-section-head" type="button" aria-expanded="false" aria-controls="admin-sec-users">
+          <span class="admin-section-icon">&#x1F465;</span>
+          <span class="admin-section-title">Utilisateurs</span>
+          <span class="admin-section-meta" id="admin-meta-users"></span>
+          <span class="admin-section-chev" aria-hidden="true">&#9662;</span>
+        </button>
+        <div class="admin-section-body" id="admin-sec-users" hidden>
+          <!-- Répertoire des comptes ayant déjà lancé Allure+ (seule visibilité
+               possible sur une appli distribuée en .exe) - voir server.js
+               checkUserDirectory / support-relay routes /users/*. -->
+          <div id="admin-users-table"><div class="table-loading">Chargement…</div></div>
         </div>
-        <div class="card-body" id="admin-seasons"><div class="table-loading">Chargement…</div></div>
       </section>
 
-      <div class="admin-grid" id="admin-diagnostics" style="display:none">
-
-        <!-- Statut serveur -->
-        <section class="card">
-          <div class="card-header">
-            <h2 class="card-title"><span class="card-title-icon">&#x1F5A5;&#xFE0F;</span> Serveur</h2>
-          </div>
-          <div class="card-body" id="admin-server-info">
-            <div class="table-loading">Chargement…</div>
-          </div>
-          <div style="padding:0 16px 16px">
-            <button class="btn-admin-action" id="restart-btn">&#x1F504; Redémarrer le serveur</button>
-          </div>
-        </section>
-
-        <!-- Connexions -->
-        <section class="card">
-          <div class="card-header">
-            <h2 class="card-title"><span class="card-title-icon">&#x1F511;</span> Connexion...s</h2>
-          </div>
-          <div class="card-body" id="admin-connections">
-            <div class="table-loading">Chargement…</div>
-          </div>
-          <div style="padding:0 16px 16px">
-            <button class="btn-admin-action" id="admin-refresh-data-btn" onclick="refreshAll()" style="border-color:var(--accent);background:var(--accent-light);color:var(--accent-text)">
-              &#x1F504; Actualiser les données
-            </button>
-          </div>
-        </section>
-
-        <!-- Logs -->
-        <section class="card admin-logs-card">
-          <div class="card-header">
-            <h2 class="card-title"><span class="card-title-icon">&#x1F4CB;</span> Logs serveur</h2>
-            <button class="btn-admin-refresh" id="admin-refresh-logs" onclick="loadAdminLogs()">? Rafraîchir</button>
-          </div>
-          <div class="card-body">
-            <div class="admin-logs-pre" id="admin-logs-content">Chargement…</div>
-          </div>
-        </section>
-
-        <!-- Référence D+ trail (pour la création de plans) -->
-        <section class="card admin-dplus-card">
-          <div class="card-header">
-            <h2 class="card-title"><span class="card-title-icon">&#x26F0;&#xFE0F;</span> Référence D+ trail</h2>
-          </div>
-          <div class="card-body" id="admin-dplus-tiers">
-            <div class="table-loading">Chargement…</div>
-          </div>
-        </section>
-
-      </div>
-
-      <!-- Utilisateurs : ecran principal de la page Admin. Repertoire des
-           comptes ayant deja lance Allure+ (seule visibilite possible sur
-           une appli distribuee en .exe) - voir server.js checkUserDirectory/
-           support-relay routes /users/*. Replie par defaut (demande
-           utilisateur 20/08), meme mecanisme que "Diagnostics" plus haut -
-           les donnees continuent de se charger en arriere-plan meme repliees. -->
-      <section class="card admin-users-card">
-        <div class="card-header" id="admin-users-header" style="cursor:pointer">
-          <h2 class="card-title"><span class="card-title-icon">&#x1F465;</span> Utilisateurs</h2>
-          <span id="admin-users-chevron" style="color:var(--text-secondary)">▾</span>
+      <!-- ══ APPARENCE ══ -->
+      <h2 class="admin-group-title">Apparence</h2>
+      <section class="card admin-section" data-section="seasons">
+        <button class="admin-section-head" type="button" aria-expanded="false" aria-controls="admin-sec-seasons">
+          <span class="admin-section-icon">&#x1F3A8;</span>
+          <span class="admin-section-title">Thèmes de saison</span>
+          <span class="admin-section-meta" id="admin-meta-seasons"></span>
+          <span class="admin-section-chev" aria-hidden="true">&#9662;</span>
+        </button>
+        <div class="admin-section-body" id="admin-sec-seasons" hidden>
+          <!-- Tester, programmer, forcer, publier (calendrier partagé via le dépôt Git) : themes.js -->
+          <div id="admin-seasons"><div class="table-loading">Chargement…</div></div>
         </div>
-        <div class="card-body" id="admin-users-body" style="display:none">
-          <div id="admin-users-table">
-            <div class="table-loading">Chargement…</div>
+      </section>
+
+      <!-- ══ RÉFÉRENCE ══ -->
+      <h2 class="admin-group-title">Référence</h2>
+      <section class="card admin-section" data-section="dplus">
+        <button class="admin-section-head" type="button" aria-expanded="false" aria-controls="admin-sec-dplus">
+          <span class="admin-section-icon">&#x26F0;&#xFE0F;</span>
+          <span class="admin-section-title">Référence D+ trail</span>
+          <span class="admin-section-meta">pour la création de plans</span>
+          <span class="admin-section-chev" aria-hidden="true">&#9662;</span>
+        </button>
+        <div class="admin-section-body" id="admin-sec-dplus" hidden>
+          <div id="admin-dplus-tiers"><div class="table-loading">Chargement…</div></div>
+        </div>
+      </section>
+
+      <!-- ══ SYSTÈME ══ -->
+      <h2 class="admin-group-title">Système</h2>
+      <section class="card admin-section" data-section="system">
+        <button class="admin-section-head" type="button" aria-expanded="false" aria-controls="admin-sec-system">
+          <span class="admin-section-icon">&#x1F5A5;&#xFE0F;</span>
+          <span class="admin-section-title">Serveur et connexions</span>
+          <span class="admin-section-meta" id="admin-meta-system"></span>
+          <span class="admin-section-chev" aria-hidden="true">&#9662;</span>
+        </button>
+        <div class="admin-section-body" id="admin-sec-system" hidden>
+          <div class="admin-twocol">
+            <div>
+              <div class="admin-subtitle">Serveur</div>
+              <div id="admin-server-info"><div class="table-loading">Chargement…</div></div>
+              <button class="btn-admin-action" id="restart-btn">&#x1F504; Redémarrer le serveur</button>
+            </div>
+            <div>
+              <div class="admin-subtitle">Connexions</div>
+              <div id="admin-connections"><div class="table-loading">Chargement…</div></div>
+              <button class="btn-admin-action" id="admin-refresh-data-btn" onclick="refreshAll()" style="border-color:var(--accent);background:var(--accent-light);color:var(--accent-text)">
+                &#x1F504; Actualiser les données
+              </button>
+            </div>
           </div>
+        </div>
+      </section>
+
+      <section class="card admin-section" data-section="logs">
+        <button class="admin-section-head" type="button" aria-expanded="false" aria-controls="admin-sec-logs">
+          <span class="admin-section-icon">&#x1F4CB;</span>
+          <span class="admin-section-title">Logs serveur</span>
+          <span class="admin-section-chev" aria-hidden="true">&#9662;</span>
+        </button>
+        <div class="admin-section-body" id="admin-sec-logs" hidden>
+          <div style="text-align:right;margin-bottom:8px">
+            <button class="btn-admin-refresh" id="admin-refresh-logs" onclick="loadAdminLogs()">&#x21BB; Rafraîchir</button>
+          </div>
+          <div class="admin-logs-pre" id="admin-logs-content">Chargement…</div>
         </div>
       </section>
     </div>
@@ -1475,9 +1484,9 @@
     <span class="support-fab-dot" id="support-fab-dot" style="display:none"></span>
   </button>
 
-  <script src="js/app.js?v=1789488240010"></script>
+  <script src="js/app.js?v=1789488240011"></script>
   <script src="js/season_scenes.js?v=1790000000004"></script>
-  <script src="js/themes.js?v=1790000000003"></script>
+  <script src="js/themes.js?v=1790000000004"></script>
   <script src="js/gear.js?v=1786459105634"></script>
   <script src="js/campus.js?v=1787730000007"></script>
   <script src="js/free_sessions.js?v=1786701705047"></script>

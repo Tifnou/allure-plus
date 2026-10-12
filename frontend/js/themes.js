@@ -134,6 +134,7 @@
     if (id && document.body) buildDecor(id); else clearDecor();
     lockToggle(id);
     document.dispatchEvent(new CustomEvent('season-changed', { detail: { id } }));
+    if (typeof updateSeasonMeta === 'function') updateSeasonMeta();
   }
   window.applySeason = applySeason;
 
@@ -182,10 +183,36 @@
       const d = await r.json();
       _admin = { cfg: JSON.parse(JSON.stringify(d.local)), remote: d.remote, inSync: d.inSync, canPublish: d.canPublish, dirty: false };
       renderAdminSeasons();
+      updateSeasonMeta();
     } catch (e) {
       box.innerHTML = '<div class="table-loading">Impossible de charger la programmation des thèmes.</div>';
     }
   };
+
+  // Prochain démarrage de thème (jours) à partir d'une config — pour le résumé replié.
+  function nextSeasonStart(cfg, now) {
+    now = now || new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    let best = null;
+    ((cfg && cfg.themes) || []).forEach(t => {
+      if (t.enabled === false || !SEASONS[t.id]) return;
+      const [m, d] = String(t.start).split('-').map(Number);
+      let when = new Date(today.getFullYear(), m - 1, d);
+      if (when < today) when = new Date(today.getFullYear() + 1, m - 1, d);
+      const days = Math.round((when - today) / 86400000);
+      if (!best || days < best.days) best = { id: t.id, days, when };
+    });
+    return best;
+  }
+  function seasonMetaText(cfg) {
+    const eff = resolveSeason(cfg);
+    if (eff) return `${SEASONS[eff.id].emoji} ${SEASONS[eff.id].label} actif${eff.reason === 'force' ? ' (forcé)' : ''}`;
+    const nx = nextSeasonStart(cfg);
+    return nx ? `aucun actif · ${SEASONS[nx.id].emoji} ${SEASONS[nx.id].label} dans ${nx.days} j` : 'aucun thème actif';
+  }
+  function updateSeasonMeta() {
+    if (typeof setAdminSectionMeta === 'function') setAdminSectionMeta('seasons', seasonMetaText((_admin && _admin.remote) || _cfg));
+  }
 
   function statusLine() {
     const eff = resolveSeason(_admin.remote || _cfg);

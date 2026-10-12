@@ -4384,39 +4384,61 @@ async function loadPref2State() {
 // Bandeau compact toujours visible (voyant + version + uptime) - le detail
 // (cartes Serveur/Connexions/Logs/D+ trail) reste disponible derriere
 // "Diagnostics", replie par defaut (retour utilisateur 14/08).
-function wireAdminDiagToggle() {
-  const btn = document.getElementById('admin-diag-toggle');
-  if (!btn || btn.dataset.wired) return;
-  btn.dataset.wired = '1';
-  const chevron = document.getElementById('admin-diag-chevron');
-  btn.onclick = () => {
-    const diag = document.getElementById('admin-diagnostics');
-    if (!diag) return;
-    const open = diag.style.display === 'none';
-    diag.style.display = open ? '' : 'none';
-    if (chevron) chevron.textContent = open ? '▴' : '▾';
-  };
+// Sections repliables de la page Admin (Utilisateurs, Thèmes de saison, D+ trail,
+// Serveur, Logs) : toutes repliées au premier affichage (demande utilisateur
+// 20/08), puis l'état de chacune est mémorisé. Le contenu se charge quand même
+// en arrière-plan (les loaders ne dépendent pas de la visibilité) ; un résumé
+// (setAdminSectionMeta) reste visible dans l'en-tête quand la section est repliée.
+const ADMIN_SECTIONS_LS = 'allure_admin_sections';
+function adminSectionsState() {
+  try { return JSON.parse(localStorage.getItem(ADMIN_SECTIONS_LS) || '{}') || {}; } catch (e) { return {}; }
 }
-
-// Meme mecanisme que wireAdminDiagToggle ci-dessus, pour le repli/depli du
-// tableau Utilisateurs (replie par defaut, demande utilisateur 20/08) - le
-// chargement des donnees (loadAdminUsers) reste independant de la visibilite.
-function wireAdminUsersToggle() {
-  const header = document.getElementById('admin-users-header');
-  if (!header || header.dataset.wired) return;
-  header.dataset.wired = '1';
-  const chevron = document.getElementById('admin-users-chevron');
-  header.onclick = () => {
-    const body = document.getElementById('admin-users-body');
-    if (!body) return;
-    const open = body.style.display === 'none';
-    body.style.display = open ? '' : 'none';
-    if (chevron) chevron.textContent = open ? '▴' : '▾';
-  };
+function setAdminSectionOpen(sec, open, persist = true) {
+  const head = sec.querySelector('.admin-section-head');
+  const body = sec.querySelector('.admin-section-body');
+  if (!head || !body) return;
+  body.hidden = !open;
+  head.setAttribute('aria-expanded', open ? 'true' : 'false');
+  sec.classList.toggle('admin-section--open', open);
+  if (persist) {
+    const st = adminSectionsState(); st[sec.dataset.section] = open;
+    try { localStorage.setItem(ADMIN_SECTIONS_LS, JSON.stringify(st)); } catch (e) { /* silencieux */ }
+  }
+}
+function updateAdminToggleAllLabel() {
+  const btn = document.getElementById('admin-toggle-all');
+  if (!btn) return;
+  const secs = [...document.querySelectorAll('#page-admin .admin-section')];
+  btn.textContent = secs.every(s => s.classList.contains('admin-section--open')) ? 'Tout replier' : 'Tout déplier';
+}
+function wireAdminSections() {
+  const page = document.getElementById('page-admin');
+  if (!page || page.dataset.sectionsWired) return;
+  page.dataset.sectionsWired = '1';
+  const st = adminSectionsState();
+  page.querySelectorAll('.admin-section').forEach(sec => {
+    setAdminSectionOpen(sec, st[sec.dataset.section] === true, false);
+    sec.querySelector('.admin-section-head').addEventListener('click', () => {
+      setAdminSectionOpen(sec, !sec.classList.contains('admin-section--open'));
+      updateAdminToggleAllLabel();
+    });
+  });
+  document.getElementById('admin-toggle-all')?.addEventListener('click', () => {
+    const secs = [...page.querySelectorAll('.admin-section')];
+    const openAll = !secs.every(s => s.classList.contains('admin-section--open'));
+    secs.forEach(s => setAdminSectionOpen(s, openAll));
+    updateAdminToggleAllLabel();
+  });
+  updateAdminToggleAllLabel();
+}
+// Résumé affiché dans l'en-tête de section (visible replié).
+function setAdminSectionMeta(id, text) {
+  const el = document.getElementById('admin-meta-' + id);
+  if (el) el.textContent = text || '';
 }
 
 async function loadAdminInfo() {
-  wireAdminDiagToggle();
+  wireAdminSections();
   try {
     const data = await fetch('/api/admin-info').then(r => r.json());
 
@@ -4428,6 +4450,7 @@ async function loadAdminInfo() {
       const version = document.getElementById('app-version')?.textContent || '';
       stripText.textContent = `Serveur actif ${version ? '· ' + version + ' ' : ''}· uptime ${data.server.uptime}`;
     }
+    setAdminSectionMeta('system', `${data.garmin?.connected ? 'Garmin connecté' : 'Garmin non connecté'} · uptime ${data.server.uptime}`);
 
     // Serveur
     const srvEl = document.getElementById('admin-server-info');
@@ -4483,12 +4506,13 @@ async function loadAdminInfo() {
 // Repertoire des utilisateurs (voir server.js /api/admin/users, relais
 // support-relay routes /users/*) - ecran principal de la page Admin.
 async function loadAdminUsers() {
-  wireAdminUsersToggle();
+  wireAdminSections();
   const wrap = document.getElementById('admin-users-table');
   if (!wrap) return;
   wrap.innerHTML = '<div class="table-loading">Chargement…</div>';
   try {
     const { users } = await fetch(`${API}/api/admin/users`).then(r => r.json());
+    setAdminSectionMeta('users', users && users.length ? `${users.length} compte${users.length > 1 ? 's' : ''}${users.some(u => u.blocked) ? ` · ${users.filter(u => u.blocked).length} bloqué(s)` : ''}` : 'aucun compte');
     if (!users || users.length === 0) {
       wrap.innerHTML = '<div class="support-empty">Aucun utilisateur pour le moment.</div>';
       return;
