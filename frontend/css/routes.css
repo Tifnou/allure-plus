@@ -500,3 +500,7 @@
 .rt-band:hover::after, .rt-band:hover::before, .rt-band:focus-visible::after, .rt-band:focus-visible::before { transform: translateX(0) translateY(0); }
 
 .routes-address-row { grid-template-columns: 140px 1fr; }
+
+/* Bouton Réinitialiser : fond plein pour rester lisible sur le fond photo */
+.rt-head .routes-reset-corner-btn { background: var(--bg-white); color: var(--text-primary); border-color: var(--border); box-shadow: var(--shadow-sm); padding: 7px 14px; font-size: 12.5px; }
+.rt-head .routes-reset-corner-btn:hover { background: var(--accent-light); color: var(--accent-text); border-color: var(--accent); }
