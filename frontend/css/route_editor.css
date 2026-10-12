@@ -637,3 +637,10 @@
 .re-tab-panel .route-editor-climbs-table th, .re-tab-panel .route-editor-climbs-table td { padding: 6px 6px; }
 .re-tab-panel .route-editor-strategy-card { margin-bottom: 12px; }
 .re-tab-panel .route-editor-strategy-table-wrap { margin: 0 -14px; padding: 0 14px; }
+
+/* Valeur mise en évidence selon le tri actif (Position / D+ / Pente) */
+.re-climb-stats .re-hl, .re-climb-pos.re-hl {
+  background: var(--accent-light); color: var(--accent-text); border-radius: 4px; padding: 0 6px; font-weight: 700;
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.re-climb-stats .re-hl b { color: var(--accent-text); }

@@ -679,7 +679,10 @@ function renderRouteEditorClimbsList() {
   const order = climbs.map((_, i) => i);
   if (_routeEditorClimbSort === 'dplus') order.sort((a, b) => climbs[b].gainM - climbs[a].gainM);
   else if (_routeEditorClimbSort === 'pente') order.sort((a, b) => climbs[b].avgGradePct - climbs[a].avgGradePct);
-  const sortBtn = (id, label) => `<button type="button" class="re-sort-btn${_routeEditorClimbSort === id ? ' active' : ''}" data-sort="${id}">${label}</button>`;
+  const SORT_TIPS = { position: 'Dans l\'ordre du parcours (kilomètre de départ de la côte)', dplus: 'Dénivelé positif : la hauteur gagnée en montant, en mètres', pente: 'Pente moyenne : la raideur, en % (mètres gagnés pour 100 m parcourus)' };
+  const sortBtn = (id, label) => `<button type="button" class="re-sort-btn${_routeEditorClimbSort === id ? ' active' : ''}" data-sort="${id}" title="${SORT_TIPS[id]}">${label}</button>`;
+  // La valeur correspondant au tri actif est mise en évidence dans chaque ligne.
+  const hl = id => (_routeEditorClimbSort === id ? ' re-hl' : '');
   const rows = order.map(i => {
     const c = climbs[i];
     const bracket = brackets.find(b => c.startKm <= b.endKm && c.endKm >= b.startKm);
@@ -690,12 +693,12 @@ function renderRouteEditorClimbsList() {
         <div class="re-climb-head">
           <span class="re-climb-dot" style="background:${band.color}" title="${band.label}"></span>
           <span class="re-climb-name">Côte ${i + 1}</span>${badge}
-          <span class="re-climb-pos">km ${c.startKm.toFixed(1)} → ${c.endKm.toFixed(1)}</span>
+          <span class="re-climb-pos${hl('position')}">km ${c.startKm.toFixed(1)} → ${c.endKm.toFixed(1)}</span>
         </div>
         <div class="re-climb-stats">
           <span><b>${(c.distM / 1000).toFixed(2).replace('.', ',')}</b> km</span>
-          <span><b>+${c.gainM}</b> m</span>
-          <span><b>${c.avgGradePct.toFixed(1).replace('.', ',')}</b> % moy.</span>
+          <span class="re-stat${hl('dplus')}"><b>+${c.gainM}</b> m</span>
+          <span class="re-stat${hl('pente')}"><b>${c.avgGradePct.toFixed(1).replace('.', ',')}</b> % moy.</span>
           <span><b>${c.maxGradePct.toFixed(1).replace('.', ',')}</b> % max</span>
         </div>
         <button type="button" class="route-editor-climb-repeat-btn re-climb-btn" data-climb-idx="${i}" title="Sélectionne cette côte comme section à répéter">🔁 Répéter</button>
