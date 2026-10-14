@@ -1589,6 +1589,34 @@ function printPPGSession(weekId, trainingIndex) {
 }
 
 // "?"? Panneau de détail d'une séance "?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?
+// Effort ressenti (RPE = Rating of Perceived Exertion) : échelle de 1 (très facile) à 10 (maximal).
+// Utilisé là où l'allure n'a pas de sens (côtes, trail) : on se règle sur la sensation, pas sur le chrono.
+// zone d'allure équivalente à un effort ressenti (à plat) : sert à AFFICHER une allure indicative
+const RPE_REF_ZONE = { 1: ['EF', 'low'], 2: ['EF', 'low'], 3: ['EF', 'low'], 4: ['EF', 'high'], 5: ['TEMPO', null], 6: ['S60', null], 7: ['S30', null], 8: ['VMA', null], 9: ['VMA', null], 10: ['VMA', null] };
+function rpeInfo(n) {
+  const T = {
+    1: ['très facile', 'Presque aucun effort, respiration normale.'],
+    2: ['très facile', 'Effort très léger, conversation fluide.'],
+    3: ['facile', 'Effort léger, tu parles sans difficulté.'],
+    4: ['facile', 'Effort modéré bas : tu parles en phrases complètes.'],
+    5: ['modéré', 'Respiration marquée mais tu tiens une conversation en phrases courtes.'],
+    6: ['soutenu', 'Effort net mais tenable : tu ne dis plus que quelques mots à la fois.'],
+    7: ['dur', 'Effort difficile : respiration forte, impossible de discuter.'],
+    8: ['très dur', 'Effort très difficile, tenable seulement quelques minutes.'],
+    9: ['presque maximal', 'Tout près de ton maximum.'],
+    10: ['maximal', 'Effort maximal, quelques secondes seulement.'],
+  };
+  const t = T[Math.max(1, Math.min(10, Math.round(n)))];
+  return { label: t[0], hint: 'Effort ressenti ' + n + '/10 (RPE) — ' + t[1] };
+}
+function rpeLegendHtml(zones) {
+  const used = [...new Set((zones || []).filter(z => z.rpe != null).map(z => z.rpe))].sort((a, b) => a - b);
+  if (!used.length) return '';
+  return '<div class="rpe-legend"><b>Effort ressenti (RPE)</b> : échelle de 1 (très facile) à 10 (maximal), à la sensation plutôt qu\u2019au chrono. <i>Les allures affichées sont indicatives (équivalent à plat) : en côte la pente ralentit, règle-toi sur l\u2019effort.</i> '
+    + used.map(n => '<span><b>' + n + '/10</b> ' + rpeInfo(n).label + ' — ' + rpeInfo(n).hint.replace(/^Effort ressenti \d+\/10 \(RPE\) — /, '') + '</span>').join(' ')
+    + '</div>';
+}
+
 function renderSessionDetail(session, weekId, isCurrentWeek) {
   const isPPG = session.sport === 'ppg' || session.trainingCategory === 'gpp';
 
@@ -1708,10 +1736,17 @@ function renderSessionDetail(session, weekId, isCurrentWeek) {
       // cible, seulement la consigne RPE.
       if (z.rpe != null) {
         const rpeLbl = z.rpeLabel ? String(z.rpeLabel).replace(/_/g, ' ') : '';
+        // Allure indicative : zone d'allure équivalente à cet effort (à plat), corrigée trail comme le
+        // reste de la séance. En côte la pente ralentit : l'effort ressenti reste la vraie consigne.
+        const ref = RPE_REF_ZONE[Math.max(1, Math.min(10, Math.round(z.rpe)))];
+        const apR = vmaToUse ? (isSessTrail ? calcAllureRefTrail(ref[0], vmaToUse, ref[1] || undefined) : calcAllureRef(ref[0], vmaToUse, ref[1] || undefined)) : null;
+        const hbR = approxHRBandForPaceZone(ref[0], hrZones);
         return '<div class="pace-zone-row" data-zone="' + zKey + '" style="background:' + rowBg + ';border-radius:4px;margin-bottom:2px;padding:4px 8px;">'
           + '<span class="pace-zone-kind">Effort' + (rpeLbl ? ' &middot; ' + rpeLbl : '') + '</span>'
           + '<span class="pace-zone-duration">' + fmtDuration(z.duration) + '</span>'
-          + '<span class="pace-zone-pace" style="color:#94a3b8;font-style:italic;font-size:12px">RPE ' + z.rpe + '/10</span></div>';
+          + '<span class="pace-zone-pace rpe-chip" title="' + rpeInfo(z.rpe).hint.replace(/"/g, '&quot;') + '">Effort ressenti ' + z.rpe + '/10 &middot; ' + rpeInfo(z.rpe).label + '</span>'
+          + (apR ? '<span class="pace-zone-pace personal-pace" title="Allure indicative (équivalent à plat). En côte la pente ralentit : règle-toi sur l\u2019effort ressenti.">&asymp; ' + fmtPace(apR.paceMin) + ' &ndash; ' + fmtPace(apR.paceMax) + '/km</span>' : '')
+          + (hbR ? '<span class="pace-zone-hr">❤️ ~' + hbR.low + '-' + hbR.high + '</span>' : '') + '</div>';
       }
       // Le tout premier segment, s'il resout en RECOVER, est la mise en
       // route de la seance (pas une "recuperation" - rien avant lui) : on
@@ -1798,7 +1833,7 @@ function renderSessionDetail(session, weekId, isCurrentWeek) {
 
     zonesHTML = '<div class="session-detail-section"><div class="session-detail-section-title">'
       + modeBadge + "&nbsp;Zones d'allure" + trailNote + vmaBadge + distBadge
-      + '</div><div class="pace-zones-list">' + zoneRows + '</div></div>';
+      + '</div><div class="pace-zones-list">' + zoneRows + '</div>' + rpeLegendHtml(zonesResolved) + '</div>';
 
     if (goalPaceInfo) {
       // Repliee par defaut (retour utilisateur : duplique la meme liste de

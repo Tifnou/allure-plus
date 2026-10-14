@@ -3946,7 +3946,13 @@ function buildGarminWorkoutFromSession(session, weekNum, sessionDisplay, userZon
     if (zone.rpe != null) {
       // Effort au ressenti (cote, trail - routines hors plan) : jamais de cible
       // d'allure, la consigne RPE reste en texte dans le nom de l'etape.
-      description = toAscii('Effort RPE ' + zone.rpe + (zone.rpeLabel ? ' - ' + String(zone.rpeLabel).replace(/_/g, ' ') : ''));
+      // Allure INDICATIVE dans le nom de l'etape (zone equivalente a cet effort, a plat, correction trail
+      // comprise) : jamais en alerte d'allure - en cote elle bipperait en permanence sans rien vouloir dire.
+      const RPE_REF = { 1: 'EF_LOW', 2: 'EF_LOW', 3: 'EF_LOW', 4: 'EF_HIGH', 5: 'TEMPO', 6: 'S60', 7: 'S30', 8: 'VMA', 9: 'VMA', 10: 'VMA' };
+      const rpeZone = userZones && userZones[RPE_REF[Math.max(1, Math.min(10, Math.round(zone.rpe)))]];
+      const fmtRpeP = sec => Math.floor(sec / 60) + "'" + String(sec % 60).padStart(2, '0');
+      description = toAscii('Effort ressenti ' + zone.rpe + '/10' + (zone.rpeLabel ? ' - ' + String(zone.rpeLabel).replace(/_/g, ' ') : '')
+        + (rpeZone ? ' | ~' + fmtRpeP(rpeZone.min) + '-' + fmtRpeP(rpeZone.max) + '/km indicatif' : ''));
     } else if (isRecoverKind) {
       // Pas de cible : Garmin laisse le coureur récupérer à son rythme
     } else if (preferAllureplusZones && apUserZone) {

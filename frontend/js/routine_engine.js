@@ -653,7 +653,7 @@ function _fmtSec(s) {
 const _CODE_LABEL = { EF: 'EF', EFL: 'EF classique', EFH: 'EF soutenue', TEMPO: 'Tempo', AS42: 'AS42', SS: 'Sweet Spot', AS21: 'AS21', S60: 'S60', AS10: 'AS10', S30: 'S30', VMA: 'VMA', WALK: 'marche', STRIDE: 'relance relâchée' };
 function _subSuffix(n) { return n.sub && n.code !== 'EFL' && n.code !== 'EFH' ? (n.sub === 'low' ? ' (bas de plage)' : ' (haut de plage)') : ''; }
 function _fmtStep(n) {
-  if (n.code === 'RPE') return _fmtSec(n.sec) + ' effort RPE ' + n.rpe + (n.label ? ' (' + n.label.replace(/_/g, ' ') + ')' : '');
+  if (n.code === 'RPE') return _fmtSec(n.sec) + ' effort ressenti ' + n.rpe + '/10' + (n.label ? ' (' + n.label.replace(/_/g, ' ') + ')' : '');
   return _fmtSec(n.sec) + ' ' + _CODE_LABEL[n.code] + _subSuffix(n);
 }
 function routineDescribe(dsl) {
