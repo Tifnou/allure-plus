@@ -468,19 +468,26 @@ test('sans plan ni course : vague lente avec un cycle de consolidation tous les 
   assert.ok(ws[12].macro.rampQ < ws[8].macro.rampQ, 'la consolidation allège');
 });
 
-test("objectif : aucune allure sans intérêt pour la cible (AS42 hors 10 km / 5 km, rien de route en trail)", () => {
-  const codesOf = ws => new Set(ws.flatMap(w => w.sessions).flatMap(s => Object.keys(E.routineLoadOfDsl(s.dsl, s.wuCd !== false).counts)));
-  const AVOID = { '10k': ['AS42'], '5k': ['AS42', 'AS21'], marathon: ['S30'], trail: ['AS42', 'AS21', 'AS10', 'S30'] };
-  for (const [key, bad] of Object.entries(AVOID)) {
-    for (const flag of key === 'trail' ? [false, true] : [false]) {
-      const ws = toPlan(key, 24, {}, { terrain: key === 'trail' ? 'trail' : 'route' }, { trailRoadFamilies: flag });
-      const codes = codesOf(ws);
-      bad.forEach(c => assert.ok(!codes.has(c), `${key}${flag ? ' (familles route ouvertes)' : ''} : ${c} proposé`));
-      assert.ok(ws.every(w => w.sessions.length === 4), `${key} : toujours 4 séances`);
-    }
+test("objectif : allures privilégiées au cœur de la préparation, allures rares tolérées, allures de route exclues en trail", () => {
+  const codesOf = s => Object.keys(E.routineLoadOfDsl(s.dsl, s.wuCd !== false).counts);
+  const qualitySessions = ws => ws.filter(w => w.phase !== 'S4' && w.macro.phaseName !== 'Reprise').flatMap(w => w.sessions.filter(s => s.slot === 'Q1'));
+  // 10 km : S60 / S30 / AS10 / VMA font l'essentiel des séances principales hors reprise et récupération
+  for (const key of ['10k', '5k']) {
+    const q = qualitySessions(toPlan(key, 24));
+    const core = q.filter(s => codesOf(s).some(c => ['S60', 'S30', 'AS10', 'VMA'].includes(c))).length;
+    assert.ok(core / q.length >= 0.7, `${key} : ${core}/${q.length} séances principales sur les allures privilégiées`);
   }
-  assert.ok(codesOf(toPlan('marathon', 24)).has('AS42'), "le marathon, lui, garde l'AS42");
-  assert.ok(codesOf(toPlan('semi', 24)).has('AS21'), "le semi garde l'AS21");
+  // AS42 / AS21 : rares pour un 10 km (permises, jamais exclues)
+  const rare = qualitySessions(toPlan('10k', 24)).filter(s => codesOf(s).some(c => ['AS42', 'AS21'].includes(c))).length;
+  assert.ok(rare <= 2, `10k : ${rare} séances AS42/AS21`);
+  // trail : aucune allure de route, même familles route ouvertes ; marathon : pas de S30
+  for (const flag of [false, true]) {
+    const codes = new Set(toPlan('trail', 24, {}, { terrain: 'trail' }, { trailRoadFamilies: flag }).flatMap(w => w.sessions).flatMap(codesOf));
+    ['AS42', 'AS21', 'AS10', 'S30'].forEach(c => assert.ok(!codes.has(c), `trail${flag ? ' (route ouverte)' : ''} : ${c}`));
+  }
+  assert.ok(!new Set(toPlan('marathon', 24).flatMap(w => w.sessions).flatMap(codesOf)).has('S30'));
+  assert.ok(new Set(toPlan('marathon', 24).flatMap(w => w.sessions).flatMap(codesOf)).has('AS42'), 'le marathon garde l\'AS42');
+  assert.ok(toPlan('10k', 24).every(w => w.sessions.length === 4));
 });
 
 test("vitesse (AS10 / VMA) comptée partout, sorties longues comprises : quota par cycle, jamais pendant la reprise", () => {
