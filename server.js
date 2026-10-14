@@ -4039,7 +4039,7 @@ function buildGarminWorkoutFromSession(session, weekNum, sessionDisplay, userZon
     // "echauffement" un premier footing facile de 55' sans bloc d'echauffement.
     // 'main' = bloc principal explicite des routines hors plan (routine_catalog.js) :
     // leurs roles (echauffement / retour au calme) sont toujours donnes, jamais devines.
-    const hasExplicitRoles = zones.some(z => z.blockType === 'warm-up' || z.blockType === 'cool-down' || z.blockType === 'main');
+    const hasExplicitRoles = zones.some(z => z.blockType === 'warm-up' || z.blockType === 'cool-down' || z.blockType === 'main' || z.explicitRoles);
     if (hasExplicitRoles) {
       zones.forEach((z, k) => {
         if (z.blockType === 'warm-up') { steps[k] = { ...steps[k], stepType: WARMUP_TYPE }; if (k === 0) warmupApplied = true; }

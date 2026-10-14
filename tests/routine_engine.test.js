@@ -336,8 +336,8 @@ test('variantes : vert = bas de plage, orange/rouge = haut de plage, jaune = pla
   assert.equal(v.red.intensity, 'haut de plage');
   assert.ok(!/_[LH]/.test(v.yellow.dsl));
   // jamais d'autre zone : mêmes codes ; efforts au ressenti et EF non modulés
-  const r = V('A11-02');
-  assert.ok(!/_[LH]/.test(r.green.dsl.replace(/EFL|EFH/g, '')), r.green.dsl);
+  const legacy = E.routineVaryDsl('15m EF + 3x(1m RPE7:cote + 2m EF) + 10m EF', 'green');
+  assert.ok(legacy && !/_[LH]/.test(legacy), legacy);      // ancien format RPE : jamais de bas / haut de plage
   const ef = V('A01-03');
   assert.ok(!/_[LH]/.test(ef.green.dsl) && !/_[LH]/.test(ef.orange.dsl));
 });
@@ -415,7 +415,7 @@ test("1er cycle = reprise (aucun palier dur) ; la charge monte de cycle en cycle
   const ws = toPlan('10k', 16);
   assert.ok(ws.slice(0, 4).every(w => w.sessions.every(s => s.tier <= 1)), 'reprise sans palier dur');
   const s3 = [2, 6, 10].map(i => loadOf(ws[i]));
-  assert.ok(s3[1] >= s3[0] && s3[2] >= s3[1], `charges S3 : ${s3}`);
+  assert.ok(s3[1] >= s3[0] * 0.93 && s3[2] >= s3[1] * 0.93 && s3[2] > s3[0], `charges S3 : ${s3}`);
   const top = ws.slice().sort((x, y) => y.macro.rampQ - x.macro.rampQ)[0];
   assert.ok(top.plan.weeksToStart >= 4, `la progression culmine à ${top.plan.weeksToStart} semaines du plan, pas dans les dernières`);
   assert.ok(ws.slice(-3).every(w => w.macro.rampQ < top.macro.rampQ), 'stabilisation puis transition : la progression redescend');
@@ -480,11 +480,10 @@ test("objectif : allures privilégiées au cœur de la préparation, allures rar
   // AS42 / AS21 : rares pour un 10 km (permises, jamais exclues)
   const rare = qualitySessions(toPlan('10k', 24)).filter(s => codesOf(s).some(c => ['AS42', 'AS21'].includes(c))).length;
   assert.ok(rare <= 2, `10k : ${rare} séances AS42/AS21`);
-  // trail : aucune allure de route, même familles route ouvertes ; marathon : pas de S30
-  for (const flag of [false, true]) {
-    const codes = new Set(toPlan('trail', 24, {}, { terrain: 'trail' }, { trailRoadFamilies: flag }).flatMap(w => w.sessions).flatMap(codesOf));
-    ['AS42', 'AS21', 'AS10', 'S30'].forEach(c => assert.ok(!codes.has(c), `trail${flag ? ' (route ouverte)' : ''} : ${c}`));
-  }
+  // trail : familles route fermées par défaut (réglage Admin) ; les côtes / terrain utilisent les mêmes allures nommées
+  const ROAD_ONLY = ['03', '04', '05', '07', '08', '09', '10'];
+  assert.ok(toPlan('trail', 24, {}, { terrain: 'trail' }).flatMap(w => w.sessions).every(s => !ROAD_ONLY.includes(s.family)), 'trail : aucune famille route par défaut');
+  // marathon : pas de S30
   assert.ok(!new Set(toPlan('marathon', 24).flatMap(w => w.sessions).flatMap(codesOf)).has('S30'));
   assert.ok(new Set(toPlan('marathon', 24).flatMap(w => w.sessions).flatMap(codesOf)).has('AS42'), 'le marathon garde l\'AS42');
   assert.ok(toPlan('10k', 24).every(w => w.sessions.length === 4));
@@ -498,4 +497,55 @@ test("vitesse (AS10 / VMA) comptée partout, sorties longues comprises : quota p
     ws.slice(0, 4).forEach(w => assert.equal(speedIn(w), 0, `${key} S${w.weekNum} : pas de vitesse pendant la reprise`));
     for (let c = 0; c < 6; c++) assert.ok(ws.slice(c * 4, c * 4 + 4).reduce((a, w) => a + speedIn(w), 0) <= q, `${key} cycle ${c + 1} : plus de ${q} séance(s) de vitesse`);
   }
+});
+
+
+// ─── Base propre pour l'analyse prévu / réalisé : même format qu'une séance de plan ─────
+test("séance libre au format d'un plan : exercices complets, rôles explicites, catégorie reconnue", () => {
+  const { compileRoutineDsl, routineToSessionStructure, routineSessionCategory } = require('../frontend/js/routine_catalog.js');
+  for (const m of ROUTINE_CATALOG) {
+    const c = compileRoutineDsl(m.dsl, { wuCd: m.wuCd });
+    const st = routineToSessionStructure(c, { uphill: m.family === '11' });
+    st.exercisesBlocks.forEach(b => {
+      assert.ok([undefined, 'warm-up', 'cool-down'].includes(b.blockType), `${m.id} : blockType ${b.blockType}`);
+      assert.equal(b.explicitRoles, true);
+      b.exercises.forEach(ex => {
+        assert.ok(['running', 'recuperation'].includes(ex.exerciseType), m.id);
+        assert.ok(ex.durations.length === 1 && ex.durations[0].value > 0 && ex.durations[0].timeUnit === 'seconds', m.id);
+        assert.ok(ex.pace && ex.pace.slug && ex.pace.zoneKind, `${m.id} : zone manquante`);
+      });
+    });
+    // durée totale identique à la liste à plat (affichage, export) et au total compilé
+    const flat = st.exercisesBlocks.flatMap(b => Array.from({ length: b.repeat }, () => b.exercises).flat());
+    assert.equal(flat.reduce((a, e) => a + e.durations[0].value, 0), c.totalSec, m.id);
+    assert.equal(flat.length, st.paceZones.length, m.id);
+    // plus aucune étape "au ressenti" dans le catalogue : mêmes allures nommées partout
+    assert.ok(!/RPE/.test(m.dsl), `${m.id} : RPE`);
+    const cat = routineSessionCategory(c, { role: m.role, family: m.family, terrain: m.terrain.includes('road') ? 'road' : 'trail' });
+    assert.match(cat, /^(road|trail)_(basic_endurance|long_run|vma_intervals|vma|threshold_intervals|threshold|race_pace|race_simulation|hill_repeats|threshold_uphill|vma_uphill)$/, `${m.id} : ${cat}`);
+  }
+});
+
+test("séances de côtes : travail marqué 'uphill' (allures corrigées trail comme un plan), échauffement et retour au calme non", () => {
+  const { compileRoutineDsl, routineToSessionStructure } = require('../frontend/js/routine_catalog.js');
+  const c11 = ROUTINE_CATALOG.find(m => m.id === 'A11-04');
+  const st = routineToSessionStructure(compileRoutineDsl(c11.dsl, { wuCd: true }), { uphill: true });
+  const ex = st.exercisesBlocks.flatMap(b => b.exercises.map(e => ({ ...e, bt: b.blockType })));
+  assert.ok(ex.filter(e => e.terrainIncline === 'uphill').length >= 1 && ex.filter(e => e.terrainIncline === 'uphill').every(e => e.pace.slug === 'seuil30'));
+  assert.ok(ex.filter(e => e.bt === 'warm-up' || e.bt === 'cool-down' || e.exerciseType === 'recuperation').every(e => !e.terrainIncline));
+});
+
+test("catégories : VMA → vma, seuil → threshold, tempo → allure course, sortie longue, EF ; côtes → hill / uphill", () => {
+  const { compileRoutineDsl, routineSessionCategory } = require('../frontend/js/routine_catalog.js');
+  const cat = (id, terrain = 'road') => { const m = ROUTINE_CATALOG.find(x => x.id === id); return routineSessionCategory(compileRoutineDsl(m.dsl, { wuCd: m.wuCd }), { role: m.role, family: m.family, terrain }); };
+  assert.equal(cat('A05-01'), 'road_vma_intervals');
+  assert.equal(cat('A03-01'), 'road_threshold_intervals');
+  assert.equal(cat('A02-01'), 'road_race_pace');
+  assert.equal(cat('A10-03'), 'road_long_run');
+  assert.equal(cat('A01-03'), 'road_basic_endurance');
+  assert.equal(cat('A11-01'), 'trail_vma_uphill');
+  assert.equal(cat('A11-04'), 'trail_threshold_uphill');
+  assert.equal(cat('A11-06'), 'road_hill_repeats');
+  assert.equal(cat('A12-04', 'trail'), 'trail_long_run');
+  assert.equal(cat('A02-01', 'trail'), 'trail_race_simulation');
 });

@@ -113,7 +113,7 @@ function flattenExerciseInfo(session) {
     const repeat = block.repeat || 1;
     const exercises = block.exercises || [];
     for (let r = 0; r < repeat; r++) {
-      exercises.forEach(ex => out.push({ pace: ex.pace || null, blockIdx, blockRepeat: repeat, blockType: block.blockType || null, exerciseType: ex.exerciseType || null }));
+      exercises.forEach(ex => out.push({ pace: ex.pace || null, blockIdx, blockRepeat: repeat, blockType: block.blockType || null, exerciseType: ex.exerciseType || null, explicitRoles: !!block.explicitRoles }));
     }
   });
   return out;
@@ -133,6 +133,7 @@ function annotatePaceZones(session, goalType) {
     // sur la premiere/derniere zone.
     blockType: info[i]?.blockType || null,
     exerciseType: info[i]?.exerciseType || null,
+    explicitRoles: !!info[i]?.explicitRoles,
   }));
 }
 

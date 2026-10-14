@@ -132,7 +132,7 @@ const ROUTINE_TARGETS = {
   '10k':    { avoidCodes: [], preferCodes: ['S60', 'S30', 'AS10', 'VMA'], rareCodes: ['AS42', 'AS21'], label: '10 km', themes: ['aero', 'seuil', 'vma', 'seuil'], vmaPerCycle: 2, why: 'endurance active, seuil puis vitesse (VMA, AS10) en alternance ; la vitesse tient au plus 2 séances par cycle, jamais deux semaines de suite' },
   semi:     { preferCodes: ['AS21', 'S60', 'SS'], rareCodes: [], label: 'semi-marathon', themes: ['aero', 'seuil', 'seuil', 'vma', 'seuil'], vmaPerCycle: 1, why: 'surtout du seuil et de l\u2019allure semi, avec très peu de vitesse (1 séance par cycle au plus)' },
   marathon: { avoidCodes: ['S30'], preferCodes: ['AS42', 'S60', 'SS'], rareCodes: [], label: 'marathon', themes: ['aero', 'seuil', 'aero', 'seuil'], vmaPerCycle: 0, why: 'endurance active, allure marathon et seuil ; pas de travail de VMA' },
-  trail:    { avoidCodes: ['AS42', 'AS21', 'AS10', 'S30'], label: 'trail', themes: ['force', 'aero', 'force', 'aero'], vmaPerCycle: 0, why: 'résistance (côtes, terrain) et endurance active ; pas de travail de VMA sur route' },
+  trail:    { avoidCodes: [], label: 'trail', themes: ['force', 'aero', 'force', 'aero'], vmaPerCycle: 0, why: 'résistance (côtes, terrain) et endurance active ; pas de travail de VMA sur route' },
   base:     { label: 'polyvalent', themes: ['aero', 'seuil', 'force', 'vma', 'seuil'], vmaPerCycle: 1, why: 'Pas d\u2019objectif précis : endurance active, seuil, résistance et un peu de vitesse en alternance' },
 };
 // preferCodes : les allures les plus adaptées à l'objectif — elles font le cœur des séances de qualité
@@ -198,6 +198,10 @@ function routineRaceAdvice(weeksToRace, distKey) {
   return { typical, recommendNow: weeksToRace <= typical + 2, weeksUntilPlan: Math.max(0, weeksToRace - typical) };
 }
 
+function _modelHasCode(id, code) {
+  const m = _RC.ROUTINE_CATALOG.find(c => c.id === id);
+  return !!m && Object.keys(routineModelLoad(m).counts).includes(code);
+}
 const _vmaModelCache = {};
 function _modelHasVma(id) {
   if (!(id in _vmaModelCache)) {
@@ -351,9 +355,9 @@ function routineGenerateWeek(prefs, weekNum, ctx) {
   const tgt = ROUTINE_TARGETS[targetKey] || ROUTINE_TARGETS.base;
   const dom = m => ROUTINE_DOMAIN[m.family];
   const hasVmaCode = m => Object.keys(routineModelLoad(m).counts).some(c => c === 'AS10' || c === 'VMA');
-  const vmaIn = h => (h.sessions || []).filter(x => (['Q1', 'Q2'].includes(x.slot) && ROUTINE_DOMAIN[x.family] === 'vma') || (x.slot === 'SL' && _modelHasVma(x.modelId))).length;
+  const vmaIn = h => (h.sessions || []).filter(x => x.slot !== 'EF' && _modelHasVma(x.modelId)).length;
   const vmaCycle = history.filter(h => h.age >= 1 && h.age <= cyclePos).reduce((a, h) => a + vmaIn(h), 0);
-  const vmaPrev = history.some(h => h.age === 1 && (h.sessions || []).some(x => ['Q1', 'Q2'].includes(x.slot) && x.family === '05'));
+  const vmaPrev = history.some(h => h.age === 1 && (h.sessions || []).some(x => ['Q1', 'Q2'].includes(x.slot) && _modelHasCode(x.modelId, 'VMA')));
   const vmaOk = tgt.vmaPerCycle > 0 && vmaCycle < tgt.vmaPerCycle && !isRecup && macro.phaseName !== 'Reprise';
 
   // — qualité principale (Q1) : choisie en premier (palier cible), jamais la même famille d'affilée
@@ -367,13 +371,13 @@ function routineGenerateWeek(prefs, weekNum, ctx) {
     const hasAny = (m, codes) => !!codes && codes.length > 0 && Object.keys(routineModelLoad(m).counts).some(c => codes.includes(c));
     const q1Pool = pool.filter(m => m.role === 'quality' && routineEligible(m, ec, { maxTier: qt }));
     const favour = list => {                                // allures privilégiées d'abord, rares en dernier recours
-      if (macro.phaseName === 'Reprise') return list;       // la reprise reste généraliste
       const noRare = list.filter(m => !hasAny(m, tgt.rareCodes));
       const base = noRare.length ? noRare : list;
+      if (macro.phaseName === 'Reprise') return base;       // la reprise reste généraliste (pas de restriction aux allures privilégiées)
       const pref = base.filter(m => hasAny(m, tgt.preferCodes));
       return pref.length ? pref : base;
     };
-    const allowed = list => list.filter(m => dom(m) !== 'vma' || (vmaOk && !(vmaPrev && m.family === '05')));
+    const allowed = list => list.filter(m => !(dom(m) === 'vma' || hasVmaCode(m)) || (vmaOk && !(vmaPrev && Object.keys(routineModelLoad(m).counts).includes('VMA'))));
     const FALLBACK = { vma: ['seuil', 'aero'], seuil: ['aero', 'force'], aero: ['force', 'seuil'], force: ['aero', 'seuil'] };
     const themed = list => {
       const ok = allowed(list);
@@ -415,7 +419,7 @@ function routineGenerateWeek(prefs, weekNum, ctx) {
   if (wantActive) {
     const vmaThisWeek = !!(q1 && dom(q1) === 'vma');            // la séance principale de la semaine en compte déjà une
     let act = slActive.filter(m => routineModelLoad(m).tier <= slMaxTier && (!hasVmaCode(m) || (vmaOk && !vmaThisWeek && vmaCycle + 1 <= tgt.vmaPerCycle)));
-    { const noRare = act.filter(m => !Object.keys(routineModelLoad(m).counts).some(c => (tgt.rareCodes || []).includes(c))); if (noRare.length && macro.phaseName !== 'Reprise') act = noRare; }
+    { const noRare = act.filter(m => !Object.keys(routineModelLoad(m).counts).some(c => (tgt.rareCodes || []).includes(c))); if (noRare.length) act = noRare; }
     slCands = slNear(act);
     if (!slCands.length) slCands = act.filter(m => routineModelLoad(m).totalMin <= slDur + 20);
     slActiveChosen = slCands.length > 0;

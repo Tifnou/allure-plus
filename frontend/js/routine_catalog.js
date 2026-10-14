@@ -10,7 +10,8 @@
 //   Durées  : 15m · 30s · 90s · 1m30
 //   Codes   : EF (EFL = bas, EFH = haut) · TEMPO · AS42 · SS (Sweet Spot) ·
 //             AS21 · S60 · AS10 · S30 · VMA · WALK · STRIDE (relâché)
-//             RPE<n>:<libelle> = effort au ressenti (côtes, trail), sans allure
+//             (RPE<n>:<libelle> = effort au ressenti : ancien format, encore lu mais plus utilisé par le catalogue —
+//              côtes et trail utilisent les MÊMES allures nommées qu'une séance route ; le trail applique sa correction)
 //   Montée  : 4m/6m/8m TEMPO r2m EF  (paliers ; r entre paliers)
 //   Répét.  : Nx( ... ) r2m EF       (N fois ; r entre répétitions)
 //             Nx( ... ) R4m EF       (R = récupération entre blocs/séries)
@@ -279,23 +280,59 @@ function routineStepToZone(s) {
   return { kind: c.kind, slug: c.slug, sub: (sub === 'low' || sub === 'high') ? sub : null };
 }
 
+// Catégorie Campus d'une séance libre, déduite de son contenu : l'analyse choisit son profil de score
+// (EF, seuil, VMA, allure course, sortie longue, trail) et son affichage (libellé / couleur) d'après elle.
+function routineSessionCategory(compiled, o) {
+  const trail = o.terrain === 'trail';
+  const p = trail ? 'trail_' : 'road_';
+  if (o.role === 'long') return p + 'long_run';
+  const secs = {};
+  compiled.steps.forEach(s => {
+    if (['warmup', 'cooldown', 'recovery', 'setRecovery'].includes(s.role)) return;
+    if (s.code === 'RPE' || ROUTINE_EASY_CODES.includes(s.code)) return;
+    secs[s.code] = (secs[s.code] || 0) + s.sec;
+  });
+  const dom = Object.keys(secs).sort((a, b) => secs[b] - secs[a])[0] || null;
+  const kind = !dom ? null : ['VMA', 'AS10'].includes(dom) ? 'vma' : ['S30', 'S60', 'SS', 'AS21'].includes(dom) ? 'threshold' : 'race_pace';
+  if (o.family === '11') return kind === 'vma' ? 'trail_vma_uphill' : kind === 'threshold' ? 'trail_threshold_uphill' : 'road_hill_repeats';
+  if (!kind) return p + 'basic_endurance';
+  if (trail) return kind === 'vma' ? 'trail_vma' : kind === 'threshold' ? 'trail_threshold' : 'trail_race_simulation';
+  return kind === 'vma' ? 'road_vma_intervals' : kind === 'threshold' ? 'road_threshold_intervals' : 'road_race_pace';
+}
+
 // Structure complète d'une séance au format Campus : paceZones (à plat, ordre
 // joué) + exercisesBlocks (blocs répétés) — exactement ce qu'attendent
 // annotatePaceZones (zones.js), l'affichage (campus.js), l'export Garmin
 // (buildStructuredSteps, server.js) et l'analyse (session-analysis.js).
 // blockType 'warm-up' / 'cool-down' explicites ; tout le reste = 'main', ce
 // qui désactive côté export l'heuristique "première/dernière zone".
-function routineToSessionStructure(compiled) {
+// Exercices au MÊME format que ceux d'un plan (Campus / .aplus) : c'est ce que lisent l'analyse
+// prévu / réalisé (flattenPlannedExercises, buildPlannedSteps, alignLapsToSteps) et l'export.
+//  exerciseType 'running' | 'recuperation', durations [{value, timeUnit}], pace {slug, zoneKind, perception},
+//  blocs : blockType 'warm-up' / 'cool-down' sinon aucun (bloc principal) — jamais de valeur maison.
+//  explicitRoles : l'échauffement / retour au calme sont DONNÉS (jamais devinés par l'export Garmin).
+//  opts.uphill : étapes de travail "en côte" (terrainIncline: 'uphill', comme les séances côte d'un plan) →
+//  allures corrigées trail comme partout.
+function routineToSessionStructure(compiled, opts = {}) {
   const paceZones = [];
   const exercisesBlocks = [];
+  const mkExercise = (s, inRepeat) => {
+    const z = routineStepToZone(s);
+    const easyRun = !z.recup && s.role !== 'warmup' && s.role !== 'cooldown' && s.code !== 'RPE' && ROUTINE_EASY_CODES.includes(s.code);
+    const ex = {
+      exerciseType: z.recup ? 'recuperation' : 'running',
+      durations: [{ value: s.sec, timeUnit: 'seconds' }],
+      pace: z.slug ? { slug: z.slug, zoneKind: z.recup ? 'RECOVER' : s.role === 'warmup' ? 'WARMUP' : s.role === 'cooldown' ? 'COOLDOWN' : z.kind, perception: z.recup ? 'easy' : (s.role === 'warmup' || s.role === 'cooldown') ? 'comfortable' : easyRun ? 'steady' : 'target' } : null,
+    };
+    if (z.sub) ex.sub = z.sub;
+    if (opts.uphill && !z.recup && s.role !== 'warmup' && s.role !== 'cooldown' && !easyRun) ex.terrainIncline = 'uphill';
+    void inRepeat;
+    return ex;
+  };
   const push = (blockType, repeat, tpl) => {
-    exercisesBlocks.push({
-      repeat, blockType,
-      exercises: tpl.map(s => {
-        const z = routineStepToZone(s);
-        return { pace: z.slug ? { slug: z.slug } : null, exerciseType: z.recup ? 'recuperation' : null };
-      }),
-    });
+    const block = { repeat, explicitRoles: true, exercises: tpl.map(s => mkExercise(s, repeat > 1)) };
+    if (blockType) block.blockType = blockType;
+    exercisesBlocks.push(block);
     for (let r = 0; r < repeat; r++) {
       tpl.forEach(s => {
         const z = routineStepToZone(s);
@@ -307,10 +344,10 @@ function routineToSessionStructure(compiled) {
     }
   };
   compiled.segs.forEach(sg => {
-    if (sg.repeat >= 2) { push('main', sg.repeat, sg.tpl); return; }
+    if (sg.repeat >= 2) { push(null, sg.repeat, sg.tpl); return; }
     // segment à plat : échauffement / retour au calme dans leur propre bloc
     let run = [];
-    const flush = () => { if (run.length) { push('main', 1, run); run = []; } };
+    const flush = () => { if (run.length) { push(null, 1, run); run = []; } };
     sg.tpl.forEach(s => {
       if (s.role === 'warmup')        { flush(); push('warm-up', 1, [s]); }
       else if (s.role === 'cooldown') { flush(); push('cool-down', 1, [s]); }
@@ -412,7 +449,7 @@ const ROUTINE_FAMILIES = [
     ['A06-07', 'Fartlek 10×1/1', '15m EF + 10x(1m TEMPO + 1m EF) + 10m EF', 45],
     ['A06-08', 'Fartlek 4×(3/2)', '15m EF + 4x(3m SS + 2m EF) + 10m EF', 45],
     ['A06-09', 'Fartlek mix doux', '15m EF + 3x(4m EFH + 3m TEMPO + 2m EF) + 10m EF', 52],
-    ['A06-10', 'Fartlek libre guidé', '15m EF + 25m RPE4:variations_terrain + 10m EF', 50],
+    ['A06-10', 'Fartlek libre guidé', '15m EF + 25m EFH + 10m EF', 50],
   ] },
   { id: '07', name: 'AS42 & course longue', terrain: ['road'], access: 'modérée', role: 'quality', rows: [
     ['A07-01', 'AS42 2×12', '15m EF + 2x(12m AS42) r3m EF + 10m EF', 52],
@@ -480,28 +517,28 @@ const ROUTINE_FAMILIES = [
     ['L10-09', 'SL pyramide AS42 / SS / S60', '25m EF + 15m AS42 + 10m SS + 5m S60 + 29m EF', null, 'SL_ACT_07'],
   ] },
   { id: '11', name: 'Côtes route & trail', terrain: ['road', 'trail'], access: 'modérée à haute', role: 'quality', rows: [
-    ['A11-01', 'Côtes 8×30″', '15m EF + 8x(30s RPE7:cote + 90s EF) + 10m EF', 41],
-    ['A11-02', 'Côtes 10×45″', '15m EF + 10x(45s RPE7:cote + 75s EF) + 10m EF', 45],
-    ['A11-03', 'Côtes 6×1′', '15m EF + 6x(1m RPE7:cote + 2m EF) + 10m EF', 43],
-    ['A11-04', 'Côtes 5×2′', '15m EF + 5x(2m RPE6:cote + 3m EF) + 10m EF', 50],
-    ['A11-05', 'Côtes 4×3′', '15m EF + 4x(3m RPE6:cote + 3m EF) + 10m EF', 49],
-    ['A11-06', 'Côtes marche active', '15m EF + 5x(4m RPE5:marche_montante + 3m EF) + 10m EF', 60],
-    ['A11-07', 'Côtes progressives', '15m EF + 4x(2m RPE5:cote + 1m RPE6:cote + 3m EF) + 10m EF', 49],
-    ['A11-08', 'Côtes en escalier', '15m EF + 1m/2m/3m/2m/1m RPE6:cote r3m EF + 10m EF', 46],
-    ['A11-09', 'Côtes double série', '15m EF + 2x(3x(1m RPE7:cote + 2m EF)) R4m EF + 10m EF', 47],
-    ['A11-10', 'Côtes technicité', '15m EF + 30m RPE4:sentier_technique + 10m EF', 55],
+    ['A11-01', 'Côtes 8×30″', '15m EF + 8x(30s VMA + 90s EF) + 10m EF', 41],
+    ['A11-02', 'Côtes 10×45″', '15m EF + 10x(45s VMA + 75s EF) + 10m EF', 45],
+    ['A11-03', 'Côtes 6×1′', '15m EF + 6x(1m VMA + 2m EF) + 10m EF', 43],
+    ['A11-04', 'Côtes 5×2′', '15m EF + 5x(2m S30 + 3m EF) + 10m EF', 50],
+    ['A11-05', 'Côtes 4×3′', '15m EF + 4x(3m S30 + 3m EF) + 10m EF', 49],
+    ['A11-06', 'Côtes marche active', '15m EF + 5x(4m TEMPO + 3m EF) + 10m EF', 60],
+    ['A11-07', 'Côtes progressives', '15m EF + 4x(2m TEMPO + 1m S30 + 3m EF) + 10m EF', 49],
+    ['A11-08', 'Côtes en escalier', '15m EF + 1m/2m/3m/2m/1m S30 r3m EF + 10m EF', 46],
+    ['A11-09', 'Côtes double série', '15m EF + 2x(3x(1m VMA + 2m EF)) R4m EF + 10m EF', 47],
+    ['A11-10', 'Côtes technicité', '15m EF + 30m EFH + 10m EF', 55],
   ] },
   { id: '12', name: 'Trail / SL terrain et blocs mixtes', terrain: ['trail'], access: 'modérée', role: 'long', wuCd: false, rows: [
     ['A12-01', 'Trail facile 75', '75m EF', 75],
     ['A12-02', 'Trail facile 90', '90m EF', 90],
-    ['A12-03', 'Trail montées marche', '20m EF + 4x(5m RPE5:montee_marche + 4m EF) + 14m EF', 70],
-    ['A12-04', 'Trail montées course', '20m EF + 4x(4m RPE6:cote + 5m EF) + 14m EF', 70],
-    ['A12-05', 'Trail alternance terrain', '20m EF + 3x(8m RPE4:vallonne + 5m EF) + 11m EF', 70],
-    ['A12-06', 'Trail 2 longs blocs', '20m EF + 2x(15m RPE5:montee_reguliere) R8m EF + 12m EF', 70],
-    ['A12-07', 'Trail technique facile', '25m EF + 25m RPE3:technique_descente + 20m EF', 70],
+    ['A12-03', 'Trail montées marche', '20m EF + 4x(5m TEMPO + 4m EF) + 14m EF', 70],
+    ['A12-04', 'Trail montées course', '20m EF + 4x(4m S60 + 5m EF) + 14m EF', 70],
+    ['A12-05', 'Trail alternance terrain', '20m EF + 3x(8m EFH + 5m EF) + 11m EF', 70],
+    ['A12-06', 'Trail 2 longs blocs', '20m EF + 2x(15m TEMPO) R8m EF + 12m EF', 70],
+    ['A12-07', 'Trail technique facile', '25m EF + 25m EFL + 20m EF', 70],
     ['A12-08', 'Trail progression D+', '80m EF', 80],
-    ['A12-09', 'Trail SL active', '35m EF + 2x(10m RPE5:montee + 6m EF) + 13m EF', 80],
-    ['A12-10', 'Trail simulation mixte', '20m EF + 3x(6m RPE5:marche_montee + 6m RPE4:roulant + 4m EF) + 12m EF', 80],
+    ['A12-09', 'Trail SL active', '35m EF + 2x(10m TEMPO + 6m EF) + 13m EF', 80],
+    ['A12-10', 'Trail simulation mixte', '20m EF + 3x(6m TEMPO + 6m EFH + 4m EF) + 12m EF', 80],
   ] },
 ];
 
@@ -537,6 +574,6 @@ function getRoutineCompiled(model) {
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     ROUTINE_CODES, ROUTINE_FAMILIES, ROUTINE_CATALOG,
-    compileRoutineDsl, routineParseDsl, routineTreeToDsl, routineToSessionStructure, getRoutineCompiled,
+    compileRoutineDsl, routineParseDsl, routineTreeToDsl, routineToSessionStructure, routineSessionCategory, getRoutineCompiled,
   };
 }

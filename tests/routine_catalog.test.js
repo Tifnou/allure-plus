@@ -65,7 +65,7 @@ test('échauffement / retour au calme assignés seulement sur les séances de qu
 test('structure Campus : bloc répété sans récup fantôme, retour au calme dédié', () => {
   const st = routineToSessionStructure(compileRoutineDsl('15m EF + 3x(6m TEMPO) r2m EF + 10m EF'));
   // échauffement | 2 x [Tempo + récup] | Tempo final | retour au calme
-  assert.deepEqual(st.exercisesBlocks.map(b => [b.blockType, b.repeat]), [['warm-up', 1], ['main', 2], ['main', 1], ['cool-down', 1]]);
+  assert.deepEqual(st.exercisesBlocks.map(b => [b.blockType || null, b.repeat]), [['warm-up', 1], [null, 2], [null, 1], ['cool-down', 1]]);
   assert.equal(st.paceZones.reduce((a, z) => a + z.duration, 0), (15 + 18 + 4 + 10) * 60);
   assert.equal(st.paceZones.filter(z => z.kind === 'RECOVER').length, 2);
   assert.equal(st.paceZones[st.paceZones.length - 1].kind, 'COOLDOWN');
@@ -137,4 +137,12 @@ test('arbre → DSL → arbre : aller-retour sans perte sur tout le catalogue', 
     assert.equal(b.totalSec, a.totalSec, m.id);
     assert.deepEqual(b.steps.map(s => [s.sec, s.code, s.role]), a.steps.map(s => [s.sec, s.code, s.role]), m.id);
   }
+});
+
+test("perception : seule une vraie récupération est 'easy' ; une EF active (classique / soutenue) est 'steady', l'échauffement 'comfortable'", () => {
+  const st = routineToSessionStructure(compileRoutineDsl('4x(8m EFL + 2m EFH)'));
+  const ex = st.exercisesBlocks.flatMap(b => b.exercises);
+  assert.ok(ex.every(e => e.exerciseType === 'running' && e.pace.perception === 'steady'));
+  const q = routineToSessionStructure(compileRoutineDsl('15m EF + 3x(6m S60) r2m EF + 10m EF')).exercisesBlocks.flatMap(b => b.exercises);
+  assert.deepEqual([...new Set(q.map(e => e.pace.perception))].sort(), ['comfortable', 'easy', 'target']);
 });

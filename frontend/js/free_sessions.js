@@ -479,7 +479,9 @@ function routineShouldPrecedePlan(goal, weeks) {
 // en cours ou à venir déjà figées sous l'ancienne échéance sont régénérées
 // (sauf si une séance y a déjà été pointée) pour recaler le cycle.
 // Empreinte des réglages utilisés pour générer une semaine
-function routinePrefsSig(prefs) { return [prefs.terrain, prefs.frequency, prefs.maxMin || 90, prefs.caution ? 1 : 0, prefs.seedSalt || 0].join('|'); }
+// ROUTINE_CATALOG_VERSION : à incrémenter quand le CONTENU des fiches change (les semaines non touchées sont alors régénérées)
+const ROUTINE_CATALOG_VERSION = 3;
+function routinePrefsSig(prefs) { return [prefs.terrain, prefs.frequency, prefs.maxMin || 90, prefs.caution ? 1 : 0, prefs.seedSalt || 0, ROUTINE_CATALOG_VERSION].join('|'); }
 
 // Une semaine "intacte" n'a ni séance pointée (faite / passée) ni variante choisie
 function routineWeekIsUntouched(wd, w) {
@@ -606,13 +608,13 @@ async function ensureRoutineWeek(prefs, weekNum, planInfo, opts) {
 // Fiche figée → séance au format Campus (affichage, pointage, export Garmin, analyse)
 function routineSnapshotToSession(snap, idx) {
   const compiled = compileRoutineDsl(snap.dsl, { wuCd: snap.wuCd });
-  const { paceZones, exercisesBlocks } = routineToSessionStructure(compiled);
+  const { paceZones, exercisesBlocks } = routineToSessionStructure(compiled, { uphill: snap.family === '11' });
   const trail = snap.terrain === 'trail';
-  const cat = snap.role === 'ef' ? 'basic_endurance' : snap.role === 'long' ? 'long_run' : 'intensity';
   const session = {
     displayName: snap.name,
     name: snap.name,
-    trainingCategory: (trail ? 'trail_' : 'road_') + cat,
+    // catégorie déduite du contenu (VMA / seuil / allure course / EF / sortie longue) : l'analyse en dépend
+    trainingCategory: routineSessionCategory(compiled, { role: snap.role, family: snap.family, terrain: snap.terrain }),
     trainingIndex: idx,
     paceZones, exercisesBlocks,
     description: RoutineEngine.routineDescribe(snap.dsl) + '.',

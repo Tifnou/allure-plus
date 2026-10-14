@@ -141,7 +141,7 @@ function flattenPlannedExercises(session) {
   (session.exercisesBlocks || []).forEach((block, blockIdx) => {
     const repeat = block.repeat || 1;
     for (let r = 0; r < repeat; r++) {
-      (block.exercises || []).forEach(ex => out.push({ ...ex, blockType: block.blockType || null, blockIdx, repIdx: r, blockRepeat: repeat }));
+      (block.exercises || []).forEach(ex => out.push({ ...ex, blockType: block.blockType || null, blockIdx, repIdx: r, blockRepeat: repeat, explicitRoles: !!block.explicitRoles }));
     }
   });
   return out;
@@ -408,7 +408,8 @@ function buildPlannedSteps(plannedFlat, goalType) {
   const active = steps.filter(s => s.role !== 'other');
   // Sans aucun blockType (anciens plans, seances libres) : memes heuristiques
   // premiere/derniere zone que l'export Garmin.
-  const explicit = plannedFlat.some(e => e.blockType === 'warm-up' || e.blockType === 'cool-down');
+  // explicitRoles : séances libres (routines) — les rôles sont DONNÉS, une EF seule n'a ni échauffement ni retour au calme à deviner
+  const explicit = plannedFlat.some(e => e.blockType === 'warm-up' || e.blockType === 'cool-down' || e.explicitRoles);
   if (!explicit && active.length > 1) {
     const first = active[0], last = active[active.length - 1];
     let wu = false;
@@ -561,12 +562,20 @@ async function buildSessionAnalysis(session, week, activity) {
   // lignes droites visent la zone VMA) — sert uniquement au tableau
   // repetition par repetition, jamais a la ligne de synthese globale.
   const mainZoneKey = pickDominantZone(runningEx.length ? runningEx : mainFlat, goalType);
+  // Sous-zone (séances libres : EF classique / soutenue, bas / haut de plage) : la cible est la moitié
+  // basse / haute de la zone SI tous les exercices de cette zone la partagent, sinon la zone entière.
+  const subOfZone = (exs, zoneKey) => {
+    const subs = new Set(exs.filter(e => resolvePlannedExerciseZone(e, goalType) === zoneKey).map(e => e.sub || null));
+    return subs.size === 1 ? ([...subs][0] || undefined) : undefined;
+  };
+  const mainSub = subOfZone(runningEx.length ? runningEx : mainFlat, mainZoneKey);
   let mainPaceRange = mainZoneKey && vma
-    ? (isTrail ? calcAllureRefTrail(mainZoneKey, vma) : calcAllureRef(mainZoneKey, vma))
+    ? (isTrail ? calcAllureRefTrail(mainZoneKey, vma, mainSub) : calcAllureRef(mainZoneKey, vma, mainSub))
     : null;
   const repsZoneKey = hasStructuredReps ? pickDominantZone(repeatingRunningEx, goalType) : null;
+  const repsSub = repsZoneKey ? subOfZone(repeatingRunningEx, repsZoneKey) : undefined;
   const repsPaceRange = repsZoneKey && vma
-    ? (isTrail ? calcAllureRefTrail(repsZoneKey, vma) : calcAllureRef(repsZoneKey, vma))
+    ? (isTrail ? calcAllureRefTrail(repsZoneKey, vma, repsSub) : calcAllureRef(repsZoneKey, vma, repsSub))
     : null;
   // Zones FC utilisateur + bande approximative du bloc REPETE (repsZoneKey,
   // ex S60), distincte de la zone dominante globale (mainZoneKey, ex EF sur
@@ -640,7 +649,7 @@ async function buildSessionAnalysis(session, week, activity) {
     if (totW > 0) {
       let pMin = 0, pMax = 0, hLow = 0, hHigh = 0, hW = 0;
       ws.forEach(s => {
-        const r = isTrail ? calcAllureRefTrail(s.zoneKey, vma) : calcAllureRef(s.zoneKey, vma);
+        const r = isTrail ? calcAllureRefTrail(s.zoneKey, vma, s.ex && s.ex.sub || undefined) : calcAllureRef(s.zoneKey, vma, s.ex && s.ex.sub || undefined);
         if (r) { pMin += r.paceMin * s.durSec; pMax += r.paceMax * s.durSec; }
         const hb = approxHRBandForPaceZone(s.zoneKey, hrZones);
         if (hb) { hLow += hb.low * s.durSec; hHigh += hb.high * s.durSec; hW += s.durSec; }
@@ -704,7 +713,7 @@ async function buildSessionAnalysis(session, week, activity) {
     // harmonique 492s/km (8'12"), bien plus coherente et proche de Garmin (8:19).
     const gapTotalEquivM = gapLaps.reduce((s, l) => s + l.gapMps * l.durSec, 0);
     const gapAvgSecKm = (gapTotalSec > 0 && gapTotalEquivM > 0) ? gapTotalSec / (gapTotalEquivM / 1000) : null;
-    const flatPaceRange = (mainZoneKey && vma) ? calcAllureRef(mainZoneKey, vma) : null;
+    const flatPaceRange = (mainZoneKey && vma) ? calcAllureRef(mainZoneKey, vma, mainSub) : null;
 
     let gapDeviationSecKm = null, gapVerdict = null;
     if (flatPaceRange && gapAvgSecKm != null) {
@@ -939,7 +948,7 @@ async function buildSessionAnalysis(session, week, activity) {
     reps = repEntries.map(({ lapIdx, zoneKey, step }, i) => {
       const lap = laps[lapIdx];
       const repsPaceRange = zoneKey && vma
-        ? (isTrail ? calcAllureRefTrail(zoneKey, vma) : calcAllureRef(zoneKey, vma))
+        ? (isTrail ? calcAllureRefTrail(zoneKey, vma, step && step.ex && step.ex.sub || undefined) : calcAllureRef(zoneKey, vma, step && step.ex && step.ex.sub || undefined))
         : null;
       const repsHRBand = zoneKey ? approxHRBandForPaceZone(zoneKey, hrZones) : null;
       const p = lap.averageSpeed > 0 ? Math.round(1000 / lap.averageSpeed) : null;
@@ -1003,7 +1012,7 @@ async function buildSessionAnalysis(session, week, activity) {
       else if (st.role === 'warmup') label = 'Échauffement';
       else if (st.role === 'recovery') label = 'Récup';
       else label = st.ex.exerciseType === 'recuperation' ? 'Récup finale' : 'Retour au calme';
-      const range = (judged && st.zoneKey && vma) ? (isTrail ? calcAllureRefTrail(st.zoneKey, vma) : calcAllureRef(st.zoneKey, vma)) : null;
+      const range = (judged && st.zoneKey && vma) ? (isTrail ? calcAllureRefTrail(st.zoneKey, vma, st.ex && st.ex.sub || undefined) : calcAllureRef(st.zoneKey, vma, st.ex && st.ex.sub || undefined)) : null;
       const hb = (judged && st.zoneKey) ? approxHRBandForPaceZone(st.zoneKey, hrZones) : null;
       const p = (lap && lap.averageSpeed > 0) ? Math.round(1000 / lap.averageSpeed) : null;
       const hrv = lap?.averageHR ? Math.round(lap.averageHR) : null;
