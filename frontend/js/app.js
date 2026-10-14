@@ -157,10 +157,25 @@ async function syncUserDataFromServer() {
     // local mais absentes du serveur (typiquement la toute premiere
     // synchro apres l'ajout de ce mecanisme) — sans attendre une prochaine
     // ecriture qui pourrait ne jamais survenir avant un nettoyage.
+    // MAIS jamais une cle que le serveur connait comme SUPPRIMEE (tombstone dans
+    // meta, cle absente de data) : la repousser ressuscitait un plan annule
+    // ailleurs (bug constate : "Marathon des Causses" annule, revenu au
+    // redemarrage parce qu'un autre navigateur en gardait une copie locale
+    // perimee et la renvoyait a chaque chargement). Si ce tombstone est plus
+    // recent que la derniere copie appliquee ici, la suppression vient d'un
+    // autre appareil : on retire aussi la copie locale perimee.
     const toPush = {};
+    const nativeRemove = Storage.prototype.removeItem.bind(localStorage);
     Object.keys(localStorage).forEach(key => {
-      if (isDurableLsKey(key) && !(key in (serverData || {}))) toPush[key] = localStorage.getItem(key);
+      if (!isDurableLsKey(key) || key in (serverData || {})) return;
+      const deletedTs = serverMeta && serverMeta[key];
+      if (deletedTs) {
+        if (applied[key] && deletedTs > applied[key]) { nativeRemove(key); delete applied[key]; appliedChanged = true; }
+        return;
+      }
+      toPush[key] = localStorage.getItem(key);
     });
+    if (appliedChanged) _nativeLsSetItem(DURABLE_SYNC_APPLIED_KEY, JSON.stringify(applied));
     if (Object.keys(toPush).length) {
       fetch(`${API}/api/user-data`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
