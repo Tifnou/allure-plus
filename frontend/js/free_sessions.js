@@ -469,7 +469,8 @@ function routineCurrentPlanInfo() {
 
 // campus.js renderTrainingPlan : la routine précède-t-elle ce plan ?
 function routineShouldPrecedePlan(goal, weeks) {
-  if (!getFreeSessionsPrefs()) return false;
+  const fp = getFreeSessionsPrefs();
+  if (!fp || fp.dormant) return false;
   const info = routinePlanInfoFrom(goal, weeks);
   return !!(info && info.startMs > mondayOfWeek(Date.now()));
 }
@@ -764,6 +765,8 @@ async function disableFreeSessions() {
 
 function editFreeSessionsPrefs() {
   const prefs = getFreeSessionsPrefs();
+  const note = document.getElementById('free-sessions-note');
+  if (note) note.style.display = prefs && prefs.dormant ? '' : 'none';
   el('campus-connect-card').style.display = '';
   el('campus-plan-wrap').style.display = 'none';
   el('campus-login-block').style.display = 'none';
@@ -944,7 +947,8 @@ function renderPrePlanBanner(goal, weeks) {
   const wrap = document.getElementById('campus-plan-wrap');
   if (!info || !wrap || info.startMs <= mondayOfWeek(Date.now())) return;
   const n = Math.max(1, routineWeeksBetween(mondayOfWeek(Date.now()), info.startMs));
-  const hasRoutine = !!getFreeSessionsPrefs();
+  const fp = getFreeSessionsPrefs();
+  const hasRoutine = !!(fp && !fp.dormant);
   const banner = document.createElement('div');
   banner.className = 'rt-plan-banner rt-plan-banner--card card';
   banner.innerHTML = `<div>🏁 Ton plan démarre le <strong>${routineDateFr(info.startMs)}</strong> (dans ${n} semaine${n > 1 ? 's' : ''}).

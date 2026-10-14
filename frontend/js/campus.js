@@ -814,7 +814,11 @@ function showTrainingEmpty() {
   // Séances libres configurées (cf free_sessions.js) : proposer la semaine
   // courante plutôt que le simple écran "aucun plan" - reste prioritaire
   // sur l'écran vide tant qu'aucun vrai plan (Campus/importé) n'est actif.
-  if (typeof getFreeSessionsPrefs === 'function' && getFreeSessionsPrefs()) {
+  // Après "Annuler le plan" la routine est en sommeil (prefs.dormant) : on ne la
+  // relance PAS d'office avec l'ancienne config / l'ancien cycle (semaine 9...),
+  // on redemande terrain, séances/semaine et durée max (réglages précédents préremplis).
+  const freePrefs = typeof getFreeSessionsPrefs === 'function' ? getFreeSessionsPrefs() : null;
+  if (freePrefs && !freePrefs.dormant) {
     renderFreeSessionsWeek();
     return;
   }
@@ -838,6 +842,7 @@ function showTrainingEmpty() {
   // Masquer le bouton déconnexion Campus
   const disconnectBtn = el('campus-disconnect-btn');
   if (disconnectBtn) disconnectBtn.style.display = 'none';
+  if (freePrefs && freePrefs.dormant && typeof editFreeSessionsPrefs === 'function') editFreeSessionsPrefs();
 }
 
 // ── Préchargement silencieux du plan (sans toucher au DOM) ──────────
@@ -1982,6 +1987,12 @@ async function cancelPlan() {
   localStorage.removeItem('suivi_imported_plan');
   localStorage.removeItem('prefer_imported_plan');
   localStorage.removeItem('campus_was_connected');
+  // La routine "hors plan" configurée avant ce plan reste en sommeil : elle ne
+  // reprend pas seule (ancien cycle périmé), l'utilisateur la reconfigure.
+  if (typeof getFreeSessionsPrefs === 'function') {
+    const fp = getFreeSessionsPrefs();
+    if (fp && !fp.dormant) saveFreeSessionsPrefs({ ...fp, dormant: true });
+  }
 
   // Nettoyer état local
   campusState.goal              = null;
