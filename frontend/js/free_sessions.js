@@ -691,7 +691,6 @@ async function renderFreeSessionsWeek(forceIdx) {
       <button class="btn-plan-action" onclick="toggleRoutineCaution()" title="Bloque les variantes orange et rouge et garde les prochaines séances au palier modéré">
         ${prefs.caution ? '🩹 Gêne signalée — lever' : '🩹 Signaler une gêne / fatigue'}
       </button>
-      ${typeof getDismissedCampusGoals === 'function' && campusState.campusConnected !== undefined && getDismissedCampusGoals().length ? '<button class="btn-plan-action" onclick="restoreDismissedCampusPlans()" title="Réafficher le plan Campus Coach écarté">↩ Réafficher mon plan Campus</button>' : ''}
       <button class="btn-plan-action btn-cancel-plan" onclick="disableFreeSessions()" style="margin-left:auto;opacity:.85;background:rgba(229,57,53,.15);color:#e53935;border:1px solid rgba(229,57,53,.3);">
         ✕ Désactiver les séances libres
       </button>

@@ -598,50 +598,34 @@ function cleanPlanIfUserChanged(currentUserEmail) {
   localStorage.setItem('allureplus_plan_owner', currentUserEmail);
 }
 
-// ── Plans Campus Coach écartés par l'utilisateur ────────────────────────────
-// Un plan Campus est rechargé à chaque démarrage depuis le compte (c'est l'objectif
-// ACTIF côté Campus, Allure+ ne peut pas le supprimer là-bas) : sans mémoire,
-// "Annuler le plan" ne durait que jusqu'au prochain redémarrage (plan d'essai
-// "La Cettoise" qui revenait). On retient les identifiants écartés (clé durable,
-// synchronisée) ; la page vide propose de les réafficher.
-const CAMPUS_DISMISSED_KEY = 'campus_dismissed_goals';
-function getDismissedCampusGoals() {
-  try { const a = JSON.parse(localStorage.getItem(CAMPUS_DISMISSED_KEY) || '[]'); return Array.isArray(a) ? a : []; } catch (e) { return []; }
+// ── Compte Campus Coach connecté : on DEMANDE avant d'afficher son plan ─────
+// Le plan Campus est rechargé depuis le compte à chaque démarrage (c'est
+// l'objectif actif côté Campus, Allure+ ne peut pas le supprimer là-bas) :
+// l'afficher d'office faisait revenir un plan d'essai déjà annulé. Règle produit :
+// un plan annulé ou pas explicitement choisi n'est jamais proposé d'office. Tant
+// que l'utilisateur n'a pas répondu (campusState.campusPlanChosen, pour la session),
+// l'onglet Entraînements montre la page par défaut + une carte qui pose la question.
+async function renderCampusAskCard() {
+  const slot = document.getElementById('campus-ask-slot');
+  if (!slot) return;
+  slot.replaceChildren();
+  if (!campusState.campusConnected || campusState.campusPlanChosen) return;
+  let d = null;
+  try { d = await fetchJSON('/api/campus/training'); } catch (e) { return; }   // pas de plan chez Campus : rien à demander
+  if (!d || !d.goal || campusState.campusPlanChosen) return;
+  const name = d.goal.name || d.goal.goalTitle || (d.goal.isBackgroundGoal ? 'plan de fond' : 'plan');
+  const weeks = (d.weeks || []).length || d.goal.weekCount;
+  const card = document.createElement('div');
+  card.className = 'rt-plan-banner rt-plan-banner--card card';
+  card.innerHTML = '<div>\u{1F3C3} <strong>Compte Campus Coach connecté.</strong> Un plan est disponible chez Campus Coach (' + name + (weeks ? ', ' + weeks + ' semaines' : '') + '). Souhaites-tu l\u2019afficher ici ? Sinon, choisis un autre plan ci-dessous.</div>'
+    + '<button type="button" class="btn-plan-action" onclick="showCampusPlan()">Afficher mon plan Campus</button>';
+  slot.appendChild(card);
 }
-// Clé stable d'un objectif Campus : son _id s'il en a un ; un "plan de fond" n'en a
-// pas, on prend alors son type, son nom et ses dates.
-function campusGoalKey(g) {
-  if (!g) return null;
-  if (g._id) return g._id;
-  const k = [g.kind || '', g.name || g.goalTitle || '', g.startDate || '', g.endDate || g.competitionDate || ''].join('|');
-  return k === '|||' ? null : k;
-}
-function isCampusGoalDismissed(goal) { const id = campusGoalKey(goal); return !!id && getDismissedCampusGoals().some(g => g.id === id); }
-function dismissCampusGoal(goal) {
-  const id = campusGoalKey(goal);
-  if (!id || isCampusGoalDismissed(goal)) return;
-  const name = goal.name || goal.goalTitle || (goal.endDate ? 'plan de fond Campus Coach' : 'plan Campus Coach');
-  const list = getDismissedCampusGoals();
-  list.push({ id, name });
-  localStorage.setItem(CAMPUS_DISMISSED_KEY, JSON.stringify(list.slice(-20)));
-}
-function restoreDismissedCampusPlans() {
-  localStorage.removeItem(CAMPUS_DISMISSED_KEY);
+function showCampusPlan() {
+  campusState.campusPlanChosen = true;
+  document.getElementById('campus-ask-slot')?.replaceChildren();
   showTrainingLoading();
   loadTrainingPlan();
-}
-// Rappel discret dans la page vide : "plan X masqué — Réafficher"
-function renderDismissedCampusNote() {
-  const old = document.getElementById('campus-dismissed-note');
-  if (old) old.remove();
-  const list = getDismissedCampusGoals();
-  const anchor = document.getElementById('campus-connect-msg');
-  if (!list.length || !anchor || !campusState.campusConnected) return;
-  const note = document.createElement('p');
-  note.id = 'campus-dismissed-note';
-  note.className = 'campus-import-hint';
-  note.innerHTML = 'Plan Campus Coach masqué : <strong>' + list.map(g => g.name).join(', ') + '</strong>. <a href="#" onclick="event.preventDefault();restoreDismissedCampusPlans()">Le réafficher</a>';
-  anchor.insertAdjacentElement('afterend', note);
 }
 
 async function initCampus() {
@@ -782,10 +766,16 @@ async function initCampus() {
           // Laisser loadTrainingPlan retenter via le fallback localStorage
         }
       }
-      // Pas de préférence → plan Campus par défaut
+      // Pas de plan importé préféré : on DEMANDE si l'utilisateur veut afficher son plan
+      // Campus ; sinon page par défaut (catalogue / import / séances libres)
       campusState.campusConnected = true;
       campusState.usingImportedPlan = false;
       localStorage.setItem('campus_was_connected', 'true');
+      if (!campusState.campusPlanChosen) {
+        el('campus-loading').style.display = 'none';
+        showTrainingEmpty();
+        return;
+      }
       showTrainingLoading();
       await loadTrainingPlan();
 
@@ -866,6 +856,7 @@ function showTrainingEmpty() {
   const freePrefs = typeof getFreeSessionsPrefs === 'function' ? getFreeSessionsPrefs() : null;
   if (freePrefs && !freePrefs.dormant) {
     renderFreeSessionsWeek();
+    renderCampusAskCard();
     return;
   }
   const el = id => document.getElementById(id);
@@ -889,7 +880,7 @@ function showTrainingEmpty() {
   const disconnectBtn = el('campus-disconnect-btn');
   if (disconnectBtn) disconnectBtn.style.display = 'none';
   if (freePrefs && freePrefs.dormant && typeof editFreeSessionsPrefs === 'function') editFreeSessionsPrefs();
-  renderDismissedCampusNote();
+  renderCampusAskCard();
 }
 
 // ── Préchargement silencieux du plan (sans toucher au DOM) ──────────
@@ -908,9 +899,14 @@ async function preloadPlanState() {
         return;
       }
     }
-    // 2. Fallback serveur
+    // 2. Fallback serveur — sauf plan Campus pas encore accepté par l'utilisateur
+    // (la question est posée dans l'onglet Entraînements, voir renderCampusAskCard)
+    try {
+      const st = await fetchJSON('/api/campus/status');
+      if (st && st.connected && st.campusEnabled !== false && !campusState.campusPlanChosen && localStorage.getItem('prefer_imported_plan') !== 'true') return;
+    } catch (e) { /* statut indisponible : comportement habituel */ }
     const data = await fetchJSON('/api/campus/training');
-    if (data?.goal && !isCampusGoalDismissed(data.goal)) {
+    if (data?.goal) {
       campusState.goal  = data.goal;
       campusState.weeks = data.weeks || [];
     }
@@ -945,13 +941,6 @@ async function loadTrainingPlan() {
       fetchJSON('/api/fitness').catch(() => null),
     ]);
     if (fitness?.zones) campusState.fitness = fitness;
-    if (data && data.goal && isCampusGoalDismissed(data.goal)) {
-      // plan Campus déjà annulé par l'utilisateur : page vide (catalogue / import / séances libres)
-      campusState.campusHasPlan = false;
-      el('campus-loading').style.display = 'none';
-      showTrainingEmpty();
-      return;
-    }
     campusState.campusHasPlan = !!(data.weeks && data.weeks.length > 0);
     renderTrainingPlan(data.goal, data.weeks || []);
   } catch(err) {
@@ -1081,6 +1070,7 @@ async function exportPlanXlsx() {
 // weeks quand elle précède un plan dont le début est à venir (free_sessions.js).
 function renderTrainingPlan(goal, weeks, opts) {
   campusState.planSnapshot = { goal, weeks };
+  document.getElementById('campus-ask-slot')?.replaceChildren();
   if (!(opts && opts.skipRoutine) && typeof routineShouldPrecedePlan === 'function' && routineShouldPrecedePlan(goal, weeks)) {
     renderFreeSessionsWeek();
     return;
@@ -2012,6 +2002,7 @@ async function exportPlan() {
 function switchToCampusPlan() {
   localStorage.removeItem('prefer_imported_plan');
   campusState.usingImportedPlan = false;
+  campusState.campusPlanChosen = true;
   showTrainingLoading();
   loadTrainingPlan();
 }
@@ -2037,14 +2028,8 @@ async function cancelPlan() {
   });
   if (!ok) return;
 
-  // Plan Campus affiché → on le retient comme écarté ; plan importé affiché alors que
-  // Campus a aussi un objectif actif → idem, sinon il réapparaîtrait au démarrage.
-  const shownGoal = campusState.goal;
-  if (shownGoal && !campusState.usingImportedPlan) {
-    dismissCampusGoal(shownGoal);
-  } else if (campusState.campusConnected) {
-    fetchJSON('/api/campus/training').then(d => { if (d && d.goal) { dismissCampusGoal(d.goal); renderDismissedCampusNote(); } }).catch(() => {});
-  }
+  // Le plan Campus (rechargé depuis le compte) sera de nouveau demandé, jamais affiché d'office
+  campusState.campusPlanChosen = false;
 
   // Nettoyer localStorage
   localStorage.removeItem('suivi_imported_plan');
@@ -2405,6 +2390,7 @@ document.addEventListener('DOMContentLoaded', () => {
           try { await fetchJSON('/api/campus/save-env', { method: 'POST', body: JSON.stringify({ email, password }) }); }
           catch(e) { /* silencieux */ }
         }
+        campusState.campusPlanChosen = true;   // connexion explicite : on affiche son plan
         showTrainingLoading();
         await loadTrainingPlan();
       } catch(err) {
