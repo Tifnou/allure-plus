@@ -177,7 +177,7 @@ Généré depuis `frontend/js/routine_catalog.js` (ne pas éditer à la main). L
 | A10-07 | SL AS10 2×5 | `45m EF + 2x(5m AS10) r3m EF + 32m EF` | 1h30 | Route ⟲ | cahier |
 | A10-08 | SL finish Tempo | `55m EF + 15m TEMPO + 10m EF` | 1h20 | Route ⟲ | cahier |
 | A10-09 | SL mix EA / AS21 | `40m EF + 10m TEMPO + 3m EF + 10m AS21 + 17m EF` | 1h20 | Route ⟲ | cahier |
-| A10-10 | SL EF haute par paliers | `35m EF + 15m EFH + 5m EF + 15m EFH + 10m EF` | 1h20 | Route ⟲ | cahier |
+| A10-10 | SL EF soutenue par paliers | `35m EF + 15m EFH + 5m EF + 15m EFH + 10m EF` | 1h20 | Route ⟲ | cahier |
 | L10-01 | SL EF 75 | `75m EF` | 1h15 | Route ⟲ | existant (SL_EASY_03) |
 | L10-02 | SL progressive 40 EF + 20 AS42 | `40m EF + 20m AS42 + 10m EF` | 1h10 | Route ⟲ | existant (SL_EASY_05) |
 | L10-03 | SL active AS21 3×8 | `30m EF + 3x(8m AS21) r2m EF + 12m EF` | 1h10 | Route ⟲ | existant (SL_ACT_01) |

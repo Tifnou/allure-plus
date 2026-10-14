@@ -224,7 +224,7 @@ function routineUnroll(segs) {
 //  recovery récup entre répétitions (r) ou EF intercalée entre deux efforts,
 //           marche ; côté Garmin : grise, sans cible
 //  setRecovery récup entre séries/blocs (R) ; même rendu que recovery
-//  easy     EF "active" (sortie longue, EF haute) ; base = séance sans qualité
+//  easy     EF "active" (sortie longue, EF soutenue) ; base = séance sans qualité
 // opts.wuCd (défaut vrai) : faux pour sorties longues / trail où l'EF de tête
 // fait partie du corps de la séance, pas d'un échauffement.
 function compileRoutineDsl(src, opts = {}) {
@@ -243,7 +243,7 @@ function compileRoutineDsl(src, opts = {}) {
     steps.forEach((s, i) => {
       if (s.role !== 'work') return;
       if (!isEasy(s)) return;
-      // EF (pas "haute") coincée entre des efforts, ou dans un groupe répété
+      // EF (pas "soutenue") coincée entre des efforts, ou dans un groupe répété
       // après un effort : c'est une récupération, pas une EF active.
       const plainEf = s.code === 'EF' || s.code === 'EFL';
       s.role = plainEf && i > fq && (i < lq || s.inRep) ? 'recovery' : 'easy';
@@ -300,7 +300,7 @@ function routineToSessionStructure(compiled) {
       tpl.forEach(s => {
         const z = routineStepToZone(s);
         const pz = { kind: z.kind, duration: s.sec, pace: z.slug ? { slug: z.slug, value: null } : null };
-        if (z.sub) pz.sub = z.sub;     // moitié basse / haute de la zone (EF aisée / haute)
+        if (z.sub) pz.sub = z.sub;     // moitié basse / haute de la zone (EF classique / soutenue)
         if (z.rpe != null) { pz.rpe = z.rpe; pz.rpeLabel = z.label || null; pz.noTarget = true; }
         paceZones.push(pz);
       });
@@ -467,7 +467,7 @@ const ROUTINE_FAMILIES = [
     ['A10-07', 'SL AS10 2×5', '45m EF + 2x(5m AS10) r3m EF + 32m EF', 90],
     ['A10-08', 'SL finish Tempo', '55m EF + 15m TEMPO + 10m EF', 80],
     ['A10-09', 'SL mix EA / AS21', '40m EF + 10m TEMPO + 3m EF + 10m AS21 + 17m EF', 80],
-    ['A10-10', 'SL EF haute par paliers', '35m EF + 15m EFH + 5m EF + 15m EFH + 10m EF', 80],
+    ['A10-10', 'SL EF soutenue par paliers', '35m EF + 15m EFH + 5m EF + 15m EFH + 10m EF', 80],
     // reprises de l'existant (SL_EASY_01/02/04 = doublons de A01-03 / A01-04 / A10-02, non reprises)
     ['L10-01', 'SL EF 75', '75m EF', null, 'SL_EASY_03'],
     ['L10-02', 'SL progressive 40 EF + 20 AS42', '40m EF + 20m AS42 + 10m EF', null, 'SL_EASY_05'],

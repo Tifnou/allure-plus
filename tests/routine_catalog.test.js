@@ -97,7 +97,7 @@ test('toute séance de qualité se termine par un retour au calme', () => {
   }
 });
 
-test('EF intercalée entre deux efforts = récup ; EF haute = EF active', () => {
+test('EF intercalée entre deux efforts = récup ; EF soutenue = EF active', () => {
   const c = compileRoutineDsl('15m EF + 4x(4m TEMPO + 2m EF) + 10m EF');
   assert.equal(c.steps.filter(s => s.role === 'recovery').length, 4);
   const d = compileRoutineDsl('15m EF + 3x(5m EFH + 4m TEMPO) + 10m EF');

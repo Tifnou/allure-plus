@@ -355,7 +355,7 @@ test("bas / haut de plage : le suffixe survit à l'aller-retour DSL, aux étapes
   assert.throws(() => compileRoutineDsl('15m EF + 3x(6m XYZ_L) r2m EF'));
 });
 
-test("EF aisée / haute : deux plages d'allure distinctes contenues dans la zone EF", () => {
+test("EF classique / soutenue : deux plages d'allure distinctes contenues dans la zone EF", () => {
   const { getZoneRange } = require('../zones.js');
   const all = getZoneRange('EF'), low = getZoneRange('EF', 'low'), high = getZoneRange('EF', 'high');
   assert.ok(low.pctHigh <= high.pctLow + 1e-9 && low.pctLow === all.pctLow && high.pctHigh === all.pctHigh);

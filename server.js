@@ -3933,11 +3933,11 @@ function buildGarminWorkoutFromSession(session, weekNum, sessionDisplay, userZon
     let targetType = NO_TARGET, targetValueOne = null, targetValueTwo = null;
     let description = toAscii(zoneName);
 
-    // sous-zone (EF aisée / haute des routines) : plage plus étroite si calculée
+    // sous-zone (EF classique / soutenue des routines) : plage plus étroite si calculée
     const subKey = zone.sub ? refinedKey + '_' + String(zone.sub).toUpperCase() : null;
     const apUserZone = userZones && subKey && userZones[subKey] ? userZones[subKey]
       : (userZones && userZones[refinedKey] ? userZones[refinedKey] : null);
-    if (zone.sub) description += refinedKey === 'EF' ? (zone.sub === 'low' ? ' aisee' : ' haute') : (zone.sub === 'low' ? ' bas de plage' : ' haut de plage');
+    if (zone.sub) description += refinedKey === 'EF' ? (zone.sub === 'low' ? ' classique' : ' soutenue') : (zone.sub === 'low' ? ' bas de plage' : ' haut de plage');
     // RECOVER/RECOVERY = allure libre (jamais de cible Garmin)
     // Le code brut (zKey) sert au type d'étape Garmin plus bas, pas à la cible :
     // un pas tagué RECOVER par Campus peut avoir un slug "ef" (ex: retour au calme
@@ -4169,7 +4169,7 @@ app.post('/api/garmin/workout-from-session', requireSession, async (req, res) =>
       });
       const hasIntervalsServer = sessionZoneKeys.some(k => !['EF','RECOVER','RECOVERY','WARMUP','COOLDOWN'].includes(k));
       const calcZone = (zKey) => {
-        // clés "EF_LOW" / "EF_HIGH" = moitié basse / haute de la zone (EF aisée / haute)
+        // clés "EF_LOW" / "EF_HIGH" = moitié basse / haute de la zone (EF classique / soutenue)
         const subM     = /^(.*)_(LOW|HIGH)$/.exec(zKey);
         const baseKey  = subM ? subM[1] : zKey;
         zKey           = baseKey;
@@ -4192,7 +4192,7 @@ app.post('/api/garmin/workout-from-session', requireSession, async (req, res) =>
        'EF','TEMPO','SWEET_SPOT','AS42','AS21','S60','S30','AS10','VMA'].forEach(k => {
         const z = calcZone(k); if (z) userZones[k] = z;
       });
-      // moitiés basse / haute de chaque zone (EF aisée / haute, variantes bas / haut de plage)
+      // moitiés basse / haute de chaque zone (EF classique / soutenue, variantes bas / haut de plage)
       ['EF','TEMPO','SWEET_SPOT','AS42','AS21','S60','S30','AS10','VMA'].forEach(k => {
         ['LOW','HIGH'].forEach(h => { const z = calcZone(k + '_' + h); if (z) userZones[k + '_' + h] = z; });
       });

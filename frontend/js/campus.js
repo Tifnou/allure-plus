@@ -117,7 +117,7 @@ const ALLURE_PLUS_ZONES = {
 
 // Calcule min/max allure (sec/km) pour une zone et une VMA données
 // sub = 'low' | 'high' : moitié basse / haute de la zone (routines hors plan :
-// "EF aisée" / "EF haute", termes du cahier des charges) — calculée depuis la zone elle-même, aucun % dupliqué.
+// "EF classique" / "EF soutenue") — calculée depuis la zone elle-même, aucun % dupliqué.
 function calcAllureRef(zoneKey, vma, sub) {
   const ref = ALLURE_PLUS_ZONES[zoneKey];
   if (!ref || !vma) return null;
@@ -1718,7 +1718,7 @@ function renderSessionDetail(session, weekId, isCurrentWeek) {
       // l'affiche "Échauffement", meme cohérence que l'export xlsx.
       const zoneLbl = (apZone === 'RECOVER' && idx === 0)
         ? 'Échauffement'
-        : (zoneDef ? zoneDef.label + (z.sub ? (apZone === 'EF' ? (z.sub === 'low' ? ' · aisée' : ' · haute') : (z.sub === 'low' ? ' · bas de plage' : ' · haut de plage')) : '') : fmtZoneKind(z.kind, session.displayName || session.name || ''));
+        : (zoneDef ? zoneDef.label + (z.sub ? (apZone === 'EF' ? (z.sub === 'low' ? ' · classique' : ' · soutenue') : (z.sub === 'low' ? ' · bas de plage' : ' · haut de plage')) : '') : fmtZoneKind(z.kind, session.displayName || session.name || ''));
       // FC cible indicative de cette zone (~min-max bpm) - meme pour une zone
       // "allure libre" (RECOVER), la FC reste un repere pertinent la ou
       // l'allure n'en est pas un.

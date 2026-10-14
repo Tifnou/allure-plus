@@ -18,7 +18,7 @@ const ALLURE_PLUS_ZONES = {
 };
 
 // Sweet Spot = 95% de la vitesse S60 (règle métier Allure+)
-// sub = 'low' | 'high' : moitié basse / haute de la zone (routines hors plan : EF aisée / haute)
+// sub = 'low' | 'high' : moitié basse / haute de la zone (routines hors plan : EF classique / soutenue)
 function getZoneRange(zoneKey, sub) {
   const ref = ALLURE_PLUS_ZONES[zoneKey];
   if (!ref) return null;
