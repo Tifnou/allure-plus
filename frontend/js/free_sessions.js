@@ -764,8 +764,8 @@ async function renderFreeSessionsWeek(forceIdx) {
       Cette routine entretient ta base sans préparer la course de façon ciblée ; un plan Allure+ du catalogue sera recommandé au bon moment.</div></div>`;
   }
 
-  let headCollapsed = false;
-  try { headCollapsed = localStorage.getItem('allure_rt_head_collapsed') === '1'; } catch (e) { /* stockage indisponible */ }
+  let headCollapsed = true;                       // plié par défaut
+  try { headCollapsed = localStorage.getItem('allure_rt_head_collapsed') !== '0'; } catch (e) { /* stockage indisponible */ }
   const header = `
     <div class="training-plan-header card rt-head${headCollapsed ? ' rt-head--collapsed' : ''}" id="rt-head">
       <div class="rt-head-bar">
@@ -775,16 +775,18 @@ async function renderFreeSessionsWeek(forceIdx) {
         </div>
         <div class="rt-head-actions">
           ${planInfo ? '<button type="button" class="btn-plan-action" onclick="routineShowPlan()">Voir le plan</button>' : ''}
-          <button type="button" class="rt-head-toggle" onclick="toggleRoutineHeader()" aria-expanded="${!headCollapsed}" aria-controls="rt-head-body">
-            <span class="rt-head-toggle-label">${headCollapsed ? 'Afficher les détails' : 'Réduire'}</span><span class="rt-head-chev" aria-hidden="true">▾</span>
+          <button type="button" class="rt-head-toggle" onclick="toggleRoutineHeader()" aria-expanded="${!headCollapsed}" aria-controls="rt-head-body" title="Afficher ou masquer les explications">
+            <span>Détails</span><span class="rt-head-chev" aria-hidden="true">▾</span>
           </button>
         </div>
       </div>
-      <div class="rt-head-body" id="rt-head-body"${headCollapsed ? ' hidden' : ''}>
-        <div class="plan-subtitle-desc">${NOT_A_PLAN_ADVICE}${phaseHtml}</div>
-        <div class="rt-adapt-note">🔄 <strong>Des séances qui s’adaptent.</strong> Celles que tu vois sont des <strong>propositions</strong> : elles peuvent être modifiées selon ta forme, ton assiduité (séances faites ou manquées), ta charge récente, tes autres sports et ton ressenti. La semaine en cours reste stable ; les semaines à venir sont ajustées quand elles commencent.</div>
-        ${planBannerHtml}
-      </div>
+      <div class="rt-head-bodywrap"><div class="rt-head-body" id="rt-head-body">
+        <div class="rt-head-body-inner">
+          <div class="plan-subtitle-desc">${NOT_A_PLAN_ADVICE}${phaseHtml}</div>
+          <div class="rt-adapt-note">🔄 <strong>Des séances qui s’adaptent.</strong> Celles que tu vois sont des <strong>propositions</strong> : elles peuvent être modifiées selon ta forme, ton assiduité (séances faites ou manquées), ta charge récente, tes autres sports et ton ressenti. La semaine en cours reste stable ; les semaines à venir sont ajustées quand elles commencent.</div>
+          ${planBannerHtml}
+        </div>
+      </div></div>
     </div>`;
 
   const weekTabs = `
@@ -972,6 +974,8 @@ function routineWeekCtx(prefs, stored, snapIdx, locked) {
   return {
     phase: stored.phase, cap: stored.cap, level: stored.level, warnings: stored.warnings || [],
     caution: !!prefs.caution, maxMin: prefs.maxMin || 90, locked,
+    reprise: !!(stored.macro && stored.macro.phaseName === 'Reprise'),
+    hold: !!(stored.signals && stored.signals.hold), tired: !!(stored.signals && stored.signals.tired),
     otherTiers: stored.sessions.filter((s, i) => i !== snapIdx).map(s => s.tier),
   };
 }
@@ -986,16 +990,18 @@ function routineLookup(weekId, idx) {
   return { prefs, store, stored, wd, snap: stored.sessions[idx] };
 }
 
-// Choix de l'intensité : 4 colonnes de hauteur croissante (vert → rouge, comme un histogramme)
-// et, à droite, l'explication de la colonne sélectionnée (aperçu au survol / focus sans changer
-// le choix). Cliquer une colonne applique la variante.
+// Choix de l'intensité : 4 colonnes colorées de hauteur croissante (vert → rouge, comme un
+// histogramme) posées sur une même ligne de base, légende dessous ; à droite l'explication de la
+// colonne sélectionnée. Rien ne bouge au survol : pas de déplacement des colonnes, et les 4
+// panneaux d'explication sont superposés (la zone garde la hauteur du plus grand). Survol / focus =
+// aperçu sans changer le choix ; un clic applique la variante.
 const ROUTINE_VARIANT_PURPOSE = {
   green: ['Allégée', 'Moins de travail et allure en bas de la fourchette de la zone. Pour une semaine chargée, une reprise, ou quand la forme n’est pas là.'],
   yellow: ['Référence prévue', 'La séance telle que construite pour ta semaine, ton niveau et ta forme du moment.'],
   orange: ['Renforcée', 'Un paramètre de plus (répétition ou durée de bloc) et allure en haut de la fourchette. Compte comme une charge supérieure dans ton cycle.'],
-  red: ['Très exigeante', 'Deux crans au-dessus, réservée aux profils confirmés en semaines S2 / S3, sans fatigue ni gêne. Jamais deux séances très exigeantes dans la même semaine.'],
+  red: ['Très exigeante', 'Deux crans au-dessus, réservée aux profils confirmés quand toutes les conditions sont réunies. Jamais deux séances très exigeantes dans la même semaine.'],
 };
-const ROUTINE_BAR_HEIGHT = { green: 54, yellow: 72, orange: 90, red: 108 };
+const ROUTINE_BAR_HEIGHT = { green: 22, yellow: 34, orange: 46, red: 58 };
 
 function renderRoutineVariantBar(session, weekId) {
   const idx = session.trainingIndex ?? 0;
@@ -1007,20 +1013,26 @@ function renderRoutineVariantBar(session, weekId) {
   const variants = RoutineEngine.routineBuildVariants(snap, routineWeekCtx(prefs, stored, idx, done || pastWeek));
   const sel = variants.find(v => v.selected) || variants[1];
   const sgn = n => (n >= 0 ? '+' : '') + n;
-  const bar = v => {
+  const col = v => {
     const usable = v.available || v.selected;
     // aria-disabled (et non disabled) : une colonne indisponible reste survolable / focusable pour expliquer POURQUOI
-    return `<button type="button" class="rt-bar rt-bar--${v.variant}${v.selected ? ' rt-bar--on' : ''}${usable ? '' : ' rt-bar--off'}" style="--h:${ROUTINE_BAR_HEIGHT[v.variant]}px"${usable ? '' : ' aria-disabled="true"'}
-      data-variant="${v.variant}" role="radio" aria-checked="${v.selected}"
+    return `<button type="button" class="rt-col rt-col--${v.variant}${v.selected ? ' rt-col--on' : ''}${usable ? '' : ' rt-col--off'}" data-variant="${v.variant}" role="radio" aria-checked="${v.selected}"${usable ? '' : ' aria-disabled="true"'}
       onmouseenter="rtShowVariantInfo(this,'${v.variant}')" onfocus="rtShowVariantInfo(this,'${v.variant}')" onmouseleave="rtShowVariantInfo(this)" onblur="rtShowVariantInfo(this)"
       onclick="event.stopPropagation();setRoutineVariant('${weekId}',${idx},'${v.variant}')">
-      <span class="rt-bar-name">${v.label}</span>
-      <span class="rt-bar-min">${v.totalMin} min</span>
-      <span class="rt-bar-delta">${v.variant === 'yellow' ? 'prévue' : sgn(v.deltaLoadPct) + ' %'}</span></button>`;
+      <span class="rt-col-barwrap"><span class="rt-col-bar" style="height:${ROUTINE_BAR_HEIGHT[v.variant]}px"></span></span>
+      <span class="rt-col-name">${v.label}</span>
+      <span class="rt-col-min">${v.totalMin} min</span>
+      <span class="rt-col-delta">${v.variant === 'yellow' ? 'prévue' : sgn(v.deltaLoadPct) + ' %'}</span></button>`;
   };
   const panel = v => {
     const [ttl, why] = ROUTINE_VARIANT_PURPOSE[v.variant];
     const usable = v.available || v.selected;
+    let cond = '';
+    if (v.conditions) {
+      cond = v.unmet.length
+        ? `<div class="rt-var-block">Indisponible : ${v.reason}</div><div class="rt-var-unmet"><b>À réunir (${v.metCount}/${v.conditions.length} remplies) :</b> ${v.unmet.map(u => `<span>✗ ${u}</span>`).join('')}</div>`
+        : `<div class="rt-var-ok">✓ Toutes les conditions sont réunies (${v.conditions.length})</div>`;
+    } else if (!usable) cond = `<div class="rt-var-block">Indisponible : ${v.reason}</div>`;
     return `<div class="rt-var-panel${v.selected ? ' rt-var-panel--on' : ''}" data-variant="${v.variant}">
       <div class="rt-var-panel-title"><span class="rt-var-dot rt-var-dot--${v.variant}"></span>${v.label} — ${ttl}${v.selected ? '<span class="rt-var-tag">Choisie</span>' : ''}</div>
       <div class="rt-var-stats">
@@ -1031,7 +1043,7 @@ function renderRoutineVariantBar(session, weekId) {
       </div>
       <div class="rt-var-struct">${RoutineEngine.routineDescribe(v.dsl)}.</div>
       <div class="rt-var-why">${why}</div>
-      ${usable ? '' : `<div class="rt-var-block">Indisponible : ${v.reason}</div>`}
+      ${cond}
     </div>`;
   };
   const lockedMsg = (done || pastWeek) ? '<div class="rt-variant-note">Séance faite ou semaine passée : variante figée.</div>'
@@ -1039,7 +1051,7 @@ function renderRoutineVariantBar(session, weekId) {
   return `<div class="session-detail-section rt-variants" data-selected="${sel.variant}">
     <div class="session-detail-section-title">Intensité de la séance <span class="zones-source-note">charge ≈ ${sel.load}</span></div>
     <div class="rt-var-layout">
-      <div class="rt-bars" role="radiogroup" aria-label="Intensité de la séance">${variants.map(bar).join('')}</div>
+      <div class="rt-cols" role="radiogroup" aria-label="Intensité de la séance">${variants.map(col).join('')}</div>
       <div class="rt-var-info" aria-live="polite">${variants.map(panel).join('')}</div>
     </div>
     ${lockedMsg}
@@ -1052,7 +1064,7 @@ function rtShowVariantInfo(el, variant) {
   if (!box) return;
   const shown = variant || box.dataset.selected;
   box.querySelectorAll('.rt-var-panel').forEach(p => p.classList.toggle('rt-var-panel--on', p.dataset.variant === shown));
-  box.querySelectorAll('.rt-bar').forEach(b => b.classList.toggle('rt-bar--peek', !!variant && b.dataset.variant === variant && variant !== box.dataset.selected));
+  box.querySelectorAll('.rt-col').forEach(b => b.classList.toggle('rt-col--peek', !!variant && b.dataset.variant === variant && variant !== box.dataset.selected));
 }
 
 function setRoutineVariant(weekId, idx, variant) {
@@ -1203,16 +1215,14 @@ async function routineCheckin(wd, mood) {
 
 
 // ─── En-tête repliable ───────────────────────────────────────────────────
-// Réduit : titre + pastilles (aperçu) ; déplié : explications complètes. Choix mémorisé (local).
+// Réduit : titre + pastilles (aperçu) ; déplié : explications complètes. Une simple bascule de
+// classe : le bloc se replie / se déplie en douceur (transition CSS) et le bouton ne bouge pas.
+// Choix mémorisé (local) ; plié par défaut.
 function toggleRoutineHeader() {
   const head = document.getElementById('rt-head');
-  const body = document.getElementById('rt-head-body');
-  if (!head || !body) return;
+  if (!head) return;
   const collapsed = !head.classList.contains('rt-head--collapsed');
   head.classList.toggle('rt-head--collapsed', collapsed);
-  body.hidden = collapsed;
-  const lbl = head.querySelector('.rt-head-toggle-label');
-  if (lbl) lbl.textContent = collapsed ? 'Afficher les détails' : 'Réduire';
   const btn = head.querySelector('.rt-head-toggle');
   if (btn) btn.setAttribute('aria-expanded', String(!collapsed));
   try { localStorage.setItem('allure_rt_head_collapsed', collapsed ? '1' : '0'); } catch (e) { /* stockage indisponible */ }

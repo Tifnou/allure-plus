@@ -596,28 +596,40 @@ function routineBuildVariants(snap, wk) {
       intensity: /_L\b/.test(dsl) && variant !== 'yellow' ? 'bas de plage' : /_H\b/.test(dsl) && variant !== 'yellow' ? 'haut de plage' : null,
     });
     if (rec.available && variant === 'green' && snap.role !== 'ef' && base.qualityMin > 8 && l.qualityMin < 6) { rec.available = false; rec.reason = 'Déjà au minimum utile.'; }
-    if (rec.available && (variant === 'orange' || variant === 'red')) {
+    if (variant === 'orange' || variant === 'red') {
+      // Conditions EXPLICITES (affichées à l'utilisateur) : la variante n'est ouverte que si toutes sont réunies
       const capKeys = Object.keys(l.counts).filter(k => l.counts[k] / 60 > (ROUTINE_WORK_CAP_MIN[k] || 1e9));
-      if (wk.caution) rec.reason = 'Gêne ou fatigue signalée : variantes plus exigeantes bloquées.';
-      else if (wk.phase === 'S4') rec.reason = 'Semaine de récupération : pas de séance plus exigeante.';
-      else if (wk.cap < 1 && snap.role !== 'ef') rec.reason = 'Charge récente élevée : variante plus exigeante bloquée.';
-      else if (l.totalMin > (wk.maxMin || 1e9)) rec.reason = `Dépasse ton temps disponible (${wk.maxMin} min).`;
-      else if (capKeys.length) rec.reason = 'Plafond de travail à cette allure atteint.';
-      else if (l.tier >= 2 && (wk.otherTiers || []).some(t => t >= 2)) rec.reason = 'Une seule séance très exigeante par semaine.';
-      else if (variant === 'red') {
-        if ((wk.level || 2) < 3) rec.reason = 'Réservée aux profils confirmés.';
-        else if (!['S2', 'S3'].includes(wk.phase)) rec.reason = 'Disponible en semaines S2 et S3 seulement.';
-        else if (wk.cap < 2 || (wk.warnings || []).length) rec.reason = 'Forme ou charge récente : conditions non réunies.';
-        else if (snap.role === 'ef') rec.reason = 'Pas de variante rouge pour l’endurance.';
-      }
-      if (rec.reason) rec.available = false;
+      const C = [
+        { ok: !wk.caution, label: 'Pas de gêne signalée', reason: 'Gêne ou fatigue signalée : variantes plus exigeantes bloquées.' },
+        { ok: wk.phase !== 'S4', label: 'Hors semaine de récupération', reason: 'Semaine de récupération : pas de séance plus exigeante.' },
+        { ok: snap.role === 'ef' || wk.cap >= 1, label: 'Charge récente supportable', reason: 'Charge récente élevée : variante plus exigeante bloquée.' },
+        { ok: l.totalMin <= (wk.maxMin || 1e9), label: 'Dans ton temps disponible', reason: `Dépasse ton temps disponible (${wk.maxMin} min).` },
+        { ok: !capKeys.length, label: 'Plafond de travail respecté', reason: 'Plafond de travail à cette allure atteint.' },
+        { ok: !(l.tier >= 2 && (wk.otherTiers || []).some(t => t >= 2)), label: 'Une seule séance très exigeante', reason: 'Une seule séance très exigeante par semaine.' },
+      ];
+      if (variant === 'red') C.push(
+        { ok: (wk.level || 2) >= 3, label: 'Profil confirmé (niveau 3)', reason: 'Réservée aux profils confirmés.' },
+        { ok: ['S2', 'S3'].includes(wk.phase), label: 'Semaine S2 ou S3', reason: 'Disponible en semaines S2 et S3 seulement.' },
+        { ok: !wk.reprise, label: 'Hors premier cycle (reprise)', reason: 'Indisponible pendant le premier cycle de reprise.' },
+        { ok: (wk.cap >= 2 || !!wk.reprise) && !(wk.warnings || []).length, label: 'Forme et charge sans alerte', reason: 'Forme ou charge récente : conditions non réunies.' },
+        { ok: !wk.hold && !wk.tired, label: 'Assiduité et ressenti corrects', reason: 'Assiduité ou ressenti récents : on ne monte pas.' },
+        { ok: snap.role !== 'ef', label: 'Séance de qualité (pas une EF)', reason: 'Pas de variante rouge pour l\u2019endurance.' },
+      );
+      rec.conditions = C;
+      const unmet = C.filter(c => !c.ok);
+      if (unmet.length) { rec.reason = unmet[0].reason; rec.available = false; }
     }
     if (wk.locked && !rec.selected) { rec.available = false; rec.reason = rec.reason || 'Séance déjà faite ou semaine passée.'; }
     return rec;
   });
   // rouge identique à orange (petites séances) : une seule des deux a un sens
   const orange = list.find(v => v.variant === 'orange'), red = list.find(v => v.variant === 'red');
-  if (red.available && orange.dsl === red.dsl) { red.available = false; red.reason = 'Identique à la variante orange pour cette séance.'; }
+  if (red.conditions) {
+    const diff = { ok: orange.dsl !== red.dsl, label: 'Différente de l\u2019orange', reason: 'Identique à la variante orange pour cette séance.' };
+    red.conditions.push(diff);
+    if (!diff.ok && red.available) { red.available = false; red.reason = diff.reason; }
+  }
+  list.forEach(v => { if (v.conditions) { v.unmet = v.conditions.filter(c => !c.ok).map(c => c.label); v.metCount = v.conditions.length - v.unmet.length; } });
   return list;
 }
 
