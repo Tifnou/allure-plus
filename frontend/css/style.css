@@ -5758,3 +5758,6 @@ body { background: var(--bg) !important; }
 
 .rt-horizon-note { margin: 0 0 12px; padding: 10px 14px; border-radius: 10px; font-size: 12.5px; line-height: 1.5; opacity: .9;
   background: rgba(100, 130, 200, .10); border: 1px solid rgba(100, 130, 200, .30); }
+
+.rt-adapt-note { margin-top: 10px; padding: 9px 12px; border-radius: 10px; font-size: 12.5px; line-height: 1.5;
+  background: rgba(100, 130, 200, .10); border: 1px solid rgba(100, 130, 200, .30); }

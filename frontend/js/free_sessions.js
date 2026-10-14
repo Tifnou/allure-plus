@@ -624,7 +624,7 @@ async function renderFreeSessionsWeek(forceIdx) {
     if (stored) {
       w.sessions = stored.sessions.map((s, i) => routineSnapshotToSession(s, i));
       w.stored = stored;
-      if (stored.preview) w.context = { cycleDescription: 'Aperçu : cette semaine sera ajustée d’après ta forme, ton assiduité et ta charge récente quand elle commencera.' };
+      if (stored.preview) w.context = { cycleDescription: 'Séances proposées à titre indicatif : elles seront modifiées si besoin d’après ta forme, ton assiduité, ta charge récente et tes ressentis avant que cette semaine commence.' };
     } else {
       w.sessions = [];
       w.pending = true;
@@ -692,6 +692,7 @@ async function renderFreeSessionsWeek(forceIdx) {
         <div>
           <div class="plan-title">Séances libres — entretien</div>
           <div class="plan-subtitle-desc">${NOT_A_PLAN_ADVICE}${phaseHtml}</div>
+          <div class="rt-adapt-note">🔄 <strong>Des séances qui s’adaptent.</strong> Celles que tu vois sont des <strong>propositions</strong> : elles peuvent être modifiées selon ta forme, ton assiduité (séances faites ou manquées), ta charge récente, tes autres sports et ton ressenti. La semaine en cours reste stable ; les semaines à venir sont ajustées quand elles commencent.</div>
           ${planBannerHtml}
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">

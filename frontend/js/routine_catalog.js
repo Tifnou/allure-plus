@@ -300,7 +300,7 @@ function routineToSessionStructure(compiled) {
       tpl.forEach(s => {
         const z = routineStepToZone(s);
         const pz = { kind: z.kind, duration: s.sec, pace: z.slug ? { slug: z.slug, value: null } : null };
-        if (z.sub) pz.sub = z.sub;     // moitié basse / haute de la zone (EF facile / soutenue)
+        if (z.sub) pz.sub = z.sub;     // moitié basse / haute de la zone (EF aisée / haute)
         if (z.rpe != null) { pz.rpe = z.rpe; pz.rpeLabel = z.label || null; pz.noTarget = true; }
         paceZones.push(pz);
       });

@@ -541,7 +541,7 @@ function _fmtSec(s) {
   if (s < 60) return s + ' s';
   return Math.floor(s / 60) + ' min ' + (s % 60) + ' s';
 }
-const _CODE_LABEL = { EF: 'EF', EFL: 'EF facile', EFH: 'EF soutenue', TEMPO: 'Tempo', AS42: 'AS42', SS: 'Sweet Spot', AS21: 'AS21', S60: 'S60', AS10: 'AS10', S30: 'S30', VMA: 'VMA', WALK: 'marche', STRIDE: 'relance relâchée' };
+const _CODE_LABEL = { EF: 'EF', EFL: 'EF aisée', EFH: 'EF haute', TEMPO: 'Tempo', AS42: 'AS42', SS: 'Sweet Spot', AS21: 'AS21', S60: 'S60', AS10: 'AS10', S30: 'S30', VMA: 'VMA', WALK: 'marche', STRIDE: 'relance relâchée' };
 function _subSuffix(n) { return n.sub && n.code !== 'EFL' && n.code !== 'EFH' ? (n.sub === 'low' ? ' (bas de plage)' : ' (haut de plage)') : ''; }
 function _fmtStep(n) {
   if (n.code === 'RPE') return _fmtSec(n.sec) + ' effort RPE ' + n.rpe + (n.label ? ' (' + n.label.replace(/_/g, ' ') + ')' : '');
