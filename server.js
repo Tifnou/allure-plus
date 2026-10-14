@@ -310,6 +310,24 @@ app.post('/api/user-data', requireSession, (req, res) => {
   res.json({ success: true });
 });
 
+// Suppression d'une cle durable (ex: "Annuler le plan en cours"). Sans cette
+// route, le client ne faisait que `localStorage.removeItem` : la copie serveur
+// restait, et au rechargement syncUserDataFromServer() "comblait" la cle
+// manquante depuis le serveur -> le plan annule revenait (bug constate).
+// Le tombstone (deleted=true) est aussi propage aux autres appareils.
+app.delete('/api/user-data/:key', requireSession, (req, res) => {
+  const email = (req.session.email || '').toLowerCase();
+  const key = String(req.params.key || '');
+  if (!key) return res.status(400).json({ error: 'Cle manquante' });
+  const store = readJsonSafe(USER_DATA_FILE, {});
+  if (store[email] && Object.prototype.hasOwnProperty.call(store[email], key)) {
+    delete store[email][key];
+    writeJsonSafe(USER_DATA_FILE, store);
+  }
+  scheduleSync('user_data', key, email, true);
+  res.json({ success: true });
+});
+
 // Ajout / suppression des images du diaporama de fond
 app.post('/api/bg-images', requireSession, upload.single('image'), (req, res) => {
   try {

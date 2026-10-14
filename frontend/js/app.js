@@ -101,6 +101,19 @@ let _nativeLsSetItem = null;
       }).catch(e => console.error('sync user-data (' + key + '):', e));
     }
   };
+  // Une suppression doit aussi partir au serveur : sinon la copie serveur
+  // ressuscite la cle au prochain demarrage (syncUserDataFromServer comble
+  // les cles absentes en local) - ex: "Annuler le plan en cours" qui revenait
+  // apres un rafraichissement. localStorage.clear() (logout) n'est PAS
+  // concerne : vider le navigateur doit toujours pouvoir etre recupere.
+  const nativeRemove = localStorage.removeItem.bind(localStorage);
+  localStorage.removeItem = function(key) {
+    nativeRemove(key);
+    if (isDurableLsKey(key)) {
+      fetch(`${API}/api/user-data/${encodeURIComponent(key)}`, { method: 'DELETE' })
+        .catch(e => console.error('sync user-data delete (' + key + '):', e));
+    }
+  };
 })();
 // Cle purement locale (pas une DURABLE_LS_KEYS, jamais synchronisee) qui
 // retient, par cle durable, l'horodatage serveur (meta.updatedAt) DEJA
