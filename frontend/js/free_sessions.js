@@ -661,6 +661,7 @@ async function renderFreeSessionsWeek(forceIdx) {
     if (planInfo && routineWeeksBetween(weekDate, planInfo.startMs) <= 0) {
       // à partir du début du plan, c'est lui qui prend le relais : rien n'est généré
       weeks.push({ ...base, sessions: [], pending: true, planWeek: true, dot: '🏁', tabTitle: 'Début du plan — ses séances remplacent la routine',
+        emptyHtml: `<div class="rt-pending card"><div class="rt-pending-ico">🏁</div><div><div class="rt-pending-title">Ton plan prend le relais</div><div class="rt-pending-text">Le plan « ${planInfo.name} » démarre le lundi ${routineDateFr(planInfo.startMs)} : ses séances remplacent la routine à partir de cette semaine.</div></div></div>`,
         emptyMessage: `Ton plan « ${planInfo.name} » a démarré : ses séances remplacent la routine (le plan s'affiche ici dès le lundi ${routineDateFr(planInfo.startMs)}).` });
       continue;
     }
@@ -678,6 +679,7 @@ async function renderFreeSessionsWeek(forceIdx) {
     } else {
       w.sessions = [];
       w.pending = true;
+      w.emptyHtml = routinePendingCard(wn, phase, currentWeekNum, prefs, planInfo, start);
       w.emptyMessage = wn < currentWeekNum
         ? 'Semaine non générée (l’application n’a pas été ouverte cette semaine-là).'
         : wn <= currentWeekNum + 1
@@ -704,16 +706,20 @@ async function renderFreeSessionsWeek(forceIdx) {
 
   // Bandeau de phase de la semaine en cours + transparence sur ce que le
   // moteur a retenu (niveau, volume) et sur ses éventuelles précautions.
-  let phaseHtml, badges;
+  const chip = (k, v) => `<span class="rt-chip"><span class="rt-chip-k">${k}</span><span class="rt-chip-v">${v}</span></span>`;
+  const chips = [chip('Terrain', terrainLabel), chip('Rythme', `${prefs.frequency} séances/sem.`)];
+  let phaseHtml;
   if (cur.legacy) {
     phaseHtml = cur.light ? ' <strong>Semaine allégée cette semaine</strong> (récupération).' : ` <strong>Semaine ${cur.tier + 1}/3</strong> du bloc — charge ${TIER_LABEL[cur.tier]}.`;
-    badges = cur.light ? '<span class="plan-type-badge" style="background:#fef3c7;color:#b45309">Semaine légère</span>' : `<span class="plan-type-badge">${TIER_DOT[cur.tier]} Charge ${TIER_LABEL[cur.tier]}</span>`;
+    chips.push(chip('Charge', cur.light ? '🪶 allégée' : `${TIER_DOT[cur.tier]} ${TIER_LABEL[cur.tier]}`));
   } else {
     phaseHtml = ` <strong>${cur.phase} — semaine ${ROUTINE_PHASE_LABEL[cur.phase]}</strong> du cycle de 4 semaines.`;
-    badges = `<span class="plan-type-badge">${cur.dot} ${cur.phase} · ${ROUTINE_PHASE_LABEL[cur.phase]}</span>`;
+    chips.push(chip('Semaine', `${cur.dot} ${cur.phase} · ${ROUTINE_PHASE_LABEL[cur.phase]}`));
     const st = cur.stored;
     if (st && st.macro) {
-      badges += ` <span class="plan-type-badge">Cycle ${st.macro.cycleIdx + 1} · ${st.macro.phaseName}</span> <span class="plan-type-badge">Thème : ${st.macro.themeLabel}</span>`;
+      chips.push(chip('Cycle', `${st.macro.cycleIdx + 1} · ${st.macro.phaseName}`));
+      chips.push(chip('Thème', st.macro.themeLabel));
+      if (st.macro.targetLabel !== 'polyvalent') chips.push(chip('Objectif', st.macro.targetLabel));
       phaseHtml += `<br><span style="opacity:.9">🎯 ${st.macro.targetLabel === 'polyvalent' ? '' : `<strong>Objectif ${st.macro.targetLabel}</strong> : `}${st.macro.why}.</span>`;
     }
     if (st) {
@@ -723,6 +729,8 @@ async function renderFreeSessionsWeek(forceIdx) {
       (st.notes || []).concat(st.warnings || []).forEach(n => { phaseHtml += `<br><span style="opacity:.85">ℹ️ ${n}</span>`; });
     }
   }
+  if (planInfo) chips.push(chip('Plan', `démarre le ${routineDateFr(planInfo.startMs)}`));
+  else if (prefs.race && prefs.race.dateMs > Date.now()) chips.push(chip('Course', routineDateFr(prefs.race.dateMs)));
 
   // Bilan de la semaine écoulée (une fois) : nourrit le moteur pour les semaines suivantes
   let checkinHtml = '';
@@ -756,20 +764,26 @@ async function renderFreeSessionsWeek(forceIdx) {
       Cette routine entretient ta base sans préparer la course de façon ciblée ; un plan Allure+ du catalogue sera recommandé au bon moment.</div></div>`;
   }
 
+  let headCollapsed = false;
+  try { headCollapsed = localStorage.getItem('allure_rt_head_collapsed') === '1'; } catch (e) { /* stockage indisponible */ }
   const header = `
-    <div class="training-plan-header card">
-      <div class="plan-header-top">
-        <div>
+    <div class="training-plan-header card rt-head${headCollapsed ? ' rt-head--collapsed' : ''}" id="rt-head">
+      <div class="rt-head-bar">
+        <div class="rt-head-main">
           <div class="plan-title">Séances libres — entretien</div>
-          <div class="plan-subtitle-desc">${NOT_A_PLAN_ADVICE}${phaseHtml}</div>
-          <div class="rt-adapt-note">🔄 <strong>Des séances qui s’adaptent.</strong> Celles que tu vois sont des <strong>propositions</strong> : elles peuvent être modifiées selon ta forme, ton assiduité (séances faites ou manquées), ta charge récente, tes autres sports et ton ressenti. La semaine en cours reste stable ; les semaines à venir sont ajustées quand elles commencent.</div>
-          ${planBannerHtml}
+          <div class="rt-chips">${chips.join('')}</div>
         </div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;">
-          <span class="plan-type-badge">${terrainLabel}</span>
-          <span class="plan-type-badge">${prefs.frequency}x/sem</span>
-          ${badges}
+        <div class="rt-head-actions">
+          ${planInfo ? '<button type="button" class="btn-plan-action" onclick="routineShowPlan()">Voir le plan</button>' : ''}
+          <button type="button" class="rt-head-toggle" onclick="toggleRoutineHeader()" aria-expanded="${!headCollapsed}" aria-controls="rt-head-body">
+            <span class="rt-head-toggle-label">${headCollapsed ? 'Afficher les détails' : 'Réduire'}</span><span class="rt-head-chev" aria-hidden="true">▾</span>
+          </button>
         </div>
+      </div>
+      <div class="rt-head-body" id="rt-head-body"${headCollapsed ? ' hidden' : ''}>
+        <div class="plan-subtitle-desc">${NOT_A_PLAN_ADVICE}${phaseHtml}</div>
+        <div class="rt-adapt-note">🔄 <strong>Des séances qui s’adaptent.</strong> Celles que tu vois sont des <strong>propositions</strong> : elles peuvent être modifiées selon ta forme, ton assiduité (séances faites ou manquées), ta charge récente, tes autres sports et ton ressenti. La semaine en cours reste stable ; les semaines à venir sont ajustées quand elles commencent.</div>
+        ${planBannerHtml}
       </div>
     </div>`;
 
@@ -807,6 +821,26 @@ async function renderFreeSessionsWeek(forceIdx) {
 
   el('campus-plan-wrap').innerHTML = checkinHtml + header + weekTabs + horizonNote + actions + `<div id="training-session-list"></div>`;
   renderSessionList(campusState.selectedWeekIdx);
+}
+
+// Carte d'une semaine pas encore construite : lisible (fond opaque), avec ce qui est déjà
+// connu (phase, charge, thème indicatif) et ce qui décidera du contenu.
+function routinePendingCard(wn, phase, currentWeekNum, prefs, planInfo, start) {
+  if (wn < currentWeekNum) {
+    return '<div class="rt-pending card"><div class="rt-pending-ico">🗓️</div><div><div class="rt-pending-title">Semaine non générée</div><div class="rt-pending-text">L’application n’a pas été ouverte cette semaine-là : aucune séance n’avait été construite.</div></div></div>';
+  }
+  const targetKey = planInfo ? planInfo.targetKey : (prefs.race && prefs.race.dateMs > Date.now() ? prefs.race.distKey : null);
+  const macro = RoutineEngine.routineMacro({ weekIdx: wn - start, targetKey, plan: planInfo ? { weeksToStart: Math.max(1, routineWeeksBetween(freeWeekDate(prefs, wn), planInfo.startMs)) } : null, horizon: null });
+  const charge = { S1: 'souple', S2: 'modérée', S3: 'intense', S4: 'de récupération' }[phase];
+  const chips = [
+    ['Phase', `${ROUTINE_PHASE_DOT[phase]} ${phase} · ${ROUTINE_PHASE_LABEL[phase]}`],
+    ['Charge prévue', charge],
+    ['Thème du cycle (indicatif)', macro.themeLabel],
+  ].map(([k, v]) => `<span class="rt-chip"><span class="rt-chip-k">${k}</span><span class="rt-chip-v">${v}</span></span>`).join('');
+  return `<div class="rt-pending card"><div class="rt-pending-ico">🗓️</div><div>
+    <div class="rt-pending-title">Semaine ${wn} — pas encore construite</div>
+    <div class="rt-pending-text">Ses séances seront choisies à l’approche, en fonction de ta forme du moment, de ton assiduité, de ta charge récente et de tes ressentis. Elle sera ajustée si tu manques des séances d’ici là.</div>
+    <div class="rt-chips" style="margin-top:10px">${chips}</div></div></div>`;
 }
 
 // Un onglet de semaine non générée (semaine en cours ou suivante) la génère
@@ -952,7 +986,17 @@ function routineLookup(weekId, idx) {
   return { prefs, store, stored, wd, snap: stored.sessions[idx] };
 }
 
-// Barre de choix affichée dans le détail d'une séance (campus.js renderSessionDetail)
+// Choix de l'intensité : 4 colonnes de hauteur croissante (vert → rouge, comme un histogramme)
+// et, à droite, l'explication de la colonne sélectionnée (aperçu au survol / focus sans changer
+// le choix). Cliquer une colonne applique la variante.
+const ROUTINE_VARIANT_PURPOSE = {
+  green: ['Allégée', 'Moins de travail et allure en bas de la fourchette de la zone. Pour une semaine chargée, une reprise, ou quand la forme n’est pas là.'],
+  yellow: ['Référence prévue', 'La séance telle que construite pour ta semaine, ton niveau et ta forme du moment.'],
+  orange: ['Renforcée', 'Un paramètre de plus (répétition ou durée de bloc) et allure en haut de la fourchette. Compte comme une charge supérieure dans ton cycle.'],
+  red: ['Très exigeante', 'Deux crans au-dessus, réservée aux profils confirmés en semaines S2 / S3, sans fatigue ni gêne. Jamais deux séances très exigeantes dans la même semaine.'],
+};
+const ROUTINE_BAR_HEIGHT = { green: 54, yellow: 72, orange: 90, red: 108 };
+
 function renderRoutineVariantBar(session, weekId) {
   const idx = session.trainingIndex ?? 0;
   const found = routineLookup(weekId, idx);
@@ -962,23 +1006,53 @@ function renderRoutineVariantBar(session, weekId) {
   const pastWeek = wd + 7 * 86400000 < Date.now();
   const variants = RoutineEngine.routineBuildVariants(snap, routineWeekCtx(prefs, stored, idx, done || pastWeek));
   const sel = variants.find(v => v.selected) || variants[1];
-  const btn = v => {
-    const delta = v.variant === 'yellow' ? 'prévue' : `${v.deltaLoadPct >= 0 ? '+' : ''}${v.deltaLoadPct} % de charge`;
-    const title = v.available || v.selected
-      ? `${v.label} — ${v.totalMin} min au total (${v.deltaTotalMin >= 0 ? '+' : ''}${v.deltaTotalMin} min), ${v.deltaWorkMin >= 0 ? '+' : ''}${v.deltaWorkMin} min de travail${v.intensity ? ', allure ' + v.intensity + ' de la zone' : ''}. ${RoutineEngine.routineDescribe(v.dsl)}.`
-      : v.reason;
-    return `<button type="button" class="rt-variant rt-variant--${v.variant}${v.selected ? ' rt-variant--on' : ''}"${v.available || v.selected ? '' : ' disabled'}
-      title="${title.replace(/"/g, '&quot;')}" onclick="event.stopPropagation();setRoutineVariant('${weekId}',${idx},'${v.variant}')">
-      <span class="rt-variant-name">${ROUTINE_VARIANT_DOT[v.variant]} ${v.label}</span>
-      <span class="rt-variant-meta">${v.totalMin} min · ${delta}</span>${v.intensity ? `<span class="rt-variant-meta">allure ${v.intensity}</span>` : ''}</button>`;
+  const sgn = n => (n >= 0 ? '+' : '') + n;
+  const bar = v => {
+    const usable = v.available || v.selected;
+    // aria-disabled (et non disabled) : une colonne indisponible reste survolable / focusable pour expliquer POURQUOI
+    return `<button type="button" class="rt-bar rt-bar--${v.variant}${v.selected ? ' rt-bar--on' : ''}${usable ? '' : ' rt-bar--off'}" style="--h:${ROUTINE_BAR_HEIGHT[v.variant]}px"${usable ? '' : ' aria-disabled="true"'}
+      data-variant="${v.variant}" role="radio" aria-checked="${v.selected}"
+      onmouseenter="rtShowVariantInfo(this,'${v.variant}')" onfocus="rtShowVariantInfo(this,'${v.variant}')" onmouseleave="rtShowVariantInfo(this)" onblur="rtShowVariantInfo(this)"
+      onclick="event.stopPropagation();setRoutineVariant('${weekId}',${idx},'${v.variant}')">
+      <span class="rt-bar-name">${v.label}</span>
+      <span class="rt-bar-min">${v.totalMin} min</span>
+      <span class="rt-bar-delta">${v.variant === 'yellow' ? 'prévue' : sgn(v.deltaLoadPct) + ' %'}</span></button>`;
+  };
+  const panel = v => {
+    const [ttl, why] = ROUTINE_VARIANT_PURPOSE[v.variant];
+    const usable = v.available || v.selected;
+    return `<div class="rt-var-panel${v.selected ? ' rt-var-panel--on' : ''}" data-variant="${v.variant}">
+      <div class="rt-var-panel-title"><span class="rt-var-dot rt-var-dot--${v.variant}"></span>${v.label} — ${ttl}${v.selected ? '<span class="rt-var-tag">Choisie</span>' : ''}</div>
+      <div class="rt-var-stats">
+        <span><b>${v.totalMin} min</b> au total (${sgn(v.deltaTotalMin)} min)</span>
+        <span>Travail <b>${sgn(v.deltaWorkMin)} min</b></span>
+        <span>Charge <b>≈ ${v.load}</b> (${sgn(v.deltaLoadPct)} %)</span>
+        ${v.intensity ? `<span>Allure <b>${v.intensity}</b></span>` : ''}
+      </div>
+      <div class="rt-var-struct">${RoutineEngine.routineDescribe(v.dsl)}.</div>
+      <div class="rt-var-why">${why}</div>
+      ${usable ? '' : `<div class="rt-var-block">Indisponible : ${v.reason}</div>`}
+    </div>`;
   };
   const lockedMsg = (done || pastWeek) ? '<div class="rt-variant-note">Séance faite ou semaine passée : variante figée.</div>'
     : prefs.caution ? '<div class="rt-variant-note">🩹 Gêne signalée : les variantes plus exigeantes sont bloquées.</div>' : '';
-  return `<div class="session-detail-section rt-variants">
+  return `<div class="session-detail-section rt-variants" data-selected="${sel.variant}">
     <div class="session-detail-section-title">Intensité de la séance <span class="zones-source-note">charge ≈ ${sel.load}</span></div>
-    <div class="rt-variant-row">${variants.map(btn).join('')}</div>
+    <div class="rt-var-layout">
+      <div class="rt-bars" role="radiogroup" aria-label="Intensité de la séance">${variants.map(bar).join('')}</div>
+      <div class="rt-var-info" aria-live="polite">${variants.map(panel).join('')}</div>
+    </div>
     ${lockedMsg}
   </div>`;
+}
+
+// Aperçu de l'explication au survol / focus ; sans argument : revient à la variante choisie
+function rtShowVariantInfo(el, variant) {
+  const box = el && el.closest ? el.closest('.rt-variants') : null;
+  if (!box) return;
+  const shown = variant || box.dataset.selected;
+  box.querySelectorAll('.rt-var-panel').forEach(p => p.classList.toggle('rt-var-panel--on', p.dataset.variant === shown));
+  box.querySelectorAll('.rt-bar').forEach(b => b.classList.toggle('rt-bar--peek', !!variant && b.dataset.variant === variant && variant !== box.dataset.selected));
 }
 
 function setRoutineVariant(weekId, idx, variant) {
@@ -1125,4 +1199,21 @@ async function routineCheckin(wd, mood) {
   saveRoutineStore(store);
   if (mood) showToast(mood === 'bad' ? 'Merci : on allège les prochaines semaines si besoin.' : 'Merci : c’est pris en compte pour la suite.', 'info');
   await renderFreeSessionsWeek(campusState.selectedWeekIdx);
+}
+
+
+// ─── En-tête repliable ───────────────────────────────────────────────────
+// Réduit : titre + pastilles (aperçu) ; déplié : explications complètes. Choix mémorisé (local).
+function toggleRoutineHeader() {
+  const head = document.getElementById('rt-head');
+  const body = document.getElementById('rt-head-body');
+  if (!head || !body) return;
+  const collapsed = !head.classList.contains('rt-head--collapsed');
+  head.classList.toggle('rt-head--collapsed', collapsed);
+  body.hidden = collapsed;
+  const lbl = head.querySelector('.rt-head-toggle-label');
+  if (lbl) lbl.textContent = collapsed ? 'Afficher les détails' : 'Réduire';
+  const btn = head.querySelector('.rt-head-toggle');
+  if (btn) btn.setAttribute('aria-expanded', String(!collapsed));
+  try { localStorage.setItem('allure_rt_head_collapsed', collapsed ? '1' : '0'); } catch (e) { /* stockage indisponible */ }
 }

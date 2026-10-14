@@ -5717,27 +5717,57 @@ body { background: var(--bg) !important; }
 .admin-users-table tr.admin-users-detail-row--selected > td { background: var(--accent-light); box-shadow: inset 4px 0 0 var(--accent); border-bottom: 2px solid var(--accent); }
 .admin-users-detail-row--selected .admin-users-detail-item { background: var(--bg-white); }
 
-/* ── Routines hors plan : choix de variante (vert / jaune / orange / rouge) ── */
-.rt-variant-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
-.rt-variant {
-  display: flex; flex-direction: column; gap: 2px; align-items: flex-start;
-  padding: 8px 10px; border-radius: 10px; cursor: pointer; text-align: left;
-  border: 1.5px solid var(--border, #ddd); background: transparent; color: var(--text-primary, inherit);
-  font: inherit; transition: border-color .15s, background .15s, opacity .15s;
-}
-.rt-variant-name { font-size: 13px; font-weight: 600; }
-.rt-variant-meta { font-size: 11px; opacity: .75; }
-.rt-variant--green:hover:not(:disabled)  { border-color: #43a047; }
-.rt-variant--yellow:hover:not(:disabled) { border-color: #f9a825; }
-.rt-variant--orange:hover:not(:disabled) { border-color: #fb8c00; }
-.rt-variant--red:hover:not(:disabled)    { border-color: #e53935; }
-.rt-variant--green.rt-variant--on  { border-color: #43a047; background: rgba(67, 160, 71, .14); }
-.rt-variant--yellow.rt-variant--on { border-color: #f9a825; background: rgba(249, 168, 37, .16); }
-.rt-variant--orange.rt-variant--on { border-color: #fb8c00; background: rgba(251, 140, 0, .16); }
-.rt-variant--red.rt-variant--on    { border-color: #e53935; background: rgba(229, 57, 53, .14); }
-.rt-variant:disabled { opacity: .45; cursor: not-allowed; }
+/* ── Routines hors plan : choix d'intensité en histogramme ── */
+.rt-var-layout { display: grid; grid-template-columns: minmax(250px, 340px) 1fr; gap: 16px; align-items: end; }
+.rt-bars { display: flex; align-items: flex-end; gap: 8px; }
+.rt-bar { --c: 150, 150, 150; flex: 1 1 0; min-width: 0; height: var(--h); display: flex; flex-direction: column; justify-content: flex-end; align-items: center; gap: 1px;
+  padding: 6px 4px; border-radius: 8px 8px 4px 4px; cursor: pointer; text-align: center; font: inherit; color: var(--text-primary);
+  border: 1.5px solid rgb(var(--c)); border-bottom-width: 3px; background: rgba(var(--c), .16); transition: background .15s, transform .15s, box-shadow .15s; }
+.rt-bar--green { --c: 67, 160, 71; } .rt-bar--yellow { --c: 249, 168, 37; } .rt-bar--orange { --c: 251, 140, 0; } .rt-bar--red { --c: 229, 57, 53; }
+.rt-bar:hover:not(.rt-bar--off), .rt-bar:focus-visible, .rt-bar--peek { background: rgba(var(--c), .30); transform: translateY(-2px); outline: none; }
+.rt-bar--on { background: rgba(var(--c), .55); box-shadow: 0 0 0 2px rgba(var(--c), .45); }
+.rt-bar--on .rt-bar-name { text-decoration: underline; text-underline-offset: 3px; }
+.rt-bar--off { opacity: .55; cursor: not-allowed; background: repeating-linear-gradient(135deg, rgba(var(--c), .10) 0 6px, transparent 6px 12px); }
+.rt-bar-name { font-size: 13px; font-weight: 700; }
+.rt-bar-min { font-size: 12px; font-weight: 600; }
+.rt-bar-delta { font-size: 11px; opacity: .8; }
+.rt-var-info { min-height: 108px; padding: 12px 14px; border-radius: 10px; background: var(--bg-white); color: var(--text-primary); border: 1px solid var(--border); }
+.rt-var-panel { display: none; }
+.rt-var-panel--on { display: block; }
+.rt-var-panel-title { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 14px; margin-bottom: 6px; }
+.rt-var-dot { width: 12px; height: 12px; border-radius: 50%; flex: none; }
+.rt-var-dot--green { background: #43a047; } .rt-var-dot--yellow { background: #f9a825; } .rt-var-dot--orange { background: #fb8c00; } .rt-var-dot--red { background: #e53935; }
+.rt-var-tag { margin-left: auto; font-size: 10.5px; font-weight: 600; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--border); opacity: .85; }
+.rt-var-stats { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12.5px; margin-bottom: 6px; }
+.rt-var-struct { font-size: 12.5px; opacity: .9; margin-bottom: 6px; }
+.rt-var-why { font-size: 12.5px; line-height: 1.5; opacity: .85; }
+.rt-var-block { margin-top: 6px; font-size: 12.5px; font-weight: 600; color: #e53935; }
 .rt-variant-note { margin-top: 8px; font-size: 12px; opacity: .8; }
-@media (max-width: 560px) { .rt-variant-row { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 700px) { .rt-var-layout { grid-template-columns: 1fr; } }
+
+/* En-tête repliable des séances libres */
+.rt-head-bar { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.rt-head-main { flex: 1 1 360px; min-width: 0; }
+.rt-head-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.rt-head-toggle { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 8px; cursor: pointer; font: inherit; font-size: 12.5px;
+  color: var(--text-primary); background: var(--bg-white); border: 1px solid var(--border); }
+.rt-head-toggle:hover { border-color: var(--accent); }
+.rt-head-chev { display: inline-block; transition: transform .2s; }
+.rt-head--collapsed .rt-head-chev { transform: rotate(-90deg); }
+.rt-head-body { margin-top: 12px; }
+.rt-head-body[hidden] { display: none; }
+.rt-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.rt-chip { display: inline-flex; align-items: baseline; gap: 6px; padding: 4px 10px; border-radius: 8px; line-height: 1.3;
+  background: var(--bg-white); color: var(--text-primary); border: 1px solid var(--border); }
+.rt-chip-k { font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; opacity: .6; }
+.rt-chip-v { font-size: 12.5px; font-weight: 600; }
+
+/* Semaine pas encore construite : carte lisible */
+.rt-pending { display: flex; gap: 14px; align-items: flex-start; padding: 18px 20px; margin-top: 4px;
+  background: var(--bg-white); color: var(--text-primary); border: 1px solid var(--border); border-left: 4px solid var(--accent); border-radius: 12px; }
+.rt-pending-ico { font-size: 26px; line-height: 1; }
+.rt-pending-title { font-weight: 700; font-size: 15px; margin-bottom: 4px; }
+.rt-pending-text { font-size: 13px; line-height: 1.55; opacity: .88; }
 
 /* Admin : interrupteur à case à cocher */
 .admin-switch-row { display: flex; gap: 12px; align-items: flex-start; cursor: pointer; line-height: 1.45; }

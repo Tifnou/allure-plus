@@ -1298,7 +1298,7 @@ function renderSessionList(weekIdx) {
     </div>`;
 
   if (sessions.length === 0) {
-    container.innerHTML = weekHeader + '<div class="training-empty">' + (week.emptyMessage || 'Pas de séances pour cette semaine.') + '</div>';
+    container.innerHTML = weekHeader + (week.emptyHtml || ('<div class="training-empty">' + (week.emptyMessage || 'Pas de séances pour cette semaine.') + '</div>'));
     return;
   }
 
