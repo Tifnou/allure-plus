@@ -16,7 +16,7 @@
   <script>window.CESIUM_BASE_URL = 'https://cdn.jsdelivr.net/npm/cesium@1.120.0/Build/Cesium/';</script>
   <script src="https://cdn.jsdelivr.net/npm/cesium@1.120.0/Build/Cesium/Cesium.js"></script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cesium@1.120.0/Build/Cesium/Widgets/widgets.css" />
-  <link rel="stylesheet" href="css/style.css?v=1789488270021" />
+  <link rel="stylesheet" href="css/style.css?v=1790100000003" />
   <link rel="stylesheet" href="css/seasons.css?v=1790000000004" />
   <link rel="stylesheet" href="css/plans.css?v=1787132767395" />
   <link rel="stylesheet" href="css/routes.css?v=1787650000004" />
@@ -1391,6 +1391,11 @@
               <span class="admin-nav-label">D+ trail</span>
               <span class="admin-nav-meta" id="admin-meta-dplus"></span>
             </button>
+            <button type="button" class="admin-nav-item" data-section="routines">
+              <span class="admin-nav-icon">&#x1F3C3;</span>
+              <span class="admin-nav-label">Routines hors plan</span>
+              <span class="admin-nav-meta" id="admin-meta-routines"></span>
+            </button>
             </div>
           </div>
           <div class="admin-nav-group" data-group="systeme">
@@ -1433,6 +1438,13 @@
           <header class="admin-panel-head"><span class="admin-section-icon">&#x26F0;&#xFE0F;</span><h2 class="admin-panel-title">Référence D+ trail</h2></header>
           <div class="admin-panel-body">
         <div id="admin-dplus-tiers"><div class="table-loading">Chargement…</div></div>
+          </div>
+        </section>
+        <section class="card admin-panel" data-section="routines" id="admin-panel-routines" hidden>
+          <header class="admin-panel-head"><span class="admin-section-icon">&#x1F3C3;</span><h2 class="admin-panel-title">Routines hors plan</h2></header>
+          <div class="admin-panel-body">
+        <!-- Réglages du moteur de séances libres : loadAdminRoutines (free_sessions.js) -->
+        <div id="admin-routines"><div class="table-loading">Chargement…</div></div>
           </div>
         </section>
         <section class="card admin-panel" data-section="system" id="admin-panel-system" hidden>
@@ -1503,14 +1515,14 @@
     <span class="support-fab-dot" id="support-fab-dot" style="display:none"></span>
   </button>
 
-  <script src="js/app.js?v=1790100000002"></script>
+  <script src="js/app.js?v=1790100000003"></script>
   <script src="js/season_scenes.js?v=1790000000004"></script>
   <script src="js/themes.js?v=1790000000004"></script>
   <script src="js/gear.js?v=1786459105634"></script>
-  <script src="js/campus.js?v=1790100000001"></script>
-  <script src="js/routine_catalog.js?v=1790100000001"></script>
-  <script src="js/routine_engine.js?v=1790100000001"></script>
-  <script src="js/free_sessions.js?v=1790100000001"></script>
+  <script src="js/campus.js?v=1790100000003"></script>
+  <script src="js/routine_catalog.js?v=1790100000003"></script>
+  <script src="js/routine_engine.js?v=1790100000004"></script>
+  <script src="js/free_sessions.js?v=1790100000003"></script>
   <script src="js/session-analysis.js?v=1789492600013"></script>
   <script src="js/nutrition.js?v=1787990000002"></script>
   <script src="js/stats.js?v=1787231562110"></script>

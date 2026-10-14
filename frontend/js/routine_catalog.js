@@ -135,6 +135,22 @@ function routineParseDsl(src) {
   return tree;
 }
 
+// ─── Arbre → DSL (variantes : on modifie l'arbre puis on re-sérialise) ───
+function routineDurToDsl(sec) {
+  if (sec < 60) return sec + 's';
+  const m = Math.floor(sec / 60), r = sec % 60;
+  return r === 0 ? m + 'm' : m + 'm' + String(r).padStart(2, '0');
+}
+function routineCodeToDsl(n) { return n.code === 'RPE' ? 'RPE' + n.rpe + (n.label ? ':' + n.label : '') : n.code; }
+function routineTreeToDsl(nodes) {
+  const sep = s => (s ? ' ' + (s.role === 'recovery' ? 'r' : 'R') + routineDurToDsl(s.sec) + ' ' + routineCodeToDsl(s) : '');
+  return nodes.map(n => {
+    if (n.t === 'step') return routineDurToDsl(n.sec) + ' ' + routineCodeToDsl(n);
+    if (n.t === 'ladder') return n.durs.map(routineDurToDsl).join('/') + ' ' + routineCodeToDsl(n) + sep(n.sep);
+    return n.n + 'x(' + routineTreeToDsl(n.body) + ')' + sep(n.sep);
+  }).join(' + ');
+}
+
 // Découpe l'arbre en SEGMENTS : un segment = des étapes jouées `repeat` fois.
 // Sert à la fois à la liste à plat (durée, rôles) et aux blocs répétés de
 // l'export Garmin. Règles (cahier des charges §9, "Cas D") :
@@ -513,6 +529,6 @@ function getRoutineCompiled(model) {
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     ROUTINE_CODES, ROUTINE_FAMILIES, ROUTINE_CATALOG,
-    compileRoutineDsl, routineParseDsl, routineToSessionStructure, getRoutineCompiled,
+    compileRoutineDsl, routineParseDsl, routineTreeToDsl, routineToSessionStructure, getRoutineCompiled,
   };
 }

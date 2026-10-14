@@ -128,3 +128,13 @@ test('aucun doublon exact de structure dans le catalogue', () => {
     seen.set(key, m);
   }
 });
+
+test('arbre → DSL → arbre : aller-retour sans perte sur tout le catalogue', () => {
+  const { routineParseDsl, routineTreeToDsl } = require('../frontend/js/routine_catalog.js');
+  for (const m of ROUTINE_CATALOG) {
+    const again = routineTreeToDsl(routineParseDsl(m.dsl));
+    const a = compileRoutineDsl(m.dsl, { wuCd: m.wuCd }), b = compileRoutineDsl(again, { wuCd: m.wuCd });
+    assert.equal(b.totalSec, a.totalSec, m.id);
+    assert.deepEqual(b.steps.map(s => [s.sec, s.code, s.role]), a.steps.map(s => [s.sec, s.code, s.role]), m.id);
+  }
+});

@@ -328,6 +328,24 @@ app.delete('/api/user-data/:key', requireSession, (req, res) => {
   res.json({ success: true });
 });
 
+// Reglages du moteur de routines "hors plan" (page Admin > Routines). Fichier
+// local a CE poste (data/routine_config.json, protege comme le reste de data/) :
+// lu par chaque client au moment de generer une semaine (free_sessions.js).
+//  - trailRoadFamilies : ouvre au trail les 7 familles "route seulement" du
+//    catalogue (S60/SS, S30, VMA, AS42, AS21, AS10, sorties longues actives).
+const ROUTINE_CONFIG_FILE = path.join(__dirname, 'data', 'routine_config.json');
+function readRoutineConfig() {
+  const c = readJsonSafe(ROUTINE_CONFIG_FILE, {});
+  return { trailRoadFamilies: c && c.trailRoadFamilies === true };
+}
+app.get('/api/routine-config', requireSession, (req, res) => res.json(readRoutineConfig()));
+app.post('/api/admin/routine-config', requireAdmin, (req, res) => {
+  const next = { ...readRoutineConfig() };
+  if (typeof req.body?.trailRoadFamilies === 'boolean') next.trailRoadFamilies = req.body.trailRoadFamilies;
+  writeJsonSafe(ROUTINE_CONFIG_FILE, next);
+  res.json(next);
+});
+
 // Ajout / suppression des images du diaporama de fond
 app.post('/api/bg-images', requireSession, upload.single('image'), (req, res) => {
   try {

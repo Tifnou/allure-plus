@@ -18,7 +18,7 @@
 const RoutineEngine = (function () {
 const _RC = (typeof module !== 'undefined' && module.exports)
   ? require('./routine_catalog.js')
-  : { ROUTINE_CATALOG, getRoutineCompiled, routineToSessionStructure, routineParseDsl };
+  : { ROUTINE_CATALOG, getRoutineCompiled, routineToSessionStructure, routineParseDsl, compileRoutineDsl, routineTreeToDsl };
 
 const ROUTINE_RULES = {
   // niveau déduit des 6 dernières semaines de course
@@ -114,7 +114,7 @@ function _rng(seed) {
 // ─── Éligibilité ─────────────────────────────────────────────────────────
 // ctx : { terrain, maxMin, level, tierCap }
 function routineEligible(model, ctx, opts = {}) {
-  if (!model.terrain.includes(ctx.terrain)) return false;
+  if (!model.terrain.includes(ctx.terrain) && !(ctx.terrain === 'trail' && ctx.trailRoadFamilies && model.trailReopenable)) return false;
   const load = routineModelLoad(model);
   if (load.totalMin > (opts.maxMin || ctx.maxMin)) return false;
   if (opts.maxTier != null && load.tier > opts.maxTier) return false;
@@ -173,11 +173,13 @@ function routineGenerateWeek(prefs, weekNum, ctx) {
   if (other >= R.otherMinCapLight) { cap = 0; warnings.push('Beaucoup d\'autres activités cette semaine : la séance de qualité est allégée.'); }
   else if (other >= R.otherMinCapModerate) { cap = Math.min(cap, 1); notes.push('Autres activités importantes récemment : charge de la séance de qualité limitée.'); }
   if (ctx.hoursSinceLongRun != null && ctx.hoursSinceLongRun < R.hardGapHours) { cap = Math.min(cap, 1); }
+  if (ctx.caution) { cap = Math.min(cap, 1); notes.push('Gêne ou fatigue signalée : séances limitées au palier modéré, variantes plus exigeantes bloquées.'); }
   target = Math.min(target, cap);
+  if (ctx.prevExcess > 0.2 && phaseIdx !== 3 && target > 0) { target -= 1; notes.push('La semaine dernière était plus chargée que prévu : palier ramené d\u2019un cran.'); }
   const isRecup = phase === 'S4';
 
   const pool = _RC.ROUTINE_CATALOG;
-  const ec = { terrain, maxMin, level };
+  const ec = { terrain, maxMin, level, trailRoadFamilies: !!ctx.trailRoadFamilies };
   const sessions = [];
   const lastQ1Fam = history.filter(h => h.age <= 2).flatMap(h => (h.sessions || []).filter(s => s.slot === 'Q1').map(s => s.family));
 
@@ -198,7 +200,7 @@ function routineGenerateWeek(prefs, weekNum, ctx) {
   // — sortie longue : EF seule, ou "active" (blocs à allure : compte comme qualité).
   // Active seulement en S2/S3 et niveau 2+ ; légère si Q1 est déjà très exigeante
   // (jamais deux grosses qualités dans la semaine), nulle en S4.
-  const slPool = pool.filter(m => (terrain === 'trail' ? m.family === '12' : m.family === '10') && routineEligible(m, ec, { maxMin: Math.max(maxMin, 60) }));
+  const slPool = pool.filter(m => (terrain === 'trail' ? (m.family === '12' || (ctx.trailRoadFamilies && m.family === '10')) : m.family === '10') && routineEligible(m, ec, { maxMin: Math.max(maxMin, 60) }));
   const slTarget = ctx.slTarget || 75;
   const slDur = isRecup ? Math.max(60, _round5(slTarget * 0.75)) : slTarget;
   const slNear = list => list.filter(m => Math.abs(routineModelLoad(m).totalMin - slDur) <= 20);
@@ -265,14 +267,178 @@ function routineGenerateWeek(prefs, weekNum, ctx) {
     sessions.push({
       slot, modelId: m.id, name: m.name, dsl: m.dsl, family: m.family, role: m.role, wuCd: m.wuCd,
       terrain, variant: 'yellow', trainingIndex: i,
-      totalSec: Math.round(load.totalMin * 60), qualitySec: Math.round(load.qualityMin * 60), tier: load.tier,
+      totalSec: Math.round(load.totalMin * 60), qualitySec: Math.round(load.qualityMin * 60), tier: load.tier, baseDsl: m.dsl, load: routineLoadValue(load),
     });
   });
 
   const qualityCount = sessions.filter(s => s.qualitySec > 0 && s.tier >= 0 && s.role !== 'ef').length;
   const hardCount = sessions.filter(s => s.tier >= 2).length;
   if (hardCount > 1) warnings.push('Deux séances très exigeantes dans la même semaine.');
-  return { weekNum, phase, phaseIdx, target, cap, level, qualityCount, hardCount, sessions, notes, warnings, generatedAt: Date.now() };
+  return { weekNum, phase, phaseIdx, target, cap, level, caution: !!ctx.caution, qualityCount, hardCount, sessions, notes, warnings, generatedAt: Date.now() };
+}
+
+// ─── Variantes vert / jaune / orange / rouge (cahier des charges §8) ─────
+// Jaune = la fiche telle que générée. On part TOUJOURS de `baseDsl` (jamais
+// d'une variante déjà modifiée) : vert = moins de travail, orange = un
+// paramètre de plus (répétition ou durée de bloc), rouge = deux crans, sous
+// plafonds par allure. La nature de la séance ne change jamais (même code
+// d'allure, mêmes récupérations) ; les allures restent celles du profil.
+const ROUTINE_VARIANT_ORDER = ['green', 'yellow', 'orange', 'red'];
+const ROUTINE_VARIANT_LABEL = { green: 'Vert', yellow: 'Jaune', orange: 'Orange', red: 'Rouge' };
+// minutes de travail cumulées maximum par code d'allure dans une séance
+// (premiers réglages, à recalibrer — cahier des charges §15)
+const ROUTINE_WORK_CAP_MIN = { TEMPO: 70, AS42: 60, SS: 45, AS21: 50, S60: 45, AS10: 35, S30: 28, VMA: 22, RPE4: 60, RPE5: 50, RPE6: 35, RPE7: 18, RPE8: 12 };
+const _EASY_CODES = ['EF', 'EFL', 'EFH', 'WALK', 'STRIDE'];
+
+function routineLoadValue(l) { return Math.round(l.score + 0.25 * l.totalMin); }
+
+function _isWorkNode(n) { return n.code === 'RPE' || !_EASY_CODES.includes(n.code); }
+function _workSec(n) {
+  if (n.t === 'step') return _isWorkNode(n) ? n.sec : 0;
+  if (n.t === 'ladder') return _isWorkNode(n) ? n.durs.reduce((a, b) => a + b, 0) : 0;
+  return n.n * n.body.reduce((a, b) => a + _workSec(b), 0);
+}
+function _totalSecNode(n) {
+  if (n.t === 'step') return n.sec;
+  if (n.t === 'ladder') return n.durs.reduce((a, b) => a + b, 0) + (n.sep ? n.sep.sec * (n.durs.length - 1) : 0);
+  return n.n * n.body.reduce((a, b) => a + _totalSecNode(b), 0) + (n.sep ? n.sep.sec * (n.n - 1) : 0);
+}
+function _scaleSec(sec, f, unit) {
+  let r = Math.round(sec * f / unit) * unit;
+  if (r === sec) r = sec + (f > 1 ? unit : -unit);
+  return Math.max(unit, r);
+}
+// nombre de répétitions : +1/-1 ; au-delà de 6 répétitions (courts), +2/-2 ; rouge = deux crans
+function _repAdj(n, mode) {
+  const big = n >= 6;
+  if (mode === 'green') return Math.max(2, n - (big ? 2 : 1));
+  if (mode === 'orange') return n + (big ? 2 : 1);
+  return n + (big ? 4 : 2);
+}
+const _FACTOR = { green: 0.8, orange: 1.2, red: 1.4 };
+
+function _varyNode(n, mode) {
+  const f = _FACTOR[mode];
+  if (n.t === 'step') {
+    if (!_isWorkNode(n)) return n;
+    return { ...n, sec: _scaleSec(n.sec, f, n.sec >= 180 ? 60 : 30) };
+  }
+  if (n.t === 'ladder') {
+    if (!_isWorkNode(n)) return n;
+    const unit = Math.max(...n.durs) >= 180 ? 60 : 30;
+    return { ...n, durs: n.durs.map(d => _scaleSec(d, f, unit)) };
+  }
+  // répétition
+  if (n.body.some(b => b.t === 'rep') && n.n <= 2) return { ...n, body: n.body.map(b => (b.t === 'rep' ? _varyNode(b, mode) : b)) };
+  if (n.n >= 3) return { ...n, n: _repAdj(n.n, mode) };
+  return { ...n, body: n.body.map(b => (b.t === 'step' || b.t === 'ladder' ? _varyNode(b, mode) : b)) };
+}
+
+// dsl de base → dsl varié, ou null si aucune variation sensée n'existe
+function routineVaryDsl(dsl, mode) {
+  const tree = JSON.parse(JSON.stringify(_RC.routineParseDsl(dsl)));
+  const works = tree.map(_workSec);
+  const hasWork = works.some(w => w > 0);
+  let idx, next;
+  if (hasWork) {
+    idx = works.indexOf(Math.max(...works));
+    next = _varyNode(tree[idx], mode);
+  } else {
+    // séance d'endurance seule : volume ±10 min (±5 min si plusieurs blocs), jamais de rouge
+    if (mode === 'red') return null;
+    const tots = tree.map(_totalSecNode);
+    idx = tots.indexOf(Math.max(...tots));
+    const n = tree[idx];
+    const d = (tree.length === 1 ? 600 : 300) * (mode === 'green' ? -1 : 1);
+    if (n.t === 'step') { if (n.sec + d < 1500) return null; next = { ...n, sec: n.sec + d }; }
+    else if (n.t === 'rep' && n.n >= 3) next = { ...n, n: _repAdj(n.n, mode) };
+    else return null;
+  }
+  if (JSON.stringify(next) === JSON.stringify(tree[idx])) return null;
+  tree[idx] = next;
+  return _RC.routineTreeToDsl(tree);
+}
+
+const _loadDslCache = {};
+function routineLoadOfDsl(dsl, wuCd) {
+  const key = dsl + '|' + wuCd;
+  if (_loadDslCache[key]) return _loadDslCache[key];
+  const c = _RC.compileRoutineDsl(dsl, { wuCd });
+  let score = 0;
+  const counts = {};
+  c.steps.forEach(s => {
+    if (['warmup', 'cooldown', 'recovery', 'setRecovery'].includes(s.role)) return;
+    const min = s.sec / 60;
+    const k = s.code === 'RPE' ? 'RPE' + s.rpe : s.code;
+    if (s.code === 'RPE') score += min * routineRpeWeight(s.rpe);
+    else if (ROUTINE_WEIGHTS[s.code]) score += min * ROUTINE_WEIGHTS[s.code];
+    else return;
+    counts[k] = (counts[k] || 0) + s.sec;
+  });
+  const mainCode = Object.keys(counts).sort((a, b) => counts[b] - counts[a])[0] || null;
+  let tier = score < ROUTINE_RULES.tierLightMax ? 0 : score < ROUTINE_RULES.tierModerateMax ? 1 : 2;
+  if (['VMA', 'S30', 'AS10'].includes(mainCode)) tier = Math.max(tier, 1);
+  return (_loadDslCache[key] = { score: Math.round(score), tier, mainCode, counts, totalMin: c.totalSec / 60, qualityMin: c.qualitySec / 60 });
+}
+
+// snap : fiche figée d'une semaine ; wk : contexte de la semaine
+//   { phase, cap, level, caution, maxMin, warnings, otherTiers:[paliers des AUTRES séances], locked }
+// → 4 options { variant, label, dsl, totalMin, deltaTotalMin, deltaWorkMin, load, deltaLoadPct, tier, available, reason, selected }
+function routineBuildVariants(snap, wk) {
+  const baseDsl = snap.baseDsl || snap.dsl;
+  const wuCd = snap.wuCd !== false;
+  const base = routineLoadOfDsl(baseDsl, wuCd);
+  const baseLoad = routineLoadValue(base);
+  const current = snap.variant || 'yellow';
+  const list = ROUTINE_VARIANT_ORDER.map(variant => {
+    const rec = { variant, label: ROUTINE_VARIANT_LABEL[variant], available: true, reason: null, selected: current === variant };
+    let dsl = baseDsl;
+    if (variant !== 'yellow') {
+      dsl = routineVaryDsl(baseDsl, variant === 'red' ? 'red' : variant);
+      if (!dsl) { rec.available = false; rec.reason = 'Pas de variation possible pour cette séance.'; dsl = baseDsl; }
+    }
+    const l = routineLoadOfDsl(dsl, wuCd);
+    const load = routineLoadValue(l);
+    Object.assign(rec, {
+      dsl, totalMin: Math.round(l.totalMin), tier: l.tier, load,
+      deltaTotalMin: Math.round(l.totalMin - base.totalMin), deltaWorkMin: Math.round(l.qualityMin - base.qualityMin),
+      deltaLoadPct: baseLoad ? Math.round((load - baseLoad) / baseLoad * 100) : 0,
+    });
+    if (rec.available && variant === 'green' && snap.role !== 'ef' && base.qualityMin > 8 && l.qualityMin < 6) { rec.available = false; rec.reason = 'Déjà au minimum utile.'; }
+    if (rec.available && (variant === 'orange' || variant === 'red')) {
+      const capKeys = Object.keys(l.counts).filter(k => l.counts[k] / 60 > (ROUTINE_WORK_CAP_MIN[k] || 1e9));
+      if (wk.caution) rec.reason = 'Gêne ou fatigue signalée : variantes plus exigeantes bloquées.';
+      else if (wk.phase === 'S4') rec.reason = 'Semaine de récupération : pas de séance plus exigeante.';
+      else if (wk.cap < 1 && snap.role !== 'ef') rec.reason = 'Charge récente élevée : variante plus exigeante bloquée.';
+      else if (l.totalMin > (wk.maxMin || 1e9)) rec.reason = `Dépasse ton temps disponible (${wk.maxMin} min).`;
+      else if (capKeys.length) rec.reason = 'Plafond de travail à cette allure atteint.';
+      else if (l.tier >= 2 && (wk.otherTiers || []).some(t => t >= 2)) rec.reason = 'Une seule séance très exigeante par semaine.';
+      else if (variant === 'red') {
+        if ((wk.level || 2) < 3) rec.reason = 'Réservée aux profils confirmés.';
+        else if (!['S2', 'S3'].includes(wk.phase)) rec.reason = 'Disponible en semaines S2 et S3 seulement.';
+        else if (wk.cap < 2 || (wk.warnings || []).length) rec.reason = 'Forme ou charge récente : conditions non réunies.';
+        else if (snap.role === 'ef') rec.reason = 'Pas de variante rouge pour l’endurance.';
+      }
+      if (rec.reason) rec.available = false;
+    }
+    if (wk.locked && !rec.selected) { rec.available = false; rec.reason = rec.reason || 'Séance déjà faite ou semaine passée.'; }
+    return rec;
+  });
+  // rouge identique à orange (petites séances) : une seule des deux a un sens
+  const orange = list.find(v => v.variant === 'orange'), red = list.find(v => v.variant === 'red');
+  if (red.available && orange.dsl === red.dsl) { red.available = false; red.reason = 'Identique à la variante orange pour cette séance.'; }
+  return list;
+}
+
+// charge de la semaine (variantes comprises) vs prévue (tout en jaune)
+function routineWeekExcess(sessions) {
+  let actual = 0, nominal = 0;
+  (sessions || []).forEach(s => {
+    const w = s.wuCd !== false;
+    actual += routineLoadValue(routineLoadOfDsl(s.dsl, w));
+    nominal += routineLoadValue(routineLoadOfDsl(s.baseDsl || s.dsl, w));
+  });
+  return { actual, nominal, excessPct: nominal ? (actual - nominal) / nominal : 0 };
 }
 
 // ─── Description lisible d'une structure ─────────────────────────────────
@@ -300,6 +466,8 @@ function routineDescribe(dsl) {
 return {
   ROUTINE_RULES, routinePhaseOf, routineModelLoad, routineAssessProfile,
   routineEligible, routineGenerateWeek, routineDescribe,
+  routineVaryDsl, routineLoadOfDsl, routineBuildVariants, routineWeekExcess, routineLoadValue,
+  ROUTINE_VARIANT_ORDER, ROUTINE_VARIANT_LABEL, ROUTINE_WORK_CAP_MIN,
 };
 })();
 

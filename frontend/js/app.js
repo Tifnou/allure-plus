@@ -290,7 +290,7 @@ function navigateTo(pageId) {
   if (pageId === 'health')     renderHealthPage();
   if (pageId === 'stats')      renderStatsPage();
   if (pageId === 'profile')    renderProfile();
-  if (pageId === 'admin')      { wireAdminSections(); resetAdminNav(); loadAdminInfo(); loadAdminLogs(); loadAdminUsers(); if (typeof loadAdminSeasons === 'function') loadAdminSeasons(); }
+  if (pageId === 'admin')      { wireAdminSections(); resetAdminNav(); loadAdminInfo(); loadAdminLogs(); loadAdminUsers(); if (typeof loadAdminSeasons === 'function') loadAdminSeasons(); if (typeof loadAdminRoutines === 'function') loadAdminRoutines(); }
   if (pageId === 'support-admin' && typeof loadSupportAdminPage === 'function') loadSupportAdminPage();
   if (pageId === 'goals')      { if (typeof loadGoalsPage === 'function') loadGoalsPage(); }
   if (pageId === 'routes')     { if (typeof initRoutesPage === 'function') initRoutesPage(); }

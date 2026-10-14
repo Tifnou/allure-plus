@@ -1797,6 +1797,7 @@ function renderSessionDetail(session, weekId, isCurrentWeek) {
           <div class="session-coach-advice-label">&#x1F4A1; Conseil du coach</div>
           <div class="session-coach-advice-text">${mdBold(sanitizeCoachText(session.coachAdvice))}</div>
         </div>` : ''}
+      ${session.routine && typeof renderRoutineVariantBar === 'function' ? renderRoutineVariantBar(session, weekId) : ''}
       ${zonesHTML}
       <div class="session-detail-actions">
         ${exportBtn}

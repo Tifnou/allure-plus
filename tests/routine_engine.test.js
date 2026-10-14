@@ -118,3 +118,104 @@ test('évaluation du profil depuis les activités Garmin', () => {
 test('description lisible', () => {
   assert.equal(E.routineDescribe('15m EF + 3x(6m TEMPO) r2m EF + 10m EF'), '15 min EF → 3 × (6 min Tempo), récup 2 min EF → 10 min EF');
 });
+
+// ─── P3 : variantes vert / jaune / orange / rouge ────────────────────────
+const WK = { phase: 'S2', cap: 2, level: 3, caution: false, maxMin: 120, warnings: [], otherTiers: [], locked: false };
+const snapOf = id => { const m = byId[id]; return { modelId: id, role: m.role, wuCd: m.wuCd, dsl: m.dsl, baseDsl: m.dsl, variant: 'yellow' }; };
+const V = (id, wk = WK) => Object.fromEntries(E.routineBuildVariants(snapOf(id), wk).map(v => [v.variant, v]));
+
+test('variantes : vert < jaune < orange < rouge en charge, jaune = fiche telle quelle', () => {
+  const v = V('A03-01');   // S60 3×6
+  assert.equal(v.yellow.dsl, byId['A03-01'].dsl);
+  assert.ok(v.green.load < v.yellow.load && v.yellow.load < v.orange.load && v.orange.load < v.red.load);
+  assert.ok(v.green.totalMin < v.yellow.totalMin && v.orange.totalMin > v.yellow.totalMin);
+  assert.ok(v.green.dsl.includes('2x(6m S60)') && v.orange.dsl.includes('4x(6m S60)'), `${v.green.dsl} / ${v.orange.dsl}`);
+});
+
+test('variantes : la nature de la séance ne change jamais (mêmes codes d\'allure)', () => {
+  const { routineParseDsl } = require('../frontend/js/routine_catalog.js');
+  const codes = dsl => JSON.stringify([...new Set(JSON.stringify(routineParseDsl(dsl)).match(/"code":"[A-Z0-9]+"/g))].sort());
+  for (const m of ROUTINE_CATALOG) {
+    for (const v of E.routineBuildVariants(snapOf(m.id), WK)) assert.equal(codes(v.dsl), codes(m.dsl), `${m.id} ${v.variant}`);
+  }
+});
+
+test('variantes : échauffement et retour au calme jamais modifiés, aucune récup fantôme', () => {
+  const { compileRoutineDsl } = require('../frontend/js/routine_catalog.js');
+  for (const m of ROUTINE_CATALOG) {
+    const base = compileRoutineDsl(m.dsl, { wuCd: m.wuCd });
+    for (const v of E.routineBuildVariants(snapOf(m.id), WK)) {
+      const c = compileRoutineDsl(v.dsl, { wuCd: m.wuCd });       // doit compiler
+      if (base.hasQuality) {
+        assert.equal(c.steps[c.steps.length - 1].role, 'cooldown', `${m.id} ${v.variant}`);
+        assert.equal(c.steps[c.steps.length - 1].sec, base.steps[base.steps.length - 1].sec, `${m.id} ${v.variant} : retour au calme modifié`);
+        assert.equal(c.steps[0].sec, base.steps[0].sec, `${m.id} ${v.variant} : échauffement modifié`);
+      }
+    }
+  }
+});
+
+test('variantes : plafonds respectés et temps disponible', () => {
+  for (const m of ROUTINE_CATALOG) {
+    for (const v of E.routineBuildVariants(snapOf(m.id), { ...WK, maxMin: 90 })) {
+      if (v.variant === 'yellow' || !v.available) continue;
+      assert.ok(v.totalMin <= 90 || v.variant === 'green', `${m.id} ${v.variant} : ${v.totalMin} min > 90`);
+      const l = E.routineLoadOfDsl(v.dsl, m.wuCd);
+      Object.entries(l.counts).forEach(([k, sec]) => { if (v.variant !== 'green') assert.ok(sec / 60 <= (E.ROUTINE_WORK_CAP_MIN[k] || 1e9), `${m.id} ${v.variant} ${k}`); });
+    }
+  }
+});
+
+test('rouge : verrouillé hors niveau 3, hors S2/S3, avec gêne, en S4 ; orange aussi bloqué en S4 / gêne', () => {
+  assert.equal(V('A03-01', { ...WK, level: 2 }).red.available, false);
+  assert.equal(V('A03-01', { ...WK, phase: 'S1' }).red.available, false);
+  assert.equal(V('A03-01', { ...WK, phase: 'S4' }).orange.available, false);
+  assert.equal(V('A03-01', { ...WK, phase: 'S4' }).green.available, true);
+  const c = V('A03-01', { ...WK, caution: true });
+  assert.equal(c.orange.available, false); assert.equal(c.red.available, false); assert.equal(c.green.available, true);
+  assert.equal(V('A03-01', { ...WK, cap: 1 }).red.available, false);
+  assert.equal(V('A03-01', { ...WK, warnings: ['x'] }).red.available, false);
+  assert.ok(V('A03-01').red.available);
+});
+
+test('une seule séance très exigeante par semaine, variantes comprises', () => {
+  const v = V('A03-02', { ...WK, otherTiers: [2] });     // S60 3×8 : orange/rouge passeraient palier dur
+  assert.equal(v.red.available, false);
+});
+
+test('séance d\'endurance : volume ±10 min, jamais de rouge ; semaine passée : tout verrouillé sauf le choix actuel', () => {
+  const v = V('A01-03');
+  assert.equal(v.red.available, false);
+  assert.equal(v.green.totalMin, 40); assert.equal(v.orange.totalMin, 60);
+  const l = V('A03-01', { ...WK, locked: true });
+  assert.equal(l.green.available, false); assert.equal(l.orange.available, false); assert.equal(l.yellow.selected, true);
+});
+
+test('semaine plus chargée que prévu → palier suivant ramené d\'un cran, jamais de rattrapage après du vert', () => {
+  const p = PROFILES[1];
+  const normal = E.routineGenerateWeek(p.prefs, 3, { ...p.ctx, history: [] });
+  const apres = E.routineGenerateWeek(p.prefs, 3, { ...p.ctx, history: [], prevExcess: 0.3 });
+  assert.equal(apres.target, normal.target - 1);
+  const apresVert = E.routineGenerateWeek(p.prefs, 3, { ...p.ctx, history: [], prevExcess: -0.2 });
+  assert.equal(apresVert.target, normal.target);
+  const w = [{ ...snapOf('A03-01'), variant: 'orange', dsl: V('A03-01').orange.dsl }];
+  assert.ok(E.routineWeekExcess(w).excessPct > 0.2);
+  assert.equal(E.routineWeekExcess([snapOf('A03-01')]).excessPct, 0);
+});
+
+test('gêne signalée : la génération reste au palier modéré', () => {
+  const p = PROFILES[1];
+  const w = E.routineGenerateWeek(p.prefs, 3, { ...p.ctx, history: [], caution: true });
+  assert.ok(w.sessions.every(s => s.tier <= 1));
+  assert.equal(w.caution, true);
+});
+
+test('trail : les 7 familles route restent fermées par défaut, s\'ouvrent avec le réglage Admin', () => {
+  const p = PROFILES[5];
+  const ROAD_ONLY = ['03', '04', '05', '07', '08', '09', '10'];
+  const closed = simulate(p.prefs, p.ctx, 24).flatMap(w => w.sessions);
+  assert.ok(closed.every(s => !ROAD_ONLY.includes(s.family)), 'aucune famille route en trail par défaut');
+  const opened = simulate(p.prefs, { ...p.ctx, trailRoadFamilies: true }, 24).flatMap(w => w.sessions);
+  assert.ok(opened.some(s => ROAD_ONLY.includes(s.family)), 'avec le réglage, des familles route apparaissent');
+  opened.forEach(s => assert.ok(byId[s.modelId].terrain.includes('trail') || byId[s.modelId].trailReopenable));
+});

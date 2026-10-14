@@ -5716,3 +5716,30 @@ body { background: var(--bg) !important; }
 .admin-users-table tr.admin-users-row--selected > td:first-child { box-shadow: inset 4px 0 0 var(--accent); }
 .admin-users-table tr.admin-users-detail-row--selected > td { background: var(--accent-light); box-shadow: inset 4px 0 0 var(--accent); border-bottom: 2px solid var(--accent); }
 .admin-users-detail-row--selected .admin-users-detail-item { background: var(--bg-white); }
+
+/* ── Routines hors plan : choix de variante (vert / jaune / orange / rouge) ── */
+.rt-variant-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.rt-variant {
+  display: flex; flex-direction: column; gap: 2px; align-items: flex-start;
+  padding: 8px 10px; border-radius: 10px; cursor: pointer; text-align: left;
+  border: 1.5px solid var(--border, #ddd); background: transparent; color: var(--text-primary, inherit);
+  font: inherit; transition: border-color .15s, background .15s, opacity .15s;
+}
+.rt-variant-name { font-size: 13px; font-weight: 600; }
+.rt-variant-meta { font-size: 11px; opacity: .75; }
+.rt-variant--green:hover:not(:disabled)  { border-color: #43a047; }
+.rt-variant--yellow:hover:not(:disabled) { border-color: #f9a825; }
+.rt-variant--orange:hover:not(:disabled) { border-color: #fb8c00; }
+.rt-variant--red:hover:not(:disabled)    { border-color: #e53935; }
+.rt-variant--green.rt-variant--on  { border-color: #43a047; background: rgba(67, 160, 71, .14); }
+.rt-variant--yellow.rt-variant--on { border-color: #f9a825; background: rgba(249, 168, 37, .16); }
+.rt-variant--orange.rt-variant--on { border-color: #fb8c00; background: rgba(251, 140, 0, .16); }
+.rt-variant--red.rt-variant--on    { border-color: #e53935; background: rgba(229, 57, 53, .14); }
+.rt-variant:disabled { opacity: .45; cursor: not-allowed; }
+.rt-variant-note { margin-top: 8px; font-size: 12px; opacity: .8; }
+@media (max-width: 560px) { .rt-variant-row { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* Admin : interrupteur à case à cocher */
+.admin-switch-row { display: flex; gap: 12px; align-items: flex-start; cursor: pointer; line-height: 1.45; }
+.admin-switch-row input[type="checkbox"] { width: 18px; height: 18px; margin-top: 2px; flex: none; accent-color: var(--accent, #4caf50); }
+.admin-switch-hint { font-size: 12.5px; opacity: .8; }

@@ -408,6 +408,17 @@ async function routineActivities() {
   return _routineActsFallback || [];
 }
 
+// Réglages du moteur posés par l'admin (page Admin > Routines hors plan).
+let _routineCfgCache = null;
+async function routineServerConfig(force) {
+  if (_routineCfgCache && !force) return _routineCfgCache;
+  try {
+    const res = await fetch(`${API}/api/routine-config`);
+    if (res.ok) _routineCfgCache = await res.json();
+  } catch (e) { /* hors-ligne : réglages par défaut */ }
+  return _routineCfgCache || { trailRoadFamilies: false };
+}
+
 async function ensureRoutineWeek(prefs, weekNum) {
   const store = getRoutineStore();
   const wd = freeWeekDate(prefs, weekNum);
@@ -418,7 +429,14 @@ async function ensureRoutineWeek(prefs, weekNum) {
     age: Math.round((wd - Number(k)) / (7 * 86400000)),
     sessions: store.weeks[k].sessions,
   })).filter(h => h.age >= 1 && h.age <= ROUTINE_STORE_KEEP_WEEKS);
-  const week = RoutineEngine.routineGenerateWeek(prefs, weekNum, { ...profile, history });
+  const cfg = await routineServerConfig();
+  const prev = store.weeks[wd - 7 * 86400000];
+  const prevExcess = prev ? RoutineEngine.routineWeekExcess(prev.sessions).excessPct : 0;
+  const week = RoutineEngine.routineGenerateWeek(prefs, weekNum, {
+    ...profile, history, prevExcess,
+    caution: !!prefs.caution,
+    trailRoadFamilies: !!cfg.trailRoadFamilies,
+  });
   week.profile = { level: profile.level, weeklyMin: profile.weeklyMin, runsPerWeek: profile.runsPerWeek, efTarget: profile.efTarget, slTarget: profile.slTarget, otherMin7: profile.otherMin7, hasData: profile.hasData };
   store.weeks[wd] = week;
   saveRoutineStore(store);
@@ -556,6 +574,9 @@ async function renderFreeSessionsWeek(forceIdx) {
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
         Modifier (terrain / fréquence / durée)
       </button>
+      <button class="btn-plan-action" onclick="toggleRoutineCaution()" title="Bloque les variantes orange et rouge et garde les prochaines séances au palier modéré">
+        ${prefs.caution ? '🩹 Gêne signalée — lever' : '🩹 Signaler une gêne / fatigue'}
+      </button>
       <button class="btn-plan-action btn-cancel-plan" onclick="disableFreeSessions()" style="margin-left:auto;opacity:.85;background:rgba(229,57,53,.15);color:#e53935;border:1px solid rgba(229,57,53,.3);">
         ✕ Désactiver les séances libres
       </button>
@@ -629,4 +650,153 @@ function editFreeSessionsPrefs() {
     document.querySelectorAll('#free-sessions-freq-toggle .routes-toggle-btn').forEach(b => b.classList.toggle('active', b.dataset.freq === String(prefs.frequency)));
     document.querySelectorAll('#free-sessions-maxmin-toggle .routes-toggle-btn').forEach(b => b.classList.toggle('active', b.dataset.maxmin === String(prefs.maxMin || 90)));
   }
+}
+
+
+// ─── Variantes vert / jaune / orange / rouge ─────────────────────────────
+// Le choix se fait AVANT la séance : la fiche figée de la semaine est
+// remplacée par la variante (dsl recalculé, durée / récupérations / charge
+// avec), jamais les allures (toujours celles du profil). Une séance déjà
+// pointée ou une semaine passée ne change plus.
+const ROUTINE_VARIANT_DOT = { green: '🟢', yellow: '🟡', orange: '🟠', red: '🔴' };
+
+function routineWeekCtx(prefs, stored, snapIdx, locked) {
+  return {
+    phase: stored.phase, cap: stored.cap, level: stored.level, warnings: stored.warnings || [],
+    caution: !!prefs.caution, maxMin: prefs.maxMin || 90, locked,
+    otherTiers: stored.sessions.filter((s, i) => i !== snapIdx).map(s => s.tier),
+  };
+}
+
+function routineLookup(weekId, idx) {
+  const prefs = getFreeSessionsPrefs();
+  if (!prefs || !weekId || !String(weekId).startsWith('free_')) return null;
+  const wd = Number(String(weekId).slice(5));
+  const store = getRoutineStore();
+  const stored = store.weeks[wd];
+  if (!stored || !stored.sessions[idx]) return null;
+  return { prefs, store, stored, wd, snap: stored.sessions[idx] };
+}
+
+// Barre de choix affichée dans le détail d'une séance (campus.js renderSessionDetail)
+function renderRoutineVariantBar(session, weekId) {
+  const idx = session.trainingIndex ?? 0;
+  const found = routineLookup(weekId, idx);
+  if (!found) return '';
+  const { prefs, stored, wd, snap } = found;
+  const done = typeof getLocalSessionStatus === 'function' && getLocalSessionStatus(weekId, idx) === 'done';
+  const pastWeek = wd + 7 * 86400000 < Date.now();
+  const variants = RoutineEngine.routineBuildVariants(snap, routineWeekCtx(prefs, stored, idx, done || pastWeek));
+  const sel = variants.find(v => v.selected) || variants[1];
+  const btn = v => {
+    const delta = v.variant === 'yellow' ? 'prévue' : `${v.deltaLoadPct >= 0 ? '+' : ''}${v.deltaLoadPct} % de charge`;
+    const title = v.available || v.selected
+      ? `${v.label} — ${v.totalMin} min au total (${v.deltaTotalMin >= 0 ? '+' : ''}${v.deltaTotalMin} min), ${v.deltaWorkMin >= 0 ? '+' : ''}${v.deltaWorkMin} min de travail. ${RoutineEngine.routineDescribe(v.dsl)}.`
+      : v.reason;
+    return `<button type="button" class="rt-variant rt-variant--${v.variant}${v.selected ? ' rt-variant--on' : ''}"${v.available || v.selected ? '' : ' disabled'}
+      title="${title.replace(/"/g, '&quot;')}" onclick="event.stopPropagation();setRoutineVariant('${weekId}',${idx},'${v.variant}')">
+      <span class="rt-variant-name">${ROUTINE_VARIANT_DOT[v.variant]} ${v.label}</span>
+      <span class="rt-variant-meta">${v.totalMin} min · ${delta}</span></button>`;
+  };
+  const lockedMsg = (done || pastWeek) ? '<div class="rt-variant-note">Séance faite ou semaine passée : variante figée.</div>'
+    : prefs.caution ? '<div class="rt-variant-note">🩹 Gêne signalée : les variantes plus exigeantes sont bloquées.</div>' : '';
+  return `<div class="session-detail-section rt-variants">
+    <div class="session-detail-section-title">Intensité de la séance <span class="zones-source-note">charge ≈ ${sel.load}</span></div>
+    <div class="rt-variant-row">${variants.map(btn).join('')}</div>
+    ${lockedMsg}
+  </div>`;
+}
+
+function setRoutineVariant(weekId, idx, variant) {
+  const found = routineLookup(weekId, idx);
+  if (!found) return;
+  const { prefs, store, stored, wd, snap } = found;
+  const done = typeof getLocalSessionStatus === 'function' && getLocalSessionStatus(weekId, idx) === 'done';
+  if (done || wd + 7 * 86400000 < Date.now()) return;
+  const v = RoutineEngine.routineBuildVariants(snap, routineWeekCtx(prefs, stored, idx, false)).find(x => x.variant === variant);
+  if (!v || !v.available) { if (v && v.reason) showToast(v.reason, 'info'); return; }
+  snap.baseDsl = snap.baseDsl || snap.dsl;
+  snap.variant = variant;
+  snap.dsl = v.dsl;
+  snap.totalSec = v.totalMin * 60;
+  snap.qualitySec = Math.round(RoutineEngine.routineLoadOfDsl(v.dsl, snap.wuCd !== false).qualityMin * 60);
+  snap.tier = v.tier;
+  snap.load = v.load;
+  stored.hardCount = stored.sessions.filter(s => s.tier >= 2).length;
+  const others = (stored.warnings || []).filter(w => !/très exigeantes/.test(w));
+  stored.warnings = stored.hardCount > 1 ? others.concat('Deux séances très exigeantes dans la même semaine.') : others;
+  saveRoutineStore(store);
+  // ré-affiche la semaine en gardant la séance ouverte
+  const keepIdx = campusState.selectedWeekIdx;
+  renderFreeSessionsWeek(keepIdx).then(() => {
+    campusState.openSessionIdx = idx;
+    renderSessionList(keepIdx);
+  });
+}
+
+// ─── Gêne / fatigue signalée ─────────────────────────────────────────────
+// Bloque les variantes orange/rouge et ramène la génération au palier modéré
+// (cahier des charges §8 : limiter les hausses en cas de douleur, fatigue,
+// retour de blessure). Les semaines à venir déjà générées repassent en jaune.
+async function toggleRoutineCaution() {
+  const prefs = getFreeSessionsPrefs();
+  if (!prefs) return;
+  const on = !prefs.caution;
+  prefs.caution = on;
+  saveFreeSessionsPrefs(prefs);
+  if (on) {
+    const store = getRoutineStore();
+    const now = Date.now();
+    Object.keys(store.weeks).forEach(k => {
+      if (Number(k) + 7 * 86400000 < now) return;           // semaines passées : intactes
+      const w = store.weeks[k];
+      w.sessions.forEach((snap, i) => {
+        if (snap.variant !== 'orange' && snap.variant !== 'red') return;
+        const wasDone = typeof getLocalSessionStatus === 'function' && getLocalSessionStatus('free_' + k, i) === 'done';
+        if (wasDone) return;
+        const yellow = RoutineEngine.routineBuildVariants({ ...snap, variant: 'yellow' }, { phase: w.phase, cap: 2, level: w.level, caution: true, maxMin: 999, locked: false, otherTiers: [] })[1];
+        snap.variant = 'yellow'; snap.dsl = snap.baseDsl || snap.dsl; snap.totalSec = yellow.totalMin * 60; snap.tier = yellow.tier; snap.load = yellow.load;
+      });
+      w.hardCount = w.sessions.filter(s => s.tier >= 2).length;
+    });
+    saveRoutineStore(store);
+  }
+  showToast(on ? 'Gêne signalée : variantes plus exigeantes bloquées.' : 'Gêne levée : variantes de nouveau disponibles.', 'info');
+  await renderFreeSessionsWeek(campusState.selectedWeekIdx);
+}
+
+// ─── Page Admin > Routines hors plan ─────────────────────────────────────
+async function loadAdminRoutines() {
+  const box = document.getElementById('admin-routines');
+  if (!box) return;
+  const cfg = await routineServerConfig(true);
+  const roadOnly = ROUTINE_FAMILIES.filter(f => !f.terrain.includes('trail'));
+  const trailNow = ROUTINE_FAMILIES.filter(f => f.terrain.includes('trail'));
+  const count = id => ROUTINE_CATALOG.filter(m => m.family === id).length;
+  const trailFam = trailNow.length + (cfg.trailRoadFamilies ? roadOnly.length : 0);
+  setAdminSectionMeta('routines', `Trail : ${trailFam} familles sur ${ROUTINE_FAMILIES.length}`);
+  box.innerHTML = `
+    <label class="admin-switch-row">
+      <input type="checkbox" id="admin-routines-trailfam" ${cfg.trailRoadFamilies ? 'checked' : ''}>
+      <span>
+        <strong>Ouvrir au trail les 7 familles « route seulement »</strong><br>
+        <span class="admin-switch-hint">Les routines Trail proposeront aussi : ${roadOnly.map(f => f.name + ' (' + count(f.id) + ')').join(' · ')}. Les allures restent celles du profil, avec la correction trail habituelle. Ne change pas les semaines déjà générées : seulement celles à venir.</span>
+      </span>
+    </label>
+    <div class="admin-switch-hint" style="margin-top:12px">Réglage propre à <strong>ce poste</strong> (fichier <code>data/routine_config.json</code>) : il n'est pas diffusé aux autres utilisateurs.</div>
+    <div class="admin-subtitle" style="margin-top:16px">Familles disponibles en trail aujourd'hui</div>
+    <div class="admin-switch-hint">${ROUTINE_FAMILIES.filter(f => f.terrain.includes('trail') || cfg.trailRoadFamilies).map(f => f.id + ' ' + f.name).join(' · ')}</div>`;
+  document.getElementById('admin-routines-trailfam').addEventListener('change', async ev => {
+    const want = ev.target.checked;
+    try {
+      const res = await fetch(`${API}/api/admin/routine-config`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ trailRoadFamilies: want }) });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      _routineCfgCache = await res.json();
+      showToast(want ? 'Familles route ouvertes au trail.' : 'Trail limité à ses 5 familles.', 'success');
+      loadAdminRoutines();
+    } catch (e) {
+      ev.target.checked = !want;
+      showToast('Enregistrement impossible : ' + e.message, 'error');
+    }
+  });
 }
