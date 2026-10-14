@@ -200,7 +200,9 @@ function routineGenerateWeek(prefs, weekNum, ctx) {
   const maxMin = prefs.maxMin || R.defaultMaxMin;
   const level = ctx.level || 2;
   const history = ctx.history || [];
-  const rand = _rng((prefs.anchorMonday || 0) / 1000 + weekNum * 7919);
+  // seedSalt : tirée à chaque (re)création de la routine — sans elle, mêmes réglages + même lundi
+  // = exactement les mêmes séances (génération reproductible) et recréer une routine donnait le même résultat
+  const rand = _rng((prefs.anchorMonday || 0) / 1000 + weekNum * 7919 + (prefs.seedSalt || 0));
   const notes = [], warnings = [];
 
   // Plan Allure+ à venir : la routine s'efface à sa date de début. Les derniers

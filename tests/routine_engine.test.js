@@ -364,3 +364,12 @@ test("EF classique / soutenue : deux plages d'allure distinctes contenues dans l
   const st = routineToSessionStructure(compileRoutineDsl(byId['A01-06'].dsl));
   assert.deepEqual([...new Set(st.paceZones.map(z => z.sub))].sort(), ['high', 'low']);
 });
+
+test('recréer une routine (nouvelle seedSalt) change les séances proposées ; même salt = mêmes séances', () => {
+  const p = PROFILES[1];
+  const ids = salt => simulate({ ...p.prefs, seedSalt: salt }, p.ctx, 4).map(w => w.sessions.map(s => s.modelId).join(','));
+  assert.deepEqual(ids(111), ids(111));
+  const a = ids(111), b = ids(222);
+  assert.ok(a.some((w, i) => w !== b[i]), 'au moins une semaine différente');
+  assert.ok(a.filter((w, i) => w !== b[i]).length >= 3, 'la plupart des semaines changent');
+});

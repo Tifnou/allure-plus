@@ -479,7 +479,7 @@ function routineShouldPrecedePlan(goal, weeks) {
 // en cours ou à venir déjà figées sous l'ancienne échéance sont régénérées
 // (sauf si une séance y a déjà été pointée) pour recaler le cycle.
 // Empreinte des réglages utilisés pour générer une semaine
-function routinePrefsSig(prefs) { return [prefs.terrain, prefs.frequency, prefs.maxMin || 90, prefs.caution ? 1 : 0].join('|'); }
+function routinePrefsSig(prefs) { return [prefs.terrain, prefs.frequency, prefs.maxMin || 90, prefs.caution ? 1 : 0, prefs.seedSalt || 0].join('|'); }
 
 // Une semaine "intacte" n'a ni séance pointée (faite / passée) ni variante choisie
 function routineWeekIsUntouched(wd, w) {
@@ -770,6 +770,7 @@ function startFreeSessions() {
     anchorMonday,
     engine: 'v2',
     engineStartWeek: 1,
+    seedSalt: Math.floor(Math.random() * 1000000) + 1,   // nouvelle routine = nouvelles propositions
   };
   const rDate = document.getElementById('free-sessions-race-date')?.value;
   const rDist = document.getElementById('free-sessions-race-dist')?.value;
