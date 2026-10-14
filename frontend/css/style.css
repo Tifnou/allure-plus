@@ -5755,3 +5755,6 @@ body { background: var(--bg) !important; }
 .rt-race-fields { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-top: 8px; }
 .rt-race-fields input, .rt-race-fields select { padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border, #ddd); background: transparent; color: inherit; font: inherit; min-width: 0; }
 @media (max-width: 560px) { .rt-race-fields { grid-template-columns: 1fr; } }
+
+.rt-horizon-note { margin: 0 0 12px; padding: 10px 14px; border-radius: 10px; font-size: 12.5px; line-height: 1.5; opacity: .9;
+  background: rgba(100, 130, 200, .10); border: 1px solid rgba(100, 130, 200, .30); }

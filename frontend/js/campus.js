@@ -116,7 +116,9 @@ const ALLURE_PLUS_ZONES = {
 };
 
 // Calcule min/max allure (sec/km) pour une zone et une VMA données
-function calcAllureRef(zoneKey, vma) {
+// sub = 'low' | 'high' : moitié basse / haute de la zone (routines hors plan :
+// "EF facile" / "EF soutenue") — calculée depuis la zone elle-même, aucun % dupliqué.
+function calcAllureRef(zoneKey, vma, sub) {
   const ref = ALLURE_PLUS_ZONES[zoneKey];
   if (!ref || !vma) return null;
   let pL = ref.pctLow, pH = ref.pctHigh;
@@ -124,6 +126,8 @@ function calcAllureRef(zoneKey, vma) {
     pL = ALLURE_PLUS_ZONES.S60.pctLow  * 0.95;
     pH = ALLURE_PLUS_ZONES.S60.pctHigh * 0.95;
   }
+  if (sub === 'low')  pH = (pL + pH) / 2;
+  if (sub === 'high') pL = (pL + pH) / 2;
   return {
     paceMin: Math.round(3600 / (vma * pH)), // allure rapide sec/km
     paceMax: Math.round(3600 / (vma * pL)), // allure lente  sec/km
@@ -174,8 +178,8 @@ function isTrailSession(session) {
 }
 
 // Calcule les allures Trail = allures route × (1 + trailCorr de la zone)
-function calcAllureRefTrail(zoneKey, vma) {
-  const base = calcAllureRef(zoneKey, vma);
+function calcAllureRefTrail(zoneKey, vma, sub) {
+  const base = calcAllureRef(zoneKey, vma, sub);
   if (!base) return null;
   const corr = (ALLURE_PLUS_ZONES[zoneKey]?.trailCorr || 0);
   if (corr === 0) return base;
@@ -1714,7 +1718,7 @@ function renderSessionDetail(session, weekId, isCurrentWeek) {
       // l'affiche "Échauffement", meme cohérence que l'export xlsx.
       const zoneLbl = (apZone === 'RECOVER' && idx === 0)
         ? 'Échauffement'
-        : (zoneDef ? zoneDef.label : fmtZoneKind(z.kind, session.displayName || session.name || ''));
+        : (zoneDef ? zoneDef.label + (z.sub ? (apZone === 'EF' ? (z.sub === 'low' ? ' · facile' : ' · soutenue') : (z.sub === 'low' ? ' · bas de plage' : ' · haut de plage')) : '') : fmtZoneKind(z.kind, session.displayName || session.name || ''));
       // FC cible indicative de cette zone (~min-max bpm) - meme pour une zone
       // "allure libre" (RECOVER), la FC reste un repere pertinent la ou
       // l'allure n'en est pas un.
@@ -1736,7 +1740,7 @@ function renderSessionDetail(session, weekId, isCurrentWeek) {
       // Calcul allures depuis VMA utilisateur (correctement calibré + correction trail +7/+8/+10%)
       // Les pace.value du fichier .aplus sont des valeurs template non calibrées à l'utilisateur
       const apRef = apZone && vmaToUse
-        ? (useTrail ? calcAllureRefTrail(apZone, vmaToUse) : calcAllureRef(apZone, vmaToUse))
+        ? (useTrail ? calcAllureRefTrail(apZone, vmaToUse, z.sub) : calcAllureRef(apZone, vmaToUse, z.sub))
         : null;
       const paceColor = apRef?.isTrail ? 'var(--text-trail, #6b7a8f)' : 'var(--text-pace, var(--text-primary))';
       const paceCell = apRef
@@ -1780,7 +1784,7 @@ function renderSessionDetail(session, weekId, isCurrentWeek) {
         if (!apZone) return;
         const isEfWarmup = hasIntervals && (apZone === 'EF' || apZone === 'WARMUP' || apZone === 'COOLDOWN');
         const useTrail = isSessTrail && !isEfWarmup;
-        const apRef = useTrail ? calcAllureRefTrail(apZone, displayVma) : calcAllureRef(apZone, displayVma);
+        const apRef = useTrail ? calcAllureRefTrail(apZone, displayVma, z.sub) : calcAllureRef(apZone, displayVma, z.sub);
         if (!apRef) return;
         anyRef = true;
         const midPaceSecKm = (apRef.paceMin + apRef.paceMax) / 2;

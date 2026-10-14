@@ -478,8 +478,20 @@ function routineShouldPrecedePlan(goal, weeks) {
 // Date de début du plan modifiée / plan retiré / course changée : les semaines
 // en cours ou à venir déjà figées sous l'ancienne échéance sont régénérées
 // (sauf si une séance y a déjà été pointée) pour recaler le cycle.
+// Empreinte des réglages utilisés pour générer une semaine
+function routinePrefsSig(prefs) { return [prefs.terrain, prefs.frequency, prefs.maxMin || 90, prefs.caution ? 1 : 0].join('|'); }
+
+// Une semaine "intacte" n'a ni séance pointée (faite / passée) ni variante choisie
+function routineWeekIsUntouched(wd, w) {
+  return w.sessions.every((s, i) => {
+    const st = typeof getLocalSessionStatus === 'function' ? getLocalSessionStatus('free_' + wd, i) : null;
+    return !['done', 'skip'].includes(st) && (!s.variant || s.variant === 'yellow');
+  });
+}
+
 function reconcileRoutineWithPlan(prefs, planInfo) {
   const store = getRoutineStore();
+  const sig = routinePrefsSig(prefs);
   const now = Date.now();
   const wantPlan = planInfo ? planInfo.startMs : null;
   const wantRace = prefs.race ? prefs.race.dateMs : null;
@@ -487,19 +499,31 @@ function reconcileRoutineWithPlan(prefs, planInfo) {
   Object.keys(store.weeks).forEach(k => {
     if (Number(k) + 7 * 86400000 < now) return;                      // semaine passée : intacte
     const w = store.weeks[k];
-    if ((w.planStartMs || null) === wantPlan && (w.raceMs || null) === wantRace) return;
-    const touched = w.sessions.some((s, i) => ['done', 'skip'].includes(typeof getLocalSessionStatus === 'function' ? getLocalSessionStatus('free_' + k, i) : null));
-    if (touched) return;
+    // obsolète si l'échéance (plan / course) OU les réglages (terrain, séances/semaine,
+    // durée max, gêne) ont changé depuis sa génération — sans signature mémorisée
+    // (ancienne semaine), on juge au nombre de séances
+    const stale = (w.planStartMs || null) !== wantPlan || (w.raceMs || null) !== wantRace
+      || (w.sig ? w.sig !== sig : w.sessions.length !== prefs.frequency);
+    if (!stale) return;
+    if (!routineWeekIsUntouched(k, w)) return;
     delete store.weeks[k];
     changed = true;
   });
   if (changed) saveRoutineStore(store);
 }
 
-async function ensureRoutineWeek(prefs, weekNum, planInfo) {
+// opts.preview : semaine à venir montrée en AVANT-PREMIÈRE (cycle complet visible).
+// Elle est reconstruite d'après la forme du moment dès qu'elle devient la semaine en
+// cours, sauf si l'utilisateur y a déjà touché (variante choisie, séance pointée).
+async function ensureRoutineWeek(prefs, weekNum, planInfo, opts) {
   const store = getRoutineStore();
   const wd = freeWeekDate(prefs, weekNum);
-  if (store.weeks[wd]) return store.weeks[wd];
+  const existing = store.weeks[wd];
+  if (existing) {
+    const rebuild = existing.preview && !(opts && opts.preview) && routineWeekIsUntouched(wd, existing);
+    if (!rebuild) return existing;
+    delete store.weeks[wd];
+  }
   const acts = await routineActivities();
   const profile = RoutineEngine.routineAssessProfile(acts, Date.now(), prefs.maxMin || 90);
   const history = Object.keys(store.weeks).map(k => ({
@@ -520,6 +544,8 @@ async function ensureRoutineWeek(prefs, weekNum, planInfo) {
     trailRoadFamilies: !!cfg.trailRoadFamilies,
     plan, race,
   });
+  week.preview = !!(opts && opts.preview);
+  week.sig = routinePrefsSig(prefs);
   week.planStartMs = planInfo ? planInfo.startMs : null;
   week.raceMs = prefs.race ? prefs.race.dateMs : null;
   week.profile = { level: profile.level, weeklyMin: profile.weeklyMin, runsPerWeek: profile.runsPerWeek, efTarget: profile.efTarget, slTarget: profile.slTarget, otherMin7: profile.otherMin7, hasData: profile.hasData };
@@ -562,6 +588,14 @@ async function renderFreeSessionsWeek(forceIdx) {
   const planInfo = routineCurrentPlanInfo();
   reconcileRoutineWithPlan(prefs, planInfo);
   if (currentWeekNum >= start) await ensureRoutineWeek(prefs, currentWeekNum, planInfo);
+  // Un cycle complet visible : semaine en cours + 3 suivantes, en avant-première
+  // (réajustées à la forme du moment quand chacune devient la semaine en cours).
+  for (let k = 1; k <= 3; k++) {
+    const wn = currentWeekNum + k;
+    if (wn < start) continue;
+    if (planInfo && routineWeeksBetween(freeWeekDate(prefs, wn), planInfo.startMs) < 1) break;
+    await ensureRoutineWeek(prefs, wn, planInfo, { preview: true });
+  }
   const store = getRoutineStore();
   const totalWeeks = Math.max(FREE_SESSIONS_MIN_WEEKS, currentWeekNum + FREE_SESSIONS_LOOKAHEAD);
 
@@ -590,6 +624,7 @@ async function renderFreeSessionsWeek(forceIdx) {
     if (stored) {
       w.sessions = stored.sessions.map((s, i) => routineSnapshotToSession(s, i));
       w.stored = stored;
+      if (stored.preview) w.context = { cycleDescription: 'Aperçu : cette semaine sera ajustée d’après ta forme, ton assiduité et ta charge récente quand elle commencera.' };
     } else {
       w.sessions = [];
       w.pending = true;
@@ -597,7 +632,7 @@ async function renderFreeSessionsWeek(forceIdx) {
         ? 'Semaine non générée (l’application n’a pas été ouverte cette semaine-là).'
         : wn <= currentWeekNum + 1
           ? 'Cliquez sur l’onglet pour générer cette semaine.'
-          : `Les séances de cette semaine (${phase} — ${ROUTINE_PHASE_LABEL[phase]}) seront générées à l’approche, d’après ta forme du moment.`;
+          : `Semaine ${phase} (${ROUTINE_PHASE_LABEL[phase]}) : ses séances seront construites à l’approche, en fonction de ta forme du moment, de ton assiduité, de ta charge récente et de tes ressentis. Ce qui est déjà prévu pour cette semaine : une charge ${phase === 'S1' ? 'souple' : phase === 'S2' ? 'modérée' : phase === 'S3' ? 'intense' : 'de récupération'}.`;
     }
     weeks.push(w);
   }
@@ -682,6 +717,9 @@ async function renderFreeSessionsWeek(forceIdx) {
       </div>
     </div>`;
 
+  const horizonNote = `<div class="rt-horizon-note">ℹ️ <strong>Pourquoi seulement les 4 prochaines semaines ?</strong>
+    Ces séances ne sont pas un plan écrit d’avance : chaque semaine est construite d’après ta forme du moment, ton assiduité, ta charge récente (y compris tes autres sports) et tes ressentis. Les 4 semaines d’un cycle complet sont montrées en aperçu pour te projeter, puis réajustées quand elles arrivent ; au-delà, seule la phase du cycle est connue (souple, modérée, intense, récupération) — figer 16 semaines à l’avance deviendrait faux dès que tu manques ou ajoutes une séance.</div>`;
+
   const actions = `
     <div class="plan-actions-bar">
       <button class="btn-plan-action" onclick="editFreeSessionsPrefs()">
@@ -696,7 +734,7 @@ async function renderFreeSessionsWeek(forceIdx) {
       </button>
     </div>`;
 
-  el('campus-plan-wrap').innerHTML = header + weekTabs + actions + `<div id="training-session-list"></div>`;
+  el('campus-plan-wrap').innerHTML = header + weekTabs + horizonNote + actions + `<div id="training-session-list"></div>`;
   renderSessionList(campusState.selectedWeekIdx);
 }
 
@@ -824,12 +862,12 @@ function renderRoutineVariantBar(session, weekId) {
   const btn = v => {
     const delta = v.variant === 'yellow' ? 'prévue' : `${v.deltaLoadPct >= 0 ? '+' : ''}${v.deltaLoadPct} % de charge`;
     const title = v.available || v.selected
-      ? `${v.label} — ${v.totalMin} min au total (${v.deltaTotalMin >= 0 ? '+' : ''}${v.deltaTotalMin} min), ${v.deltaWorkMin >= 0 ? '+' : ''}${v.deltaWorkMin} min de travail. ${RoutineEngine.routineDescribe(v.dsl)}.`
+      ? `${v.label} — ${v.totalMin} min au total (${v.deltaTotalMin >= 0 ? '+' : ''}${v.deltaTotalMin} min), ${v.deltaWorkMin >= 0 ? '+' : ''}${v.deltaWorkMin} min de travail${v.intensity ? ', allure ' + v.intensity + ' de la zone' : ''}. ${RoutineEngine.routineDescribe(v.dsl)}.`
       : v.reason;
     return `<button type="button" class="rt-variant rt-variant--${v.variant}${v.selected ? ' rt-variant--on' : ''}"${v.available || v.selected ? '' : ' disabled'}
       title="${title.replace(/"/g, '&quot;')}" onclick="event.stopPropagation();setRoutineVariant('${weekId}',${idx},'${v.variant}')">
       <span class="rt-variant-name">${ROUTINE_VARIANT_DOT[v.variant]} ${v.label}</span>
-      <span class="rt-variant-meta">${v.totalMin} min · ${delta}</span></button>`;
+      <span class="rt-variant-meta">${v.totalMin} min · ${delta}</span>${v.intensity ? `<span class="rt-variant-meta">allure ${v.intensity}</span>` : ''}</button>`;
   };
   const lockedMsg = (done || pastWeek) ? '<div class="rt-variant-note">Séance faite ou semaine passée : variante figée.</div>'
     : prefs.caution ? '<div class="rt-variant-note">🩹 Gêne signalée : les variantes plus exigeantes sont bloquées.</div>' : '';

@@ -129,7 +129,7 @@ test('variantes : vert < jaune < orange < rouge en charge, jaune = fiche telle q
   assert.equal(v.yellow.dsl, byId['A03-01'].dsl);
   assert.ok(v.green.load < v.yellow.load && v.yellow.load < v.orange.load && v.orange.load < v.red.load);
   assert.ok(v.green.totalMin < v.yellow.totalMin && v.orange.totalMin > v.yellow.totalMin);
-  assert.ok(v.green.dsl.includes('2x(6m S60)') && v.orange.dsl.includes('4x(6m S60)'), `${v.green.dsl} / ${v.orange.dsl}`);
+  assert.ok(v.green.dsl.includes('2x(6m S60_L)') && v.orange.dsl.includes('4x(6m S60_H)'), `${v.green.dsl} / ${v.orange.dsl}`);
 });
 
 test('variantes : la nature de la séance ne change jamais (mêmes codes d\'allure)', () => {
@@ -325,4 +325,42 @@ test('écran de réglage : les boutons ont un gestionnaire de clic et existent d
   assert.match(js, /closest\('#free-sessions-setup \.routes-toggle-btn'\)/);
   ['free-sessions-terrain-toggle', 'free-sessions-freq-toggle', 'free-sessions-maxmin-toggle'].forEach(id => assert.ok(html.includes(`id="${id}"`), id));
   assert.ok(html.indexOf('id="free-sessions-setup"') < html.indexOf('id="free-sessions-maxmin-toggle"'));
+});
+
+// ─── Intensité des variantes : bas / haut de plage dans la MÊME zone ─────
+test('variantes : vert = bas de plage, orange/rouge = haut de plage, jaune = plage complète', () => {
+  const v = V('A03-01');
+  assert.equal(v.yellow.intensity, null);
+  assert.equal(v.green.intensity, 'bas de plage');
+  assert.equal(v.orange.intensity, 'haut de plage');
+  assert.equal(v.red.intensity, 'haut de plage');
+  assert.ok(!/_[LH]/.test(v.yellow.dsl));
+  // jamais d'autre zone : mêmes codes ; efforts au ressenti et EF non modulés
+  const r = V('A11-02');
+  assert.ok(!/_[LH]/.test(r.green.dsl.replace(/EFL|EFH/g, '')), r.green.dsl);
+  const ef = V('A01-03');
+  assert.ok(!/_[LH]/.test(ef.green.dsl) && !/_[LH]/.test(ef.orange.dsl));
+});
+
+test("bas / haut de plage : le suffixe survit à l'aller-retour DSL, aux étapes et à la charge", () => {
+  const { routineParseDsl, routineTreeToDsl, compileRoutineDsl, routineToSessionStructure } = require('../frontend/js/routine_catalog.js');
+  const dsl = '15m EF + 3x(6m AS21_H) r2m EF + 10m EF';
+  assert.equal(routineTreeToDsl(routineParseDsl(dsl)), dsl);
+  const st = routineToSessionStructure(compileRoutineDsl(dsl));
+  assert.ok(st.paceZones.filter(z => z.sub === 'high').length === 3);
+  assert.ok(st.paceZones.filter(z => z.sub).every(z => z.sub === 'high'));
+  const base = E.routineLoadOfDsl('15m EF + 3x(6m AS21) r2m EF + 10m EF', true);
+  assert.ok(E.routineLoadOfDsl(dsl, true).score > base.score);
+  assert.ok(E.routineLoadOfDsl('15m EF + 3x(6m AS21_L) r2m EF + 10m EF', true).score < base.score);
+  assert.throws(() => compileRoutineDsl('15m EF + 3x(6m XYZ_L) r2m EF'));
+});
+
+test("EF facile / soutenue : deux plages d'allure distinctes contenues dans la zone EF", () => {
+  const { getZoneRange } = require('../zones.js');
+  const all = getZoneRange('EF'), low = getZoneRange('EF', 'low'), high = getZoneRange('EF', 'high');
+  assert.ok(low.pctHigh <= high.pctLow + 1e-9 && low.pctLow === all.pctLow && high.pctHigh === all.pctHigh);
+  assert.ok(low.pctHigh < all.pctHigh && high.pctLow > all.pctLow);
+  const { compileRoutineDsl, routineToSessionStructure } = require('../frontend/js/routine_catalog.js');
+  const st = routineToSessionStructure(compileRoutineDsl(byId['A01-06'].dsl));
+  assert.deepEqual([...new Set(st.paceZones.map(z => z.sub))].sort(), ['high', 'low']);
 });

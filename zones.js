@@ -18,13 +18,15 @@ const ALLURE_PLUS_ZONES = {
 };
 
 // Sweet Spot = 95% de la vitesse S60 (règle métier Allure+)
-function getZoneRange(zoneKey) {
+// sub = 'low' | 'high' : moitié basse / haute de la zone (routines hors plan : EF facile / soutenue)
+function getZoneRange(zoneKey, sub) {
   const ref = ALLURE_PLUS_ZONES[zoneKey];
   if (!ref) return null;
-  if (ref.isSweetSpot) {
-    return { pctLow: ALLURE_PLUS_ZONES.S60.pctLow * 0.95, pctHigh: ALLURE_PLUS_ZONES.S60.pctHigh * 0.95 };
-  }
-  return { pctLow: ref.pctLow, pctHigh: ref.pctHigh };
+  let pctLow = ref.pctLow, pctHigh = ref.pctHigh;
+  if (ref.isSweetSpot) { pctLow = ALLURE_PLUS_ZONES.S60.pctLow * 0.95; pctHigh = ALLURE_PLUS_ZONES.S60.pctHigh * 0.95; }
+  if (sub === 'low')  pctHigh = (pctLow + pctHigh) / 2;
+  if (sub === 'high') pctLow = (pctLow + pctHigh) / 2;
+  return { pctLow, pctHigh };
 }
 
 // ═══════════════════════════════════════════════════════

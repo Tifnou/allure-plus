@@ -414,6 +414,17 @@ function _varyNode(n, mode) {
   return { ...n, body: n.body.map(b => (b.t === 'step' || b.t === 'ladder' ? _varyNode(b, mode) : b)) };
 }
 
+// Intensité : vert = bas de la fourchette d'allure de la zone, orange / rouge = haut.
+// Même zone (même domaine physiologique), jamais un autre code d'allure ; les efforts
+// au ressenti (RPE) et l'EF n'ont pas de fourchette à moduler.
+function _applyIntensity(nodes, mode) {
+  const sub = mode === 'green' ? 'low' : 'high';
+  nodes.forEach(n => {
+    if (n.t === 'rep') { _applyIntensity(n.body, mode); return; }
+    if ((n.t === 'step' || n.t === 'ladder') && n.code !== 'RPE' && !_EASY_CODES.includes(n.code)) n.sub = sub;
+  });
+}
+
 // dsl de base → dsl varié, ou null si aucune variation sensée n'existe
 function routineVaryDsl(dsl, mode) {
   const tree = JSON.parse(JSON.stringify(_RC.routineParseDsl(dsl)));
@@ -436,6 +447,7 @@ function routineVaryDsl(dsl, mode) {
   }
   if (JSON.stringify(next) === JSON.stringify(tree[idx])) return null;
   tree[idx] = next;
+  if (hasWork) _applyIntensity(tree, mode);
   return _RC.routineTreeToDsl(tree);
 }
 
@@ -450,8 +462,9 @@ function routineLoadOfDsl(dsl, wuCd) {
     if (['warmup', 'cooldown', 'recovery', 'setRecovery'].includes(s.role)) return;
     const min = s.sec / 60;
     const k = s.code === 'RPE' ? 'RPE' + s.rpe : s.code;
+    const mult = s.sub === 'low' ? 0.94 : s.sub === 'high' ? 1.06 : 1;     // bas / haut de plage
     if (s.code === 'RPE') score += min * routineRpeWeight(s.rpe);
-    else if (ROUTINE_WEIGHTS[s.code]) score += min * ROUTINE_WEIGHTS[s.code];
+    else if (ROUTINE_WEIGHTS[s.code]) score += min * ROUTINE_WEIGHTS[s.code] * mult;
     else return;
     counts[k] = (counts[k] || 0) + s.sec;
   });
@@ -483,6 +496,7 @@ function routineBuildVariants(snap, wk) {
       dsl, totalMin: Math.round(l.totalMin), tier: l.tier, load,
       deltaTotalMin: Math.round(l.totalMin - base.totalMin), deltaWorkMin: Math.round(l.qualityMin - base.qualityMin),
       deltaLoadPct: baseLoad ? Math.round((load - baseLoad) / baseLoad * 100) : 0,
+      intensity: /_L\b/.test(dsl) && variant !== 'yellow' ? 'bas de plage' : /_H\b/.test(dsl) && variant !== 'yellow' ? 'haut de plage' : null,
     });
     if (rec.available && variant === 'green' && snap.role !== 'ef' && base.qualityMin > 8 && l.qualityMin < 6) { rec.available = false; rec.reason = 'Déjà au minimum utile.'; }
     if (rec.available && (variant === 'orange' || variant === 'red')) {
@@ -528,16 +542,17 @@ function _fmtSec(s) {
   return Math.floor(s / 60) + ' min ' + (s % 60) + ' s';
 }
 const _CODE_LABEL = { EF: 'EF', EFL: 'EF facile', EFH: 'EF soutenue', TEMPO: 'Tempo', AS42: 'AS42', SS: 'Sweet Spot', AS21: 'AS21', S60: 'S60', AS10: 'AS10', S30: 'S30', VMA: 'VMA', WALK: 'marche', STRIDE: 'relance relâchée' };
+function _subSuffix(n) { return n.sub && n.code !== 'EFL' && n.code !== 'EFH' ? (n.sub === 'low' ? ' (bas de plage)' : ' (haut de plage)') : ''; }
 function _fmtStep(n) {
   if (n.code === 'RPE') return _fmtSec(n.sec) + ' effort RPE ' + n.rpe + (n.label ? ' (' + n.label.replace(/_/g, ' ') + ')' : '');
-  return _fmtSec(n.sec) + ' ' + _CODE_LABEL[n.code];
+  return _fmtSec(n.sec) + ' ' + _CODE_LABEL[n.code] + _subSuffix(n);
 }
 function routineDescribe(dsl) {
   const tree = _RC.routineParseDsl(dsl);
   const sep = s => (s ? ', récup ' + _fmtSec(s.sec) + ' ' + _CODE_LABEL[s.code] : '');
   const one = n => {
     if (n.t === 'step') return _fmtStep(n);
-    if (n.t === 'ladder') return n.durs.map(_fmtSec).join(' / ') + ' ' + (n.code === 'RPE' ? 'RPE ' + n.rpe : _CODE_LABEL[n.code]) + sep(n.sep);
+    if (n.t === 'ladder') return n.durs.map(_fmtSec).join(' / ') + ' ' + (n.code === 'RPE' ? 'RPE ' + n.rpe : _CODE_LABEL[n.code] + _subSuffix(n)) + sep(n.sep);
     return n.n + ' × (' + n.body.map(one).join(' + ') + ')' + sep(n.sep);
   };
   return tree.map(one).join(' → ');

@@ -3933,7 +3933,11 @@ function buildGarminWorkoutFromSession(session, weekNum, sessionDisplay, userZon
     let targetType = NO_TARGET, targetValueOne = null, targetValueTwo = null;
     let description = toAscii(zoneName);
 
-    const apUserZone = userZones && userZones[refinedKey] ? userZones[refinedKey] : null;
+    // sous-zone (EF facile / soutenue des routines) : plage plus étroite si calculée
+    const subKey = zone.sub ? refinedKey + '_' + String(zone.sub).toUpperCase() : null;
+    const apUserZone = userZones && subKey && userZones[subKey] ? userZones[subKey]
+      : (userZones && userZones[refinedKey] ? userZones[refinedKey] : null);
+    if (zone.sub) description += refinedKey === 'EF' ? (zone.sub === 'low' ? ' facile' : ' soutenue') : (zone.sub === 'low' ? ' bas de plage' : ' haut de plage');
     // RECOVER/RECOVERY = allure libre (jamais de cible Garmin)
     // Le code brut (zKey) sert au type d'étape Garmin plus bas, pas à la cible :
     // un pas tagué RECOVER par Campus peut avoir un slug "ef" (ex: retour au calme
@@ -4165,8 +4169,12 @@ app.post('/api/garmin/workout-from-session', requireSession, async (req, res) =>
       });
       const hasIntervalsServer = sessionZoneKeys.some(k => !['EF','RECOVER','RECOVERY','WARMUP','COOLDOWN'].includes(k));
       const calcZone = (zKey) => {
+        // clés "EF_LOW" / "EF_HIGH" = moitié basse / haute de la zone (EF facile / soutenue)
+        const subM     = /^(.*)_(LOW|HIGH)$/.exec(zKey);
+        const baseKey  = subM ? subM[1] : zKey;
+        zKey           = baseKey;
         const apKey    = ZG[zKey] || zKey;
-        const z        = getZoneRange(apKey);
+        const z        = getZoneRange(apKey, subM ? subM[2].toLowerCase() : undefined);
         if (!z) return null;
         // EF en warmup (session avec intervalles) → Route ; EF sortie longue → Trail
         // On utilise hasIntervals du frontend (déjà calculé correctement)
@@ -4183,6 +4191,10 @@ app.post('/api/garmin/workout-from-session', requireSession, async (req, res) =>
       ['Z1','Z2','Z3','Z4','Z5','RECOVER','RECOVERY','WARMUP','COOLDOWN',
        'EF','TEMPO','SWEET_SPOT','AS42','AS21','S60','S30','AS10','VMA'].forEach(k => {
         const z = calcZone(k); if (z) userZones[k] = z;
+      });
+      // moitiés basse / haute de chaque zone (EF facile / soutenue, variantes bas / haut de plage)
+      ['EF','TEMPO','SWEET_SPOT','AS42','AS21','S60','S30','AS10','VMA'].forEach(k => {
+        ['LOW','HIGH'].forEach(h => { const z = calcZone(k + '_' + h); if (z) userZones[k + '_' + h] = z; });
       });
       console.log('[Allure+] VMA=' + allureplusVma + ' isTrail=' + isTrail + ' zones calculees');
     } else {

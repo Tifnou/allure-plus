@@ -54,7 +54,7 @@ function routineTokenize(src) {
     ['SEP',   /^([rR])(?=\d)/],
     ['DUR',   /^(\d+m\d*|\d+s)/],
     ['SLASH', /^\//],
-    ['CODE',  /^[A-Z][A-Z0-9]*(?::[a-z0-9_]+)?/],
+    ['CODE',  /^[A-Z][A-Z0-9]*(?:_[LH])?(?::[a-z0-9_]+)?/],
   ];
   const out = [];
   let i = 0;
@@ -84,11 +84,14 @@ function routineParseDuration(v) {
   throw new Error(`DSL: durée invalide "${v}"`);
 }
 
+// Suffixe _L / _H : moitié basse / haute de la fourchette d'allure de la zone
+// (variantes vert = bas de plage, orange/rouge = haut de plage ; même zone).
 function routineParseCode(v) {
   const rpe = /^RPE(\d+)(?::([a-z0-9_]+))?$/.exec(v);
   if (rpe) return { code: 'RPE', rpe: parseInt(rpe[1], 10), label: rpe[2] || null };
-  if (!ROUTINE_CODES[v]) throw new Error(`DSL: code d'allure inconnu "${v}"`);
-  return { code: v };
+  const m = /^([A-Z0-9]+)(?:_([LH]))?$/.exec(v);
+  if (!m || !ROUTINE_CODES[m[1]]) throw new Error(`DSL: code d'allure inconnu "${v}"`);
+  return m[2] ? { code: m[1], sub: m[2] === 'L' ? 'low' : 'high' } : { code: m[1] };
 }
 
 function routineParseDsl(src) {
@@ -141,7 +144,10 @@ function routineDurToDsl(sec) {
   const m = Math.floor(sec / 60), r = sec % 60;
   return r === 0 ? m + 'm' : m + 'm' + String(r).padStart(2, '0');
 }
-function routineCodeToDsl(n) { return n.code === 'RPE' ? 'RPE' + n.rpe + (n.label ? ':' + n.label : '') : n.code; }
+function routineCodeToDsl(n) {
+  if (n.code === 'RPE') return 'RPE' + n.rpe + (n.label ? ':' + n.label : '');
+  return n.code + (n.sub && n.code !== 'EFL' && n.code !== 'EFH' ? (n.sub === 'low' ? '_L' : '_H') : '');
+}
 function routineTreeToDsl(nodes) {
   const sep = s => (s ? ' ' + (s.role === 'recovery' ? 'r' : 'R') + routineDurToDsl(s.sec) + ' ' + routineCodeToDsl(s) : '');
   return nodes.map(n => {
@@ -171,7 +177,7 @@ function routineSegments(nodes, segs = [], inRep = false) {
     if (n.t === 'step') { plain().tpl.push(mk(n)); return; }
     if (n.t === 'ladder') {
       n.durs.forEach((sec, i) => {
-        plain().tpl.push(mk({ t: 'step', sec, code: n.code, rpe: n.rpe, label: n.label, role: 'work' }));
+        plain().tpl.push(mk({ t: 'step', sec, code: n.code, sub: n.sub, rpe: n.rpe, label: n.label, role: 'work' }));
         if (i < n.durs.length - 1 && n.sep) plain().tpl.push(mk(n.sep));
       });
       return;
@@ -269,7 +275,8 @@ function routineStepToZone(s) {
     return { kind, slug: null, rpe: s.rpe, label: s.label };
   }
   const c = ROUTINE_CODES[s.code];
-  return { kind: c.kind, slug: c.slug };
+  const sub = s.sub || c.sub;
+  return { kind: c.kind, slug: c.slug, sub: (sub === 'low' || sub === 'high') ? sub : null };
 }
 
 // Structure complète d'une séance au format Campus : paceZones (à plat, ordre
@@ -293,6 +300,7 @@ function routineToSessionStructure(compiled) {
       tpl.forEach(s => {
         const z = routineStepToZone(s);
         const pz = { kind: z.kind, duration: s.sec, pace: z.slug ? { slug: z.slug, value: null } : null };
+        if (z.sub) pz.sub = z.sub;     // moitié basse / haute de la zone (EF facile / soutenue)
         if (z.rpe != null) { pz.rpe = z.rpe; pz.rpeLabel = z.label || null; pz.noTarget = true; }
         paceZones.push(pz);
       });
