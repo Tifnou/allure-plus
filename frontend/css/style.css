@@ -5747,17 +5747,21 @@ body { background: var(--bg) !important; }
 /* Routines hors plan : bandeau plan à venir / course envisagée */
 .rt-plan-banner { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap;
   margin-top: 10px; padding: 10px 12px; border-radius: 10px; font-size: 13px; line-height: 1.45;
-  background: rgba(76, 175, 80, .10); border: 1px solid rgba(76, 175, 80, .35); }
+  /* fond OPAQUE suivant le thème (clair / sombre / saison) : un fond translucide se perd sur la photo de fond */
+  background: var(--bg-white); color: var(--text-primary);
+  border: 1px solid var(--border); border-left: 4px solid #4caf50; }
 .rt-plan-banner > div { flex: 1 1 320px; }
 .rt-plan-banner--card { margin: 0 0 14px; padding: 12px 16px; }
 .rt-plan-horizon { display: inline-block; margin-left: 6px; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 600;
-  background: rgba(76, 175, 80, .2); }
+  background: var(--bg-hover, rgba(76, 175, 80, .2)); border: 1px solid #4caf50; }
 .rt-race-fields { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-top: 8px; }
 .rt-race-fields input, .rt-race-fields select { padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border, #ddd); background: transparent; color: inherit; font: inherit; min-width: 0; }
 @media (max-width: 560px) { .rt-race-fields { grid-template-columns: 1fr; } }
 
-.rt-horizon-note { margin: 0 0 12px; padding: 10px 14px; border-radius: 10px; font-size: 12.5px; line-height: 1.5; opacity: .9;
-  background: rgba(100, 130, 200, .10); border: 1px solid rgba(100, 130, 200, .30); }
+.rt-horizon-note { margin: 0 0 12px; padding: 12px 16px; border-radius: 10px; font-size: 13px; line-height: 1.55;
+  background: var(--bg-white); color: var(--text-primary);
+  border: 1px solid var(--border); border-left: 4px solid var(--accent); }
 
-.rt-adapt-note { margin-top: 10px; padding: 9px 12px; border-radius: 10px; font-size: 12.5px; line-height: 1.5;
-  background: rgba(100, 130, 200, .10); border: 1px solid rgba(100, 130, 200, .30); }
+.rt-adapt-note { margin-top: 10px; padding: 10px 14px; border-radius: 10px; font-size: 13px; line-height: 1.55;
+  background: var(--bg-white); color: var(--text-primary);
+  border: 1px solid var(--border); border-left: 4px solid var(--accent); }
