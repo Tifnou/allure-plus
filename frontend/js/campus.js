@@ -1231,7 +1231,7 @@ function renderSessionList(weekIdx) {
     </div>`;
 
   if (sessions.length === 0) {
-    container.innerHTML = weekHeader + '<div class="training-empty">Pas de séances pour cette semaine.</div>';
+    container.innerHTML = weekHeader + '<div class="training-empty">' + (week.emptyMessage || 'Pas de séances pour cette semaine.') + '</div>';
     return;
   }
 
@@ -1637,6 +1637,15 @@ function renderSessionDetail(session, weekId, isCurrentWeek) {
       const apZone  = z.resolvedZone;
       const zoneDef = apZone ? ALLURE_PLUS_ZONES[apZone] : null;
       const rowBg   = getZoneColor(zKey);
+      // Effort au ressenti (routines hors plan : cote, trail) : pas d'allure
+      // cible, seulement la consigne RPE.
+      if (z.rpe != null) {
+        const rpeLbl = z.rpeLabel ? String(z.rpeLabel).replace(/_/g, ' ') : '';
+        return '<div class="pace-zone-row" data-zone="' + zKey + '" style="background:' + rowBg + ';border-radius:4px;margin-bottom:2px;padding:4px 8px;">'
+          + '<span class="pace-zone-kind">Effort' + (rpeLbl ? ' &middot; ' + rpeLbl : '') + '</span>'
+          + '<span class="pace-zone-duration">' + fmtDuration(z.duration) + '</span>'
+          + '<span class="pace-zone-pace" style="color:#94a3b8;font-style:italic;font-size:12px">RPE ' + z.rpe + '/10</span></div>';
+      }
       // Le tout premier segment, s'il resout en RECOVER, est la mise en
       // route de la seance (pas une "recuperation" - rien avant lui) : on
       // l'affiche "Échauffement", meme cohérence que l'export xlsx.

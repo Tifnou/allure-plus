@@ -3903,7 +3903,11 @@ function buildGarminWorkoutFromSession(session, weekNum, sessionDisplay, userZon
     // un pas tagué RECOVER par Campus peut avoir un slug "ef" (ex: retour au calme
     // à allure EF) et doit alors recevoir une vraie cible, comme dans l'affichage.
     const isRecoverKind = refinedKey === 'RECOVER';
-    if (isRecoverKind) {
+    if (zone.rpe != null) {
+      // Effort au ressenti (cote, trail - routines hors plan) : jamais de cible
+      // d'allure, la consigne RPE reste en texte dans le nom de l'etape.
+      description = toAscii('Effort RPE ' + zone.rpe + (zone.rpeLabel ? ' - ' + String(zone.rpeLabel).replace(/_/g, ' ') : ''));
+    } else if (isRecoverKind) {
       // Pas de cible : Garmin laisse le coureur récupérer à son rythme
     } else if (preferAllureplusZones && apUserZone) {
       // Zones Allure+ avec correction trail éventuelle (toujours prioritaires)
@@ -3987,7 +3991,9 @@ function buildGarminWorkoutFromSession(session, weekNum, sessionDisplay, userZon
     // ci-dessous (premiere/derniere zone) ne servent qu'aux seances sans aucun
     // blockType (seances libres, anciens plans) — elles typaient a tort en
     // "echauffement" un premier footing facile de 55' sans bloc d'echauffement.
-    const hasExplicitRoles = zones.some(z => z.blockType === 'warm-up' || z.blockType === 'cool-down');
+    // 'main' = bloc principal explicite des routines hors plan (routine_catalog.js) :
+    // leurs roles (echauffement / retour au calme) sont toujours donnes, jamais devines.
+    const hasExplicitRoles = zones.some(z => z.blockType === 'warm-up' || z.blockType === 'cool-down' || z.blockType === 'main');
     if (hasExplicitRoles) {
       zones.forEach((z, k) => {
         if (z.blockType === 'warm-up') { steps[k] = { ...steps[k], stepType: WARMUP_TYPE }; if (k === 0) warmupApplied = true; }

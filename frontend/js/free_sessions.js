@@ -11,6 +11,8 @@
 // recommence au tier léger mais pioche une autre séance dans chaque tier
 // (blockIdx), pour ne jamais reproposer deux fois la même séance à charge
 // équivalente avant plusieurs mois.
+// Depuis les routines v2 : catalogue routine_catalog.js + moteur routine_engine.js
+// (chargés avant ce fichier), semaines figées dans `suivi_free_routine`.
 // Dépend de campus.js (campusState, ALLURE_PLUS_ZONES, renderSessionList,
 // showTrainingEmpty, isTrailSession...) et app.js (el, showToast,
 // showConfirmModal, formatDate...).
@@ -346,63 +348,189 @@ function generateFreeSessionsWeek(prefs, now = Date.now()) {
   return buildFreeSessionsWeekData(prefs, freeSessionsWeekNumber(prefs, now));
 }
 
-// ─── Rendu ───────────────────────────────────────────────────────────────
-// Ce n'est pas un plan avec une fin (séances "d'entretien" reconduites
-// indéfiniment) : on génère et affiche quand même un horizon d'au moins
-// 16 semaines (avec onglets, comme un vrai plan) - purement pour que
-// l'utilisateur puisse parcourir à l'avance et valider la rotation des
-// fractionnés / la cadence des semaines allégées, sans attendre semaine
-// après semaine. La fenêtre glisse avec le temps (16 semaines mini,
-// toujours au moins 8 semaines d'avance sur la semaine courante).
+// ─── Routines v2 : semaines figées ──────────────────────────────────────
+// Depuis les routines "hors plan" (routine_catalog.js / routine_engine.js),
+// une semaine n'est générée qu'UNE FOIS, au moment où on l'ouvre, puis
+// conservée telle quelle dans `suivi_free_routine` (clé durable, donc
+// synchronisée/restaurée comme le reste) : le moteur tient compte de
+// l'historique et de la forme du moment, régénérer une semaine passée la
+// changerait sous les pieds de l'utilisateur. Les semaines AVANT
+// `prefs.engineStartWeek` (utilisateurs existants) restent celles de
+// l'ancien moteur (buildFreeSessionsWeekData ci-dessus) pour que les séances
+// déjà pointées "faites" gardent leur sens. Clé de stockage = lundi (ms), le
+// même `weekDate` que l'identifiant de semaine (`free_<weekDate>`) : les
+// pointages "fait" retombent donc sur les bonnes séances.
+const ROUTINE_STORE_KEY = 'suivi_free_routine';
+const ROUTINE_STORE_KEEP_WEEKS = 40;
 const FREE_SESSIONS_MIN_WEEKS = 16;
 const FREE_SESSIONS_LOOKAHEAD = 8;
 
-// Charge du tier (0/1/2) : couleur pour le point dans les onglets + libellé
-// pour le bandeau d'en-tête et le title="" au survol.
+const ROUTINE_PHASE_LABEL = { S1: 'souple', S2: 'modérée', S3: 'intense', S4: 'récupération' };
+const ROUTINE_PHASE_DOT = { S1: '🟢', S2: '🟡', S3: '🔴', S4: '\u{1FAB6}' };
+// ancien moteur
 const TIER_DOT = ['🟢', '🟡', '🔴'];
 const TIER_LABEL = ['légère', 'modérée', 'élevée'];
 
-function renderFreeSessionsWeek() {
-  const prefs = getFreeSessionsPrefs();
+function getRoutineStore() {
+  try {
+    const s = JSON.parse(localStorage.getItem(ROUTINE_STORE_KEY) || 'null');
+    if (s && s.v === 2 && s.weeks) return s;
+  } catch (e) { /* stockage illisible : on repart d'un magasin vide */ }
+  return { v: 2, weeks: {} };
+}
+function saveRoutineStore(store) {
+  const keys = Object.keys(store.weeks).map(Number).sort((a, b) => b - a);
+  keys.slice(ROUTINE_STORE_KEEP_WEEKS).forEach(k => { delete store.weeks[k]; });
+  localStorage.setItem(ROUTINE_STORE_KEY, JSON.stringify(store));
+}
+
+function freeWeekDate(prefs, weekNum) { return prefs.anchorMonday + (weekNum - 1) * 7 * 86400000; }
+function routineEngineStart(prefs) { return prefs.engineStartWeek || 1; }
+
+// Migration douce : un utilisateur existant (sans `engine`) garde l'ancien
+// moteur jusqu'à la fin de la semaine en cours, le nouveau prend le relais
+// dès la semaine suivante.
+function migrateFreeSessionsPrefs(prefs) {
+  if (!prefs || prefs.engine === 'v2') return prefs;
+  const next = { ...prefs, engine: 'v2', maxMin: prefs.maxMin || 90, engineStartWeek: freeSessionsWeekNumber(prefs) + 1 };
+  saveFreeSessionsPrefs(next);
+  return next;
+}
+
+let _routineActsFallback = null;
+async function routineActivities() {
+  if (typeof _allActivities !== 'undefined' && _allActivities.length) return _allActivities;
+  if (_routineActsFallback) return _routineActsFallback;
+  try {
+    const res = await fetch(`${API}/api/dashboard`);
+    if (res.ok) { const d = await res.json(); _routineActsFallback = d.allActivities || d.lastRuns || []; }
+  } catch (e) { /* hors-ligne : profil par défaut */ }
+  return _routineActsFallback || [];
+}
+
+async function ensureRoutineWeek(prefs, weekNum) {
+  const store = getRoutineStore();
+  const wd = freeWeekDate(prefs, weekNum);
+  if (store.weeks[wd]) return store.weeks[wd];
+  const acts = await routineActivities();
+  const profile = RoutineEngine.routineAssessProfile(acts, Date.now(), prefs.maxMin || 90);
+  const history = Object.keys(store.weeks).map(k => ({
+    age: Math.round((wd - Number(k)) / (7 * 86400000)),
+    sessions: store.weeks[k].sessions,
+  })).filter(h => h.age >= 1 && h.age <= ROUTINE_STORE_KEEP_WEEKS);
+  const week = RoutineEngine.routineGenerateWeek(prefs, weekNum, { ...profile, history });
+  week.profile = { level: profile.level, weeklyMin: profile.weeklyMin, runsPerWeek: profile.runsPerWeek, efTarget: profile.efTarget, slTarget: profile.slTarget, otherMin7: profile.otherMin7, hasData: profile.hasData };
+  store.weeks[wd] = week;
+  saveRoutineStore(store);
+  return week;
+}
+
+// Fiche figée → séance au format Campus (affichage, pointage, export Garmin, analyse)
+function routineSnapshotToSession(snap, idx) {
+  const compiled = compileRoutineDsl(snap.dsl, { wuCd: snap.wuCd });
+  const { paceZones, exercisesBlocks } = routineToSessionStructure(compiled);
+  const trail = snap.terrain === 'trail';
+  const cat = snap.role === 'ef' ? 'basic_endurance' : snap.role === 'long' ? 'long_run' : 'intensity';
+  const session = {
+    displayName: snap.name,
+    name: snap.name,
+    trainingCategory: (trail ? 'trail_' : 'road_') + cat,
+    trainingIndex: idx,
+    paceZones, exercisesBlocks,
+    description: RoutineEngine.routineDescribe(snap.dsl) + '.',
+    stats: { expectedDuration: compiled.totalSec, expectedElevationGain: trail ? (snap.role === 'long' ? 300 : 100) : 0 },
+    routine: { modelId: snap.modelId, slot: snap.slot, family: snap.family, tier: snap.tier, variant: snap.variant || 'yellow' },
+  };
+  if (snap.role === 'quality') session.coachAdvice = NOT_A_PLAN_ADVICE;
+  return session;
+}
+
+// ─── Rendu ───────────────────────────────────────────────────────────────
+// Ce n'est pas un plan avec une fin (routine reconduite indéfiniment) mais on
+// affiche un horizon d'au moins 16 semaines pour pouvoir parcourir la
+// rotation : les semaines déjà générées montrent leurs séances, les autres
+// seulement leur phase (S1 souple … S4 récupération), générées à l'ouverture.
+async function renderFreeSessionsWeek(forceIdx) {
+  let prefs = getFreeSessionsPrefs();
   if (!prefs) return;
+  prefs = migrateFreeSessionsPrefs(prefs);
+  const start = routineEngineStart(prefs);
   const currentWeekNum = freeSessionsWeekNumber(prefs);
-  const currentLight = isLightFreeWeek(currentWeekNum);
-  const currentTier = currentLight ? null : (currentWeekNum - 1) % 4;
+  if (currentWeekNum >= start) await ensureRoutineWeek(prefs, currentWeekNum);
+  const store = getRoutineStore();
   const totalWeeks = Math.max(FREE_SESSIONS_MIN_WEEKS, currentWeekNum + FREE_SESSIONS_LOOKAHEAD);
 
   const weeks = [];
   for (let wn = 1; wn <= totalWeeks; wn++) {
-    const { light, tier, sessions } = buildFreeSessionsWeekData(prefs, wn);
-    const weekDate = prefs.anchorMonday + (wn - 1) * 7 * 86400000;
-    weeks.push({ _id: 'free_' + weekDate, weekDate, sessions, context: {}, light, tier });
+    const weekDate = freeWeekDate(prefs, wn);
+    const base = { _id: 'free_' + weekDate, weekDate, context: {} };
+    if (wn < start) {
+      const { light, tier, sessions } = buildFreeSessionsWeekData(prefs, wn);
+      weeks.push({ ...base, sessions, legacy: true, light, tier, dot: light ? '\u{1FAB6}' : TIER_DOT[tier], tabTitle: light ? 'Semaine allégée' : `Charge ${TIER_LABEL[tier]} (${tier + 1}/3 du bloc)` });
+      continue;
+    }
+    const { phase } = RoutineEngine.routinePhaseOf(wn);
+    const stored = store.weeks[weekDate];
+    const w = { ...base, phase, dot: ROUTINE_PHASE_DOT[phase], tabTitle: `${phase} — ${ROUTINE_PHASE_LABEL[phase]}`, light: phase === 'S4' };
+    if (stored) {
+      w.sessions = stored.sessions.map((s, i) => routineSnapshotToSession(s, i));
+      w.stored = stored;
+    } else {
+      w.sessions = [];
+      w.pending = true;
+      w.emptyMessage = wn < currentWeekNum
+        ? 'Semaine non générée (l’application n’a pas été ouverte cette semaine-là).'
+        : wn <= currentWeekNum + 1
+          ? 'Cliquez sur l’onglet pour générer cette semaine.'
+          : `Les séances de cette semaine (${phase} — ${ROUTINE_PHASE_LABEL[phase]}) seront générées à l’approche, d’après ta forme du moment.`;
+    }
+    weeks.push(w);
   }
 
   campusState.weeks = weeks;
   const currentIdx = Math.min(Math.max(currentWeekNum - 1, 0), weeks.length - 1);
-  campusState.selectedWeekIdx = currentIdx;
+  campusState.selectedWeekIdx = forceIdx != null ? forceIdx : currentIdx;
   campusState.openSessionIdx = -1;
   campusState.usingImportedPlan = true; // active "Marquer comme fait" (getLocalSessionStatus)
   campusState.campusConnected = false;
   campusState.goal = null; // pas d'objectif associé - évite un bloc "Allure objectif" perimé
 
+  const cur = weeks[currentIdx];
   const terrainLabel = prefs.terrain === 'trail' ? 'Trail' : 'Route';
-
   el('campus-connect-card').style.display = 'none';
   el('campus-loading').style.display = 'none';
   el('campus-plan-wrap').style.display = '';
   el('campus-plan-subtitle').textContent = `Séances libres — ${terrainLabel} · ${prefs.frequency}x/semaine`;
+
+  // Bandeau de phase de la semaine en cours + transparence sur ce que le
+  // moteur a retenu (niveau, volume) et sur ses éventuelles précautions.
+  let phaseHtml, badges;
+  if (cur.legacy) {
+    phaseHtml = cur.light ? ' <strong>Semaine allégée cette semaine</strong> (récupération).' : ` <strong>Semaine ${cur.tier + 1}/3</strong> du bloc — charge ${TIER_LABEL[cur.tier]}.`;
+    badges = cur.light ? '<span class="plan-type-badge" style="background:#fef3c7;color:#b45309">Semaine légère</span>' : `<span class="plan-type-badge">${TIER_DOT[cur.tier]} Charge ${TIER_LABEL[cur.tier]}</span>`;
+  } else {
+    phaseHtml = ` <strong>${cur.phase} — semaine ${ROUTINE_PHASE_LABEL[cur.phase]}</strong> du cycle de 4 semaines.`;
+    badges = `<span class="plan-type-badge">${cur.dot} ${cur.phase} · ${ROUTINE_PHASE_LABEL[cur.phase]}</span>`;
+    const st = cur.stored;
+    if (st) {
+      const lv = ['', 'débutant', 'régulier', 'confirmé'][st.level] || '';
+      if (st.profile && st.profile.hasData) phaseHtml += ` <span style="opacity:.8">Niveau retenu : ${lv} (≈ ${st.profile.weeklyMin} min de course par semaine sur 6 semaines).</span>`;
+      else phaseHtml += ' <span style="opacity:.8">Pas encore assez d’activités récentes pour affiner : séances prudentes par défaut.</span>';
+      (st.notes || []).concat(st.warnings || []).forEach(n => { phaseHtml += `<br><span style="opacity:.85">ℹ️ ${n}</span>`; });
+    }
+  }
 
   const header = `
     <div class="training-plan-header card">
       <div class="plan-header-top">
         <div>
           <div class="plan-title">Séances libres — entretien</div>
-          <div class="plan-subtitle-desc">${NOT_A_PLAN_ADVICE}${currentLight ? ' <strong>Semaine allégée cette semaine</strong> (récupération).' : ` <strong>Semaine ${currentTier + 1}/3</strong> du bloc — charge ${TIER_LABEL[currentTier]}.`}</div>
+          <div class="plan-subtitle-desc">${NOT_A_PLAN_ADVICE}${phaseHtml}</div>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
           <span class="plan-type-badge">${terrainLabel}</span>
           <span class="plan-type-badge">${prefs.frequency}x/sem</span>
-          ${currentLight ? '<span class="plan-type-badge" style="background:#fef3c7;color:#b45309">Semaine légère</span>' : `<span class="plan-type-badge">${TIER_DOT[currentTier]} Charge ${TIER_LABEL[currentTier]}</span>`}
+          ${badges}
         </div>
       </div>
     </div>`;
@@ -413,11 +541,10 @@ function renderFreeSessionsWeek() {
         ${weeks.map((w, i) => {
           const isCurrent = i === currentIdx;
           const isPast = i < currentIdx;
-          const tabTitle = w.light ? 'Semaine allégée' : `Charge ${TIER_LABEL[w.tier]} (${w.tier + 1}/3 du bloc)`;
           return `
             <button class="week-tab${i === campusState.selectedWeekIdx ? ' week-tab--active' : ''}${isCurrent ? ' week-tab--current' : ''}${isPast ? ' week-tab--past' : ''}"
-              onclick="selectWeek(${i})" id="week-tab-${i}" title="${tabTitle}">
-              <span class="week-tab-num">${isPast ? '✓ ' : ''}S${i + 1}${w.light ? ' \u{1FAB6}' : ' ' + TIER_DOT[w.tier]}</span>
+              onclick="selectFreeWeek(${i})" id="week-tab-${i}" title="${w.tabTitle}">
+              <span class="week-tab-num">${isPast ? '✓ ' : ''}S${i + 1} ${w.dot}</span>
             </button>`;
         }).join('')}
       </div>
@@ -427,7 +554,7 @@ function renderFreeSessionsWeek() {
     <div class="plan-actions-bar">
       <button class="btn-plan-action" onclick="editFreeSessionsPrefs()">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-        Modifier (terrain / fréquence)
+        Modifier (terrain / fréquence / durée)
       </button>
       <button class="btn-plan-action btn-cancel-plan" onclick="disableFreeSessions()" style="margin-left:auto;opacity:.85;background:rgba(229,57,53,.15);color:#e53935;border:1px solid rgba(229,57,53,.3);">
         ✕ Désactiver les séances libres
@@ -438,15 +565,41 @@ function renderFreeSessionsWeek() {
   renderSessionList(campusState.selectedWeekIdx);
 }
 
+// Un onglet de semaine non générée (semaine en cours ou suivante) la génère
+// à l'ouverture ; les autres se contentent d'afficher leur message.
+async function selectFreeWeek(idx) {
+  const prefs = getFreeSessionsPrefs();
+  const w = campusState.weeks[idx];
+  if (prefs && w && w.pending) {
+    const wn = idx + 1;
+    if (wn >= routineEngineStart(prefs) && wn <= freeSessionsWeekNumber(prefs) + 1) {
+      await ensureRoutineWeek(prefs, wn);
+      await renderFreeSessionsWeek(idx);
+      return;
+    }
+  }
+  selectWeek(idx);
+}
+
 // ─── Configuration (démarrage / modification / arrêt) ──────────────────
 function startFreeSessions() {
   const terrainBtn = document.querySelector('#free-sessions-terrain-toggle .routes-toggle-btn.active');
   const freqBtn = document.querySelector('#free-sessions-freq-toggle .routes-toggle-btn.active');
+  const maxBtn = document.querySelector('#free-sessions-maxmin-toggle .routes-toggle-btn.active');
+  const anchorMonday = mondayOfWeek(Date.now());
   const prefs = {
     terrain: terrainBtn?.dataset.terrain || 'route',
     frequency: parseInt(freqBtn?.dataset.freq, 10) || 3,
-    anchorMonday: mondayOfWeek(Date.now()),
+    maxMin: parseInt(maxBtn?.dataset.maxmin, 10) || 90,
+    anchorMonday,
+    engine: 'v2',
+    engineStartWeek: 1,
   };
+  // La semaine en cours est régénérée avec les nouveaux réglages ; les
+  // semaines passées restent dans le magasin et servent d'historique (variété).
+  const store = getRoutineStore();
+  delete store.weeks[anchorMonday];
+  saveRoutineStore(store);
   saveFreeSessionsPrefs(prefs);
   renderFreeSessionsWeek();
   showToast('Séances libres générées pour cette semaine', 'success');
@@ -455,7 +608,7 @@ function startFreeSessions() {
 async function disableFreeSessions() {
   const ok = await showConfirmModal({
     title: 'Désactiver les séances libres ?',
-    message: 'Vous pourrez les réactiver à tout moment (terrain et fréquence vous seront redemandés).',
+    message: 'Vous pourrez les réactiver à tout moment (terrain, fréquence et durée vous seront redemandés).',
     confirmLabel: 'Désactiver',
     icon: '✕',
   });
@@ -474,20 +627,6 @@ function editFreeSessionsPrefs() {
   if (prefs) {
     document.querySelectorAll('#free-sessions-terrain-toggle .routes-toggle-btn').forEach(b => b.classList.toggle('active', b.dataset.terrain === prefs.terrain));
     document.querySelectorAll('#free-sessions-freq-toggle .routes-toggle-btn').forEach(b => b.classList.toggle('active', b.dataset.freq === String(prefs.frequency)));
+    document.querySelectorAll('#free-sessions-maxmin-toggle .routes-toggle-btn').forEach(b => b.classList.toggle('active', b.dataset.maxmin === String(prefs.maxMin || 90)));
   }
 }
-
-document.addEventListener('DOMContentLoaded', () => {
-  document.querySelectorAll('#free-sessions-terrain-toggle .routes-toggle-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      document.querySelectorAll('#free-sessions-terrain-toggle .routes-toggle-btn').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-    });
-  });
-  document.querySelectorAll('#free-sessions-freq-toggle .routes-toggle-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      document.querySelectorAll('#free-sessions-freq-toggle .routes-toggle-btn').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-    });
-  });
-});

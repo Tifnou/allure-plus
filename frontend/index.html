@@ -964,7 +964,7 @@
         <!-- Option 3 : Séances libres (sans plan, entretien) -->
         <div class="campus-option-block" id="free-sessions-setup">
           <div class="campus-option-label">Séances libres (sans plan)</div>
-          <p class="campus-import-hint" style="margin-bottom:10px">Pas de plan en cours ? Recevez chaque semaine 2 à 5 séances d'entretien (EF, fractionné, sortie longue) pour continuer à progresser.</p>
+          <p class="campus-import-hint" style="margin-bottom:10px">Pas de plan en cours ? Recevez chaque semaine 2 à 6 séances adaptées à votre niveau et à vos dernières sorties (EF, tempo, seuil, VMA, côtes, sortie longue), en cycles de 4 semaines (souple, modérée, intense, récupération) sans date de fin.</p>
           <div class="routes-toggle" id="free-sessions-terrain-toggle" style="margin-bottom:10px">
             <button type="button" class="routes-toggle-btn active" data-terrain="route">🏃 Route</button>
             <button type="button" class="routes-toggle-btn" data-terrain="trail">🏔️ Trail</button>
@@ -974,6 +974,13 @@
             <button type="button" class="routes-toggle-btn active" data-freq="3" title="1 footing EF + 1 fractionné + 1 sortie longue">3 séances/sem.</button>
             <button type="button" class="routes-toggle-btn" data-freq="4" title="2 footing EF + 1 fractionné + 1 sortie longue">4 séances/sem.</button>
             <button type="button" class="routes-toggle-btn" data-freq="5" title="2 footing EF + 2 fractionnés + 1 sortie longue">5 séances/sem.</button>
+            <button type="button" class="routes-toggle-btn" data-freq="6" title="3 footing EF + 2 séances de qualité + 1 sortie longue">6 séances/sem.</button>
+          </div>
+          <div class="campus-import-hint" style="margin-bottom:6px">Durée maximale d'une séance</div>
+          <div class="routes-toggle" id="free-sessions-maxmin-toggle" style="margin-bottom:10px">
+            <button type="button" class="routes-toggle-btn" data-maxmin="60">1 h</button>
+            <button type="button" class="routes-toggle-btn active" data-maxmin="90">1 h 30</button>
+            <button type="button" class="routes-toggle-btn" data-maxmin="120">2 h</button>
           </div>
           <button type="button" class="campus-login-btn" id="free-sessions-start-btn" style="width:100%" onclick="startFreeSessions()">Générer mes séances</button>
         </div>
@@ -1496,12 +1503,14 @@
     <span class="support-fab-dot" id="support-fab-dot" style="display:none"></span>
   </button>
 
-  <script src="js/app.js?v=1789488240016"></script>
+  <script src="js/app.js?v=1790100000001"></script>
   <script src="js/season_scenes.js?v=1790000000004"></script>
   <script src="js/themes.js?v=1790000000004"></script>
   <script src="js/gear.js?v=1786459105634"></script>
-  <script src="js/campus.js?v=1787730000008"></script>
-  <script src="js/free_sessions.js?v=1786701705047"></script>
+  <script src="js/campus.js?v=1790100000001"></script>
+  <script src="js/routine_catalog.js?v=1790100000001"></script>
+  <script src="js/routine_engine.js?v=1790100000001"></script>
+  <script src="js/free_sessions.js?v=1790100000001"></script>
   <script src="js/session-analysis.js?v=1789492600013"></script>
   <script src="js/nutrition.js?v=1787990000002"></script>
   <script src="js/stats.js?v=1787231562110"></script>

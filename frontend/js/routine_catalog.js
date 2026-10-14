@@ -43,7 +43,7 @@ const ROUTINE_CODES = {
   WALK:   { zone: 'RECOVER',    slug: 'slow',          kind: 'RECOVER', walk: true },
 };
 // codes qui ne comptent pas comme "qualité" (séance = EF pure si que ça)
-const ROUTINE_EASY_CODES = ['EF', 'EFL', 'EFH', 'WALK'];
+const ROUTINE_EASY_CODES = ['EF', 'EFL', 'EFH', 'WALK', 'STRIDE'];
 
 // ─── Compilateur DSL ─────────────────────────────────────────────────────
 function routineTokenize(src) {
@@ -135,73 +135,166 @@ function routineParseDsl(src) {
   return tree;
 }
 
-// Aplatit l'arbre en étapes ordonnées (récup r/R seulement ENTRE répétitions).
-function routineFlatten(nodes, out = []) {
+// Découpe l'arbre en SEGMENTS : un segment = des étapes jouées `repeat` fois.
+// Sert à la fois à la liste à plat (durée, rôles) et aux blocs répétés de
+// l'export Garmin. Règles (cahier des charges §9, "Cas D") :
+//  - r / R seulement ENTRE répétitions, jamais après la dernière : un groupe
+//    "N x (corps) r" devient un groupe (N-1) x [corps + r] suivi du corps seul,
+//    sinon Garmin jouerait une récupération fantôme avant le retour au calme ;
+//  - Garmin n'imbrique pas les répétitions : une répétition dont le corps en
+//    contient une autre est déroulée (seul le niveau le plus interne reste un
+//    groupe).
+function routineSegments(nodes, segs = [], inRep = false) {
+  const mk = (n, extra) => ({ ...n, inRep, ...extra });
+  const plain = () => {
+    let last = segs[segs.length - 1];
+    if (!last || last.repeat !== 1) { last = { repeat: 1, tpl: [] }; segs.push(last); }
+    return last;
+  };
   nodes.forEach(n => {
-    if (n.t === 'step') { out.push({ ...n }); return; }
+    if (n.t === 'step') { plain().tpl.push(mk(n)); return; }
     if (n.t === 'ladder') {
       n.durs.forEach((sec, i) => {
-        out.push({ t: 'step', sec, code: n.code, rpe: n.rpe, label: n.label, role: 'work' });
-        if (i < n.durs.length - 1 && n.sep) out.push({ ...n.sep });
+        plain().tpl.push(mk({ t: 'step', sec, code: n.code, rpe: n.rpe, label: n.label, role: 'work' }));
+        if (i < n.durs.length - 1 && n.sep) plain().tpl.push(mk(n.sep));
       });
       return;
     }
-    for (let i = 0; i < n.n; i++) {
-      routineFlatten(n.body, out);
-      if (i < n.n - 1 && n.sep) out.push({ ...n.sep });
+    const nested = n.body.some(b => b.t === 'rep');
+    if (nested) {
+      for (let i = 0; i < n.n; i++) {
+        routineSegments(n.body, segs, true);
+        if (i < n.n - 1 && n.sep) plain().tpl.push({ ...n.sep, inRep: true });
+      }
+      return;
     }
+    const body = routineSegments(n.body, [], true).flatMap(s => Array.from({ length: s.repeat }, () => s.tpl).flat());
+    if (n.sep) {
+      const iter = n.n - 1;
+      const tpl = [...body, { ...n.sep, inRep: true }];
+      if (iter >= 2) segs.push({ repeat: iter, tpl });
+      else if (iter === 1) tpl.forEach(s => plain().tpl.push(s));
+      body.forEach(s => plain().tpl.push({ ...s }));
+    } else if (n.n >= 2) {
+      segs.push({ repeat: n.n, tpl: body });
+    } else {
+      body.forEach(s => plain().tpl.push({ ...s }));
+    }
+  });
+  return segs;
+}
+
+// Liste à plat des étapes jouées (segments déroulés), chaque copie gardant un
+// lien `src` vers son étape-modèle pour que les rôles se répercutent.
+function routineUnroll(segs) {
+  const out = [];
+  segs.forEach(sg => {
+    for (let r = 0; r < sg.repeat; r++) sg.tpl.forEach(s => out.push({ ...s, src: s }));
   });
   return out;
 }
 
 // Compile une séance : étapes (avec rôle), durée exacte, temps qualitatif.
-// opts.wuCd (défaut vrai) : une EF seule en tête / en queue d'une séance de
-// qualité est un échauffement / retour au calme (comme l'export Garmin) ;
-// faux pour les sorties longues et le trail où l'EF fait partie du corps.
+// Rôles (mêmes conventions que les plans actuels) :
+//  warmup   échauffement (EF seule en tête, si opts.wuCd)
+//  cooldown retour au calme = la DERNIÈRE EF d'une séance de qualité ;
+//           côté Garmin : verte, au lap, durée en note
+//  recovery récup entre répétitions (r) ou EF intercalée entre deux efforts,
+//           marche ; côté Garmin : grise, sans cible
+//  setRecovery récup entre séries/blocs (R) ; même rendu que recovery
+//  easy     EF "active" (sortie longue, EF haute) ; base = séance sans qualité
+// opts.wuCd (défaut vrai) : faux pour sorties longues / trail où l'EF de tête
+// fait partie du corps de la séance, pas d'un échauffement.
 function compileRoutineDsl(src, opts = {}) {
   const wuCd = opts.wuCd !== false;
   const tree = routineParseDsl(src);
-  const steps = routineFlatten(tree);
+  const segs = routineSegments(tree);
+  const steps = routineUnroll(segs);
   const isEasy = s => s.code !== 'RPE' && ROUTINE_EASY_CODES.includes(s.code);
   const hasQuality = steps.some(s => !isEasy(s));
+  steps.forEach(s => { if (s.code !== 'RPE' && ROUTINE_CODES[s.code].walk) s.role = 'recovery'; });
   if (!hasQuality) {
-    steps.forEach(s => { s.role = 'base'; });
+    steps.forEach(s => { if (s.role === 'work') s.role = 'base'; });
   } else {
-    steps.forEach(s => { if (s.role === 'work' && isEasy(s)) s.role = 'easy'; });
-    if (wuCd) {
-      const first = tree[0], last = tree[tree.length - 1];
-      if (first.t === 'step' && isEasy(first)) steps[0].role = 'warmup';
-      if (tree.length > 1 && last.t === 'step' && isEasy(last)) steps[steps.length - 1].role = 'cooldown';
-    }
+    const qIdx = steps.map((s, i) => (isEasy(s) ? -1 : i)).filter(i => i >= 0);
+    const fq = qIdx[0], lq = qIdx[qIdx.length - 1];
+    steps.forEach((s, i) => {
+      if (s.role !== 'work') return;
+      if (!isEasy(s)) return;
+      // EF (pas "haute") coincée entre des efforts, ou dans un groupe répété
+      // après un effort : c'est une récupération, pas une EF active.
+      const plainEf = s.code === 'EF' || s.code === 'EFL';
+      s.role = plainEf && i > fq && (i < lq || s.inRep) ? 'recovery' : 'easy';
+    });
+    const first = tree[0], last = tree[tree.length - 1];
+    if (wuCd && first.t === 'step' && isEasy(first)) steps[0].role = 'warmup';
+    if (tree.length > 1 && last.t === 'step' && isEasy(last)) steps[steps.length - 1].role = 'cooldown';
   }
+  steps.forEach(s => { if (s.src) s.src.role = s.role; });
   steps.forEach(s => {
     if (!(s.sec > 0)) throw new Error(`DSL: durée nulle dans "${src}"`);
   });
-  if (steps[steps.length - 1].role === 'recovery' || steps[steps.length - 1].role === 'setRecovery') {
+  const lastRole = steps[steps.length - 1].role;
+  if (lastRole === 'setRecovery' || (lastRole === 'recovery' && hasQuality)) {
     throw new Error(`DSL: récupération en fin de séance dans "${src}"`);
   }
   const totalSec = steps.reduce((a, s) => a + s.sec, 0);
   const qualitySec = steps.filter(s => !isEasy(s)).reduce((a, s) => a + s.sec, 0);
-  return { steps, totalSec, qualitySec, hasQuality };
+  return { steps, segs, totalSec, qualitySec, hasQuality };
 }
 
-// Étapes au format historique de free_sessions.js ({kind, duration, slug})
-// pour réutiliser stepsToSession / annotatePaceZones / export Garmin tels
-// quels. Récup entre répétitions et marche → RECOVER (grise côté Garmin).
-function routineToLegacySteps(compiled) {
-  return compiled.steps.map(s => {
-    if (s.role === 'warmup')   return { kind: 'WARMUP', duration: s.sec, slug: 'ef' };
-    if (s.role === 'cooldown') return { kind: 'COOLDOWN', duration: s.sec, slug: 'ef' };
-    if (s.role === 'recovery' || s.role === 'setRecovery' || (s.code !== 'RPE' && ROUTINE_CODES[s.code].walk)) {
-      return { kind: 'RECOVER', duration: s.sec, slug: 'slow' };
+// Une étape → zone "paceZones" (format Campus) + exercice de bloc.
+function routineStepToZone(s) {
+  if (s.role === 'warmup')   return { kind: 'WARMUP',   slug: 'ef' };
+  if (s.role === 'cooldown') return { kind: 'COOLDOWN', slug: 'ef' };
+  if (s.role === 'recovery' || s.role === 'setRecovery') return { kind: 'RECOVER', slug: 'slow', recup: true };
+  if (s.code === 'RPE') {
+    const kind = s.rpe <= 3 ? 'Z2' : s.rpe <= 5 ? 'Z3' : s.rpe <= 7 ? 'Z4' : 'Z5';
+    return { kind, slug: null, rpe: s.rpe, label: s.label };
+  }
+  const c = ROUTINE_CODES[s.code];
+  return { kind: c.kind, slug: c.slug };
+}
+
+// Structure complète d'une séance au format Campus : paceZones (à plat, ordre
+// joué) + exercisesBlocks (blocs répétés) — exactement ce qu'attendent
+// annotatePaceZones (zones.js), l'affichage (campus.js), l'export Garmin
+// (buildStructuredSteps, server.js) et l'analyse (session-analysis.js).
+// blockType 'warm-up' / 'cool-down' explicites ; tout le reste = 'main', ce
+// qui désactive côté export l'heuristique "première/dernière zone".
+function routineToSessionStructure(compiled) {
+  const paceZones = [];
+  const exercisesBlocks = [];
+  const push = (blockType, repeat, tpl) => {
+    exercisesBlocks.push({
+      repeat, blockType,
+      exercises: tpl.map(s => {
+        const z = routineStepToZone(s);
+        return { pace: z.slug ? { slug: z.slug } : null, exerciseType: z.recup ? 'recuperation' : null };
+      }),
+    });
+    for (let r = 0; r < repeat; r++) {
+      tpl.forEach(s => {
+        const z = routineStepToZone(s);
+        const pz = { kind: z.kind, duration: s.sec, pace: z.slug ? { slug: z.slug, value: null } : null };
+        if (z.rpe != null) { pz.rpe = z.rpe; pz.rpeLabel = z.label || null; pz.noTarget = true; }
+        paceZones.push(pz);
+      });
     }
-    if (s.code === 'RPE') {
-      const kind = s.rpe <= 3 ? 'Z2' : s.rpe <= 5 ? 'Z3' : s.rpe <= 7 ? 'Z4' : 'Z5';
-      return { kind, duration: s.sec, slug: null, rpe: s.rpe, label: s.label };
-    }
-    const c = ROUTINE_CODES[s.code];
-    return { kind: c.kind, duration: s.sec, slug: c.slug };
+  };
+  compiled.segs.forEach(sg => {
+    if (sg.repeat >= 2) { push('main', sg.repeat, sg.tpl); return; }
+    // segment à plat : échauffement / retour au calme dans leur propre bloc
+    let run = [];
+    const flush = () => { if (run.length) { push('main', 1, run); run = []; } };
+    sg.tpl.forEach(s => {
+      if (s.role === 'warmup')        { flush(); push('warm-up', 1, [s]); }
+      else if (s.role === 'cooldown') { flush(); push('cool-down', 1, [s]); }
+      else run.push(s);
+    });
+    flush();
   });
+  return { paceZones, exercisesBlocks };
 }
 
 // ─── Catalogue ───────────────────────────────────────────────────────────
@@ -420,6 +513,6 @@ function getRoutineCompiled(model) {
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     ROUTINE_CODES, ROUTINE_FAMILIES, ROUTINE_CATALOG,
-    compileRoutineDsl, routineParseDsl, routineToLegacySteps, getRoutineCompiled,
+    compileRoutineDsl, routineParseDsl, routineToSessionStructure, getRoutineCompiled,
   };
 }
