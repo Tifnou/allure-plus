@@ -598,6 +598,52 @@ function cleanPlanIfUserChanged(currentUserEmail) {
   localStorage.setItem('allureplus_plan_owner', currentUserEmail);
 }
 
+// ── Plans Campus Coach écartés par l'utilisateur ────────────────────────────
+// Un plan Campus est rechargé à chaque démarrage depuis le compte (c'est l'objectif
+// ACTIF côté Campus, Allure+ ne peut pas le supprimer là-bas) : sans mémoire,
+// "Annuler le plan" ne durait que jusqu'au prochain redémarrage (plan d'essai
+// "La Cettoise" qui revenait). On retient les identifiants écartés (clé durable,
+// synchronisée) ; la page vide propose de les réafficher.
+const CAMPUS_DISMISSED_KEY = 'campus_dismissed_goals';
+function getDismissedCampusGoals() {
+  try { const a = JSON.parse(localStorage.getItem(CAMPUS_DISMISSED_KEY) || '[]'); return Array.isArray(a) ? a : []; } catch (e) { return []; }
+}
+// Clé stable d'un objectif Campus : son _id s'il en a un ; un "plan de fond" n'en a
+// pas, on prend alors son type, son nom et ses dates.
+function campusGoalKey(g) {
+  if (!g) return null;
+  if (g._id) return g._id;
+  const k = [g.kind || '', g.name || g.goalTitle || '', g.startDate || '', g.endDate || g.competitionDate || ''].join('|');
+  return k === '|||' ? null : k;
+}
+function isCampusGoalDismissed(goal) { const id = campusGoalKey(goal); return !!id && getDismissedCampusGoals().some(g => g.id === id); }
+function dismissCampusGoal(goal) {
+  const id = campusGoalKey(goal);
+  if (!id || isCampusGoalDismissed(goal)) return;
+  const name = goal.name || goal.goalTitle || (goal.endDate ? 'plan de fond Campus Coach' : 'plan Campus Coach');
+  const list = getDismissedCampusGoals();
+  list.push({ id, name });
+  localStorage.setItem(CAMPUS_DISMISSED_KEY, JSON.stringify(list.slice(-20)));
+}
+function restoreDismissedCampusPlans() {
+  localStorage.removeItem(CAMPUS_DISMISSED_KEY);
+  showTrainingLoading();
+  loadTrainingPlan();
+}
+// Rappel discret dans la page vide : "plan X masqué — Réafficher"
+function renderDismissedCampusNote() {
+  const old = document.getElementById('campus-dismissed-note');
+  if (old) old.remove();
+  const list = getDismissedCampusGoals();
+  const anchor = document.getElementById('campus-connect-msg');
+  if (!list.length || !anchor || !campusState.campusConnected) return;
+  const note = document.createElement('p');
+  note.id = 'campus-dismissed-note';
+  note.className = 'campus-import-hint';
+  note.innerHTML = 'Plan Campus Coach masqué : <strong>' + list.map(g => g.name).join(', ') + '</strong>. <a href="#" onclick="event.preventDefault();restoreDismissedCampusPlans()">Le réafficher</a>';
+  anchor.insertAdjacentElement('afterend', note);
+}
+
 async function initCampus() {
   // Attendre la restauration des cles "durables" depuis le serveur/cloud
   // (voir DURABLE_LS_KEYS, app.js) avant toute decision basee sur
@@ -843,6 +889,7 @@ function showTrainingEmpty() {
   const disconnectBtn = el('campus-disconnect-btn');
   if (disconnectBtn) disconnectBtn.style.display = 'none';
   if (freePrefs && freePrefs.dormant && typeof editFreeSessionsPrefs === 'function') editFreeSessionsPrefs();
+  renderDismissedCampusNote();
 }
 
 // ── Préchargement silencieux du plan (sans toucher au DOM) ──────────
@@ -863,7 +910,7 @@ async function preloadPlanState() {
     }
     // 2. Fallback serveur
     const data = await fetchJSON('/api/campus/training');
-    if (data?.goal) {
+    if (data?.goal && !isCampusGoalDismissed(data.goal)) {
       campusState.goal  = data.goal;
       campusState.weeks = data.weeks || [];
     }
@@ -898,6 +945,13 @@ async function loadTrainingPlan() {
       fetchJSON('/api/fitness').catch(() => null),
     ]);
     if (fitness?.zones) campusState.fitness = fitness;
+    if (data && data.goal && isCampusGoalDismissed(data.goal)) {
+      // plan Campus déjà annulé par l'utilisateur : page vide (catalogue / import / séances libres)
+      campusState.campusHasPlan = false;
+      el('campus-loading').style.display = 'none';
+      showTrainingEmpty();
+      return;
+    }
     campusState.campusHasPlan = !!(data.weeks && data.weeks.length > 0);
     renderTrainingPlan(data.goal, data.weeks || []);
   } catch(err) {
@@ -1982,6 +2036,15 @@ async function cancelPlan() {
     attachBackdropClose(modal, () => { modal.remove(); resolve(false); });
   });
   if (!ok) return;
+
+  // Plan Campus affiché → on le retient comme écarté ; plan importé affiché alors que
+  // Campus a aussi un objectif actif → idem, sinon il réapparaîtrait au démarrage.
+  const shownGoal = campusState.goal;
+  if (shownGoal && !campusState.usingImportedPlan) {
+    dismissCampusGoal(shownGoal);
+  } else if (campusState.campusConnected) {
+    fetchJSON('/api/campus/training').then(d => { if (d && d.goal) { dismissCampusGoal(d.goal); renderDismissedCampusNote(); } }).catch(() => {});
+  }
 
   // Nettoyer localStorage
   localStorage.removeItem('suivi_imported_plan');
