@@ -512,6 +512,53 @@ function reconcileRoutineWithPlan(prefs, planInfo) {
   if (changed) saveRoutineStore(store);
 }
 
+// ─── Écoute de l'utilisateur ────────────────────────────────────────────
+// Signaux lus par le moteur (jamais pour forcer : seulement pour freiner ou autoriser) :
+//  - assiduité des 2 semaines écoulées = séances de la routine réellement faites, mesurées par
+//    les sorties course Garmin de la semaine (pas besoin d'avoir pointé) OU par le pointage ;
+//  - ressenti : visages des séances pointées + bilan de fin de semaine ;
+//  - évolution de la VO2max sur ~6 semaines (série Garmin déjà chargée pour la page Santé).
+function routineRunsInWeek(acts, fromMs) {
+  const to = fromMs + 7 * 86400000;
+  return (acts || []).filter(a => {
+    const t = new Date(String(a.date).replace(' ', 'T')).getTime();
+    return t >= fromMs && t < to && /run/i.test(a.activityType || '') && (a.durationSec || 0) >= 600;
+  }).length;
+}
+function routineVmaTrendPct() {
+  const series = typeof _vo2maxSeries !== 'undefined' ? _vo2maxSeries : [];
+  const pts = series.map(h => ({ t: new Date(String(h.date).replace(' ', 'T')).getTime(), v: Number(h.preciseValue ?? h.value ?? h.vo2max) }))
+    .filter(p => isFinite(p.t) && p.v > 0).sort((a, b) => a.t - b.t);
+  if (pts.length < 2) return null;
+  const last = pts[pts.length - 1];
+  const ref = [...pts].reverse().find(p => p.t <= last.t - 42 * 86400000 && p.t >= last.t - 120 * 86400000);
+  return ref ? Math.round((last.v - ref.v) / ref.v * 1000) / 10 : null;
+}
+function routineSignals(acts, store, wd) {
+  const W7 = 7 * 86400000, now = Date.now();
+  let due = 0, done = 0;
+  const moods = { good: 0, neutral: 0, bad: 0 };
+  Object.keys(store.weeks).forEach(k => {
+    const t = Number(k);
+    if (t >= wd || t < wd - 2 * W7 || t + W7 > now) return;        // les 2 semaines précédentes, terminées
+    const w = store.weeks[k];
+    if (!w.sessions.length) return;
+    let marked = 0;
+    w.sessions.forEach((x, i) => {
+      if (typeof getLocalSessionStatus === 'function' && getLocalSessionStatus('free_' + k, i) === 'done') {
+        marked++;
+        const m = typeof getSessionMood === 'function' ? getSessionMood('free_' + k, i) : null;
+        if (m && moods[m] != null) moods[m]++;
+      }
+    });
+    due += w.sessions.length;
+    done += Math.max(marked, Math.min(w.sessions.length, routineRunsInWeek(acts, t)));
+    // un bilan de semaine pèse double : c'est le verdict de toute la semaine, pas d'une séance
+    if (w.checkin && w.checkin.mood && moods[w.checkin.mood] != null) moods[w.checkin.mood] += 2;
+  });
+  return { adherence: { due, done }, moods, vmaTrendPct: routineVmaTrendPct() };
+}
+
 // opts.preview : semaine à venir montrée en AVANT-PREMIÈRE (cycle complet visible).
 // Elle est reconstruite d'après la forme du moment dès qu'elle devient la semaine en
 // cours, sauf si l'utilisateur y a déjà touché (variante choisie, séance pointée).
@@ -538,8 +585,10 @@ async function ensureRoutineWeek(prefs, weekNum, planInfo, opts) {
   const plan = planInfo && weeksToStart >= 1 ? { ...planInfo, weeksToStart } : null;
   const weeksToRace = !planInfo && prefs.race ? routineWeeksBetween(wd, prefs.race.dateMs) : null;
   const race = weeksToRace != null && weeksToRace >= 1 ? { name: prefs.race.name || null, weeksToRace, targetKey: prefs.race.distKey } : null;
+  const signals = routineSignals(acts, store, wd);
   const week = RoutineEngine.routineGenerateWeek(prefs, weekNum, {
     ...profile, history, prevExcess,
+    weekIdx: weekNum - routineEngineStart(prefs), signals,
     caution: !!prefs.caution,
     trailRoadFamilies: !!cfg.trailRoadFamilies,
     plan, race,
@@ -620,7 +669,8 @@ async function renderFreeSessionsWeek(forceIdx) {
     // une transition allégée, S4 quel que soit son rang dans le cycle)
     const shownPhase = stored ? stored.phase : (planInfo && routineWeeksBetween(weekDate, planInfo.startMs) === 1 ? 'S4' : phase);
     const isTransition = !!(stored ? (stored.plan && stored.plan.transition) : (planInfo && routineWeeksBetween(weekDate, planInfo.startMs) === 1));
-    const w = { ...base, phase: shownPhase, dot: ROUTINE_PHASE_DOT[shownPhase], tabTitle: isTransition ? 'Transition avant ton plan — charge allégée' : `${shownPhase} — ${ROUTINE_PHASE_LABEL[shownPhase]}`, light: shownPhase === 'S4' };
+    const th = stored && stored.macro ? ` · ${stored.macro.phaseName} · ${stored.macro.themeLabel}` : '';
+    const w = { ...base, phase: shownPhase, dot: ROUTINE_PHASE_DOT[shownPhase], tabTitle: isTransition ? 'Transition avant ton plan — charge allégée' : `${shownPhase} — ${ROUTINE_PHASE_LABEL[shownPhase]}${th}`, light: shownPhase === 'S4' };
     if (stored) {
       w.sessions = stored.sessions.map((s, i) => routineSnapshotToSession(s, i));
       w.stored = stored;
@@ -662,11 +712,31 @@ async function renderFreeSessionsWeek(forceIdx) {
     phaseHtml = ` <strong>${cur.phase} — semaine ${ROUTINE_PHASE_LABEL[cur.phase]}</strong> du cycle de 4 semaines.`;
     badges = `<span class="plan-type-badge">${cur.dot} ${cur.phase} · ${ROUTINE_PHASE_LABEL[cur.phase]}</span>`;
     const st = cur.stored;
+    if (st && st.macro) {
+      badges += ` <span class="plan-type-badge">Cycle ${st.macro.cycleIdx + 1} · ${st.macro.phaseName}</span> <span class="plan-type-badge">Thème : ${st.macro.themeLabel}</span>`;
+      phaseHtml += `<br><span style="opacity:.9">🎯 ${st.macro.targetLabel === 'polyvalent' ? '' : `<strong>Objectif ${st.macro.targetLabel}</strong> : `}${st.macro.why}.</span>`;
+    }
     if (st) {
       const lv = ['', 'débutant', 'régulier', 'confirmé'][st.level] || '';
       if (st.profile && st.profile.hasData) phaseHtml += ` <span style="opacity:.8">Niveau retenu : ${lv} (≈ ${st.profile.weeklyMin} min de course par semaine sur 6 semaines).</span>`;
       else phaseHtml += ' <span style="opacity:.8">Pas encore assez d’activités récentes pour affiner : séances prudentes par défaut.</span>';
       (st.notes || []).concat(st.warnings || []).forEach(n => { phaseHtml += `<br><span style="opacity:.85">ℹ️ ${n}</span>`; });
+    }
+  }
+
+  // Bilan de la semaine écoulée (une fois) : nourrit le moteur pour les semaines suivantes
+  let checkinHtml = '';
+  {
+    const prevWd = freeWeekDate(prefs, currentWeekNum - 1);
+    const prev = store.weeks[prevWd];
+    if (prev && !prev.checkin && prev.sessions.length && prevWd + 7 * 86400000 <= Date.now() && prevWd + 21 * 86400000 > Date.now()) {
+      const nDone = prev.sessions.filter((x, i) => typeof getLocalSessionStatus === 'function' && getLocalSessionStatus('free_' + prevWd, i) === 'done').length;
+      const btn = m => `<button type="button" class="session-mood-btn" onclick="routineCheckin(${prevWd},'${m}')" title="${SESSION_MOOD_STYLES[m].label}">${sessionMoodIconSvg(m, 34)}<span>${SESSION_MOOD_STYLES[m].label}</span></button>`;
+      checkinHtml = `<div class="rt-checkin card"><div><strong>Comment s’est passée ta semaine S${currentWeekNum - 1} ?</strong>
+        <span style="opacity:.8">(${nDone} séance${nDone > 1 ? 's' : ''} pointée${nDone > 1 ? 's' : ''} sur ${prev.sessions.length})</span><br>
+        <span style="opacity:.8;font-size:12px">Ta réponse sert à adapter les prochaines semaines (on ne monte pas si c’était dur).</span></div>
+        <div class="session-mood-picker">${['good', 'neutral', 'bad'].map(btn).join('')}</div>
+        <button type="button" class="btn-plan-action" onclick="routineCheckin(${prevWd},null)">Passer</button></div>`;
     }
   }
 
@@ -735,7 +805,7 @@ async function renderFreeSessionsWeek(forceIdx) {
       </button>
     </div>`;
 
-  el('campus-plan-wrap').innerHTML = header + weekTabs + horizonNote + actions + `<div id="training-session-list"></div>`;
+  el('campus-plan-wrap').innerHTML = checkinHtml + header + weekTabs + horizonNote + actions + `<div id="training-session-list"></div>`;
   renderSessionList(campusState.selectedWeekIdx);
 }
 
@@ -1037,3 +1107,22 @@ document.addEventListener('click', ev => {
   if (!btn || !btn.parentElement) return;
   btn.parentElement.querySelectorAll('.routes-toggle-btn').forEach(b => b.classList.toggle('active', b === btn));
 });
+
+
+// ─── Bilan de fin de semaine ─────────────────────────────────────────────
+// mood = 'good' | 'neutral' | 'bad' | null (passer). Les semaines en cours / à venir encore
+// intactes sont régénérées pour tenir compte de la réponse (le moteur lit ce bilan).
+async function routineCheckin(wd, mood) {
+  const store = getRoutineStore();
+  const w = store.weeks[wd];
+  if (!w) return;
+  w.checkin = { mood: mood || null, skipped: !mood, at: Date.now() };
+  const now = Date.now();
+  Object.keys(store.weeks).forEach(k => {
+    if (Number(k) + 7 * 86400000 < now || Number(k) <= Number(wd)) return;
+    if (routineWeekIsUntouched(k, store.weeks[k])) delete store.weeks[k];
+  });
+  saveRoutineStore(store);
+  if (mood) showToast(mood === 'bad' ? 'Merci : on allège les prochaines semaines si besoin.' : 'Merci : c’est pris en compte pour la suite.', 'info');
+  await renderFreeSessionsWeek(campusState.selectedWeekIdx);
+}

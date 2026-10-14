@@ -5765,3 +5765,8 @@ body { background: var(--bg) !important; }
 .rt-adapt-note { margin-top: 10px; padding: 10px 14px; border-radius: 10px; font-size: 13px; line-height: 1.55;
   background: var(--bg-white); color: var(--text-primary);
   border: 1px solid var(--border); border-left: 4px solid var(--accent); }
+
+/* Bilan de fin de semaine (routines) */
+.rt-checkin { display: flex; gap: 14px; align-items: center; justify-content: space-between; flex-wrap: wrap; margin-bottom: 14px; padding: 14px 18px;
+  background: var(--bg-white); color: var(--text-primary); border: 1px solid var(--border); border-left: 4px solid var(--accent); border-radius: 12px; }
+.rt-checkin > div:first-child { flex: 1 1 280px; line-height: 1.5; }

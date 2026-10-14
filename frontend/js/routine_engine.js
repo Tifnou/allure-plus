@@ -59,21 +59,7 @@ function routinePhaseOf(weekNum) {
 const _routineLoadCache = {};
 function routineModelLoad(model) {
   if (_routineLoadCache[model.id]) return _routineLoadCache[model.id];
-  const c = _RC.getRoutineCompiled(model);
-  let score = 0;
-  const counts = {};
-  c.steps.forEach(s => {
-    if (s.role === 'warmup' || s.role === 'cooldown' || s.role === 'recovery' || s.role === 'setRecovery') return;
-    const min = s.sec / 60;
-    if (s.code === 'RPE') { score += min * routineRpeWeight(s.rpe); counts['RPE' + s.rpe] = (counts['RPE' + s.rpe] || 0) + s.sec; }
-    else if (ROUTINE_WEIGHTS[s.code]) { score += min * ROUTINE_WEIGHTS[s.code]; counts[s.code] = (counts[s.code] || 0) + s.sec; }
-  });
-  const mainCode = Object.keys(counts).sort((a, b) => counts[b] - counts[a])[0] || null;
-  let tier = score < ROUTINE_RULES.tierLightMax ? 0 : score < ROUTINE_RULES.tierModerateMax ? 1 : 2;
-  if (['VMA', 'S30', 'AS10'].includes(mainCode)) tier = Math.max(tier, 1);
-  const out = { score: Math.round(score), tier, mainCode, totalMin: c.totalSec / 60, qualityMin: c.qualitySec / 60 };
-  _routineLoadCache[model.id] = out;
-  return out;
+  return (_routineLoadCache[model.id] = routineLoadOfDsl(model.dsl, model.wuCd !== false));
 }
 
 // ─── Niveau & volume à partir des activités Garmin ───────────────────────
@@ -134,6 +120,50 @@ function routineEligible(model, ctx, opts = {}) {
   return true;
 }
 
+// ─── Logique de plan : thèmes de cycle selon l'objectif ──────────────────
+// Comme un plan Allure+ (blocs à thème : S60, VMA, côtes…), un cycle de 4 semaines de la
+// routine a un THÈME : la séance principale reste dans un même domaine pendant le cycle, et
+// son palier monte de S1 à S3 (progression dans le thème). Les thèmes dépendent de l'objectif :
+// peu de vitesse pour un trail ou un marathon, un peu (jamais deux semaines de suite) pour un 10 km.
+const ROUTINE_DOMAIN = { '01': 'ef', '02': 'aero', '06': 'aero', '07': 'aero', '03': 'seuil', '04': 'seuil', '08': 'seuil', '05': 'vma', '09': 'vma', '11': 'force', '12': 'force', '10': 'long' };
+const ROUTINE_THEME_LABEL = { aero: 'Endurance active', seuil: 'Seuil', vma: 'Vitesse (VMA, AS10)', force: 'Résistance (côtes, terrain)' };
+const ROUTINE_TARGETS = {
+  '5k':     { label: '5 km', themes: ['aero', 'vma', 'seuil', 'vma', 'seuil'], vmaPerCycle: 2, why: 'endurance active, vitesse (VMA, AS10) et seuil en alternance ; la vitesse tient au plus 2 séances par cycle, jamais deux semaines de suite' },
+  '10k':    { label: '10 km', themes: ['aero', 'seuil', 'vma', 'seuil'], vmaPerCycle: 2, why: 'endurance active, seuil puis vitesse (VMA, AS10) en alternance ; la vitesse tient au plus 2 séances par cycle, jamais deux semaines de suite' },
+  semi:     { label: 'semi-marathon', themes: ['aero', 'seuil', 'seuil', 'vma', 'seuil'], vmaPerCycle: 1, why: 'surtout du seuil et de l\u2019allure semi, avec très peu de vitesse (1 séance par cycle au plus)' },
+  marathon: { label: 'marathon', themes: ['aero', 'seuil', 'aero', 'seuil'], vmaPerCycle: 0, why: 'endurance active, allure marathon et seuil ; pas de travail de VMA' },
+  trail:    { label: 'trail', themes: ['force', 'aero', 'force', 'aero'], vmaPerCycle: 0, why: 'résistance (côtes, terrain) et endurance active ; pas de travail de VMA sur route' },
+  base:     { label: 'polyvalent', themes: ['aero', 'seuil', 'force', 'vma', 'seuil'], vmaPerCycle: 1, why: 'Pas d\u2019objectif précis : endurance active, seuil, résistance et un peu de vitesse en alternance' },
+};
+// domaines mis en avant à l'approche du plan (horizon intermédiaire), par cible
+const ROUTINE_SPECIFIC = { '5k': ['vma', 'seuil'], '10k': ['seuil', 'vma'], semi: ['seuil'], marathon: ['aero', 'seuil'], trail: ['force', 'aero'] };
+
+// Macro-progression : a) cycle 1 = reprise ; b) la charge monte de cycle en cycle (rampQ = position
+// visée dans la liste des séances du palier, de la plus légère à la plus chargée) ; c) avec un plan,
+// le sommet tombe ~5 semaines avant son début, puis stabilisation et transition (déjà gérées par
+// l'horizon) ; d) sans plan : vague lente avec un cycle de consolidation tous les 4 cycles.
+function routineMacro(o) {
+  const t = ROUTINE_TARGETS[o.targetKey] || ROUTINE_TARGETS.base;
+  const idx = Math.max(0, o.weekIdx || 0);
+  const cycleIdx = Math.floor(idx / 4);
+  let p, consolidation = false;
+  if (o.plan) {
+    const peakAt = 5;
+    p = _clamp(idx / Math.max(1, idx + o.plan.weeksToStart - peakAt), 0, 1);
+  } else {
+    consolidation = cycleIdx % 4 === 3;
+    p = consolidation ? 0.15 : 0.2 + 0.2 * (cycleIdx % 4);
+  }
+  let rampQ = _clamp(0.15 + 0.7 * p, 0.1, 0.9);
+  let theme = t.themes[cycleIdx % t.themes.length];
+  let phaseName = cycleIdx === 0 ? 'Reprise' : consolidation ? 'Consolidation' : 'Développement';
+  const hz = o.horizon && o.horizon.name;
+  if (hz === 'intermediate') { const sp = ROUTINE_SPECIFIC[o.targetKey]; if (sp && !sp.includes(theme)) theme = sp[cycleIdx % sp.length]; phaseName = 'Orientation vers le plan'; }
+  if (hz === 'close') { phaseName = 'Stabilisation'; rampQ *= 0.8; }
+  if (hz === 'final') { phaseName = 'Transition'; rampQ *= 0.6; }
+  return { cycleIdx, theme, themeLabel: ROUTINE_THEME_LABEL[theme], phaseName, rampQ: Math.round(rampQ * 100) / 100, p: Math.round(p * 100) / 100, consolidation, targetLabel: t.label, why: t.why };
+}
+
 // ─── Pré-préparation avant un plan ou une course ─────────────────────────
 // Familles de séances utiles à chaque cible (orientation douce, jamais exclusive)
 const ROUTINE_TARGET_FAMILIES = {
@@ -165,8 +195,11 @@ function routineRaceAdvice(weeksToRace, distKey) {
 }
 
 // ─── Choix pondéré dans une liste de candidats ───────────────────────────
-function _pick(cands, history, rand, wantFamilyNot = [], prefer = []) {
+function _pick(cands, history, rand, wantFamilyNot = [], prefer = [], ramp = null) {
   if (!cands.length) return null;
+  // ramp (0..1) : on vise cette position dans la liste triée par charge — progression dans le palier
+  const rank = new Map();
+  if (ramp != null && cands.length > 1) [...cands].sort((a, b) => routineModelLoad(a).score - routineModelLoad(b).score).forEach((m, i, arr) => rank.set(m.id, i / (arr.length - 1)));
   const recent = new Map();   // id → semaines écoulées depuis la dernière proposition
   const famRecent = new Map();
   history.forEach(h => {
@@ -184,6 +217,7 @@ function _pick(cands, history, rand, wantFamilyNot = [], prefer = []) {
     if (age != null) sc -= (ROUTINE_RULES.recencyWeeks - age + 1) * 1.2;
     if (wantFamilyNot.includes(m.family)) sc -= 3;
     if (prefer.includes(m.family)) sc += 2.5;
+    if (rank.has(m.id)) sc -= Math.abs(rank.get(m.id) - ramp) * 4;
     return { m, sc };
   }).sort((a, b) => b.sc - a.sc);
   return scored[0].m;
@@ -236,6 +270,39 @@ function routineGenerateWeek(prefs, weekNum, ctx) {
   if (ctx.prevExcess > 0.2 && phaseIdx !== 3 && target > 0) { target -= 1; notes.push('La semaine dernière était plus chargée que prévu : palier ramené d\u2019un cran.'); }
   const isRecup = phase === 'S4';
 
+  // Logique de plan : thème du cycle, progression d'un cycle à l'autre
+  const macro = routineMacro({ weekIdx: ctx.weekIdx != null ? ctx.weekIdx : weekNum - 1, targetKey, plan, horizon });
+  const cyclePos = routinePhaseOf(weekNum).idx;
+
+  if (macro.phaseName === 'Reprise') {
+    if (target > 1) notes.push('Premier cycle : on reprend en douceur, pas de séance très exigeante.');
+    cap = Math.min(cap, 1); target = Math.min(target, cap);
+  }
+
+  // Écoute de l'utilisateur : assiduité, ressenti, évolution de la VO2max (jamais de forçage)
+  const sg = ctx.signals || {};
+  const adh = sg.adherence && sg.adherence.due >= 3 ? sg.adherence.done / sg.adherence.due : null;
+  const mood = sg.moods || {};
+  const moodTotal = (mood.good || 0) + (mood.neutral || 0) + (mood.bad || 0);
+  const hold = adh !== null && adh < 0.6;
+  const tired = (mood.bad || 0) >= 2 || (moodTotal >= 3 && (mood.bad || 0) / moodTotal >= 0.4);
+  const vt = sg.vmaTrendPct;
+  if (hold) {
+    cap = Math.min(cap, 1); target = Math.min(target, cap); macro.rampQ = Math.min(macro.rampQ, 0.25);
+    notes.push('Tu as manqué plusieurs séances récemment (' + sg.adherence.done + ' faites sur ' + sg.adherence.due + ') : on garde une charge modérée pour reprendre sans te griller.');
+  }
+  if (tired && target > 0 && !isRecup) {
+    target -= 1; macro.rampQ = Math.min(macro.rampQ, 0.3);
+    notes.push('Plusieurs séances récentes ont été difficiles à vivre : palier ramené d\u2019un cran, on ne force pas.');
+  }
+  if (vt != null && vt <= -3) {
+    cap = Math.min(cap, 1); target = Math.min(target, cap); macro.rampQ = Math.min(macro.rampQ, 0.3);
+    notes.push('Ta VO2max a baissé de ' + Math.abs(vt).toFixed(1) + ' % ces dernières semaines : on consolide avant de monter.');
+  } else if (vt != null && vt >= 2 && !hold && !tired) {
+    macro.rampQ = Math.min(0.9, macro.rampQ + 0.1);
+    notes.push('Ta VO2max progresse (+' + vt.toFixed(1) + ' %) : la routine peut monter un peu plus.');
+  }
+
   let efTarget = ctx.efTarget || 45, slTargetBase = ctx.slTarget || 75;
   if (horizon && ['intermediate', 'close'].includes(horizon.name) && plan.longestMin && plan.longestMin * 0.85 > slTargetBase) {
     slTargetBase = _round5(Math.min(plan.longestMin * 0.85, slTargetBase + 10));      // se rapproche des sorties longues du plan
@@ -245,6 +312,11 @@ function routineGenerateWeek(prefs, weekNum, ctx) {
     if (plan.sessionsPerWeek && plan.sessionsPerWeek > freq) notes.push('Ton plan comporte ' + plan.sessionsPerWeek + ' séances par semaine (tu en as ' + freq + ' ici) : pense à augmenter peu à peu.');
     if (plan.isTrail && terrain !== 'trail') notes.push('Ton plan est un plan Trail : passe ta routine en Trail pour t\u2019y préparer.');
     if (horizon.gap > ROUTINE_RULES.plan.gapRatio && ['intermediate', 'close'].includes(horizon.name)) notes.push('La première semaine de ton plan est plus chargée que ta routine actuelle : on monte progressivement le volume.');
+  }
+  // le volume suit la montée : sortie longue jusqu'à +12 % au sommet, EF un peu plus longue
+  if (!isRecup) {
+    slTargetBase = _round5(Math.min(maxMin, slTargetBase * (1 + 0.12 * macro.p)));
+    if (macro.p >= 0.6) efTarget = Math.min(efTarget + 5, ROUTINE_RULES.efBounds[1]);
   }
   if (race) {
     const adv = routineRaceAdvice(race.weeksToRace, race.targetKey);
@@ -262,19 +334,35 @@ function routineGenerateWeek(prefs, weekNum, ctx) {
   let q1 = null;
   if (freq >= 3 || !isRecup) {
     const q1Pool = pool.filter(m => m.role === 'quality' && routineEligible(m, ec, { maxTier: target }));
-    let cands = q1Pool.filter(m => routineModelLoad(m).tier === target);
+    const tgt = ROUTINE_TARGETS[targetKey] || ROUTINE_TARGETS.base;
+    // vitesse encadrée : au plus N séances par cycle, jamais deux semaines de suite, jamais pour un trail / marathon
+    const dom = m => ROUTINE_DOMAIN[m.family];
+    const vmaIn = h => (h.sessions || []).filter(x => ['Q1', 'Q2'].includes(x.slot) && ROUTINE_DOMAIN[x.family] === 'vma').length;
+    const vmaCycle = history.filter(h => h.age >= 1 && h.age <= cyclePos).reduce((a, h) => a + vmaIn(h), 0);
+    const vmaPrev = history.some(h => h.age === 1 && (h.sessions || []).some(x => ['Q1', 'Q2'].includes(x.slot) && x.family === '05'));
+    const vmaOk = tgt.vmaPerCycle > 0 && vmaCycle < tgt.vmaPerCycle && !isRecup;
+    const allowed = list => list.filter(m => dom(m) !== 'vma' || (vmaOk && !(vmaPrev && m.family === '05')));
+    const FALLBACK = { vma: ['seuil', 'aero'], seuil: ['aero', 'force'], aero: ['force', 'seuil'], force: ['aero', 'seuil'] };
+    const themed = list => {
+      const ok = allowed(list);
+      let r = ok.filter(m => dom(m) === macro.theme);
+      for (const d of (FALLBACK[macro.theme] || [])) { if (r.length) break; r = ok.filter(m => dom(m) === d); }
+      return r.length ? r : ok;
+    };
+    let cands = themed(q1Pool.filter(m => routineModelLoad(m).tier === target));
     if (isRecup) {
-      cands = q1Pool.filter(m => routineModelLoad(m).tier === 0 && routineModelLoad(m).totalMin <= 45);
-      if (!cands.length) cands = q1Pool.filter(m => routineModelLoad(m).tier === 0);
+      cands = allowed(q1Pool.filter(m => routineModelLoad(m).tier === 0 && routineModelLoad(m).totalMin <= 45));
+      if (!cands.length) cands = allowed(q1Pool.filter(m => routineModelLoad(m).tier === 0));
     }
-    if (!cands.length) cands = q1Pool.filter(m => routineModelLoad(m).tier >= Math.max(0, target - 1));
+    if (!cands.length) cands = themed(q1Pool.filter(m => routineModelLoad(m).tier >= Math.max(0, target - 1)));
+    if (!cands.length) cands = allowed(q1Pool);
     if (!cands.length) cands = q1Pool;
     if (horizon && ['close', 'final'].includes(horizon.name)) {
       const seen = new Set(history.filter(h => h.age <= 12).flatMap(h => (h.sessions || []).map(x => x.family)));
       const familiar = cands.filter(m => seen.has(m.family));
       if (familiar.length) cands = familiar;                  // pas de famille jamais pratiquée juste avant le plan
     }
-    q1 = freq === 2 ? null : _pick(cands, history, rand, lastQ1Fam, prefer);
+    q1 = freq === 2 ? null : _pick(cands, history, rand, lastQ1Fam, prefer, isRecup ? null : macro.rampQ);
   }
 
   // — sortie longue : EF seule, ou "active" (blocs à allure : compte comme qualité).
@@ -289,7 +377,7 @@ function routineGenerateWeek(prefs, weekNum, ctx) {
   // à 3 sorties avec une qualité déjà prévue, une SL active ferait 2 séances de
   // qualité sur 3 : réservé au niveau 3 (cahier des charges §6 : EF = socle)
   const wantActive = !isRecup && level >= 2 && (phaseIdx === 1 || phaseIdx === 2) && cap >= 1
-    && (!q1 || freq >= 4 || level >= 3);
+    && (!q1 || freq >= 4 || level >= 3) && !(horizon && horizon.name === 'final');
   const slMaxTier = (q1 && routineModelLoad(q1).tier >= 2) || phaseIdx === 1 ? 0 : 1;
   let slCands = [], slActiveChosen = false;
   if (wantActive) {
@@ -318,7 +406,8 @@ function routineGenerateWeek(prefs, weekNum, ctx) {
   if (freq >= 4 && !isRecup && !slActiveChosen) {
     const c2 = pool.filter(m => m.role === 'quality' && ['02', '06', '11'].includes(m.family) && m.family !== (q1 && q1.family)
       && routineEligible(m, ec, { maxTier: 0 }) && m.id !== (q1 && q1.id));
-    q2 = _pick(c2, history, rand);
+    // complément du thème : résistance si le thème est l'endurance active, sinon endurance active
+    q2 = _pick(c2, history, rand, [], macro.theme === 'aero' ? ['11', '12'] : ['02', '06']);
   }
 
   // — EF : durée proche du volume habituel, variantes pour ne pas toujours proposer pareil
@@ -355,6 +444,7 @@ function routineGenerateWeek(prefs, weekNum, ctx) {
   const hardCount = sessions.filter(s => s.tier >= 2).length;
   if (hardCount > 1) warnings.push('Deux séances très exigeantes dans la même semaine.');
   return { weekNum, phase, phaseIdx, target, cap, level, caution: !!ctx.caution,
+    macro, signals: { adherenceRate: adh, hold, tired, vmaTrendPct: vt != null ? vt : null },
     plan: plan ? { name: plan.name || null, weeksToStart: plan.weeksToStart, horizon: horizon.name, transition } : null,
     race: race ? { name: race.name || null, weeksToRace: race.weeksToRace, recommendNow: routineRaceAdvice(race.weeksToRace, race.targetKey).recommendNow } : null, qualityCount, hardCount, sessions, notes, warnings, generatedAt: Date.now() };
 }
@@ -458,22 +548,27 @@ function routineLoadOfDsl(dsl, wuCd) {
   const key = dsl + '|' + wuCd;
   if (_loadDslCache[key]) return _loadDslCache[key];
   const c = _RC.compileRoutineDsl(dsl, { wuCd });
-  let score = 0;
+  let score = 0, maxW = 0;
   const counts = {};
   c.steps.forEach(s => {
     if (['warmup', 'cooldown', 'recovery', 'setRecovery'].includes(s.role)) return;
     const min = s.sec / 60;
     const k = s.code === 'RPE' ? 'RPE' + s.rpe : s.code;
     const mult = s.sub === 'low' ? 0.94 : s.sub === 'high' ? 1.06 : 1;     // bas / haut de plage
-    if (s.code === 'RPE') score += min * routineRpeWeight(s.rpe);
-    else if (ROUTINE_WEIGHTS[s.code]) score += min * ROUTINE_WEIGHTS[s.code] * mult;
+    let w;
+    if (s.code === 'RPE') w = routineRpeWeight(s.rpe);
+    else if (ROUTINE_WEIGHTS[s.code]) w = ROUTINE_WEIGHTS[s.code] * mult;
     else return;
+    score += min * w;
+    if (w > maxW) maxW = w;
     counts[k] = (counts[k] || 0) + s.sec;
   });
   const mainCode = Object.keys(counts).sort((a, b) => counts[b] - counts[a])[0] || null;
   let tier = score < ROUTINE_RULES.tierLightMax ? 0 : score < ROUTINE_RULES.tierModerateMax ? 1 : 2;
-  if (['VMA', 'S30', 'AS10'].includes(mainCode)) tier = Math.max(tier, 1);
-  return (_loadDslCache[key] = { score: Math.round(score), tier, mainCode, counts, totalMin: c.totalSec / 60, qualityMin: c.qualitySec / 60 });
+  // un effort très intense (VMA, S30, AS10, côtes RPE 7+) n'est jamais "léger", même court :
+  // ni en semaine souple, ni en récupération
+  if (maxW >= 2.4) tier = Math.max(tier, 1);
+  return (_loadDslCache[key] = { score: Math.round(score), tier, mainCode, maxWeight: maxW, counts, totalMin: c.totalSec / 60, qualityMin: c.qualitySec / 60 });
 }
 
 // snap : fiche figée d'une semaine ; wk : contexte de la semaine
@@ -564,6 +659,7 @@ return {
   ROUTINE_RULES, routinePhaseOf, routineModelLoad, routineAssessProfile,
   routineEligible, routineGenerateWeek, routineDescribe,
   routinePlanHorizon, routineRaceAdvice, ROUTINE_TARGET_FAMILIES,
+  routineMacro, ROUTINE_TARGETS, ROUTINE_DOMAIN, ROUTINE_THEME_LABEL,
   routineVaryDsl, routineLoadOfDsl, routineBuildVariants, routineWeekExcess, routineLoadValue,
   ROUTINE_VARIANT_ORDER, ROUTINE_VARIANT_LABEL, ROUTINE_WORK_CAP_MIN,
 };

@@ -59,7 +59,7 @@ test('progression S1 → S3 : le palier monte (niveau 3)', () => {
   for (let b = 0; b < 2; b++) {
     const [s1, s2, s3] = [weeks[b * 4], weeks[b * 4 + 1], weeks[b * 4 + 2]].map(tierOfQ1);
     assert.ok(s1 <= s2 && s2 <= s3, `bloc ${b + 1} : ${s1} ${s2} ${s3}`);
-    assert.equal(s3, 2);
+    assert.equal(s3, b === 0 ? 1 : 2, b === 0 ? 'premier cycle = reprise : pas de palier dur' : 'palier dur au 2e cycle');
   }
 });
 
@@ -193,10 +193,10 @@ test('séance d\'endurance : volume ±10 min, jamais de rouge ; semaine passée 
 
 test('semaine plus chargée que prévu → palier suivant ramené d\'un cran, jamais de rattrapage après du vert', () => {
   const p = PROFILES[1];
-  const normal = E.routineGenerateWeek(p.prefs, 3, { ...p.ctx, history: [] });
-  const apres = E.routineGenerateWeek(p.prefs, 3, { ...p.ctx, history: [], prevExcess: 0.3 });
+  const normal = E.routineGenerateWeek(p.prefs, 7, { ...p.ctx, history: [] });
+  const apres = E.routineGenerateWeek(p.prefs, 7, { ...p.ctx, history: [], prevExcess: 0.3 });
   assert.equal(apres.target, normal.target - 1);
-  const apresVert = E.routineGenerateWeek(p.prefs, 3, { ...p.ctx, history: [], prevExcess: -0.2 });
+  const apresVert = E.routineGenerateWeek(p.prefs, 7, { ...p.ctx, history: [], prevExcess: -0.2 });
   assert.equal(apresVert.target, normal.target);
   const w = [{ ...snapOf('A03-01'), variant: 'orange', dsl: V('A03-01').orange.dsl }];
   assert.ok(E.routineWeekExcess(w).excessPct > 0.2);
@@ -372,4 +372,98 @@ test('recréer une routine (nouvelle seedSalt) change les séances proposées ; 
   const a = ids(111), b = ids(222);
   assert.ok(a.some((w, i) => w !== b[i]), 'au moins une semaine différente');
   assert.ok(a.filter((w, i) => w !== b[i]).length >= 3, 'la plupart des semaines changent');
+});
+
+// ─── Logique de plan : objectif → thèmes, progression, sommet avant le plan ─────
+const DOM = E.ROUTINE_DOMAIN;
+function toPlan(targetKey, N, extra = {}, prefsOver = {}, ctxOver = {}) {
+  const p = PROFILES[1];
+  const out = [];
+  const plan = { name: targetKey, totalWeeks: 16, week1Min: 200, longestMin: 80, sessionsPerWeek: 4, targetKey, isTrail: targetKey === 'trail', ...extra };
+  for (let w = 1; w <= N; w++) {
+    const history = out.map(o => ({ age: w - o.weekNum, sessions: o.sessions.map(s => ({ modelId: s.modelId, slot: s.slot, family: s.family })) }));
+    out.push(E.routineGenerateWeek({ ...p.prefs, ...prefsOver }, w, { ...p.ctx, weeklyMin: 190, ...ctxOver, history, plan: { ...plan, weeksToStart: N + 1 - w } }));
+  }
+  return out;
+}
+const vmaCount = ws => ws.flatMap(w => w.sessions).filter(s => DOM[s.family] === 'vma').length;
+const loadOf = w => w.sessions.reduce((a, s) => a + (s.load || 0), 0);
+
+test('objectif : trail et marathon = aucune vitesse ; semi = très peu ; 10 km = quelques séances, jamais plus de 2 par cycle', () => {
+  assert.equal(vmaCount(toPlan('trail', 20, {}, { terrain: 'trail' })), 0);
+  assert.equal(vmaCount(toPlan('marathon', 20)), 0);
+  for (const key of ['5k', '10k', 'semi']) {
+    const ws = toPlan(key, 24);
+    for (let c = 0; c < 6; c++) assert.ok(vmaCount(ws.slice(c * 4, c * 4 + 4)) <= { '5k': 2, '10k': 2, semi: 1 }[key], `${key} cycle ${c + 1}`);
+  }
+  assert.ok(vmaCount(toPlan('10k', 24)) >= 2, '10 km : de la vitesse reste proposée');
+  // une VMA pure (famille 05) jamais deux semaines de suite
+  const ws = toPlan('5k', 24);
+  ws.forEach((w, i) => { if (i && w.sessions.some(s => s.family === '05')) assert.ok(!ws[i - 1].sessions.some(s => s.family === '05'), `S${i + 1}`); });
+});
+
+test('thème du cycle : la séance principale reste dans le domaine du thème (progression S2 → S3)', () => {
+  for (const [key, terrain] of [['10k', 'route'], ['trail', 'trail'], ['semi', 'route']]) {
+    const ws = toPlan(key, 24, {}, { terrain });
+    let inTheme = 0, total = 0;
+    ws.forEach(w => { if (['S2', 'S3'].includes(w.phase) && w.plan.horizon === 'long') { const q = w.sessions.find(s => s.slot === 'Q1'); total++; if (q && DOM[q.family] === w.macro.theme) inTheme++; } });
+    assert.ok(total >= 6 && inTheme / total >= 0.7, `${key} : ${inTheme}/${total} en thème`);
+  }
+});
+
+test("1er cycle = reprise (aucun palier dur) ; la charge monte de cycle en cycle jusqu'au sommet", () => {
+  const ws = toPlan('10k', 16);
+  assert.ok(ws.slice(0, 4).every(w => w.sessions.every(s => s.tier <= 1)), 'reprise sans palier dur');
+  const s3 = [2, 6, 10].map(i => loadOf(ws[i]));
+  assert.ok(s3[1] >= s3[0] && s3[2] >= s3[1], `charges S3 : ${s3}`);
+  const top = ws.slice().sort((x, y) => y.macro.rampQ - x.macro.rampQ)[0];
+  assert.ok(top.plan.weeksToStart >= 4, `la progression culmine à ${top.plan.weeksToStart} semaines du plan, pas dans les dernières`);
+  assert.ok(ws.slice(-3).every(w => w.macro.rampQ < top.macro.rampQ), 'stabilisation puis transition : la progression redescend');
+});
+
+test('sommet de la routine avant le plan, puis stabilisation et transition (jamais épuisé au démarrage)', () => {
+  for (const key of ['10k', 'marathon', 'trail']) {
+    const ws = toPlan(key, 16, {}, { terrain: key === 'trail' ? 'trail' : 'route' });
+    const peak = ws.slice().sort((a, b) => loadOf(b) - loadOf(a))[0];
+    assert.ok(peak.plan.weeksToStart >= 4, `${key} : sommet S${peak.weekNum} à ${peak.plan.weeksToStart} sem. du plan`);
+    const last2 = ws.slice(-2).map(loadOf);
+    assert.ok(last2.every(l => l < loadOf(peak)), `${key} : 2 dernières semaines (${last2}) plus légères que le sommet (${loadOf(peak)})`);
+    assert.ok(last2[1] <= 75, `${key} : dernière semaine allégée (${last2[1]})`);
+    assert.equal(ws[ws.length - 2].sessions.filter(s => s.slot === 'SL' && s.qualitySec > 0).length, 0, 'pas de sortie longue active à 2 semaines du plan');
+  }
+});
+
+test('récupération S4 : jamais de séance intense (côtes RPE 7, VMA, S30, AS10 exclus)', () => {
+  for (const key of ['10k', 'trail', 'semi', '5k']) {
+    toPlan(key, 24, {}, { terrain: key === 'trail' ? 'trail' : 'route' }).filter(w => w.phase === 'S4').forEach(w => {
+      w.sessions.forEach(s => { const l = E.routineLoadOfDsl(s.dsl, s.wuCd !== false); assert.ok(l.maxWeight < 2.4, `${key} S${w.weekNum} ${s.name}`); });
+    });
+  }
+});
+
+test("écoute de l'utilisateur : assiduité faible, ressenti difficile, VO2max en baisse = on ne monte pas ; VO2max en hausse = on peut", () => {
+  const p = PROFILES[1];
+  const wk = sig => E.routineGenerateWeek(p.prefs, 7, { ...p.ctx, history: [], signals: sig });          // S3 du cycle 2 : palier dur normalement
+  const normal = wk({});
+  assert.equal(normal.target, 2);
+  const hold = wk({ adherence: { due: 8, done: 3 } });
+  assert.ok(hold.target <= 1 && hold.macro.rampQ <= 0.25 && /manqué plusieurs séances/.test(hold.notes.join(' ')));
+  const tired = wk({ moods: { good: 1, neutral: 0, bad: 3 } });
+  assert.ok(tired.target <= 1 && /difficiles/.test(tired.notes.join(' ')));
+  const down = wk({ vmaTrendPct: -4 });
+  assert.ok(down.target <= 1 && /VO2max a baissé/.test(down.notes.join(' ')));
+  const up = wk({ vmaTrendPct: 3.5, adherence: { due: 8, done: 8 }, moods: { good: 5, neutral: 0, bad: 0 } });
+  assert.equal(up.target, 2);
+  assert.ok(up.macro.rampQ > normal.macro.rampQ && /VO2max progresse/.test(up.notes.join(' ')));
+  // trop peu de séances pour juger : aucun effet
+  assert.equal(wk({ adherence: { due: 2, done: 0 } }).target, 2);
+});
+
+test('sans plan ni course : vague lente avec un cycle de consolidation tous les 4 cycles', () => {
+  const p = PROFILES[1];
+  const ws = [];
+  for (let w = 1; w <= 20; w++) { const history = ws.map(o => ({ age: w - o.weekNum, sessions: o.sessions.map(s => ({ modelId: s.modelId, slot: s.slot, family: s.family })) })); ws.push(E.routineGenerateWeek(p.prefs, w, { ...p.ctx, history })); }
+  const names = [0, 4, 8, 12, 16].map(i => ws[i].macro.phaseName);
+  assert.deepEqual(names, ['Reprise', 'Développement', 'Développement', 'Consolidation', 'Développement']);
+  assert.ok(ws[12].macro.rampQ < ws[8].macro.rampQ, 'la consolidation allège');
 });
