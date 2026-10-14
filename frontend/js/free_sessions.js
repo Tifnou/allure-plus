@@ -956,3 +956,13 @@ function renderPrePlanBanner(goal, weeks) {
     <button type="button" class="btn-plan-action" onclick="${hasRoutine ? 'renderFreeSessionsWeek()' : 'editFreeSessionsPrefs()'}">${hasRoutine ? 'Retour à ma routine' : 'Créer ma routine d’ici là'}</button>`;
   wrap.insertBefore(banner, wrap.firstChild);
 }
+
+// ─── Boutons de réglage (terrain, séances/semaine, durée max) ────────────
+// Délégation sur tout le bloc de configuration : un clic active le bouton et
+// désactive ses voisins du même groupe. (Ce câblage a disparu par erreur à la
+// refonte v1.86.0 — les boutons restaient figés sur leurs valeurs par défaut.)
+document.addEventListener('click', ev => {
+  const btn = ev.target.closest && ev.target.closest('#free-sessions-setup .routes-toggle-btn');
+  if (!btn || !btn.parentElement) return;
+  btn.parentElement.querySelectorAll('.routes-toggle-btn').forEach(b => b.classList.toggle('active', b === btn));
+});

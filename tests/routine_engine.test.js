@@ -315,3 +315,14 @@ test('plan déjà démarré (weeksToStart <= 0) : le moteur ne le traite pas com
   const w = E.routineGenerateWeek(p.prefs, 5, { ...p.ctx, history: [], plan: { ...PLAN10K, weeksToStart: 0 } });
   assert.equal(w.plan, null);
 });
+
+// Régression v1.86.0 : le câblage des boutons de réglage (terrain / séances / durée)
+// avait disparu avec la réécriture de free_sessions.js — ils restaient figés.
+test('écran de réglage : les boutons ont un gestionnaire de clic et existent dans la page', () => {
+  const fs = require('node:fs');
+  const js = fs.readFileSync(require.resolve('../frontend/js/free_sessions.js'), 'utf8');
+  const html = fs.readFileSync(require.resolve('../frontend/index.html'), 'utf8');
+  assert.match(js, /closest\('#free-sessions-setup \.routes-toggle-btn'\)/);
+  ['free-sessions-terrain-toggle', 'free-sessions-freq-toggle', 'free-sessions-maxmin-toggle'].forEach(id => assert.ok(html.includes(`id="${id}"`), id));
+  assert.ok(html.indexOf('id="free-sessions-setup"') < html.indexOf('id="free-sessions-maxmin-toggle"'));
+});
