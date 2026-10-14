@@ -802,10 +802,41 @@ async function disableFreeSessions() {
   else showTrainingEmpty();
 }
 
+const ROUTINE_NOTE_DORMANT = '<strong>Plan retiré.</strong> Tes réglages précédents sont repris : ajuste-les si besoin (terrain, séances par semaine, durée maximale) puis génère ; le cycle repart à la semaine 1.';
+
+// Plan choisi (catalogue / import) qui démarre dans longtemps : on PROPOSE des séances
+// libres jusqu'à son début — elles s'effacent toutes seules le jour où le plan démarre.
+// Pas de proposition si une routine est déjà active ou si le plan démarre bientôt.
+async function proposeRoutineBeforePlan(goal, weeks) {
+  const info = routinePlanInfoFrom(goal, weeks);
+  if (!info) return;
+  const n = routineWeeksBetween(mondayOfWeek(Date.now()), info.startMs);
+  const fp = getFreeSessionsPrefs();
+  if (n < 3 || (fp && !fp.dormant)) return;
+  const ok = await showConfirmModal({
+    title: 'Des séances libres jusqu’au début de ton plan ?',
+    message: `Ton plan « ${info.name} » démarre le ${routineDateFr(info.startMs)}, dans ${n} semaines. D’ici là, Allure+ peut te proposer des séances libres (EF, tempo, seuil, côtes, sortie longue) adaptées à ton niveau et à ta forme, en cycles de 4 semaines, pour arriver en forme au début du plan. Elles s’effacent automatiquement le jour où ton plan démarre.`,
+    confirmLabel: 'Oui, configurer mes séances',
+    cancelLabel: 'Non, pas maintenant',
+    icon: '🏃',
+  });
+  if (!ok) return;
+  editFreeSessionsPrefs();
+  const trail = info.isTrail ? 'trail' : 'route';
+  document.querySelectorAll('#free-sessions-terrain-toggle .routes-toggle-btn').forEach(b => b.classList.toggle('active', b.dataset.terrain === trail));
+  const note = document.getElementById('free-sessions-note');
+  if (note) {
+    note.innerHTML = `<strong>Jusqu’au début de ton plan « ${info.name} » (${routineDateFr(info.startMs)}).</strong> Choisis ton terrain, ton nombre de séances par semaine et la durée maximale, puis génère : ces séances laisseront la place à ton plan le jour où il démarre.`;
+    note.style.display = '';
+  }
+  const box = document.getElementById('free-sessions-setup');
+  if (box && box.scrollIntoView) box.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
 function editFreeSessionsPrefs() {
   const prefs = getFreeSessionsPrefs();
   const note = document.getElementById('free-sessions-note');
-  if (note) note.style.display = prefs && prefs.dormant ? '' : 'none';
+  if (note) { note.innerHTML = ROUTINE_NOTE_DORMANT; note.style.display = prefs && prefs.dormant ? '' : 'none'; }
   el('campus-connect-card').style.display = '';
   el('campus-plan-wrap').style.display = 'none';
   el('campus-login-block').style.display = 'none';

@@ -2174,11 +2174,13 @@ async function importPlan(event) {
     }).catch(() => {});
 
     showToast('Plan importé (' + nbWeeks + ' semaines) - chargement...', 'success');
-    setTimeout(() => {
+    setTimeout(async () => {
       campusState.usingImportedPlan = true;
       // Ne pas forcer campusConnected=false
       showTrainingLoading();
-      loadTrainingPlan();
+      await loadTrainingPlan();
+      // Plan qui démarre dans longtemps : proposer des séances libres d'ici là
+      if (typeof proposeRoutineBeforePlan === 'function') proposeRoutineBeforePlan(data.goal, data.weeks);
     }, 800);
 
   } catch(err) {

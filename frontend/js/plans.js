@@ -759,7 +759,7 @@ async function loadPlanFromCatalog(planId) {
     }).catch(() => {});
 
     showToast('Plan chargé ! Ouverture de l\'onglet Entraînement...', 'success');
-    setTimeout(() => {
+    setTimeout(async () => {
       // Naviguer vers l'onglet Entraînement
       const navTraining = document.querySelector('[data-page="training"]');
       if (navTraining) navTraining.click();
@@ -767,8 +767,10 @@ async function loadPlanFromCatalog(planId) {
       if (typeof loadTrainingPlan === 'function') {
         campusState.usingImportedPlan = true;
         showTrainingLoading();
-        loadTrainingPlan();
+        await loadTrainingPlan();
       }
+      // Plan qui démarre dans longtemps : proposer des séances libres d'ici là
+      if (typeof proposeRoutineBeforePlan === 'function') proposeRoutineBeforePlan(data.goal, data.weeks);
     }, 800);
 
   } catch(err) {
