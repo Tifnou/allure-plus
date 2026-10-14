@@ -467,3 +467,28 @@ test('sans plan ni course : vague lente avec un cycle de consolidation tous les 
   assert.deepEqual(names, ['Reprise', 'Développement', 'Développement', 'Consolidation', 'Développement']);
   assert.ok(ws[12].macro.rampQ < ws[8].macro.rampQ, 'la consolidation allège');
 });
+
+test("objectif : aucune allure sans intérêt pour la cible (AS42 hors 10 km / 5 km, rien de route en trail)", () => {
+  const codesOf = ws => new Set(ws.flatMap(w => w.sessions).flatMap(s => Object.keys(E.routineLoadOfDsl(s.dsl, s.wuCd !== false).counts)));
+  const AVOID = { '10k': ['AS42'], '5k': ['AS42', 'AS21'], marathon: ['S30'], trail: ['AS42', 'AS21', 'AS10', 'S30'] };
+  for (const [key, bad] of Object.entries(AVOID)) {
+    for (const flag of key === 'trail' ? [false, true] : [false]) {
+      const ws = toPlan(key, 24, {}, { terrain: key === 'trail' ? 'trail' : 'route' }, { trailRoadFamilies: flag });
+      const codes = codesOf(ws);
+      bad.forEach(c => assert.ok(!codes.has(c), `${key}${flag ? ' (familles route ouvertes)' : ''} : ${c} proposé`));
+      assert.ok(ws.every(w => w.sessions.length === 4), `${key} : toujours 4 séances`);
+    }
+  }
+  assert.ok(codesOf(toPlan('marathon', 24)).has('AS42'), "le marathon, lui, garde l'AS42");
+  assert.ok(codesOf(toPlan('semi', 24)).has('AS21'), "le semi garde l'AS21");
+});
+
+test("vitesse (AS10 / VMA) comptée partout, sorties longues comprises : quota par cycle, jamais pendant la reprise", () => {
+  const speedIn = w => w.sessions.filter(x => { const l = E.routineLoadOfDsl(x.dsl, x.wuCd !== false); return 'AS10' in l.counts || 'VMA' in l.counts; }).length;
+  const QUOTA = { '10k': 2, '5k': 2, semi: 1, marathon: 0 };
+  for (const [key, q] of Object.entries(QUOTA)) {
+    const ws = toPlan(key, 24);
+    ws.slice(0, 4).forEach(w => assert.equal(speedIn(w), 0, `${key} S${w.weekNum} : pas de vitesse pendant la reprise`));
+    for (let c = 0; c < 6; c++) assert.ok(ws.slice(c * 4, c * 4 + 4).reduce((a, w) => a + speedIn(w), 0) <= q, `${key} cycle ${c + 1} : plus de ${q} séance(s) de vitesse`);
+  }
+});

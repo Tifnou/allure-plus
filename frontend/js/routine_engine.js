@@ -128,13 +128,15 @@ function routineEligible(model, ctx, opts = {}) {
 const ROUTINE_DOMAIN = { '01': 'ef', '02': 'aero', '06': 'aero', '07': 'aero', '03': 'seuil', '04': 'seuil', '08': 'seuil', '05': 'vma', '09': 'vma', '11': 'force', '12': 'force', '10': 'long' };
 const ROUTINE_THEME_LABEL = { aero: 'Endurance active', seuil: 'Seuil', vma: 'Vitesse (VMA, AS10)', force: 'Résistance (côtes, terrain)' };
 const ROUTINE_TARGETS = {
-  '5k':     { label: '5 km', themes: ['aero', 'vma', 'seuil', 'vma', 'seuil'], vmaPerCycle: 2, why: 'endurance active, vitesse (VMA, AS10) et seuil en alternance ; la vitesse tient au plus 2 séances par cycle, jamais deux semaines de suite' },
-  '10k':    { label: '10 km', themes: ['aero', 'seuil', 'vma', 'seuil'], vmaPerCycle: 2, why: 'endurance active, seuil puis vitesse (VMA, AS10) en alternance ; la vitesse tient au plus 2 séances par cycle, jamais deux semaines de suite' },
+  '5k':     { avoidCodes: ['AS42', 'AS21'], label: '5 km', themes: ['aero', 'vma', 'seuil', 'vma', 'seuil'], vmaPerCycle: 2, why: 'endurance active, vitesse (VMA, AS10) et seuil en alternance ; la vitesse tient au plus 2 séances par cycle, jamais deux semaines de suite' },
+  '10k':    { avoidCodes: ['AS42'], label: '10 km', themes: ['aero', 'seuil', 'vma', 'seuil'], vmaPerCycle: 2, why: 'endurance active, seuil puis vitesse (VMA, AS10) en alternance ; la vitesse tient au plus 2 séances par cycle, jamais deux semaines de suite' },
   semi:     { label: 'semi-marathon', themes: ['aero', 'seuil', 'seuil', 'vma', 'seuil'], vmaPerCycle: 1, why: 'surtout du seuil et de l\u2019allure semi, avec très peu de vitesse (1 séance par cycle au plus)' },
-  marathon: { label: 'marathon', themes: ['aero', 'seuil', 'aero', 'seuil'], vmaPerCycle: 0, why: 'endurance active, allure marathon et seuil ; pas de travail de VMA' },
-  trail:    { label: 'trail', themes: ['force', 'aero', 'force', 'aero'], vmaPerCycle: 0, why: 'résistance (côtes, terrain) et endurance active ; pas de travail de VMA sur route' },
+  marathon: { avoidCodes: ['S30'], label: 'marathon', themes: ['aero', 'seuil', 'aero', 'seuil'], vmaPerCycle: 0, why: 'endurance active, allure marathon et seuil ; pas de travail de VMA' },
+  trail:    { avoidCodes: ['AS42', 'AS21', 'AS10', 'S30'], label: 'trail', themes: ['force', 'aero', 'force', 'aero'], vmaPerCycle: 0, why: 'résistance (côtes, terrain) et endurance active ; pas de travail de VMA sur route' },
   base:     { label: 'polyvalent', themes: ['aero', 'seuil', 'force', 'vma', 'seuil'], vmaPerCycle: 1, why: 'Pas d\u2019objectif précis : endurance active, seuil, résistance et un peu de vitesse en alternance' },
 };
+// avoidCodes : allures sans intérêt pour l'objectif, JAMAIS proposées dans la routine (ex. AS42 = allure
+// marathon n'a pas sa place dans une routine qui prépare un 10 km ; les allures de route n'ont pas de sens en trail)
 // domaines mis en avant à l'approche du plan (horizon intermédiaire), par cible
 const ROUTINE_SPECIFIC = { '5k': ['vma', 'seuil'], '10k': ['seuil', 'vma'], semi: ['seuil'], marathon: ['aero', 'seuil'], trail: ['force', 'aero'] };
 
@@ -192,6 +194,15 @@ function routinePlanHorizon(weeksToStart, plan, profile) {
 function routineRaceAdvice(weeksToRace, distKey) {
   const typical = ROUTINE_RULES.typicalPlanWeeks[distKey] || 12;
   return { typical, recommendNow: weeksToRace <= typical + 2, weeksUntilPlan: Math.max(0, weeksToRace - typical) };
+}
+
+const _vmaModelCache = {};
+function _modelHasVma(id) {
+  if (!(id in _vmaModelCache)) {
+    const m = _RC.ROUTINE_CATALOG.find(c => c.id === id);
+    _vmaModelCache[id] = !!m && Object.keys(routineModelLoad(m).counts).some(c => c === 'AS10' || c === 'VMA');
+  }
+  return _vmaModelCache[id];
 }
 
 // ─── Choix pondéré dans une liste de candidats ───────────────────────────
@@ -325,22 +336,28 @@ function routineGenerateWeek(prefs, weekNum, ctx) {
       : 'Ta routine entretient ta base ; un plan Allure+ sera à charger dans environ ' + adv.weeksUntilPlan + ' semaines pour ta course.');
   }
 
-  const pool = _RC.ROUTINE_CATALOG;
+  // catalogue filtré par l'objectif : aucune séance utilisant une allure sans intérêt pour la cible
+  const avoid = (ROUTINE_TARGETS[targetKey] || ROUTINE_TARGETS.base).avoidCodes || [];
+  const pool = avoid.length ? _RC.ROUTINE_CATALOG.filter(m => !Object.keys(routineModelLoad(m).counts).some(c => avoid.includes(c))) : _RC.ROUTINE_CATALOG;
   const ec = { terrain, maxMin, level, trailRoadFamilies: !!ctx.trailRoadFamilies };
   const sessions = [];
   const lastQ1Fam = history.filter(h => h.age <= 2).flatMap(h => (h.sessions || []).filter(s => s.slot === 'Q1').map(s => s.family));
+
+  // Vitesse (AS10 / VMA) encadrée PARTOUT (séance principale, secondaire ET sortie longue active) :
+  // au plus N séances par cycle, jamais deux semaines de suite pour une VMA pure, jamais pour un
+  // trail / marathon, et jamais pendant le premier cycle de reprise.
+  const tgt = ROUTINE_TARGETS[targetKey] || ROUTINE_TARGETS.base;
+  const dom = m => ROUTINE_DOMAIN[m.family];
+  const hasVmaCode = m => Object.keys(routineModelLoad(m).counts).some(c => c === 'AS10' || c === 'VMA');
+  const vmaIn = h => (h.sessions || []).filter(x => (['Q1', 'Q2'].includes(x.slot) && ROUTINE_DOMAIN[x.family] === 'vma') || (x.slot === 'SL' && _modelHasVma(x.modelId))).length;
+  const vmaCycle = history.filter(h => h.age >= 1 && h.age <= cyclePos).reduce((a, h) => a + vmaIn(h), 0);
+  const vmaPrev = history.some(h => h.age === 1 && (h.sessions || []).some(x => ['Q1', 'Q2'].includes(x.slot) && x.family === '05'));
+  const vmaOk = tgt.vmaPerCycle > 0 && vmaCycle < tgt.vmaPerCycle && !isRecup && macro.phaseName !== 'Reprise';
 
   // — qualité principale (Q1) : choisie en premier (palier cible), jamais la même famille d'affilée
   let q1 = null;
   if (freq >= 3 || !isRecup) {
     const q1Pool = pool.filter(m => m.role === 'quality' && routineEligible(m, ec, { maxTier: target }));
-    const tgt = ROUTINE_TARGETS[targetKey] || ROUTINE_TARGETS.base;
-    // vitesse encadrée : au plus N séances par cycle, jamais deux semaines de suite, jamais pour un trail / marathon
-    const dom = m => ROUTINE_DOMAIN[m.family];
-    const vmaIn = h => (h.sessions || []).filter(x => ['Q1', 'Q2'].includes(x.slot) && ROUTINE_DOMAIN[x.family] === 'vma').length;
-    const vmaCycle = history.filter(h => h.age >= 1 && h.age <= cyclePos).reduce((a, h) => a + vmaIn(h), 0);
-    const vmaPrev = history.some(h => h.age === 1 && (h.sessions || []).some(x => ['Q1', 'Q2'].includes(x.slot) && x.family === '05'));
-    const vmaOk = tgt.vmaPerCycle > 0 && vmaCycle < tgt.vmaPerCycle && !isRecup;
     const allowed = list => list.filter(m => dom(m) !== 'vma' || (vmaOk && !(vmaPrev && m.family === '05')));
     const FALLBACK = { vma: ['seuil', 'aero'], seuil: ['aero', 'force'], aero: ['force', 'seuil'], force: ['aero', 'seuil'] };
     const themed = list => {
@@ -381,7 +398,8 @@ function routineGenerateWeek(prefs, weekNum, ctx) {
   const slMaxTier = (q1 && routineModelLoad(q1).tier >= 2) || phaseIdx === 1 ? 0 : 1;
   let slCands = [], slActiveChosen = false;
   if (wantActive) {
-    const act = slActive.filter(m => routineModelLoad(m).tier <= slMaxTier);
+    const vmaThisWeek = !!(q1 && dom(q1) === 'vma');            // la séance principale de la semaine en compte déjà une
+    const act = slActive.filter(m => routineModelLoad(m).tier <= slMaxTier && (!hasVmaCode(m) || (vmaOk && !vmaThisWeek && vmaCycle + 1 <= tgt.vmaPerCycle)));
     slCands = slNear(act);
     if (!slCands.length) slCands = act.filter(m => routineModelLoad(m).totalMin <= slDur + 20);
     slActiveChosen = slCands.length > 0;
