@@ -5743,3 +5743,15 @@ body { background: var(--bg) !important; }
 .admin-switch-row { display: flex; gap: 12px; align-items: flex-start; cursor: pointer; line-height: 1.45; }
 .admin-switch-row input[type="checkbox"] { width: 18px; height: 18px; margin-top: 2px; flex: none; accent-color: var(--accent, #4caf50); }
 .admin-switch-hint { font-size: 12.5px; opacity: .8; }
+
+/* Routines hors plan : bandeau plan à venir / course envisagée */
+.rt-plan-banner { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap;
+  margin-top: 10px; padding: 10px 12px; border-radius: 10px; font-size: 13px; line-height: 1.45;
+  background: rgba(76, 175, 80, .10); border: 1px solid rgba(76, 175, 80, .35); }
+.rt-plan-banner > div { flex: 1 1 320px; }
+.rt-plan-banner--card { margin: 0 0 14px; padding: 12px 16px; }
+.rt-plan-horizon { display: inline-block; margin-left: 6px; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 600;
+  background: rgba(76, 175, 80, .2); }
+.rt-race-fields { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-top: 8px; }
+.rt-race-fields input, .rt-race-fields select { padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border, #ddd); background: transparent; color: inherit; font: inherit; min-width: 0; }
+@media (max-width: 560px) { .rt-race-fields { grid-template-columns: 1fr; } }

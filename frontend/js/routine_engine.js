@@ -33,6 +33,12 @@ const ROUTINE_RULES = {
   hardGapHours: 40,
   recencyWeeks: 16,          // une fiche déjà proposée il y a moins de N semaines est évitée
   defaultMaxMin: 90,
+  // pré-préparation avant un plan (cahier des charges §11) : horizons en
+  // semaines AVANT le début du plan, jamais figés (cf. routinePlanHorizon)
+  plan: { longWeeks: 12, interWeeks: 6, closeWeeks: 3, finalWeeks: 2, shortPlanWeeks: 8, gapRatio: 1.25 },
+  // durée type d'un plan Allure+ par distance (semaines) : sert à dire "c'est
+  // le bon moment pour charger un plan" quand une course est envisagée
+  typicalPlanWeeks: { '5k': 8, '10k': 10, semi: 12, marathon: 16, trail: 16 },
   efBounds: [30, 60], slBounds: [60, 150],
 };
 
@@ -128,8 +134,38 @@ function routineEligible(model, ctx, opts = {}) {
   return true;
 }
 
+// ─── Pré-préparation avant un plan ou une course ─────────────────────────
+// Familles de séances utiles à chaque cible (orientation douce, jamais exclusive)
+const ROUTINE_TARGET_FAMILIES = {
+  '5k': ['04', '05', '09', '03'], '10k': ['09', '04', '03', '05'], semi: ['08', '03', '07'],
+  marathon: ['07', '08', '10'], trail: ['11', '12', '02', '06'],
+};
+
+// Horizon de pré-préparation selon le temps restant avant le début du plan.
+// Seuils paramétrables (ROUTINE_RULES.plan) : un plan court raccourcit les
+// horizons ; une première semaine de plan bien plus chargée que la routine
+// actuelle les allonge (il faut le temps d'y arriver).
+// plan : { totalWeeks, week1Min }, profile : { weeklyMin }
+function routinePlanHorizon(weeksToStart, plan, profile) {
+  const P = ROUTINE_RULES.plan;
+  let long = P.longWeeks, inter = P.interWeeks, close = P.closeWeeks;
+  const final = P.finalWeeks;
+  if (plan && plan.totalWeeks && plan.totalWeeks <= P.shortPlanWeeks) { long = Math.max(8, long - 2); inter = Math.max(4, inter - 1); }
+  const gap = plan && plan.week1Min && profile && profile.weeklyMin ? plan.week1Min / Math.max(60, profile.weeklyMin) : 1;
+  if (gap > P.gapRatio) { close += 1; inter += 2; long += 2; }
+  const name = weeksToStart <= final ? 'final' : weeksToStart <= close ? 'close' : weeksToStart <= inter ? 'intermediate' : 'long';
+  return { name, weeksToStart, gap: Math.round(gap * 100) / 100, bounds: { long, inter, close, final } };
+}
+
+// Course envisagée mais aucun plan choisi : on oriente doucement, sans promettre
+// une préparation ciblée, et on dit quand charger un plan.
+function routineRaceAdvice(weeksToRace, distKey) {
+  const typical = ROUTINE_RULES.typicalPlanWeeks[distKey] || 12;
+  return { typical, recommendNow: weeksToRace <= typical + 2, weeksUntilPlan: Math.max(0, weeksToRace - typical) };
+}
+
 // ─── Choix pondéré dans une liste de candidats ───────────────────────────
-function _pick(cands, history, rand, wantFamilyNot = []) {
+function _pick(cands, history, rand, wantFamilyNot = [], prefer = []) {
   if (!cands.length) return null;
   const recent = new Map();   // id → semaines écoulées depuis la dernière proposition
   const famRecent = new Map();
@@ -147,6 +183,7 @@ function _pick(cands, history, rand, wantFamilyNot = []) {
     const age = recent.get(m.id);
     if (age != null) sc -= (ROUTINE_RULES.recencyWeeks - age + 1) * 1.2;
     if (wantFamilyNot.includes(m.family)) sc -= 3;
+    if (prefer.includes(m.family)) sc += 2.5;
     return { m, sc };
   }).sort((a, b) => b.sc - a.sc);
   return scored[0].m;
@@ -157,7 +194,7 @@ function _pick(cands, history, rand, wantFamilyNot = []) {
 // ctx   : profil (routineAssessProfile) + history [{ age, sessions:[{modelId, slot, family}] }]
 function routineGenerateWeek(prefs, weekNum, ctx) {
   const R = ROUTINE_RULES;
-  const { idx: phaseIdx, phase } = routinePhaseOf(weekNum);
+  let { idx: phaseIdx, phase } = routinePhaseOf(weekNum);
   const terrain = prefs.terrain === 'trail' ? 'trail' : 'road';
   const freq = _clamp(prefs.frequency || 3, 2, 6);
   const maxMin = prefs.maxMin || R.defaultMaxMin;
@@ -166,6 +203,18 @@ function routineGenerateWeek(prefs, weekNum, ctx) {
   const rand = _rng((prefs.anchorMonday || 0) / 1000 + weekNum * 7919);
   const notes = [], warnings = [];
 
+  // Plan Allure+ à venir : la routine s'efface à sa date de début. Les derniers
+  // temps sont une transition (jamais un pic de forme) : dernière semaine
+  // allégée, avant-dernière sans palier dur.
+  const plan = ctx.plan && ctx.plan.weeksToStart >= 1 ? ctx.plan : null;
+  const horizon = plan ? routinePlanHorizon(plan.weeksToStart, plan, ctx) : null;
+  const transition = !!(horizon && horizon.name === 'final' && plan.weeksToStart === 1);
+  if (transition) { phaseIdx = 3; phase = 'S4'; }
+  const race = !plan && ctx.race && ctx.race.weeksToRace >= 1 ? ctx.race : null;
+  const targetKey = plan ? plan.targetKey : race ? race.targetKey : null;
+  const prefer = (plan && ['intermediate', 'close'].includes(horizon.name)) || (race && race.weeksToRace <= 20)
+    ? (ROUTINE_TARGET_FAMILIES[targetKey] || []) : [];
+
   // palier cible selon la phase, plafonné par le niveau et la charge hors course
   let target = phaseIdx === 0 ? 0 : phaseIdx === 1 ? 1 : phaseIdx === 2 ? 2 : 0;
   let cap = level >= 3 ? 2 : level === 2 ? 2 : 1;
@@ -173,10 +222,34 @@ function routineGenerateWeek(prefs, weekNum, ctx) {
   if (other >= R.otherMinCapLight) { cap = 0; warnings.push('Beaucoup d\'autres activités cette semaine : la séance de qualité est allégée.'); }
   else if (other >= R.otherMinCapModerate) { cap = Math.min(cap, 1); notes.push('Autres activités importantes récemment : charge de la séance de qualité limitée.'); }
   if (ctx.hoursSinceLongRun != null && ctx.hoursSinceLongRun < R.hardGapHours) { cap = Math.min(cap, 1); }
+  if (horizon && (horizon.name === 'close' || horizon.name === 'final')) {
+    cap = Math.min(cap, 1);
+    if (!transition) notes.push(horizon.name === 'final'
+      ? 'Plus que 2 semaines avant ton plan : pas de séance très exigeante, on arrive frais.'
+      : 'Ton plan approche : pas de nouveauté ni de semaine très chargée, on stabilise.');
+  }
+  if (transition) notes.push('Dernière semaine avant ton plan : charge allégée pour l\u2019aborder en forme.');
   if (ctx.caution) { cap = Math.min(cap, 1); notes.push('Gêne ou fatigue signalée : séances limitées au palier modéré, variantes plus exigeantes bloquées.'); }
   target = Math.min(target, cap);
   if (ctx.prevExcess > 0.2 && phaseIdx !== 3 && target > 0) { target -= 1; notes.push('La semaine dernière était plus chargée que prévu : palier ramené d\u2019un cran.'); }
   const isRecup = phase === 'S4';
+
+  let efTarget = ctx.efTarget || 45, slTargetBase = ctx.slTarget || 75;
+  if (horizon && ['intermediate', 'close'].includes(horizon.name) && plan.longestMin && plan.longestMin * 0.85 > slTargetBase) {
+    slTargetBase = _round5(Math.min(plan.longestMin * 0.85, slTargetBase + 10));      // se rapproche des sorties longues du plan
+  }
+  if (horizon && ['close', 'final'].includes(horizon.name) && horizon.gap > ROUTINE_RULES.plan.gapRatio) efTarget = Math.min(efTarget + 5, ROUTINE_RULES.efBounds[1]);
+  if (plan) {
+    if (plan.sessionsPerWeek && plan.sessionsPerWeek > freq) notes.push('Ton plan comporte ' + plan.sessionsPerWeek + ' séances par semaine (tu en as ' + freq + ' ici) : pense à augmenter peu à peu.');
+    if (plan.isTrail && terrain !== 'trail') notes.push('Ton plan est un plan Trail : passe ta routine en Trail pour t\u2019y préparer.');
+    if (horizon.gap > ROUTINE_RULES.plan.gapRatio && ['intermediate', 'close'].includes(horizon.name)) notes.push('La première semaine de ton plan est plus chargée que ta routine actuelle : on monte progressivement le volume.');
+  }
+  if (race) {
+    const adv = routineRaceAdvice(race.weeksToRace, race.targetKey);
+    notes.push(adv.recommendNow
+      ? 'Ta course est dans ' + race.weeksToRace + ' semaines : c\u2019est le bon moment de charger un plan Allure+ (Plans d\u2019entraînement). Cette routine ne prépare pas une course de façon ciblée.'
+      : 'Ta routine entretient ta base ; un plan Allure+ sera à charger dans environ ' + adv.weeksUntilPlan + ' semaines pour ta course.');
+  }
 
   const pool = _RC.ROUTINE_CATALOG;
   const ec = { terrain, maxMin, level, trailRoadFamilies: !!ctx.trailRoadFamilies };
@@ -194,14 +267,19 @@ function routineGenerateWeek(prefs, weekNum, ctx) {
     }
     if (!cands.length) cands = q1Pool.filter(m => routineModelLoad(m).tier >= Math.max(0, target - 1));
     if (!cands.length) cands = q1Pool;
-    q1 = freq === 2 ? null : _pick(cands, history, rand, lastQ1Fam);
+    if (horizon && ['close', 'final'].includes(horizon.name)) {
+      const seen = new Set(history.filter(h => h.age <= 12).flatMap(h => (h.sessions || []).map(x => x.family)));
+      const familiar = cands.filter(m => seen.has(m.family));
+      if (familiar.length) cands = familiar;                  // pas de famille jamais pratiquée juste avant le plan
+    }
+    q1 = freq === 2 ? null : _pick(cands, history, rand, lastQ1Fam, prefer);
   }
 
   // — sortie longue : EF seule, ou "active" (blocs à allure : compte comme qualité).
   // Active seulement en S2/S3 et niveau 2+ ; légère si Q1 est déjà très exigeante
   // (jamais deux grosses qualités dans la semaine), nulle en S4.
   const slPool = pool.filter(m => (terrain === 'trail' ? (m.family === '12' || (ctx.trailRoadFamilies && m.family === '10')) : m.family === '10') && routineEligible(m, ec, { maxMin: Math.max(maxMin, 60) }));
-  const slTarget = ctx.slTarget || 75;
+  const slTarget = slTargetBase;
   const slDur = isRecup ? Math.max(60, _round5(slTarget * 0.75)) : slTarget;
   const slNear = list => list.filter(m => Math.abs(routineModelLoad(m).totalMin - slDur) <= 20);
   const slEf = slPool.filter(m => routineModelLoad(m).qualityMin === 0);
@@ -246,7 +324,7 @@ function routineGenerateWeek(prefs, weekNum, ctx) {
   const efBase = pool.filter(m => m.family === '01' && routineEligible(m, ec, { maxMin }));
   const efs = [];
   for (let i = 0; i < efNeed; i++) {
-    const want = (ctx.efTarget || 45) - (i > 0 ? 5 : 0);
+    const want = efTarget - (i > 0 ? 5 : 0);
     const used = new Set(efs.map(m => m.id));
     let cands = efBase.filter(m => !used.has(m.id) && Math.abs(routineModelLoad(m).totalMin - want) <= 10 && routineModelLoad(m).totalMin >= 30);
     if (level >= 2 && i > 0) cands = cands.concat(efBase.filter(m => !used.has(m.id) && m.id === 'A01-08'));
@@ -274,7 +352,9 @@ function routineGenerateWeek(prefs, weekNum, ctx) {
   const qualityCount = sessions.filter(s => s.qualitySec > 0 && s.tier >= 0 && s.role !== 'ef').length;
   const hardCount = sessions.filter(s => s.tier >= 2).length;
   if (hardCount > 1) warnings.push('Deux séances très exigeantes dans la même semaine.');
-  return { weekNum, phase, phaseIdx, target, cap, level, caution: !!ctx.caution, qualityCount, hardCount, sessions, notes, warnings, generatedAt: Date.now() };
+  return { weekNum, phase, phaseIdx, target, cap, level, caution: !!ctx.caution,
+    plan: plan ? { name: plan.name || null, weeksToStart: plan.weeksToStart, horizon: horizon.name, transition } : null,
+    race: race ? { name: race.name || null, weeksToRace: race.weeksToRace, recommendNow: routineRaceAdvice(race.weeksToRace, race.targetKey).recommendNow } : null, qualityCount, hardCount, sessions, notes, warnings, generatedAt: Date.now() };
 }
 
 // ─── Variantes vert / jaune / orange / rouge (cahier des charges §8) ─────
@@ -466,6 +546,7 @@ function routineDescribe(dsl) {
 return {
   ROUTINE_RULES, routinePhaseOf, routineModelLoad, routineAssessProfile,
   routineEligible, routineGenerateWeek, routineDescribe,
+  routinePlanHorizon, routineRaceAdvice, ROUTINE_TARGET_FAMILIES,
   routineVaryDsl, routineLoadOfDsl, routineBuildVariants, routineWeekExcess, routineLoadValue,
   ROUTINE_VARIANT_ORDER, ROUTINE_VARIANT_LABEL, ROUTINE_WORK_CAP_MIN,
 };

@@ -810,6 +810,7 @@ function showTrainingLoading() {
 // Montre la carte de connexion mais en mode "import uniquement"
 // (masque le formulaire Campus Coach, garde uniquement le bouton d'import)
 function showTrainingEmpty() {
+  campusState.planSnapshot = null;   // aucun plan : la routine n'a rien à précéder
   // Séances libres configurées (cf free_sessions.js) : proposer la semaine
   // courante plutôt que le simple écran "aucun plan" - reste prioritaire
   // sur l'écran vide tant qu'aucun vrai plan (Campus/importé) n'est actif.
@@ -1016,7 +1017,20 @@ async function exportPlanXlsx() {
   }
 }
 
-function renderTrainingPlan(goal, weeks) {
+// Point d'entrée unique d'affichage d'un plan. Garde une copie du plan
+// (campusState.planSnapshot) car la routine "hors plan" écrase campusState.goal/
+// weeks quand elle précède un plan dont le début est à venir (free_sessions.js).
+function renderTrainingPlan(goal, weeks, opts) {
+  campusState.planSnapshot = { goal, weeks };
+  if (!(opts && opts.skipRoutine) && typeof routineShouldPrecedePlan === 'function' && routineShouldPrecedePlan(goal, weeks)) {
+    renderFreeSessionsWeek();
+    return;
+  }
+  renderTrainingPlanCore(goal, weeks);
+  if (typeof renderPrePlanBanner === 'function') renderPrePlanBanner(goal, weeks);
+}
+
+function renderTrainingPlanCore(goal, weeks) {
   const el = id => document.getElementById(id);
   campusState.goal  = goal;
   campusState.weeks = weeks;

@@ -219,3 +219,99 @@ test('trail : les 7 familles route restent fermées par défaut, s\'ouvrent avec
   assert.ok(opened.some(s => ROAD_ONLY.includes(s.family)), 'avec le réglage, des familles route apparaissent');
   opened.forEach(s => assert.ok(byId[s.modelId].terrain.includes('trail') || byId[s.modelId].trailReopenable));
 });
+
+// ─── P2 : plan Allure+ à venir, course envisagée ─────────────────────────
+function simulateToPlan(prefs, ctx, plan, totalWeeks = 26) {
+  // le plan démarre à la semaine `totalWeeks + 1` : la routine génère les semaines 1..totalWeeks
+  const out = [];
+  for (let w = 1; w <= totalWeeks; w++) {
+    const history = out.map(o => ({ age: w - o.weekNum, sessions: o.sessions.map(s => ({ modelId: s.modelId, slot: s.slot, family: s.family })) }));
+    out.push(E.routineGenerateWeek(prefs, w, { ...ctx, history, plan: { ...plan, weeksToStart: totalWeeks + 1 - w } }));
+  }
+  return out;
+}
+const PLAN10K = { name: '10 km juin 2027', totalWeeks: 10, week1Min: 180, longestMin: 70, sessionsPerWeek: 4, isTrail: false, targetKey: '10k' };
+
+test('plan à venir : dernière semaine = transition allégée (S4), avant-dernière sans palier dur', () => {
+  for (const p of [PROFILES[0], PROFILES[1], PROFILES[2]]) {
+    const w = simulateToPlan(p.prefs, p.ctx, PLAN10K);
+    const last = w[w.length - 1], before = w[w.length - 2];
+    assert.equal(last.phase, 'S4'); assert.equal(last.plan.transition, true);
+    assert.ok(last.sessions.every(s => s.tier <= 0), 'dernière semaine : rien au-dessus du palier léger');
+    assert.ok(before.sessions.every(s => s.tier <= 1), 'avant-dernière : pas de palier dur');
+    assert.equal(before.plan.horizon, 'final');
+  }
+});
+
+test('plan à venir : pas de palier dur ni de famille nouvelle dans les dernières semaines', () => {
+  const p = PROFILES[1];
+  const w = simulateToPlan(p.prefs, p.ctx, PLAN10K);
+  const close = w.filter(x => ['close', 'final'].includes(x.plan.horizon));
+  assert.ok(close.length >= 3);
+  close.forEach(x => assert.ok(x.sessions.every(s => s.tier <= 1), `S${x.weekNum} ${x.plan.horizon}`));
+  // familles de qualité déjà pratiquées dans les 12 semaines précédentes
+  close.forEach(x => {
+    const seen = new Set(w.filter(o => o.weekNum < x.weekNum && x.weekNum - o.weekNum <= 12).flatMap(o => o.sessions.map(s => s.family)));
+    const q1 = x.sessions.find(s => s.slot === 'Q1');
+    if (q1 && seen.size) assert.ok(seen.has(q1.family), `S${x.weekNum} : famille ${q1.family} jamais pratiquée`);
+  });
+});
+
+test('plan à venir : horizon long = cycle normal (palier dur possible en S3)', () => {
+  const w = simulateToPlan(PROFILES[1].prefs, PROFILES[1].ctx, PLAN10K);
+  const longWeeks = w.filter(x => x.plan.horizon === 'long' && x.phase === 'S3');
+  assert.ok(longWeeks.length >= 2);
+  assert.ok(longWeeks.some(x => x.sessions.some(s => s.tier >= 2)), 'le palier dur reste possible loin du plan');
+});
+
+test('plan à venir : l\'horizon intermédiaire oriente vers les qualités du plan', () => {
+  const FAV = E.ROUTINE_TARGET_FAMILIES['10k'];
+  const share = weeks => { const q = weeks.flatMap(x => x.sessions.filter(s => s.slot === 'Q1')); return q.filter(s => FAV.includes(s.family)).length / q.length; };
+  const inter = [], base = [];
+  for (let n = 0; n < 6; n++) {                       // plusieurs ancrages pour lisser le hasard
+    const prefs = { ...PROFILES[1].prefs, anchorMonday: 1700000000000 + n * 86400000 * 7 };
+    const w = simulateToPlan(prefs, PROFILES[1].ctx, PLAN10K, 24);
+    const none = simulate(prefs, PROFILES[1].ctx, 24);
+    inter.push(...w.filter(x => x.plan.horizon === 'intermediate'));
+    base.push(...none.filter(x => 24 + 1 - x.weekNum <= 6 && 24 + 1 - x.weekNum > 3));
+  }
+  assert.ok(share(inter) >= share(base), `orienté ${share(inter)} vs neutre ${share(base)}`);
+});
+
+test('horizons : un plan court ou une 1re semaine très chargée changent les seuils (pas de 4/8 figé)', () => {
+  const base = E.routinePlanHorizon(5, { totalWeeks: 12, week1Min: 150 }, { weeklyMin: 150 });
+  const court = E.routinePlanHorizon(5, { totalWeeks: 6, week1Min: 150 }, { weeklyMin: 150 });
+  const gros = E.routinePlanHorizon(5, { totalWeeks: 12, week1Min: 300 }, { weeklyMin: 150 });
+  assert.equal(base.name, 'intermediate');
+  assert.ok(court.bounds.long < base.bounds.long);
+  assert.ok(gros.bounds.close > base.bounds.close && gros.bounds.inter > base.bounds.inter);
+  assert.equal(E.routinePlanHorizon(1, {}, {}).name, 'final');
+  assert.equal(E.routinePlanHorizon(2, {}, {}).name, 'final');
+  assert.equal(E.routinePlanHorizon(20, {}, {}).name, 'long');
+});
+
+test('plan à venir : messages utiles (séances/semaine, trail, volume)', () => {
+  const p = PROFILES[0];
+  const w = E.routineGenerateWeek(p.prefs, 5, { ...p.ctx, weeklyMin: 100, history: [], plan: { ...PLAN10K, sessionsPerWeek: 5, week1Min: 260, isTrail: true, weeksToStart: 4 } });
+  const txt = w.notes.join(' | ');
+  assert.match(txt, /5 séances par semaine/);
+  assert.match(txt, /plan Trail/);
+  assert.match(txt, /plus chargée/);
+});
+
+test('course envisagée sans plan : conseil de calendrier, jamais de transition', () => {
+  const p = PROFILES[0];
+  const proche = E.routineGenerateWeek(p.prefs, 5, { ...p.ctx, history: [], race: { name: 'Corrida', weeksToRace: 9, targetKey: '10k' } });
+  assert.equal(proche.race.recommendNow, true);
+  assert.match(proche.notes.join(' '), /bon moment de charger un plan/);
+  const loin = E.routineGenerateWeek(p.prefs, 5, { ...p.ctx, history: [], race: { weeksToRace: 40, targetKey: '10k' } });
+  assert.equal(loin.race.recommendNow, false);
+  assert.equal(loin.plan, null);
+  assert.equal(E.routineRaceAdvice(30, 'marathon').weeksUntilPlan, 14);
+});
+
+test('plan déjà démarré (weeksToStart <= 0) : le moteur ne le traite pas comme une pré-préparation', () => {
+  const p = PROFILES[0];
+  const w = E.routineGenerateWeek(p.prefs, 5, { ...p.ctx, history: [], plan: { ...PLAN10K, weeksToStart: 0 } });
+  assert.equal(w.plan, null);
+});

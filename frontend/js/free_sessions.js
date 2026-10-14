@@ -419,7 +419,83 @@ async function routineServerConfig(force) {
   return _routineCfgCache || { trailRoadFamilies: false };
 }
 
-async function ensureRoutineWeek(prefs, weekNum) {
+// ─── Plan Allure+ à venir / course envisagée ───────────────────────────
+// Un plan chargé depuis le catalogue a une date de début (lundi, calée sur la
+// date de course) et s'affiche aussitôt, même si ses semaines sont dans le
+// futur. Tant que ce début n'est pas arrivé, la routine "hors plan" prend la
+// main ; à la date de début le plan reprend (renderTrainingPlan, campus.js),
+// la routine cesse de générer et son historique est conservé.
+const ROUTINE_HORIZON_LABEL = { long: 'Fondamentaux', intermediate: 'Orientation vers le plan', close: 'Stabilisation', final: 'Transition' };
+
+function routineWeeksBetween(fromMs, toMs) { return Math.round((toMs - fromMs) / (7 * 86400000)); }
+function routineDateFr(ms) { return new Date(ms).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' }); }
+
+// Résumé d'un plan pour le moteur : début, charge d'entrée, sorties longues, cible
+function routinePlanInfoFrom(goal, weeks) {
+  if (!goal || !Array.isArray(weeks) || !weeks.length) return null;
+  const sorted = [...weeks].sort((a, b) => (a.weekDate || 0) - (b.weekDate || 0));
+  if (!sorted[0].weekDate) return null;
+  const isRun = s => !(s.sport === 'ppg' || s.trainingCategory === 'gpp');
+  const mins = s => ((s.stats && s.stats.expectedDuration) || (s.paceZones || []).reduce((a, z) => a + (z.duration || 0), 0)) / 60;
+  const runs = w => (w.sessions || []).filter(isRun);
+  const cat = goal.planCategory || {};
+  const trail = /trail/i.test((cat.sportLabel || '') + ' ' + (goal.goalType || ''));
+  const dist = String(cat.distLabel || goal.goalType || '');
+  const targetKey = trail ? 'trail'
+    : /semi|20|21/i.test(dist) ? 'semi'
+      : /marathon|42/i.test(dist) ? 'marathon'
+        : /10/.test(dist) ? '10k' : /5/.test(dist) ? '5k' : null;
+  const counts = sorted.slice(0, 4).map(w => runs(w).length).filter(n => n > 0);
+  const perWeek = goal.sessionsPerWeek || (counts.length ? counts.sort((a, b) => a - b)[counts.length >> 1] : null);
+  return {
+    name: goal.name || goal.goalTitle || 'ton plan',
+    startMs: mondayOfWeek(sorted[0].weekDate),
+    totalWeeks: sorted.length,
+    week1Min: Math.round(runs(sorted[0]).reduce((a, s) => a + mins(s), 0)),
+    longestMin: Math.round(Math.max(0, ...sorted.slice(0, 4).flatMap(w => runs(w).map(mins)))),
+    sessionsPerWeek: perWeek,
+    isTrail: trail,
+    targetKey,
+  };
+}
+
+// Plan dont le début est encore à venir (sinon le plan s'affiche normalement)
+function routineCurrentPlanInfo() {
+  const snap = campusState.planSnapshot;
+  if (!snap) return null;
+  const info = routinePlanInfoFrom(snap.goal, snap.weeks);
+  return info && info.startMs > mondayOfWeek(Date.now()) ? info : null;
+}
+
+// campus.js renderTrainingPlan : la routine précède-t-elle ce plan ?
+function routineShouldPrecedePlan(goal, weeks) {
+  if (!getFreeSessionsPrefs()) return false;
+  const info = routinePlanInfoFrom(goal, weeks);
+  return !!(info && info.startMs > mondayOfWeek(Date.now()));
+}
+
+// Date de début du plan modifiée / plan retiré / course changée : les semaines
+// en cours ou à venir déjà figées sous l'ancienne échéance sont régénérées
+// (sauf si une séance y a déjà été pointée) pour recaler le cycle.
+function reconcileRoutineWithPlan(prefs, planInfo) {
+  const store = getRoutineStore();
+  const now = Date.now();
+  const wantPlan = planInfo ? planInfo.startMs : null;
+  const wantRace = prefs.race ? prefs.race.dateMs : null;
+  let changed = false;
+  Object.keys(store.weeks).forEach(k => {
+    if (Number(k) + 7 * 86400000 < now) return;                      // semaine passée : intacte
+    const w = store.weeks[k];
+    if ((w.planStartMs || null) === wantPlan && (w.raceMs || null) === wantRace) return;
+    const touched = w.sessions.some((s, i) => ['done', 'skip'].includes(typeof getLocalSessionStatus === 'function' ? getLocalSessionStatus('free_' + k, i) : null));
+    if (touched) return;
+    delete store.weeks[k];
+    changed = true;
+  });
+  if (changed) saveRoutineStore(store);
+}
+
+async function ensureRoutineWeek(prefs, weekNum, planInfo) {
   const store = getRoutineStore();
   const wd = freeWeekDate(prefs, weekNum);
   if (store.weeks[wd]) return store.weeks[wd];
@@ -432,11 +508,19 @@ async function ensureRoutineWeek(prefs, weekNum) {
   const cfg = await routineServerConfig();
   const prev = store.weeks[wd - 7 * 86400000];
   const prevExcess = prev ? RoutineEngine.routineWeekExcess(prev.sessions).excessPct : 0;
+  // échéance : plan Allure+ à venir (prioritaire) ou simple course envisagée
+  const weeksToStart = planInfo ? routineWeeksBetween(wd, planInfo.startMs) : null;
+  const plan = planInfo && weeksToStart >= 1 ? { ...planInfo, weeksToStart } : null;
+  const weeksToRace = !planInfo && prefs.race ? routineWeeksBetween(wd, prefs.race.dateMs) : null;
+  const race = weeksToRace != null && weeksToRace >= 1 ? { name: prefs.race.name || null, weeksToRace, targetKey: prefs.race.distKey } : null;
   const week = RoutineEngine.routineGenerateWeek(prefs, weekNum, {
     ...profile, history, prevExcess,
     caution: !!prefs.caution,
     trailRoadFamilies: !!cfg.trailRoadFamilies,
+    plan, race,
   });
+  week.planStartMs = planInfo ? planInfo.startMs : null;
+  week.raceMs = prefs.race ? prefs.race.dateMs : null;
   week.profile = { level: profile.level, weeklyMin: profile.weeklyMin, runsPerWeek: profile.runsPerWeek, efTarget: profile.efTarget, slTarget: profile.slTarget, otherMin7: profile.otherMin7, hasData: profile.hasData };
   store.weeks[wd] = week;
   saveRoutineStore(store);
@@ -474,7 +558,9 @@ async function renderFreeSessionsWeek(forceIdx) {
   prefs = migrateFreeSessionsPrefs(prefs);
   const start = routineEngineStart(prefs);
   const currentWeekNum = freeSessionsWeekNumber(prefs);
-  if (currentWeekNum >= start) await ensureRoutineWeek(prefs, currentWeekNum);
+  const planInfo = routineCurrentPlanInfo();
+  reconcileRoutineWithPlan(prefs, planInfo);
+  if (currentWeekNum >= start) await ensureRoutineWeek(prefs, currentWeekNum, planInfo);
   const store = getRoutineStore();
   const totalWeeks = Math.max(FREE_SESSIONS_MIN_WEEKS, currentWeekNum + FREE_SESSIONS_LOOKAHEAD);
 
@@ -488,8 +574,18 @@ async function renderFreeSessionsWeek(forceIdx) {
       continue;
     }
     const { phase } = RoutineEngine.routinePhaseOf(wn);
+    if (planInfo && routineWeeksBetween(weekDate, planInfo.startMs) <= 0) {
+      // à partir du début du plan, c'est lui qui prend le relais : rien n'est généré
+      weeks.push({ ...base, sessions: [], pending: true, planWeek: true, dot: '🏁', tabTitle: 'Début du plan — ses séances remplacent la routine',
+        emptyMessage: `Ton plan « ${planInfo.name} » a démarré : ses séances remplacent la routine (le plan s'affiche ici dès le lundi ${routineDateFr(planInfo.startMs)}).` });
+      continue;
+    }
     const stored = store.weeks[weekDate];
-    const w = { ...base, phase, dot: ROUTINE_PHASE_DOT[phase], tabTitle: `${phase} — ${ROUTINE_PHASE_LABEL[phase]}`, light: phase === 'S4' };
+    // phase affichée : celle figée dans la semaine (la dernière semaine avant un plan est
+    // une transition allégée, S4 quel que soit son rang dans le cycle)
+    const shownPhase = stored ? stored.phase : (planInfo && routineWeeksBetween(weekDate, planInfo.startMs) === 1 ? 'S4' : phase);
+    const isTransition = !!(stored ? (stored.plan && stored.plan.transition) : (planInfo && routineWeeksBetween(weekDate, planInfo.startMs) === 1));
+    const w = { ...base, phase: shownPhase, dot: ROUTINE_PHASE_DOT[shownPhase], tabTitle: isTransition ? 'Transition avant ton plan — charge allégée' : `${shownPhase} — ${ROUTINE_PHASE_LABEL[shownPhase]}`, light: shownPhase === 'S4' };
     if (stored) {
       w.sessions = stored.sessions.map((s, i) => routineSnapshotToSession(s, i));
       w.stored = stored;
@@ -538,12 +634,29 @@ async function renderFreeSessionsWeek(forceIdx) {
     }
   }
 
+  // Bandeau plan / course : explique pourquoi la routine s'adapte et jusqu'à quand
+  let planBannerHtml = '';
+  const curStored = cur.stored;
+  if (planInfo) {
+    const n = Math.max(1, routineWeeksBetween(freeWeekDate(prefs, currentWeekNum), planInfo.startMs));
+    const hz = curStored && curStored.plan ? ROUTINE_HORIZON_LABEL[curStored.plan.horizon] : null;
+    planBannerHtml = `<div class="rt-plan-banner">
+      <div>🏁 Ton plan <strong>${planInfo.name}</strong> démarre le <strong>${routineDateFr(planInfo.startMs)}</strong> (dans ${n} semaine${n > 1 ? 's' : ''}).
+      Ta routine t’accompagne jusqu’au démarrage de ton plan Allure+ ; tes prochaines semaines sont adaptées pour l’aborder en forme.${hz ? ` <span class="rt-plan-horizon">${hz}</span>` : ''}</div>
+      <button type="button" class="btn-plan-action" onclick="routineShowPlan()">Voir le plan</button></div>`;
+  } else if (prefs.race && prefs.race.dateMs > Date.now()) {
+    const n = Math.max(1, routineWeeksBetween(freeWeekDate(prefs, currentWeekNum), prefs.race.dateMs));
+    planBannerHtml = `<div class="rt-plan-banner"><div>🎯 Course envisagée${prefs.race.name ? ' : <strong>' + prefs.race.name + '</strong>' : ''} le <strong>${routineDateFr(prefs.race.dateMs)}</strong> (dans ${n} semaine${n > 1 ? 's' : ''}).
+      Cette routine entretient ta base sans préparer la course de façon ciblée ; un plan Allure+ du catalogue sera recommandé au bon moment.</div></div>`;
+  }
+
   const header = `
     <div class="training-plan-header card">
       <div class="plan-header-top">
         <div>
           <div class="plan-title">Séances libres — entretien</div>
           <div class="plan-subtitle-desc">${NOT_A_PLAN_ADVICE}${phaseHtml}</div>
+          ${planBannerHtml}
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
           <span class="plan-type-badge">${terrainLabel}</span>
@@ -593,8 +706,10 @@ async function selectFreeWeek(idx) {
   const w = campusState.weeks[idx];
   if (prefs && w && w.pending) {
     const wn = idx + 1;
-    if (wn >= routineEngineStart(prefs) && wn <= freeSessionsWeekNumber(prefs) + 1) {
-      await ensureRoutineWeek(prefs, wn);
+    const planInfo = routineCurrentPlanInfo();
+    const beforePlan = !planInfo || routineWeeksBetween(freeWeekDate(prefs, wn), planInfo.startMs) >= 1;
+    if (beforePlan && wn >= routineEngineStart(prefs) && wn <= freeSessionsWeekNumber(prefs) + 1) {
+      await ensureRoutineWeek(prefs, wn, planInfo);
       await renderFreeSessionsWeek(idx);
       return;
     }
@@ -616,6 +731,12 @@ function startFreeSessions() {
     engine: 'v2',
     engineStartWeek: 1,
   };
+  const rDate = document.getElementById('free-sessions-race-date')?.value;
+  const rDist = document.getElementById('free-sessions-race-dist')?.value;
+  if (rDate && rDist) {
+    const dateMs = new Date(rDate + 'T12:00:00').getTime();
+    if (dateMs > Date.now()) prefs.race = { dateMs, distKey: rDist, name: (document.getElementById('free-sessions-race-name')?.value || '').trim().slice(0, 60) };
+  }
   // La semaine en cours est régénérée avec les nouveaux réglages ; les
   // semaines passées restent dans le magasin et servent d'historique (variété).
   const store = getRoutineStore();
@@ -636,7 +757,9 @@ async function disableFreeSessions() {
   if (!ok) return;
   localStorage.removeItem(FREE_SESSIONS_KEY);
   campusState.usingImportedPlan = false;
-  showTrainingEmpty();
+  const snap = campusState.planSnapshot;
+  if (snap) renderTrainingPlan(snap.goal, snap.weeks, { skipRoutine: true });
+  else showTrainingEmpty();
 }
 
 function editFreeSessionsPrefs() {
@@ -649,6 +772,13 @@ function editFreeSessionsPrefs() {
     document.querySelectorAll('#free-sessions-terrain-toggle .routes-toggle-btn').forEach(b => b.classList.toggle('active', b.dataset.terrain === prefs.terrain));
     document.querySelectorAll('#free-sessions-freq-toggle .routes-toggle-btn').forEach(b => b.classList.toggle('active', b.dataset.freq === String(prefs.frequency)));
     document.querySelectorAll('#free-sessions-maxmin-toggle .routes-toggle-btn').forEach(b => b.classList.toggle('active', b.dataset.maxmin === String(prefs.maxMin || 90)));
+    const rd = document.getElementById('free-sessions-race-date'), rs = document.getElementById('free-sessions-race-dist'), rn = document.getElementById('free-sessions-race-name');
+    if (rd && rs && rn) {
+      const r = prefs.race && prefs.race.dateMs > Date.now() ? prefs.race : null;
+      rd.value = r ? new Date(r.dateMs).toISOString().slice(0, 10) : '';
+      rs.value = r ? r.distKey : '';
+      rn.value = r ? (r.name || '') : '';
+    }
   }
 }
 
@@ -799,4 +929,26 @@ async function loadAdminRoutines() {
       showToast('Enregistrement impossible : ' + e.message, 'error');
     }
   });
+}
+
+
+// ─── Passage routine ⇄ plan ───────────────────────────────────────────────
+// Depuis la routine : afficher le plan à venir (sans rien désactiver)
+function routineShowPlan() {
+  const snap = campusState.planSnapshot;
+  if (snap) renderTrainingPlan(snap.goal, snap.weeks, { skipRoutine: true });
+}
+// Depuis un plan à venir : bandeau qui propose / reprend la routine d'ici là
+function renderPrePlanBanner(goal, weeks) {
+  const info = routinePlanInfoFrom(goal, weeks);
+  const wrap = document.getElementById('campus-plan-wrap');
+  if (!info || !wrap || info.startMs <= mondayOfWeek(Date.now())) return;
+  const n = Math.max(1, routineWeeksBetween(mondayOfWeek(Date.now()), info.startMs));
+  const hasRoutine = !!getFreeSessionsPrefs();
+  const banner = document.createElement('div');
+  banner.className = 'rt-plan-banner rt-plan-banner--card card';
+  banner.innerHTML = `<div>🏁 Ton plan démarre le <strong>${routineDateFr(info.startMs)}</strong> (dans ${n} semaine${n > 1 ? 's' : ''}).
+    ${hasRoutine ? 'Ta routine t’accompagne jusqu’au démarrage de ton plan.' : 'Une routine d’entretien peut t’accompagner d’ici là pour arriver en forme.'}</div>
+    <button type="button" class="btn-plan-action" onclick="${hasRoutine ? 'renderFreeSessionsWeek()' : 'editFreeSessionsPrefs()'}">${hasRoutine ? 'Retour à ma routine' : 'Créer ma routine d’ici là'}</button>`;
+  wrap.insertBefore(banner, wrap.firstChild);
 }
