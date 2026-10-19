@@ -759,6 +759,8 @@ async function buildSessionAnalysis(session, week, activity) {
         hrClimb: gradeStats?.hrClimb ?? null,
         hrFlat: gradeStats?.hrFlat ?? null,
         climbs: gradeStats?.climbs ?? [],
+        descents: gradeStats?.descents ?? [],
+        terrain: gradeStats?.terrain ?? null,
         gapAvgSecKm: gapAvgSecKm != null ? Math.round(gapAvgSecKm) : null,
         flatPaceRange, gapDeviationSecKm, gapVerdict,
         movementSplit,
@@ -1357,6 +1359,187 @@ const CLIMB_GRADE_PCT = 3;
 // courte et repetee : sur un lap entier, une montee de quelques centaines de
 // metres peut etre noyee par le reste (plat/descente) du meme lap et donner
 // une pente nette quasi nulle alors que la pente reelle grimpe a 10-15%.
+// Arret = temps "immobile" du compteur Garmin + temps en mouvement a moins de 0,5 m/s (≈ 33'/km :
+// file d'attente sur un single, ravitaillement, photo...). Mesure sur la vitesse MOYENNE de l'intervalle
+// echantillonne (pas la vitesse instantanee, trop bruitee), meme principe que computeMovementSplit.
+const CRAWL_SPEED_MPS = 0.5;
+
+// Agrege temps / arret / course / marche sur une suite de points GPS consecutifs.
+function aggregateIntervals(pts) {
+  const r = { time: 0, still: 0, crawl: 0, run: 0, walk: 0, hasTime: false };
+  for (let i = 1; i < pts.length; i++) {
+    const p = pts[i - 1], c = pts[i];
+    if (c.sec == null || p.sec == null) continue;
+    r.hasTime = true;
+    const dEl = Math.max(0, c.sec - p.sec);
+    let dMov = dEl;
+    if (c.movingSec != null && p.movingSec != null) dMov = Math.max(0, Math.min(dEl, c.movingSec - p.movingSec));
+    const dDistM = Math.max(0, c.distKm - p.distKm) * 1000;
+    r.time += dEl; r.still += dEl - dMov;
+    if (dMov > 0) {
+      const v = dDistM / dMov;
+      if (v < CRAWL_SPEED_MPS) r.crawl += dMov;
+      else if (v >= RUN_SPEED_THRESHOLD_MPS) r.run += dMov;
+      else r.walk += dMov;
+    }
+  }
+  return r;
+}
+
+// Cumule plusieurs aggregateIntervals.
+function sumAgg(list) {
+  return list.reduce((a, g) => ({ time: a.time + g.time, still: a.still + g.still, crawl: a.crawl + g.crawl, run: a.run + g.run, walk: a.walk + g.walk, hasTime: a.hasTime || g.hasTime }),
+    { time: 0, still: 0, crawl: 0, run: 0, walk: 0, hasTime: false });
+}
+
+// Mesures d'un ensemble de troncons (une montee, une descente, ou toute une categorie de terrain).
+function terrainStats(bins, kind) {
+  const distM = bins.reduce((s, b) => s + b.distM, 0);
+  const gainM = bins.reduce((s, b) => s + b.ascentM, 0);
+  const lossM = bins.reduce((s, b) => s + b.descentM, 0);
+  const agg = sumAgg(bins.map(b => b.agg));
+  const hrBins = bins.filter(b => b.hrAvg != null);
+  const hrDist = hrBins.reduce((s, b) => s + b.distM, 0);
+  const hr = hrDist > 0 ? Math.round(hrBins.reduce((s, b) => s + b.hrAvg * b.distM, 0) / hrDist) : null;
+  const out = { distM: Math.round(distM), hr };
+  if (kind === 'up') out.gainM = Math.round(gainM);
+  if (kind === 'down') out.lossM = Math.round(lossM);
+  if (agg.hasTime) {
+    const stopped = agg.still + agg.crawl, moving = agg.run + agg.walk;
+    out.timeSec = Math.round(agg.time);
+    out.stoppedSec = Math.round(stopped);
+    out.movingSec = Math.round(moving);
+    out.walkPct = moving > 0 ? Math.round((agg.walk / moving) * 100) : null;
+    out.paceSecKm = distM > 0 ? Math.round(agg.time / (distM / 1000)) : null;
+    out.paceMovingSecKm = (distM > 0 && moving > 0) ? Math.round(moving / (distM / 1000)) : null;
+    const vert = kind === 'up' ? gainM : kind === 'down' ? lossM : 0;
+    out.vertMh = (vert > 0 && moving > 0) ? Math.round(vert / (moving / 3600)) : null;
+  }
+  return out;
+}
+
+// Regroupe les troncons d'un meme type en sections continues. Un court passage neutre (≤ maxGapM, pente
+// entre -3 % et +3 %) entre deux troncons du meme type NE coupe PAS la section : un single technique
+// avec un replat de 50 m reste UNE montee (sinon une grosse montee apparait en 3 morceaux).
+function groupTerrainSections(bins, kind, minDistM = 80, maxGapM = 100) {
+  const isKind = b => kind === 'up' ? b.gradePct >= CLIMB_GRADE_PCT : b.gradePct <= -CLIMB_GRADE_PCT;
+  const isNeutral = b => Math.abs(b.gradePct) < CLIMB_GRADE_PCT;
+  const runs = [];
+  let i = 0;
+  while (i < bins.length) {
+    if (!isKind(bins[i])) { i++; continue; }
+    let j = i;
+    while (j + 1 < bins.length && isKind(bins[j + 1])) j++;
+    runs.push([i, j]);
+    i = j + 1;
+  }
+  const merged = [];
+  runs.forEach(r => {
+    const last = merged[merged.length - 1];
+    if (last) {
+      const gap = bins.slice(last[1] + 1, r[0]);
+      if (gap.every(isNeutral) && gap.reduce((s, b) => s + b.distM, 0) <= maxGapM) { last[1] = r[1]; return; }
+    }
+    merged.push([r[0], r[1]]);
+  });
+  return merged.map(([a, b]) => {
+    const slice = bins.slice(a, b + 1);
+    const st = terrainStats(slice, kind);
+    if (st.distM < minDistM) return null;
+    const ext = kind === 'up'
+      ? slice.reduce((best, x) => (!best || x.gradePct > best.gradePct) ? x : best, null)
+      : slice.reduce((best, x) => (!best || x.gradePct < best.gradePct) ? x : best, null);
+    const vertM = kind === 'up' ? st.gainM : st.lossM;
+    return {
+      startDistKm: slice[0].startDistKm, endDistKm: slice[slice.length - 1].endDistKm,
+      ...st,
+      ascentM: kind === 'up' ? st.gainM : undefined,
+      descentM: kind === 'down' ? st.lossM : undefined,
+      avgGradePct: Math.round((kind === 'up' ? 1 : -1) * (vertM / st.distM) * 1000) / 10,
+      maxGradePct: Math.round(ext.gradePct * 10) / 10,
+    };
+  }).filter(Boolean);
+}
+
+function medianOf(arr) {
+  const a = arr.filter(v => v != null).sort((x, y) => x - y);
+  if (!a.length) return null;
+  const m = Math.floor(a.length / 2);
+  return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2;
+}
+
+// Explique, en phrases, pourquoi une montee / descente a pris ce temps : arrets, marche, rythme compare
+// aux autres sections de meme type, FC. Aucune cause inventee : on constate (arret, marche, ecart) et on
+// propose les raisons plausibles ("bouchon, ravitaillement...") sans les affirmer.
+function explainTerrainSections(sections, kind, ctx) {
+  const med = medianOf(sections.map(s => s.vertMh));
+  sections.forEach(s => {
+    const notes = [];
+    if (s.timeSec != null) {
+      const stopPct = s.timeSec > 0 ? Math.round((s.stoppedSec / s.timeSec) * 100) : 0;
+      if (s.stoppedSec >= 20 && stopPct >= 8) {
+        const sans = s.paceMovingSecKm ? ` Hors arrêt, ton allure aurait été de ${fmtPace(s.paceMovingSecKm)}/km.` : '';
+        notes.push({ tone: 'warn', text: `${fmtStepMin(s.stoppedSec)} à l'arrêt ou presque (${stopPct}% du temps) — attente, bouchon sur un single, ravitaillement ou pause.${sans}` });
+      }
+      if (s.walkPct != null && s.movingSec >= 60) {
+        if (kind === 'up') {
+          if (s.walkPct >= 70 && s.avgGradePct >= 12) notes.push({ tone: 'info', text: `Montée marchée à ${s.walkPct}% : normal à ${s.avgGradePct}% de pente moyenne, marcher est souvent plus économique que courir.` });
+          else if (s.walkPct >= 70 && s.avgGradePct < 8) notes.push({ tone: 'warn', text: `Marchée à ${s.walkPct}% malgré une pente modérée (${s.avgGradePct}%) : gestion d'effort, fatigue ou terrain technique.` });
+          else if (s.walkPct <= 25 && s.avgGradePct >= 8) notes.push({ tone: 'good', text: `Courue à ${100 - s.walkPct}% sur ${s.avgGradePct}% de pente : très bon niveau en côte.` });
+        } else {
+          if (s.walkPct >= 50) notes.push({ tone: 'info', text: `Descente marchée à ${s.walkPct}% : prudence, terrain technique ou jambes fatiguées.` });
+          else if (s.walkPct <= 10 && Math.abs(s.avgGradePct) >= 8) notes.push({ tone: 'good', text: `Descente raide (${Math.abs(s.avgGradePct)}%) courue d'un bout à l'autre.` });
+        }
+      }
+      if (med != null && s.vertMh != null && sections.length >= 3) {
+        const ratio = s.vertMh / med;
+        const word = kind === 'up' ? 'montée' : 'descente';
+        const unit = kind === 'up' ? 'VAM' : 'vitesse de descente';
+        if (ratio <= 0.8) notes.push({ tone: 'warn', text: `${unit} de ${s.vertMh} m/h, nettement sous ta médiane de ${Math.round(med)} m/h sur cette sortie${s.stoppedSec >= 20 ? ' (l\'arrêt explique une partie de l\'écart)' : ''}.` });
+        else if (ratio >= 1.2) notes.push({ tone: 'good', text: `${unit} de ${s.vertMh} m/h, nettement au-dessus de ta médiane de ${Math.round(med)} m/h — ${word} bien négociée.` });
+      }
+      if (s.hr != null && ctx.avgHR != null) {
+        if (s.hr >= ctx.avgHR + 8) notes.push({ tone: 'warn', text: `FC élevée (${s.hr} bpm contre ${ctx.avgHR} bpm en moyenne sur la sortie).` });
+        else if (s.hr <= ctx.avgHR - 10) notes.push({ tone: 'info', text: `FC basse (${s.hr} bpm contre ${ctx.avgHR} bpm en moyenne) : effort maîtrisé.` });
+      }
+    }
+    s.notes = notes;
+  });
+}
+
+// Synthese du terrain sur toute la sortie : temps passe a monter / descendre / sur le plat, arrets,
+// evolution de la gestion entre 1re et 2e moitie.
+function buildTerrainInsights(t, climbs, descents, totalDistKm) {
+  const out = [];
+  const tot = t.up.timeSec != null ? (t.up.timeSec + t.down.timeSec + t.flat.timeSec) : null;
+  if (tot > 0) {
+    const pc = x => Math.round((x / tot) * 100);
+    out.push(`Temps passé : ${pc(t.up.timeSec)}% à monter (${fmtDuration(t.up.timeSec)}), ${pc(t.down.timeSec)}% à descendre (${fmtDuration(t.down.timeSec)}), ${pc(t.flat.timeSec)}% sur le plat ou faux plat (${fmtDuration(t.flat.timeSec)}).`);
+    const stopped = t.up.stoppedSec + t.down.stoppedSec + t.flat.stoppedSec;
+    if (stopped >= 120) {
+      const parts = [['en montée', t.up.stoppedSec], ['en descente', t.down.stoppedSec], ['sur le plat', t.flat.stoppedSec]].filter(p => p[1] >= 30).map(p => `${fmtStepMin(p[1])} ${p[0]}`);
+      out.push(`${fmtStepMin(stopped)} à l'arrêt ou presque au total (${pc(stopped)}% du temps)${parts.length ? ' : ' + parts.join(', ') : ''}. Ce temps n'est pas de la course : il gonfle ton allure moyenne sans rien dire de ta forme.`);
+    }
+  }
+  const all = [...climbs.map((c, i) => ({ ...c, label: `la montée ${i + 1}` })), ...descents.map((d, i) => ({ ...d, label: `la descente ${i + 1}` }))];
+  const worst = all.filter(s => s.stoppedSec >= 60).sort((a, b) => b.stoppedSec - a.stoppedSec)[0];
+  if (worst) out.push(`Plus gros arrêt : ${worst.label} (km ${worst.startDistKm.toFixed(1)}), ${fmtStepMin(worst.stoppedSec)} à l'arrêt ou presque.`);
+  // Gestion : 1re moitie vs 2e moitie de la distance (VAM en montee, vitesse de descente en descente).
+  const half = totalDistKm / 2;
+  const cmp = (list, name, unit) => {
+    const f = list.filter(s => s.startDistKm < half && s.vertMh != null), l = list.filter(s => s.startDistKm >= half && s.vertMh != null);
+    if (f.length < 2 || l.length < 2) return;
+    const avg = a => Math.round(a.reduce((s, x) => s + x.vertMh, 0) / a.length);
+    const a1 = avg(f), a2 = avg(l), d = Math.round(((a2 - a1) / a1) * 100);
+    if (d <= -10) out.push(`${name} : ${unit} qui chute de ${Math.abs(d)}% en 2ᵉ moitié (${a1} → ${a2} m/h) — fatigue ou départ trop rapide.`);
+    else if (d >= 5) out.push(`${name} : ${unit} en hausse de ${d}% en 2ᵉ moitié (${a1} → ${a2} m/h) — gestion prudente au départ, bien finie.`);
+    else out.push(`${name} : ${unit} stable entre les deux moitiés (${a1} → ${a2} m/h) — gestion régulière.`);
+  };
+  cmp(climbs, 'Montées', 'VAM');
+  cmp(descents, 'Descentes', 'vitesse de descente');
+  return out;
+}
+
 function computeGradeSegments(elevation, binSizeM = 50) {
   if (!Array.isArray(elevation) || elevation.length < 2) return null;
   const bins = [];
@@ -1373,8 +1556,10 @@ function computeGradeSegments(elevation, binSizeM = 50) {
           startDistKm: start.distKm,
           endDistKm: pt.distKm,
           ascentM: Math.max(0, pt.alt - start.alt),
+          descentM: Math.max(0, start.alt - pt.alt),
           gradePct: ((pt.alt - start.alt) / distM) * 100,
           hrAvg: hrVals.length ? hrVals.reduce((a, b) => a + b, 0) / hrVals.length : null,
+          agg: aggregateIntervals(bucket),
         });
       }
       start = pt; bucket = [pt];
@@ -1394,36 +1579,21 @@ function computeGradeSegments(elevation, binSizeM = 50) {
   const hrClimbBins = climbBins.filter(b => b.hrAvg != null);
   const hrFlatBins = flatBins.filter(b => b.hrAvg != null);
 
-  // Regroupe les tronçons en côte CONSECUTIFS en montées individuelles
-  // (Focus montées, un panneau navigable par montée détectée façon "Montée
-  // X of Y" de Garmin Connect) - un tronçon plat/descente entre deux groupes
-  // de bins en côte marque la fin d'une montée et le début de la suivante.
-  // MIN_CLIMB_DIST_M écarte les montées trop courtes pour être pertinentes
-  // (bruit GPS/altimétrique isolé sur un terrain vallonné).
-  const MIN_CLIMB_DIST_M = 80;
-  const climbGroups = [];
-  let cur = null;
-  bins.forEach(b => {
-    if (b.gradePct >= CLIMB_GRADE_PCT) {
-      if (!cur) cur = [];
-      cur.push(b);
-    } else if (cur) { climbGroups.push(cur); cur = null; }
-  });
-  if (cur) climbGroups.push(cur);
-  const climbs = climbGroups.map(group => {
-    const totalDistM = group.reduce((s, b) => s + b.distM, 0);
-    if (totalDistM < MIN_CLIMB_DIST_M) return null;
-    const totalAscentM = group.reduce((s, b) => s + b.ascentM, 0);
-    const maxB = group.reduce((best, b) => (!best || b.gradePct > best.gradePct) ? b : best, null);
-    return {
-      startDistKm: group[0].startDistKm,
-      endDistKm: group[group.length - 1].endDistKm,
-      distM: Math.round(totalDistM),
-      ascentM: Math.round(totalAscentM),
-      avgGradePct: Math.round((totalAscentM / totalDistM) * 1000) / 10,
-      maxGradePct: Math.round(maxB.gradePct * 10) / 10,
-    };
-  }).filter(Boolean);
+  // Montées et descentes individuelles (Focus montées / descentes, façon "Montée X of Y" de Garmin Connect),
+  // chacune avec son temps, ses arrêts, son allure, sa vitesse verticale et ses explications.
+  const climbs = groupTerrainSections(bins, 'up');
+  const descents = groupTerrainSections(bins, 'down');
+  const hrAll = bins.filter(b => b.hrAvg != null);
+  const avgHR = hrAll.length ? Math.round(wAvg(hrAll, 'hrAvg')) : null;
+  explainTerrainSections(climbs, 'up', { avgHR });
+  explainTerrainSections(descents, 'down', { avgHR });
+
+  // Repartition du terrain : montee (≥ +3 %), descente (≤ -3 %), plat / faux plat (entre les deux).
+  const downBins = bins.filter(b => b.gradePct <= -CLIMB_GRADE_PCT);
+  const neutralBins = bins.filter(b => Math.abs(b.gradePct) < CLIMB_GRADE_PCT);
+  const terrain = { up: terrainStats(climbBins, 'up'), down: terrainStats(downBins, 'down'), flat: terrainStats(neutralBins, 'flat') };
+  terrain.hasTime = terrain.up.timeSec != null;
+  if (terrain.hasTime) terrain.insights = buildTerrainInsights(terrain, climbs, descents, totalDist / 1000);
 
   return {
     avgGradePctClimb: climbBins.length ? Math.round(wAvg(climbBins, 'gradePct') * 10) / 10 : null,
@@ -1431,7 +1601,7 @@ function computeGradeSegments(elevation, binSizeM = 50) {
     pctDistanceClimbing: totalDist > 0 ? Math.round((climbDist / totalDist) * 100) : null,
     hrClimb: hrClimbBins.length ? Math.round(wAvg(hrClimbBins, 'hrAvg')) : null,
     hrFlat: hrFlatBins.length ? Math.round(wAvg(hrFlatBins, 'hrAvg')) : null,
-    climbs,
+    climbs, descents, terrain,
   };
 }
 
@@ -2240,25 +2410,65 @@ function buildAnalysisModalHtml(record) {
     </div>
     <div class="analysis-climb-note">Allure de course${ms.runPaceSecKm != null ? ` ${fmtPace(ms.runPaceSecKm)}/km` : ' —'} · allure de marche${ms.walkPaceSecKm != null ? ` ${fmtPace(ms.walkPaceSecKm)}/km` : ' —'} — détection approximative à partir de la vitesse GPS (Garmin utilise en interne l'accéléromètre, plus précis).</div>` : '';
 
-  // Focus montées : un panneau navigable par montée individuellement
-  // détectée (façon "Montée X of Y" de Garmin Connect) - cf. climbs dans
-  // computeGradeSegments. Reste separe du bloc agrege "Pente & effort en
-  // côte" ci-dessus (moyennes sur toute la seance) : ici, une carte par
-  // montee avec son propre profil (survol = pente locale).
-  const climbFocusHtml = (isTrail && climb?.climbs?.length) ? `
-    <div class="analysis-section-title">Focus montées</div>
+  // Terrain : temps / arrêts / allure / vitesse verticale en montée, en descente et sur le plat — en trail les
+  // descentes demandent autant de gestion que les montées (retour utilisateur 19/10).
+  const terrain = climb?.terrain || null;
+  const fmtKm = m => (m >= 1000 ? (m / 1000).toFixed(1) + ' km' : m + ' m');
+  const terrainRow = (label, t, kind) => {
+    const tot = terrain.up.timeSec + terrain.down.timeSec + terrain.flat.timeSec;
+    const vert = kind === 'up' ? (t.gainM != null ? '+' + t.gainM + ' m' : '—') : kind === 'down' ? (t.lossM != null ? '−' + t.lossM + ' m' : '—') : '—';
+    return `<tr>
+      <td><strong>${label}</strong></td>
+      <td>${fmtKm(t.distM)}</td>
+      <td>${vert}</td>
+      <td>${t.timeSec != null ? fmtDuration(t.timeSec) + ` <span class="analysis-summary-planned">(${tot > 0 ? Math.round(t.timeSec / tot * 100) : 0}%)</span>` : '—'}</td>
+      <td>${t.stoppedSec != null ? (t.stoppedSec >= 15 ? fmtStepMin(t.stoppedSec) : '—') : '—'}</td>
+      <td>${t.paceMovingSecKm ? fmtPace(t.paceMovingSecKm) + '/km' : '—'}</td>
+      <td>${t.vertMh ? t.vertMh + ' m/h' : '—'}</td>
+      <td>${t.hr ? t.hr + ' bpm' : '—'}</td>
+    </tr>`;
+  };
+  const terrainHtml = (isTrail && terrain?.hasTime) ? `
+    <div class="analysis-section-title">Montées, descentes et plat</div>
+    <div class="analysis-terrain-wrap"><table class="analysis-reps-table analysis-terrain-table">
+      <thead><tr><th></th><th>Distance</th><th>Dénivelé</th><th>Temps</th><th>À l'arrêt</th><th>Allure*</th><th>Vitesse vert.</th><th>FC</th></tr></thead>
+      <tbody>
+        ${terrainRow('▲ Montées', terrain.up, 'up')}
+        ${terrainRow('▼ Descentes', terrain.down, 'down')}
+        ${terrainRow('▬ Plat', terrain.flat, 'flat')}
+      </tbody>
+    </table></div>
+    ${(terrain.insights || []).length ? `<ul class="analysis-list analysis-terrain-insights">${terrain.insights.map(t => `<li>${t}</li>`).join('')}</ul>` : ''}
+    <div class="analysis-climb-note">* Allure hors arrêts (temps réellement en mouvement). Montée ≥ +3 %, descente ≤ −3 %, plat entre les deux. « À l'arrêt » = immobile selon Garmin, ou moins de 0,5 m/s (file d'attente, ravitaillement, pause). Vitesse verticale = m de dénivelé gagnés (VAM) ou perdus par heure de mouvement.</div>` : '';
+
+  // Focus montées / descentes : un panneau navigable par section (façon "Montée X of Y" de Garmin Connect),
+  // avec temps, arrêts, allure, vitesse verticale et explications — cf. computeGradeSegments.
+  const hasFocus = isTrail && ((climb?.climbs?.length || 0) + (climb?.descents?.length || 0)) > 0;
+  const climbFocusHtml = hasFocus ? `
+    <div class="analysis-section-title">Focus montées &amp; descentes</div>
     <div class="analysis-climb-focus" id="analysis-climb-focus">
+      <div class="climb-focus-tabs">
+        <button type="button" class="climb-focus-tab" id="climb-focus-tab-up">▲ Montées (${climb.climbs?.length || 0})</button>
+        <button type="button" class="climb-focus-tab" id="climb-focus-tab-down">▼ Descentes (${climb.descents?.length || 0})</button>
+      </div>
       <div class="climb-focus-header">
-        <button type="button" id="climb-focus-prev" class="climb-focus-nav-btn" aria-label="Montée précédente">‹</button>
+        <button type="button" id="climb-focus-prev" class="climb-focus-nav-btn" aria-label="Précédente">‹</button>
         <span id="climb-focus-title" class="climb-focus-title"></span>
-        <button type="button" id="climb-focus-next" class="climb-focus-nav-btn" aria-label="Montée suivante">›</button>
+        <button type="button" id="climb-focus-next" class="climb-focus-nav-btn" aria-label="Suivante">›</button>
       </div>
       <div class="analysis-climb-grid">
         <div class="analysis-climb-stat"><span class="analysis-climb-stat-label">Pente moy.</span><span class="analysis-climb-stat-value" id="climb-focus-avg">—</span></div>
         <div class="analysis-climb-stat"><span class="analysis-climb-stat-label">Pente max</span><span class="analysis-climb-stat-value" id="climb-focus-max">—</span></div>
-        <div class="analysis-climb-stat"><span class="analysis-climb-stat-label">Ascension</span><span class="analysis-climb-stat-value" id="climb-focus-ascent">—</span></div>
+        <div class="analysis-climb-stat"><span class="analysis-climb-stat-label" id="climb-focus-vert-label">Ascension</span><span class="analysis-climb-stat-value" id="climb-focus-ascent">—</span></div>
         <div class="analysis-climb-stat"><span class="analysis-climb-stat-label">Distance</span><span class="analysis-climb-stat-value" id="climb-focus-dist">—</span></div>
+        <div class="analysis-climb-stat"><span class="analysis-climb-stat-label">Durée</span><span class="analysis-climb-stat-value" id="climb-focus-time">—</span></div>
+        <div class="analysis-climb-stat"><span class="analysis-climb-stat-label">À l'arrêt</span><span class="analysis-climb-stat-value" id="climb-focus-stop">—</span></div>
+        <div class="analysis-climb-stat"><span class="analysis-climb-stat-label">Allure (en mouvement)</span><span class="analysis-climb-stat-value" id="climb-focus-pace">—</span></div>
+        <div class="analysis-climb-stat"><span class="analysis-climb-stat-label" id="climb-focus-vam-label">VAM</span><span class="analysis-climb-stat-value" id="climb-focus-vam">—</span></div>
+        <div class="analysis-climb-stat"><span class="analysis-climb-stat-label">FC moyenne</span><span class="analysis-climb-stat-value" id="climb-focus-hr">—</span></div>
+        <div class="analysis-climb-stat"><span class="analysis-climb-stat-label">Marche</span><span class="analysis-climb-stat-value" id="climb-focus-walk">—</span></div>
       </div>
+      <ul class="analysis-list climb-focus-notes" id="climb-focus-notes"></ul>
       <div class="analysis-elevation-chart-wrapper">
         <canvas id="climb-focus-chart"></canvas>
       </div>
@@ -2275,6 +2485,7 @@ function buildAnalysisModalHtml(record) {
     </div>
     <div class="analysis-summary-block">${summaryRowsHtml}${trailRowHtml}${gapRowHtml}</div>
     ${movementHtml}
+    ${terrainHtml}
     ${elevationProfileHtml}
     ${climbDetailHtml}
     ${climbFocusHtml}
@@ -2398,14 +2609,15 @@ function openAnalysisModal(record) {
   modal.querySelector('#session-analysis-recalc').addEventListener('click', () => recalculateAnalysis(record));
   attachBackdropClose(modal, close);
   document.addEventListener('keydown', escHandler);
-  const climbList = record.trail?.climb?.climbs;
+  const climbList = record.trail?.climb?.climbs || [];
+  const descentList = record.trail?.climb?.descents || [];
   const needsProfile = record.sessionTypeKey === 'TRAIL' && record.trail?.plannedDPlusM;
-  const needsClimbFocus = record.sessionTypeKey === 'TRAIL' && climbList?.length;
+  const needsClimbFocus = record.sessionTypeKey === 'TRAIL' && (climbList.length + descentList.length) > 0;
   if (needsProfile || needsClimbFocus) {
     loadAnalysisActivityElevation(record.activityId).then(elevation => {
       if (!elevation || !modal.isConnected) return;
       if (needsProfile) renderAnalysisElevationChart(elevation);
-      if (needsClimbFocus) initClimbFocusPanel(elevation, climbList);
+      if (needsClimbFocus) initClimbFocusPanel(elevation, climbList, descentList);
     });
   }
 
@@ -2653,51 +2865,78 @@ function renderAnalysisElevationChart(elevation) {
 // climb.climbs (computeGradeSegments), profil/survol construits ici à partir
 // de la trace GPS complète déjà chargée pour le profil altimétrique global.
 let _analysisClimbChart = null;
-let _climbFocusState = null; // { elevation, climbs, index }
+let _climbFocusState = null; // { elevation, lists: { up, down }, kind, index }
 
-function initClimbFocusPanel(elevation, climbs) {
+function initClimbFocusPanel(elevation, climbs, descents) {
   const container = document.getElementById('analysis-climb-focus');
-  if (!container || !climbs || !climbs.length) return;
-  _climbFocusState = { elevation, climbs, index: 0 };
+  const lists = { up: climbs || [], down: descents || [] };
+  if (!container || (!lists.up.length && !lists.down.length)) return;
+  _climbFocusState = { elevation, lists, kind: lists.up.length ? 'up' : 'down', index: 0 };
   renderClimbFocusCard();
   const prevBtn = document.getElementById('climb-focus-prev');
   const nextBtn = document.getElementById('climb-focus-next');
   if (prevBtn) prevBtn.addEventListener('click', () => stepClimbFocus(-1));
   if (nextBtn) nextBtn.addEventListener('click', () => stepClimbFocus(1));
+  ['up', 'down'].forEach(k => {
+    const tab = document.getElementById('climb-focus-tab-' + k);
+    if (!tab) return;
+    tab.disabled = !lists[k].length;
+    tab.addEventListener('click', () => { if (!lists[k].length || _climbFocusState.kind === k) return; _climbFocusState.kind = k; _climbFocusState.index = 0; renderClimbFocusCard(); });
+  });
 }
 
 function stepClimbFocus(delta) {
   if (!_climbFocusState) return;
-  const { climbs, index } = _climbFocusState;
-  const next = Math.max(0, Math.min(climbs.length - 1, index + delta));
-  if (next === index) return;
+  const list = _climbFocusState.lists[_climbFocusState.kind];
+  const next = Math.max(0, Math.min(list.length - 1, _climbFocusState.index + delta));
+  if (next === _climbFocusState.index) return;
   _climbFocusState.index = next;
   renderClimbFocusCard();
 }
 
 function renderClimbFocusCard() {
   if (!_climbFocusState) return;
-  const { elevation, climbs, index } = _climbFocusState;
-  const c = climbs[index];
+  const { elevation, lists, kind, index } = _climbFocusState;
+  const list = lists[kind];
+  const c = list[index];
+  if (!c) return;
+  const isUp = kind === 'up';
   const titleEl = document.getElementById('climb-focus-title');
   const prevBtn = document.getElementById('climb-focus-prev');
   const nextBtn = document.getElementById('climb-focus-next');
-  if (titleEl) titleEl.textContent = `Montée ${index + 1} / ${climbs.length}`;
+  if (titleEl) titleEl.textContent = `${isUp ? 'Montée' : 'Descente'} ${index + 1} / ${list.length}`;
   if (prevBtn) prevBtn.disabled = index === 0;
-  if (nextBtn) nextBtn.disabled = index === climbs.length - 1;
+  if (nextBtn) nextBtn.disabled = index === list.length - 1;
+  ['up', 'down'].forEach(k => document.getElementById('climb-focus-tab-' + k)?.classList.toggle('active', k === kind));
   const setStat = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
-  setStat('climb-focus-avg', `+${c.avgGradePct}%`);
-  setStat('climb-focus-max', `${c.maxGradePct >= 0 ? '+' : ''}${c.maxGradePct}%`);
-  setStat('climb-focus-ascent', `${c.ascentM} m`);
+  const sign = v => (v >= 0 ? '+' : '') + v;
+  setStat('climb-focus-avg', `${sign(c.avgGradePct)}%`);
+  setStat('climb-focus-max', `${sign(c.maxGradePct)}%`);
+  setStat('climb-focus-vert-label', isUp ? 'Ascension' : 'Descente');
+  setStat('climb-focus-ascent', isUp ? `${c.ascentM} m` : `${c.descentM} m`);
   setStat('climb-focus-dist', c.distM >= 1000 ? `${(c.distM / 1000).toFixed(2)} km` : `${c.distM} m`);
-  renderClimbFocusChart(elevation, c);
+  setStat('climb-focus-time', c.timeSec != null ? fmtDuration(c.timeSec) : '—');
+  setStat('climb-focus-stop', c.stoppedSec != null ? (c.stoppedSec >= 15 ? fmtStepMin(c.stoppedSec) : 'aucun') : '—');
+  setStat('climb-focus-pace', c.paceMovingSecKm ? `${fmtPace(c.paceMovingSecKm)}/km` : '—');
+  setStat('climb-focus-vam-label', isUp ? 'VAM' : 'Vitesse de descente');
+  setStat('climb-focus-vam', c.vertMh ? `${c.vertMh} m/h` : '—');
+  setStat('climb-focus-hr', c.hr ? `${c.hr} bpm` : '—');
+  setStat('climb-focus-walk', c.walkPct != null ? `${c.walkPct}% marché` : '—');
+  const notesEl = document.getElementById('climb-focus-notes');
+  if (notesEl) {
+    const icon = { warn: '⚠️', good: '✅', info: 'ℹ️' };
+    notesEl.innerHTML = (c.notes && c.notes.length)
+      ? c.notes.map(n => `<li class="climb-note climb-note--${n.tone}">${icon[n.tone] || ''} ${n.text}</li>`).join('')
+      : (c.timeSec != null ? '<li class="climb-note climb-note--info">Rien d\'anormal à signaler sur cette section.</li>' : '');
+  }
+  renderClimbFocusChart(elevation, c, isUp ? '#fb923c' : '#38bdf8', isUp ? 'rgba(251,146,60,0.18)' : 'rgba(56,189,248,0.18)');
 }
 
 // Pente locale par point (fenetre glissante ~30m, plus fine que les tronçons
 // de 50m de computeGradeSegments) affichee au survol - meme principe que la
 // vue "Montée détails" de Garmin Connect.
 const CLIMB_FOCUS_GRADE_WINDOW_M = 30;
-function renderClimbFocusChart(elevation, climb) {
+function renderClimbFocusChart(elevation, climb, color = '#fb923c', fillColor = 'rgba(251,146,60,0.18)') {
   const canvas = document.getElementById('climb-focus-chart');
   if (!canvas) return;
   if (_analysisClimbChart) { _analysisClimbChart.destroy(); _analysisClimbChart = null; }
@@ -2720,7 +2959,7 @@ function renderClimbFocusChart(elevation, climb) {
     const base = chartOptions();
     _analysisClimbChart = new Chart(canvas.getContext('2d'), {
       type: 'line',
-      data: { labels, datasets: [{ data: alt, borderColor: '#fb923c', backgroundColor: 'rgba(251,146,60,0.18)', fill: true, pointRadius: 0, borderWidth: 2, cubicInterpolationMode: 'monotone' }] },
+      data: { labels, datasets: [{ data: alt, borderColor: color, backgroundColor: fillColor, fill: true, pointRadius: 0, borderWidth: 2, cubicInterpolationMode: 'monotone' }] },
       options: {
         ...base,
         plugins: { ...base.plugins, tooltip: { ...base.plugins.tooltip, displayColors: false,
