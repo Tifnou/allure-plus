@@ -1344,19 +1344,8 @@ function renderSessionCard(session, idx, weekIdx, weekId, isCurrentWeek) {
   let displayDuration = duration;
   let isTrailEstimate = false;
   if (isComp) {
-    const compGoal  = campusState.goal;
-    const compWeeks = campusState.weeks;
-    const planId    = compGoal?._id || 'plan';
-    const savedDist  = parseFloat(localStorage.getItem('suivi_objectif_dist_'  + planId)) || 0;
-    const savedDplus = parseInt(localStorage.getItem('suivi_objectif_dplus_' + planId)) || 0;
-    const isTrailGoal = (compGoal?.goalType || '').toLowerCase().includes('trail');
-    const vma = getVmaFromState();
-    if (savedDist > 0 && vma && compWeeks) {
-      const weeksTotal = compGoal?.durationInWeeks || compWeeks.length;
-      const vmaEnd = vma * (1 + getRemainingVmaGainPct(weeksTotal, compWeeks));
-      displayDuration = estimateGoalTimeSecs(vmaEnd, getGoalRaceParams(compGoal, savedDplus, savedDist));
-      isTrailEstimate = isTrailGoal;
-    }
+    const est = getRaceDayEstimate();
+    if (est) { displayDuration = est.sec; isTrailEstimate = est.isTrail; }
   }
   const durationHtml = displayDuration
     ? `<span class="session-meta-item" title="${isTrailEstimate ? 'Estimation trail (dénivelé inclus · formule ITRA)' : 'Durée prévue'}">&#9203; ${fmtDuration(displayDuration)}${isTrailEstimate ? ' *' : ''}</span>`
@@ -1615,6 +1604,25 @@ function rpeLegendHtml(zones) {
   return '<div class="rpe-legend"><b>Effort ressenti (RPE)</b> : échelle de 1 (très facile) à 10 (maximal), à la sensation plutôt qu\u2019au chrono. <i>Les allures affichées sont indicatives (équivalent à plat) : en côte la pente ralentit, règle-toi sur l\u2019effort.</i> '
     + used.map(n => '<span><b>' + n + '/10</b> ' + rpeInfo(n).label + ' — ' + rpeInfo(n).hint.replace(/^Effort ressenti \d+\/10 \(RPE\) — /, '') + '</span>').join(' ')
     + '</div>';
+}
+
+// Temps estime du jour de course (meme modele que la carte de la seance, cf getGoalRaceParams) ;
+// null si distance/VMA inconnues. Reutilise par l'analyse pour juger le temps reel de la course.
+function getRaceDayEstimate() {
+  const compGoal  = campusState.goal;
+  const compWeeks = campusState.weeks;
+  const planId    = compGoal?._id || 'plan';
+  const savedDist  = parseFloat(localStorage.getItem('suivi_objectif_dist_'  + planId)) || 0;
+  const savedDplus = parseInt(localStorage.getItem('suivi_objectif_dplus_' + planId)) || 0;
+  const vma = getVmaFromState();
+  if (!(savedDist > 0 && vma && compWeeks)) return null;
+  const weeksTotal = compGoal?.durationInWeeks || compWeeks.length;
+  const vmaEnd = vma * (1 + getRemainingVmaGainPct(weeksTotal, compWeeks));
+  return {
+    sec: estimateGoalTimeSecs(vmaEnd, getGoalRaceParams(compGoal, savedDplus, savedDist)),
+    isTrail: (compGoal?.goalType || '').toLowerCase().includes('trail'),
+    distKm: savedDist,
+  };
 }
 
 function renderSessionDetail(session, weekId, isCurrentWeek) {

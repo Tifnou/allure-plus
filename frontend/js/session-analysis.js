@@ -49,6 +49,7 @@ async function loadAnalysisIndex() {
 function classifySessionType(session, goalType, isTrail) {
   if (isTrail) return 'TRAIL';
   const cat = (session.trainingCategory || '').toLowerCase();
+  if (cat.includes('competition')) return 'COURSE';
   if (cat.includes('long_run')) return 'SORTIE_LONGUE';
   if (cat.includes('basic_endurance')) return 'EF';
   if (cat.includes('threshold')) return 'SEUIL';
@@ -68,6 +69,9 @@ const SESSION_TYPE_PROFILES = {
   SORTIE_LONGUE: { priorityOrder: ['duration', 'hr', 'drift', 'pace'],             weights: { duration: .35, hr: .25, drift: .20, pace: .20 } },
   MARATHON_AS42: { priorityOrder: ['pace', 'regularity', 'hr', 'drift'],           weights: { pace: .35, regularity: .25, hr: .20, drift: .20 } },
   TRAIL:         { priorityOrder: ['duration', 'dplus', 'hr', 'pace'],             weights: { duration: .25, dplus: .30, hr: .20, structure: .15, pace: .10 } },
+  // Jour de course : aucune allure cible (la consigne "course" n'est pas une zone d'entrainement),
+  // on juge le temps/la distance par rapport a l'estimation du plan et la derive cardiaque.
+  COURSE:        { priorityOrder: ['duration', 'distance', 'drift'],               weights: { duration: .40, distance: .25, drift: .35 } },
 };
 
 // Seuils de gravite (INFO/ATTENTION/IMPORTANT) sur l'ecart d'allure moyenne
@@ -81,6 +85,7 @@ const PACE_SEVERITY_THRESHOLDS = {
   SORTIE_LONGUE: { info: 10, attention: 18, important: 30 },
   MARATHON_AS42: { info: 8,  attention: 15, important: 25 },
   TRAIL:         { info: 15, attention: 25, important: 40 },
+  COURSE:        { info: 15, attention: 25, important: 40 },
 };
 const HR_SEVERITY_THRESHOLDS = {
   EF:            { info: 3, attention: 6,  important: 10 },
@@ -90,6 +95,7 @@ const HR_SEVERITY_THRESHOLDS = {
   SORTIE_LONGUE: { info: 4, attention: 8,  important: 14 },
   MARATHON_AS42: { info: 4, attention: 8,  important: 14 },
   TRAIL:         { info: 5, attention: 10, important: 16 },
+  COURSE:        { info: 5, attention: 10, important: 16 },
 };
 const VOLUME_SEVERITY_THRESHOLDS = { info: 8, attention: 18, important: 35 }; // % ecart
 const DRIFT_SEVERITY_THRESHOLDS  = { info: 5, attention: 10, important: 18 }; // % derive
@@ -501,6 +507,8 @@ function fmtStepMin(sec) {
 async function buildSessionAnalysis(session, week, activity) {
   const goalType = campusState.goal?.goalType || '';
   const isTrail = isTrailSession(session);
+  // Jour de course : pas d'allure cible (la zone "course" du plan n'est pas une zone d'entrainement a juger).
+  const isRace = (session.trainingCategory || '').toLowerCase().includes('competition');
   const sessionTypeKey = classifySessionType(session, goalType, isTrail);
   const profile = SESSION_TYPE_PROFILES[sessionTypeKey];
   let vma = await getCorrectVma(activity);
@@ -561,7 +569,7 @@ async function buildSessionAnalysis(session, week, activity) {
   // propre au bloc repete (peut differer : ex EF domine la duree mais les
   // lignes droites visent la zone VMA) — sert uniquement au tableau
   // repetition par repetition, jamais a la ligne de synthese globale.
-  const mainZoneKey = pickDominantZone(runningEx.length ? runningEx : mainFlat, goalType);
+  const mainZoneKey = isRace ? null : pickDominantZone(runningEx.length ? runningEx : mainFlat, goalType);
   // Sous-zone (séances libres : EF classique / soutenue, bas / haut de plage) : la cible est la moitié
   // basse / haute de la zone SI tous les exercices de cette zone la partagent, sinon la zone entière.
   const subOfZone = (exs, zoneKey) => {
@@ -830,8 +838,10 @@ async function buildSessionAnalysis(session, week, activity) {
   const mainGroup = stepGroups.length ? stepGroups.reduce((b, g) => g.workSec > b.workSec ? g : b) : null;
 
   // ── Volume ──
-  const plannedDurationSec = session.stats?.expectedDuration || null;
-  const plannedDistanceKm  = session.stats?.expectedDistance || null;
+  // Jour de course : la duree brute du plan (Campus) n'est pas fiable — on utilise l'estimation Allure+ affichee sur la carte.
+  const raceEst = isRace && typeof getRaceDayEstimate === 'function' ? getRaceDayEstimate() : null;
+  const plannedDurationSec = isRace ? (raceEst?.sec || null) : (session.stats?.expectedDuration || null);
+  const plannedDistanceKm  = isRace ? (raceEst?.distKm || null) : (session.stats?.expectedDistance || null);
   const actualDurationSec  = activity.durationSec || null;
   const actualDistanceKm   = activity.distanceKm || null;
   const durDeltaPct  = (plannedDurationSec && actualDurationSec) ? Math.round(((actualDurationSec - plannedDurationSec) / plannedDurationSec) * 100) : null;
@@ -1575,7 +1585,7 @@ function generateCommentary(ctx) {
 }
 
 function sessionTypeLabel(key) {
-  const labels = { EF: 'endurance fondamentale', TEMPO: 'tempo', SEUIL: 'seuil', VMA: 'VMA', SORTIE_LONGUE: 'sortie longue', MARATHON_AS42: 'allure marathon', TRAIL: 'trail' };
+  const labels = { EF: 'endurance fondamentale', TEMPO: 'tempo', SEUIL: 'seuil', VMA: 'VMA', SORTIE_LONGUE: 'sortie longue', MARATHON_AS42: 'allure marathon', TRAIL: 'trail', COURSE: 'course' };
   return labels[key] || key;
 }
 
@@ -1620,8 +1630,8 @@ function findWeekForDate(dateStr) {
 
 function isSessionAnalysable(session) {
   const isPPG = session.sport === 'ppg' || session.trainingCategory === 'gpp';
-  const isComp = (session.trainingCategory || '').includes('competition');
-  return !isPPG && !isComp;
+  // Le jour de course se lie aussi a son activite (analyse allegee, sans allure cible : cf isRace).
+  return !isPPG;
 }
 
 // Bouton a inserer dans session-detail-actions (campus.js, renderSessionDetail) —
