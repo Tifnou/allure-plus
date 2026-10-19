@@ -1388,7 +1388,7 @@ function renderSessionCard(session, idx, weekIdx, weekId, isCurrentWeek) {
           ${(() => {
             if (!weekId || typeof _analysisIndex === 'undefined') return '';
             const rec = _analysisIndex.bySession[(weekId + '_' + (session.trainingIndex ?? 0))];
-            return rec ? `<span class="session-analysis-score-badge" title="Séance analysée">📊 ${rec.score}%</span>` : '';
+            return rec ? `<span class="session-analysis-score-badge" title="Séance analysée">📊 ${analysisScoreText(rec)}</span>` : '';
           })()}
           <span class="session-status-badge ${statusInfo.cls}${mood ? ' session-status-badge--mood' : ''}"${mood ? ` onclick="event.stopPropagation();promptSessionMood('${weekId}',${session.trainingIndex ?? 0})" title="Ressenti : ${SESSION_MOOD_STYLES[mood].label}"` : ''}>${mood ? sessionMoodIconSvg(mood, 14) : ''}${statusInfo.label}</span>
           <span class="session-expand-chevron">${isOpen ? '-' : '-'}</span>

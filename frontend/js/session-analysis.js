@@ -20,6 +20,9 @@
 //     chaque liaison/deliaison) — evite un aller-retour reseau par seance/activite ───
 let _analysisIndex = { byActivity: {}, bySession: {}, list: [] };
 
+// Une course n'a pas de score de conformite : badge 🏁 a la place du pourcentage.
+function analysisScoreText(rec) { return rec && rec.race ? '🏁' : (rec ? rec.score + '%' : ''); }
+
 function _analysisSessionKey(weekId, trainingIndex) {
   return weekId + '_' + (trainingIndex ?? 0);
 }
@@ -69,9 +72,9 @@ const SESSION_TYPE_PROFILES = {
   SORTIE_LONGUE: { priorityOrder: ['duration', 'hr', 'drift', 'pace'],             weights: { duration: .35, hr: .25, drift: .20, pace: .20 } },
   MARATHON_AS42: { priorityOrder: ['pace', 'regularity', 'hr', 'drift'],           weights: { pace: .35, regularity: .25, hr: .20, drift: .20 } },
   TRAIL:         { priorityOrder: ['duration', 'dplus', 'hr', 'pace'],             weights: { duration: .25, dplus: .30, hr: .20, structure: .15, pace: .10 } },
-  // Jour de course : aucune allure cible (la consigne "course" n'est pas une zone d'entrainement),
-  // on juge le temps/la distance par rapport a l'estimation du plan et la derive cardiaque.
-  COURSE:        { priorityOrder: ['duration', 'distance', 'drift'],               weights: { duration: .40, distance: .25, drift: .35 } },
+  // Jour de course : aucune allure cible ni comparaison distance/D+ (les chiffres de l'organisateur sont
+  // approximatifs) — seuls comptent le temps par rapport a l'objectif saisi (page Objectifs) et la derive cardiaque.
+  COURSE:        { priorityOrder: ['objective', 'drift'],                          weights: { objective: .60, drift: .40 } },
 };
 
 // Seuils de gravite (INFO/ATTENTION/IMPORTANT) sur l'ecart d'allure moyenne
@@ -510,7 +513,7 @@ async function buildSessionAnalysis(session, week, activity) {
   // Jour de course : pas d'allure cible (la zone "course" du plan n'est pas une zone d'entrainement a juger).
   const isRace = (session.trainingCategory || '').toLowerCase().includes('competition');
   const sessionTypeKey = classifySessionType(session, goalType, isTrail);
-  const profile = SESSION_TYPE_PROFILES[sessionTypeKey];
+  const profile = isRace ? SESSION_TYPE_PROFILES.COURSE : SESSION_TYPE_PROFILES[sessionTypeKey];
   let vma = await getCorrectVma(activity);
   // "Allure objectif" forcee pour CETTE seance (cf isGoalPaceForced/
   // computeGoalPaceInfo, campus.js) : remplace la VMA reelle par la VMA
@@ -838,15 +841,27 @@ async function buildSessionAnalysis(session, week, activity) {
   const mainGroup = stepGroups.length ? stepGroups.reduce((b, g) => g.workSec > b.workSec ? g : b) : null;
 
   // ── Volume ──
-  // Jour de course : la duree brute du plan (Campus) n'est pas fiable — on utilise l'estimation Allure+ affichee sur la carte.
-  const raceEst = isRace && typeof getRaceDayEstimate === 'function' ? getRaceDayEstimate() : null;
-  const plannedDurationSec = isRace ? (raceEst?.sec || null) : (session.stats?.expectedDuration || null);
-  const plannedDistanceKm  = isRace ? (raceEst?.distKm || null) : (session.stats?.expectedDistance || null);
+  // Jour de course : pas de "prevu" Campus (duree brute fausse, distance/D+ annonces approximatifs par l'organisateur).
+  // Reference = l'objectif saisi sur la page Objectifs (temps cible, distance, D+), purement indicatif.
+  let race = null;
+  if (isRace) {
+    const planId = campusState.goal?._id || 'plan';
+    const savedGoals = JSON.parse(localStorage.getItem('suivi_personal_goals') || '{}');
+    race = {
+      targetSec: (typeof parseTargetTime === 'function' ? parseTargetTime(savedGoals.targetTime) : null) || null,
+      targetLabel: savedGoals.targetTime || null,
+      distKm: parseFloat(localStorage.getItem('suivi_objectif_dist_' + planId)) || null,
+      dplusM: parseInt(localStorage.getItem('suivi_objectif_dplus_' + planId)) || null,
+    };
+  }
+  const plannedDurationSec = isRace ? null : (session.stats?.expectedDuration || null);
+  const plannedDistanceKm  = isRace ? null : (session.stats?.expectedDistance || null);
   const actualDurationSec  = activity.durationSec || null;
   const actualDistanceKm   = activity.distanceKm || null;
   const durDeltaPct  = (plannedDurationSec && actualDurationSec) ? Math.round(((actualDurationSec - plannedDurationSec) / plannedDurationSec) * 100) : null;
   const distDeltaPct = (plannedDistanceKm && actualDistanceKm) ? Math.round(((actualDistanceKm - plannedDistanceKm) / plannedDistanceKm) * 100) : null;
   const primaryDeltaPct = durDeltaPct != null ? durDeltaPct : distDeltaPct;
+  if (race) race.deltaSec = (race.targetSec && actualDurationSec) ? Math.round(actualDurationSec - race.targetSec) : null;
   const volume = {
     plannedDurationSec, actualDurationSec, plannedDistanceKm, actualDistanceKm,
     movingTimeSec: actualDurationSec, stoppedTimeSec: null,
@@ -1157,7 +1172,7 @@ async function buildSessionAnalysis(session, week, activity) {
   // ── Trail : denivele ──
   let trail = null;
   if (isTrail) {
-    const plannedDPlusM = session.stats?.expectedElevationGain || null;
+    const plannedDPlusM = isRace ? (race?.dplusM || null) : (session.stats?.expectedElevationGain || null);
     const actualDPlusM  = activity.elevationGain || null;
     const movingH = actualDurationSec ? actualDurationSec / 3600 : null;
     trail = {
@@ -1256,7 +1271,9 @@ async function buildSessionAnalysis(session, week, activity) {
     drift: cardiacDrift ? scoreFromBand(cardiacDrift.driftPct, 4, 18) : null,
     regularity: scoreFromBand(regularity.maxEcartSecKm, 8, 40),
     structure: scoreFromStructureReps(plannedMainReps, structure.actualMainReps),
-    dplus: (trail && trail.deltaPct != null) ? scoreFromDeltaPct(trail.deltaPct, 10, 50) : null,
+    dplus: (trail && trail.deltaPct != null && !isRace) ? scoreFromDeltaPct(trail.deltaPct, 10, 50) : null,
+    // Course : seul un temps PLUS LENT que l'objectif est penalise (marge de 3 %), jamais un temps meilleur.
+    objective: (race && race.deltaSec != null) ? scoreFromDeltaPct(Math.max(0, race.deltaSec / race.targetSec * 100), 3, 30) : null,
   };
   let scoreSum = 0, scoreW = 0;
   Object.entries(profile.weights).forEach(([key, w]) => {
@@ -1264,14 +1281,21 @@ async function buildSessionAnalysis(session, week, activity) {
     if (v == null) return;
     scoreSum += v * w; scoreW += w;
   });
-  const score = scoreW > 0 ? Math.round(Math.max(0, Math.min(100, scoreSum / scoreW))) : 50;
-  const verdict = verdictForScore(score);
+  const score = scoreW > 0 ? Math.round(Math.max(0, Math.min(100, scoreSum / scoreW))) : (isRace ? 100 : 50);
+  let verdict = verdictForScore(score);
+  if (race) {
+    const fmtMin = sec => { const m = Math.round(Math.abs(sec) / 60); return m >= 60 ? Math.floor(m / 60) + 'h' + String(m % 60).padStart(2, '0') : m + ' min'; };
+    if (race.deltaSec == null) verdict = { emoji: '🏁', label: 'Course analysée' };
+    else if (race.deltaSec <= 0) verdict = { emoji: '🏆', label: `Objectif atteint (${fmtMin(race.deltaSec)} de mieux)` };
+    else if (race.deltaSec <= race.targetSec * 0.03) verdict = { emoji: '🏁', label: `Objectif quasi atteint (+${fmtMin(race.deltaSec)})` };
+    else verdict = { emoji: '🏁', label: `Plus lent que l'objectif de ${fmtMin(race.deltaSec)}` };
+  }
 
   // ── Commentaire genere ──
   const commentary = generateCommentary({
     sessionName: session.displayName || session.name, sessionTypeKey, score, verdict,
     volume, structure, plannedMainReps: structure.plannedMainReps, paceVerdict, deviationSecKm: effectiveDeviationSecKm, regularity, pacingStrategy,
-    hrVerdict, cardiacDrift, positives, improvements, paceLenient, usingGapVerdict,
+    hrVerdict, cardiacDrift, positives, improvements, paceLenient, usingGapVerdict, race, activity,
   });
 
   return {
@@ -1296,7 +1320,7 @@ async function buildSessionAnalysis(session, week, activity) {
     sessionTypeKey, score, verdict,
     volume, structure, paceAnalysis, reps, repsHRBand, regularity, pacingStrategy, recovery, hr, cardiacDrift,
     coherenceNarrative, timeInZoneBreakdown, trail, anomalies, positives, improvements, commentary, timeline: stepsUnavailable ? [] : timeline,
-    steps: stepRows, stepNotice,
+    steps: stepRows, stepNotice, race,
     pairingKey: computePairingKey(session),
     // Detail du calcul du score, pour la modale "Comprendre votre score" —
     // composants bruts + ponderations effectivement utilisees (celles a null
@@ -1556,6 +1580,14 @@ function computeCoherenceNarrative(paceVerdict, hrVerdict, usingGap) {
 
 function generateCommentary(ctx) {
   const parts = [];
+  if (ctx.race) {
+    const r = ctx.race, a = ctx.activity || {};
+    parts.push(`${ctx.verdict.label}.`);
+    if (r.targetLabel && r.deltaSec != null) parts.push(`Objectif ${r.targetLabel}, réalisé en ${fmtDuration(a.durationSec)}.`);
+    if (a.distanceKm) parts.push(`Parcours mesuré à ${a.distanceKm.toFixed(1)} km${a.elevationGain ? ' pour ' + Math.round(a.elevationGain) + ' m de D+' : ''} (les distances et dénivelés annoncés par les organisateurs sont indicatifs, ils ne sont pas jugés).`);
+    if (ctx.cardiacDrift?.narrative) parts.push(ctx.cardiacDrift.narrative);
+    return parts.join(' ');
+  }
   if (ctx.score >= 85) parts.push(`Très bonne séance de type ${sessionTypeLabel(ctx.sessionTypeKey)}.`);
   else if (ctx.score >= 70) parts.push(`Séance globalement conforme (${sessionTypeLabel(ctx.sessionTypeKey)}).`);
   else parts.push(`Séance assez différente de ce qui était prévu (${sessionTypeLabel(ctx.sessionTypeKey)}).`);
@@ -1642,7 +1674,7 @@ function renderSessionAnalysisButton(session, weekId) {
   const ti = session.trainingIndex ?? 0;
   const existing = _analysisIndex.bySession[_analysisSessionKey(weekId, ti)];
   if (existing) {
-    return `<button type="button" class="btn-view-analysis" onclick="event.stopPropagation(); openStoredAnalysis('${existing.id}')">📊 Voir l'analyse (${existing.score}%)</button>`;
+    return `<button type="button" class="btn-view-analysis" onclick="event.stopPropagation(); openStoredAnalysis('${existing.id}')">📊 Voir l'analyse (${analysisScoreText(existing)})</button>`;
   }
   return `<button type="button" class="btn-link-analysis" onclick="event.stopPropagation(); openSessionLinkPicker('${weekId}', ${ti})">🔗 Analyser / Lier une activité</button>`;
 }
@@ -1957,10 +1989,15 @@ function buildAnalysisModalHtml(record) {
   const isTrail = record.sessionTypeKey === 'TRAIL' && record.trail;
   const rows = [];
 
-  if (a.distanceKm != null || s.stats?.expectedDistance != null) {
+  const race = record.race || null;
+  if (race) {
+    // Course : reperes = objectif saisi (page Objectifs) ; distance et D+ jamais juges, seul le temps est compare a l'objectif.
+    if (a.distanceKm != null) rows.push({ label: 'Distance', planned: race.distKm ? race.distKm.toFixed(2) + ' km' : '—', actual: a.distanceKm.toFixed(2) + ' km', ok: true });
+    if (a.durationSec != null) rows.push({ label: 'Durée', planned: race.targetLabel ? 'Objectif ' + race.targetLabel : '—', actual: fmtDuration(a.durationSec), ok: race.deltaSec == null || race.deltaSec <= race.targetSec * 0.03 });
+  } else if (a.distanceKm != null || s.stats?.expectedDistance != null) {
     rows.push({ label: 'Distance', planned: s.stats?.expectedDistance ? s.stats.expectedDistance.toFixed(2) + ' km' : '—', actual: a.distanceKm ? a.distanceKm.toFixed(2) + ' km' : '—', ok: record.volume.verdict !== 'plus_court' && record.volume.verdict !== 'plus_long' });
   }
-  if (a.durationSec != null || s.stats?.expectedDuration != null) {
+  if (!race && (a.durationSec != null || s.stats?.expectedDuration != null)) {
     rows.push({ label: 'Durée', planned: s.stats?.expectedDuration ? fmtDuration(s.stats.expectedDuration) : '—', actual: a.durationSec ? fmtDuration(a.durationSec) : '—', ok: record.volume.verdict !== 'plus_court' && record.volume.verdict !== 'plus_long' });
   }
   if (record.structure.plannedMainReps) {
@@ -1986,7 +2023,7 @@ function buildAnalysisModalHtml(record) {
     <div class="analysis-summary-row">
       <span class="analysis-summary-label">Dénivelé (D+)</span>
       <span class="analysis-summary-values"><span class="analysis-summary-planned">${record.trail.plannedDPlusM ? Math.round(record.trail.plannedDPlusM) + ' m' : '—'}</span> → <span class="analysis-summary-actual">${record.trail.actualDPlusM ? Math.round(record.trail.actualDPlusM) + ' m' : '—'}${record.trail.vamMPerH ? ' · VAM ' + record.trail.vamMPerH + ' m/h' : ''}</span></span>
-      <span class="analysis-summary-icon">${_rowIcon(record.trail.deltaPct == null || Math.abs(record.trail.deltaPct) <= 15)}</span>
+      <span class="analysis-summary-icon">${_rowIcon(record.race || record.trail.deltaPct == null || Math.abs(record.trail.deltaPct) <= 15)}</span>
     </div>` : '';
 
   // Ligne "Effort (GAP)" : le vrai verdict conforme/pas conforme sur une
@@ -2232,7 +2269,7 @@ function buildAnalysisModalHtml(record) {
     <div class="analysis-modal-header">
       <div class="analysis-modal-title">${s.displayName}</div>
       <div class="analysis-modal-score-row">
-        <div class="analysis-modal-score">${record.verdict.emoji} <strong>${record.score}%</strong> — ${record.verdict.label}</div>
+        <div class="analysis-modal-score">${record.race ? `${record.verdict.emoji} <strong>${record.verdict.label}</strong>` : `${record.verdict.emoji} <strong>${record.score}%</strong> — ${record.verdict.label}`}</div>
         <button type="button" class="analysis-score-help-btn" id="analysis-score-help-btn">?</button>
       </div>
     </div>
@@ -2352,7 +2389,7 @@ function openAnalysisModal(record) {
   // est le wrapper NON scrollant (pas .analysis-modal-scroll) pour que les
   // confettis restent visuellement fixes pendant que l'utilisateur scrolle
   // le contenu de la modale, plutôt que de défiler avec lui.
-  if (record.score >= 90) fireConfetti(modal.querySelector('#session-analysis-modal-card'));
+  if (record.score >= 90 && !(record.race && record.race.deltaSec == null)) fireConfetti(modal.querySelector('#session-analysis-modal-card'));
   const close = () => { modal.remove(); document.removeEventListener('keydown', escHandler); };
   function escHandler(e) { if (e.key === 'Escape') close(); }
   modal.querySelector('#session-analysis-close').addEventListener('click', close);
@@ -2401,6 +2438,7 @@ const SCORE_COMPONENT_LABELS = {
   regularity: 'Régularité entre répétitions',
   structure:  'Répétitions réalisées',
   dplus:      'Dénivelé (D+)',
+  objective:  'Temps par rapport à l\'objectif',
 };
 
 // Phrase "coach" par composante du score (retour utilisateur 29/08 : les %
@@ -2413,6 +2451,12 @@ const SCORE_COMPONENT_LABELS = {
 function componentNarrative(key, record) {
   const s = record.sessionSnapshot, a = record.activitySnapshot;
   switch (key) {
+    case 'objective': {
+      const r = record.race;
+      if (!r || r.deltaSec == null) return null;
+      const m = Math.round(Math.abs(r.deltaSec) / 60);
+      return r.deltaSec <= 0 ? `Objectif de ${r.targetLabel} atteint, avec ${m} min d'avance. Seul un temps plus lent que l'objectif est pénalisé.` : `${m} min de plus que l'objectif de ${r.targetLabel} (marge de 3 % tolérée).`;
+    }
     case 'duration': {
       const planned = s.stats?.expectedDuration, actual = a.durationSec;
       if (!planned || !actual) return null;
@@ -2527,7 +2571,7 @@ function buildScoreBreakdownHtml(record) {
   return `
     <div class="analysis-modal-header">
       <div class="analysis-modal-title">Comprendre votre score</div>
-      <div class="analysis-modal-score">Séance type ${sessionTypeLabel(record.sessionTypeKey)} — ${record.verdict.emoji} <strong>${record.score}%</strong></div>
+      <div class="analysis-modal-score">Séance type ${sessionTypeLabel(record.sessionTypeKey)} — ${record.verdict.emoji} <strong>${analysisScoreText(record)}</strong></div>
     </div>
     <div class="analysis-commentary">Chaque composante de la séance obtient un score de 0 à 100%, selon son écart à ce qui était prévu. Le score final est leur moyenne pondérée — seules les composantes applicables à ce type de séance comptent (pondérations totales utilisées ici : ${usedPct}%).</div>
     <div class="score-breakdown-list">${rows}</div>
@@ -2755,7 +2799,7 @@ function activityAnalysisBadge(activityId) {
 function renderActivityAnalysisButtons(activity) {
   const existing = _analysisIndex.byActivity[String(activity.id)];
   if (existing) {
-    return `<button type="button" class="activity-link" id="btn-view-session-analysis" style="cursor:pointer">📊 Voir l'analyse (${existing.score}%)</button>`;
+    return `<button type="button" class="activity-link" id="btn-view-session-analysis" style="cursor:pointer">📊 Voir l'analyse (${analysisScoreText(existing)})</button>`;
   }
   const t = (activity.activityType || '').toLowerCase();
   if (!(t.includes('run') || t.includes('trail'))) return '';
