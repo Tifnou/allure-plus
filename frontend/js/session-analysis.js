@@ -2134,6 +2134,13 @@ function buildTimelineHtml(timeline) {
     return `<div class="analysis-timeline-seg" style="flex:${pct} 0 auto;height:${h}%;background:${TIMELINE_COLORS[seg.type] || TIMELINE_COLORS.effort}" title="${_escapeAttr(title)}"></div>`;
   }).join('');
   const distinctTypes = new Set(timeline.map(s => s.type));
+  // Séance continue (une seule phase) : remplacée, une fois la trace GPS chargée, par un bloc par km
+  // (renderKmBars) — l'ancienne barre reste en repli si la trace est indisponible.
+  if (distinctTypes.size <= 1) {
+    return `
+    <div class="analysis-section-title">Déroulé de la séance</div>
+    <div id="analysis-km-bars" class="analysis-km-bars-host"><div class="analysis-timeline-bar">${bar}</div></div>`;
+  }
   const legend = distinctTypes.size <= 1 ? '' : Object.keys(TIMELINE_LABELS)
     .filter(k => distinctTypes.has(k))
     .map(k => `<span class="analysis-timeline-legend-item"><span class="analysis-timeline-dot" style="background:${TIMELINE_COLORS[k]}"></span>${TIMELINE_LABELS[k]}</span>`)
@@ -2613,10 +2620,12 @@ function openAnalysisModal(record) {
   const descentList = record.trail?.climb?.descents || [];
   const needsProfile = record.sessionTypeKey === 'TRAIL' && record.trail?.plannedDPlusM;
   const needsClimbFocus = record.sessionTypeKey === 'TRAIL' && (climbList.length + descentList.length) > 0;
-  if (needsProfile || needsClimbFocus) {
+  const needsKmBars = !!modal.querySelector('#analysis-km-bars');
+  if (needsProfile || needsClimbFocus || needsKmBars) {
     loadAnalysisActivityElevation(record.activityId).then(elevation => {
       if (!elevation || !modal.isConnected) return;
-      if (needsProfile) renderAnalysisElevationChart(elevation);
+      if (needsProfile) renderAnalysisElevationChart(elevation, record.activitySnapshot?.elevationGain);
+      renderKmBars(elevation, record);
       if (needsClimbFocus) initClimbFocusPanel(elevation, climbList, descentList);
     });
   }
@@ -2831,7 +2840,7 @@ async function loadAnalysisActivityElevation(activityId) {
     return (Array.isArray(elevation) && elevation.length >= 2) ? elevation : null;
   } catch (e) { console.error('loadAnalysisActivityElevation:', e); return null; }
 }
-function renderAnalysisElevationChart(elevation) {
+function renderAnalysisElevationChart(elevation, refAscentM) {
   const canvas = document.getElementById('analysis-elevation-chart');
   if (!canvas) return;
   if (_analysisElevationChart) { _analysisElevationChart.destroy(); _analysisElevationChart = null; }
@@ -2853,11 +2862,109 @@ function renderAnalysisElevationChart(elevation) {
       options: {
         ...base,
         plugins: { ...base.plugins, tooltip: { ...base.plugins.tooltip, displayColors: false,
-          callbacks: elevationTooltipCallbacks(elevation.map(p => p.distKm), data) } },
+          callbacks: elevationTooltipCallbacks(elevation.map(p => p.distKm), data, refAscentM) } },
         scales: { ...base.scales, x: { ...base.scales.x, ticks: { ...base.scales.x.ticks, maxTicksLimit: 6 } } },
       }
     });
   } catch (e) { console.error('renderAnalysisElevationChart:', e); }
+}
+
+
+// ─── Déroulé par km : un bloc de même largeur par km, hauteur = vitesse, détail au survol ───────────────
+function computeKmSplits(elevation, refAscentM) {
+  const n = elevation.length;
+  if (n < 2) return [];
+  const total = elevation[n - 1].distKm;
+  const interp = (km, key) => {
+    let i = 1;
+    while (i < n - 1 && elevation[i].distKm < km) i++;
+    const a = elevation[i - 1], b = elevation[i];
+    if (a[key] == null || b[key] == null) return null;
+    const span = b.distKm - a.distKm;
+    const f = span > 0 ? Math.max(0, Math.min(1, (km - a.distKm) / span)) : 0;
+    return a[key] + (b[key] - a[key]) * f;
+  };
+  // D+ brut de toute la trace -> facteur pour retomber sur le D+ officiel de l'activite (cf. elevationTooltipCallbacks)
+  let rawUp = 0;
+  for (let i = 1; i < n; i++) rawUp += Math.max(0, elevation[i].alt - elevation[i - 1].alt);
+  const k = (refAscentM > 0 && rawUp > 0) ? refAscentM / rawUp : 1;
+  const out = [];
+  for (let km = 0; km < total; km++) {
+    const from = km, to = Math.min(km + 1, total);
+    if (to - from < 0.05) continue;
+    const inside = elevation.filter(p => p.distKm > from && p.distKm < to);
+    const seg = [{ ...elevation[0], distKm: from, sec: interp(from, 'sec'), movingSec: interp(from, 'movingSec'), alt: interp(from, 'alt') }, ...inside,
+      { ...elevation[n - 1], distKm: to, sec: interp(to, 'sec'), movingSec: interp(to, 'movingSec'), alt: interp(to, 'alt') }];
+    let up = 0, down = 0;
+    for (let i = 1; i < seg.length; i++) { const d = seg[i].alt - seg[i - 1].alt; if (d > 0) up += d; else down -= d; }
+    const sec = (seg[0].sec != null && seg[seg.length - 1].sec != null) ? seg[seg.length - 1].sec - seg[0].sec : null;
+    const lenKm = to - from;
+    const hrs = seg.map(p => p.hr).filter(h => h != null);
+    const gaps = seg.map(p => p.gapMps).filter(g => g > 0);
+    const agg = aggregateIntervals(seg);
+    out.push({
+      km: km + 1, lenKm, sec,
+      paceSecKm: sec != null ? Math.round(sec / lenKm) : null,
+      gapSecKm: gaps.length ? Math.round(1000 / (gaps.reduce((a, b) => a + b, 0) / gaps.length)) : null,
+      up: Math.round(up * k), down: Math.round(down * k),
+      gradePct: Math.round(((seg[seg.length - 1].alt - seg[0].alt) / (lenKm * 1000)) * 1000) / 10,
+      hr: hrs.length ? Math.round(hrs.reduce((a, b) => a + b, 0) / hrs.length) : null,
+      stoppedSec: agg.hasTime ? Math.round(agg.still + agg.crawl) : null,
+      cumSec: seg[seg.length - 1].sec,
+    });
+  }
+  return out;
+}
+
+let _kmTip = null;
+function renderKmBars(elevation, record) {
+  const host = document.getElementById('analysis-km-bars');
+  if (!host || !elevation) return;
+  const splits = computeKmSplits(elevation, record.activitySnapshot?.elevationGain).filter(x => x.paceSecKm);
+  if (splits.length < 2) return; // trace trop pauvre : on garde l'ancienne barre
+  const speeds = splits.map(x => 1 / x.paceSecKm);
+  const minS = Math.min(...speeds), maxS = Math.max(...speeds);
+  const colorFor = g => g >= CLIMB_GRADE_PCT ? '#fb923c' : g <= -CLIMB_GRADE_PCT ? '#38bdf8' : '#3b82f6';
+  const step = splits.length > 30 ? 5 : splits.length > 12 ? 2 : 1;
+  host.innerHTML = `
+    <div class="km-bars">${splits.map((x, i) => {
+      const h = maxS > minS ? 22 + ((1 / x.paceSecKm - minS) / (maxS - minS)) * 78 : 60;
+      return `<div class="km-col" data-i="${i}"><div class="km-bar" style="height:${h}%;background:${colorFor(x.gradePct)}"></div></div>`;
+    }).join('')}</div>
+    <div class="km-ticks">${splits.map(x => `<span>${(x.km === 1 || x.km % step === 0) ? x.km : ''}</span>`).join('')}</div>
+    <div class="analysis-timeline-legend">
+      <span class="analysis-timeline-legend-item"><span class="analysis-timeline-dot" style="background:#fb923c"></span>Km en montée</span>
+      <span class="analysis-timeline-legend-item"><span class="analysis-timeline-dot" style="background:#3b82f6"></span>Plat</span>
+      <span class="analysis-timeline-legend-item"><span class="analysis-timeline-dot" style="background:#38bdf8"></span>Km en descente</span>
+      <span class="analysis-timeline-legend-item">· plus la barre est haute, plus le km est rapide</span>
+    </div>`;
+  const hide = () => { if (_kmTip) { _kmTip.remove(); _kmTip = null; } };
+  const f1 = v => (v >= 0 ? '+' : '−') + Math.abs(v).toFixed(1).replace('.', ',') + ' %';
+  host.querySelectorAll('.km-col').forEach(col => {
+    const x = splits[Number(col.dataset.i)];
+    const show = ev => {
+      if (!_kmTip) { _kmTip = document.createElement('div'); _kmTip.className = 'km-tip'; document.body.appendChild(_kmTip); }
+      const row = (l, v) => v == null ? '' : `<div class="km-tip-row"><span>${l}</span><strong>${v}</strong></div>`;
+      _kmTip.innerHTML = `
+        <div class="km-tip-title">Km ${x.km}${x.lenKm < 0.95 ? ` <small>(dernier tronçon · ${(x.lenKm * 1000).toFixed(0)} m)</small>` : ''}</div>
+        ${row('Temps', fmtDuration(Math.round(x.sec)))}
+        ${row('Allure', fmtPace(x.paceSecKm) + '/km')}
+        ${x.gapSecKm && Math.abs(x.gapSecKm - x.paceSecKm) >= 5 ? row('Allure ajustée (GAP)', fmtPace(x.gapSecKm) + '/km') : ''}
+        ${row('Dénivelé', `<span class="km-up">▲ ${x.up} m</span> &nbsp; <span class="km-down">▼ ${x.down} m</span>`)}
+        ${row('Pente moyenne', f1(x.gradePct))}
+        ${row('FC moyenne', x.hr ? x.hr + ' bpm' : null)}
+        ${x.stoppedSec >= 15 ? row('À l\'arrêt', fmtStepMin(x.stoppedSec)) : ''}
+        ${row('Cumulé', x.cumSec != null ? fmtDuration(Math.round(x.cumSec)) : null)}`;
+      const r = _kmTip.getBoundingClientRect();
+      let left = ev.clientX + 16, top = ev.clientY - r.height - 12;
+      if (left + r.width > window.innerWidth - 8) left = ev.clientX - r.width - 16;
+      if (top < 8) top = ev.clientY + 18;
+      _kmTip.style.left = left + 'px'; _kmTip.style.top = top + 'px';
+    };
+    col.addEventListener('mouseenter', show);
+    col.addEventListener('mousemove', show);
+    col.addEventListener('mouseleave', hide);
+  });
 }
 
 // ─── Focus montées : panneau navigable, une carte par montée détectée ─────
@@ -2949,10 +3056,14 @@ function renderClimbFocusChart(elevation, climb, color = '#fb923c', fillColor = 
     if (pts.length < 2) return;
     const labels = pts.map(p => p.distKm.toFixed(2));
     const alt = pts.map(p => p.alt);
+    // Les points de la trace sont espaces de plusieurs dizaines de metres : on elargit la fenetre voisin par
+    // voisin jusqu'a couvrir au moins CLIMB_FOCUS_GRADE_WINDOW_M, sinon la pente tombait a 0 % partout.
     const grades = pts.map((p, i) => {
       let lo = i, hi = i;
-      while (lo > 0 && (p.distKm - pts[lo - 1].distKm) * 1000 < CLIMB_FOCUS_GRADE_WINDOW_M / 2) lo--;
-      while (hi < pts.length - 1 && (pts[hi + 1].distKm - p.distKm) * 1000 < CLIMB_FOCUS_GRADE_WINDOW_M / 2) hi++;
+      while ((lo > 0 || hi < pts.length - 1) && (pts[hi].distKm - pts[lo].distKm) * 1000 < CLIMB_FOCUS_GRADE_WINDOW_M) {
+        if (lo > 0) lo--;
+        if (hi < pts.length - 1 && (pts[hi].distKm - pts[lo].distKm) * 1000 < CLIMB_FOCUS_GRADE_WINDOW_M) hi++;
+      }
       const dM = (pts[hi].distKm - pts[lo].distKm) * 1000;
       return dM > 3 ? ((pts[hi].alt - pts[lo].alt) / dM) * 100 : 0;
     });
