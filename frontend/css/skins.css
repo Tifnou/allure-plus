@@ -54,7 +54,7 @@ html[data-skin="m8"][data-theme="dark"] #bg-slideshow::after {
 html[data-skin="m8"] .page-header {
   position: relative; overflow: hidden;
   background: linear-gradient(100deg, #0B1F4D 0%, #1E4FA8 75%);
-  border: 0; border-bottom: 3px solid #C9A24B; border-radius: var(--radius-md);
+  border: 0; border-radius: var(--radius-md); box-shadow: inset 0 -3px 0 #C9A24B;
   backdrop-filter: none; -webkit-backdrop-filter: none;
 }
 html[data-skin="m8"] .page-header::after {
