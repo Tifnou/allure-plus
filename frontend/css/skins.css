@@ -1,115 +1,172 @@
 /* ═══════════════════════════════════════════════════════════════════════
-   SKINS — habillages choisis par l'utilisateur (activation : js/skins.js)
-   html[data-skin="..."] se superpose à :root / [data-theme]. Chaque skin a une
+   SKINS — habillages réservés (activation : js/skins.js, droit : Admin)
+   html[data-skin="..."] se superpose à :root / [data-theme]. Un skin a une
    palette CLAIRE (bloc de base) et une SOMBRE (bloc [data-theme="dark"]).
-   `:not([data-season])` : un thème de saison actif reste prioritaire.
+   Un skin activé écarte les thèmes de saison (voir themes.js).
 ═══════════════════════════════════════════════════════════════════════ */
 
-/* ─── Gentle Mates · M8 — clair ───
-   Sobre « streetwear » : fond gris très clair, noir pur, bleu royal du maillot
-   Worlds 2026 en accent, doré de l'écusson en second accent. */
-html[data-skin="m8"]:not([data-season]) {
-  --bg: #F1F3F2; --bg-white: #FFFFFF; --bg-hover: #E6E9E8;
-  --border: #D8DCDA; --border-light: #E8EBEA;
-  --accent: #1E4FA8; --accent-light: #E8EEF9; --accent-text: #173F87;
-  --orange: #A87A1C; --orange-bg: #FBF4E4;
-  --text-primary: #0A0A0A; --text-secondary: #505555; --text-muted: #666B6B;
-  --nav-text: #0A0A0A; --card-bg: rgba(255,255,255,0.93);
-  --brand-green: #B8913A;
-  --font: 'DIN Next','Helvetica Neue',Helvetica,Arial,sans-serif;
+/* ═══ Gentle Mates · M8 ═══
+   Gris, noir, rose, violet, blanc — visuels dans images/skin-m8/ :
+   crest.png (écusson M8 Paris), wordmark.png (logo graffiti), tile-light.jpg /
+   tile-dark.jpg (motifs répétables, miroir), char.jpg (personnage de la barre
+   latérale), pad.jpg (manette du bandeau de la Synthèse). */
+
+/* ─── Palette claire : blanc lilas, rose magenta ─── */
+html[data-skin="m8"] {
+  --bg: #F5ECF7; --bg-white: #FFFFFF; --bg-hover: #F3DFF6;
+  --border: #E3C8EA; --border-light: #F0DEF3;
+  --accent: #B83FA9; --accent-light: #FBEAF8; --accent-text: #9B2C8E;
+  --purple: #7C3AED;
+  --text-primary: #1A1220; --text-secondary: #5E4B6A; --text-muted: #6E5A7A;
+  --nav-text: #1A1220; --card-bg: rgba(255,255,255,0.94);
+  --brand-green: #F08AE4;
+  --font: 'Helvetica Neue',Helvetica,Arial,sans-serif;
   --font-body: 'Helvetica Neue',Helvetica,Arial,sans-serif;
   --radius-sm: 4px; --radius-md: 6px; --radius-lg: 8px;
 }
 
-/* ─── Gentle Mates · M8 — sombre : noir profond, bleu éclairci, or ─── */
-html[data-skin="m8"][data-theme="dark"]:not([data-season]) {
-  --bg: #080808; --bg-white: #111212; --bg-hover: #1C1E1E;
-  --border: #2A2D2D; --border-light: #1B1D1D;
-  --accent: #4F86E6; --accent-light: #0F1B33; --accent-text: #A4C0F3;
-  --orange: #E0B04A; --orange-bg: #241B07;
-  --text-primary: #F1F3F2; --text-secondary: #A5AAAA; --text-muted: #8E9393;
-  --nav-text: #E6E8E8; --card-bg: rgba(17,18,18,0.93);
-  --brand-green: #D4AF5A;
+/* ─── Palette sombre : noir violacé, rose clair ─── */
+html[data-skin="m8"][data-theme="dark"] {
+  --bg: #0C0A10; --bg-white: #15111B; --bg-hover: #221A2C;
+  --border: #3A2A48; --border-light: #261B30;
+  --accent: #F08AE4; --accent-light: #2C1232; --accent-text: #F7B6EE;
+  --purple: #B79BFF;
+  --text-primary: #F6F0FA; --text-secondary: #BBAACB; --text-muted: #9E8DAF;
+  --nav-text: #EADCF3; --card-bg: rgba(21,17,27,0.94);
+  --shadow-sm: 0 1px 4px rgba(0,0,0,0.45);
 }
-html[data-skin="m8"][data-theme="dark"]:not([data-season]) .sidebar { background: rgba(8,8,8,0.95); }
 
-/* ─── Gentle Mates · M8 — identité graphique (dessinée ici, aucun logo officiel) ───
-   Esprit maillot Worlds 2026 : panneaux bleu royal, liseré doré, capitales,
-   gros « M8 » en filigrane. Valable en clair comme en sombre. */
-
-/* Fond : voile bleu en diagonale sur la photo + fines rayures de maillot */
+/* ─── Fond : les motifs M8 remplacent les photos du diaporama ─── */
+html[data-skin="m8"] #bg-slideshow .bg-layer { display: none !important; }
+html[data-skin="m8"] #bg-slideshow {
+  background: url("../images/skin-m8/tile-light.jpg") center top / 520px repeat;
+}
+html[data-skin="m8"][data-theme="dark"] #bg-slideshow {
+  background: url("../images/skin-m8/tile-dark.jpg") center top / 440px repeat;
+}
 html[data-skin="m8"] #bg-slideshow::after {
   content: ''; position: absolute; inset: 0; pointer-events: none;
-  background:
-    repeating-linear-gradient(115deg, transparent 0 26px, rgba(255,255,255,0.07) 26px 52px),
-    linear-gradient(115deg, rgba(11,31,77,0.72) 0%, rgba(30,79,168,0.38) 45%, rgba(241,243,242,0.30) 100%);
+  background: linear-gradient(180deg, rgba(245,236,247,0.30), rgba(245,236,247,0.55));
 }
 html[data-skin="m8"][data-theme="dark"] #bg-slideshow::after {
-  background:
-    repeating-linear-gradient(115deg, transparent 0 26px, rgba(255,255,255,0.04) 26px 52px),
-    linear-gradient(115deg, rgba(4,10,28,0.88) 0%, rgba(11,31,77,0.62) 50%, rgba(8,8,8,0.75) 100%);
+  background: linear-gradient(180deg, rgba(8,6,12,0.66), rgba(8,6,12,0.82));
 }
 
-/* Bandeau de page : panneau bleu, liseré doré, « M8 » en filigrane */
+/* ─── Barre latérale : toujours sombre, personnage en pied, écusson ─── */
+html[data-skin="m8"] .sidebar {
+  /* Palette interne sombre, même en thème clair */
+  --bg-white: #15111B; --bg-hover: #2A1D36; --border: #3A2A48; --border-light: #2E2038;
+  --text-primary: #F6F0FA; --text-secondary: #CDBCDB; --text-muted: #AA97BB;
+  --nav-text: #EADCF3; --accent: #F08AE4; --accent-light: #3A1741; --accent-text: #F7B6EE;
+  background: rgba(12,10,16,0.97);
+  box-shadow: inset -2px 0 0 #F08AE4;
+  overflow: hidden;
+}
+/* Personnage : grande silhouette verticale, fondue vers le haut */
+html[data-skin="m8"] .sidebar::before {
+  content: ''; position: absolute; inset: 0; pointer-events: none; z-index: 0;
+  background:
+    linear-gradient(180deg, rgba(12,10,16,0.98) 0%, rgba(12,10,16,0.84) 38%, rgba(12,10,16,0.30) 100%),
+    url("../images/skin-m8/char.jpg") center bottom / 100% auto no-repeat;
+}
+html[data-skin="m8"] .sidebar > * { position: relative; z-index: 1; }
+
+html[data-skin="m8"] .sidebar-brand {
+  background: linear-gradient(135deg, #0C0A10 0%, #3A1445 60%, #8A2F86 100%);
+  border-bottom: 0; box-shadow: inset 0 -3px 0 #F08AE4;
+}
+html[data-skin="m8"] #sidebar-logo-img {
+  content: url("../images/skin-m8/crest.png");
+  height: 48px; width: 52px; border-radius: 0; background: none; padding: 0;
+  filter: drop-shadow(0 0 8px rgba(240,138,228,0.5));
+}
+html[data-skin="m8"] .sidebar-brand .brand-name {
+  color: #fff; text-transform: uppercase; letter-spacing: .14em; font-weight: 800;
+  text-shadow: 0 0 10px rgba(240,138,228,0.55);
+}
+html[data-skin="m8"] .sidebar-brand .brand-user { color: #EADCF3; }
+
+html[data-skin="m8"] .nav-item { color: var(--nav-text); }
+html[data-skin="m8"] .nav-item:hover { background: rgba(240,138,228,0.14); color: #fff; box-shadow: inset 3px 0 0 #F08AE4; }
+html[data-skin="m8"] .nav-item.active {
+  background: linear-gradient(90deg, #F08AE4, #B83FA9); color: #1A0D1F; font-weight: 800;
+  box-shadow: 0 0 16px rgba(240,138,228,0.35);
+}
+html[data-skin="m8"] .nav-item.active .nav-icon { stroke: #1A0D1F; opacity: 1; }
+/* Étoile à quatre branches sur l'onglet actif (motif du logo M8) */
+html[data-skin="m8"] .nav-item.active::after {
+  content: ''; margin-left: auto; width: 13px; height: 13px; flex-shrink: 0;
+  background: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path fill='black' d='M12 0l2.6 9.4L24 12l-9.4 2.6L12 24l-2.6-9.4L0 12l9.4-2.6z'/></svg>") center / contain no-repeat;
+}
+html[data-skin="m8"] .sidebar-footer { border-top-color: #3A2A48; background: rgba(12,10,16,0.55); }
+
+/* ─── Bandeau de page : noir → rose, motif en filigrane, logo graffiti ─── */
 html[data-skin="m8"] .page-header {
   position: relative; overflow: hidden;
-  background: linear-gradient(100deg, #0B1F4D 0%, #1E4FA8 75%);
-  border: 0; border-radius: var(--radius-md); box-shadow: inset 0 -3px 0 #C9A24B;
+  background: linear-gradient(100deg, #0C0A10 0%, #2A1034 48%, #9A3592 100%);
+  border: 0; border-radius: var(--radius-md); box-shadow: inset 0 -3px 0 #F08AE4;
   backdrop-filter: none; -webkit-backdrop-filter: none;
 }
+html[data-skin="m8"] .page-header::before {
+  content: ''; position: absolute; inset: 0; pointer-events: none; opacity: 0.30; mix-blend-mode: screen;
+  background: url("../images/skin-m8/tile-dark.jpg") center / 360px;
+}
 html[data-skin="m8"] .page-header::after {
-  content: ''; position: absolute; right: 290px; top: 0; bottom: 0; width: 230px; pointer-events: none;
-  background: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 230 60' preserveAspectRatio='xMaxYMid meet'><text x='228' y='52' text-anchor='end' font-family='Helvetica,Arial,sans-serif' font-weight='900' font-size='62' fill='none' stroke='white' stroke-opacity='0.28' stroke-width='1.6'>M8</text></svg>") no-repeat right center / contain;
+  content: ''; position: absolute; right: 270px; top: 4px; bottom: 6px; width: 90px; pointer-events: none;
+  background: url("../images/skin-m8/wordmark.png") center / contain no-repeat;
+  filter: drop-shadow(0 0 6px rgba(240,138,228,0.6));
 }
 html[data-skin="m8"] .page-header > * { position: relative; z-index: 1; }
-html[data-skin="m8"] .page-title { color: #fff; text-transform: uppercase; letter-spacing: .08em; font-weight: 800; }
+html[data-skin="m8"] .page-title {
+  color: #fff; text-transform: uppercase; letter-spacing: .1em; font-weight: 800;
+  text-shadow: 0 0 12px rgba(240,138,228,0.6);
+}
 html[data-skin="m8"] .page-subtitle,
-html[data-skin="m8"] .page-header-date { color: rgba(255,255,255,0.85); }
+html[data-skin="m8"] .page-header-date { color: rgba(255,255,255,0.88); }
 
-/* Cartes : liseré bleu en tête, comme un col de maillot */
+/* ─── Cartes : liseré rose en tête ─── */
 html[data-skin="m8"] .card,
-html[data-skin="m8"] .stat-card { box-shadow: inset 0 3px 0 var(--accent), var(--shadow-sm); }
+html[data-skin="m8"] .stat-card { box-shadow: inset 0 2px 0 var(--accent), var(--shadow-sm); }
+html[data-skin="m8"] .card-title { text-transform: uppercase; letter-spacing: .05em; }
 html[data-skin="m8"] .stat-value { font-weight: 800; letter-spacing: -.01em; }
 
-/* Barre latérale : en-tête bleu à liseré doré, onglet actif plein */
-html[data-skin="m8"] .sidebar-brand {
-  background: linear-gradient(135deg, #0B1F4D 0%, #1E4FA8 100%);
-  border-bottom: 3px solid #C9A24B;
-}
-html[data-skin="m8"] .sidebar-brand .brand-name,
-html[data-skin="m8"] .sidebar-brand .brand-user { color: #fff; }
-html[data-skin="m8"] .sidebar-logo { background: #fff; border-radius: 4px; padding: 2px; }
-html[data-skin="m8"] .nav-item.active {
-  background: var(--accent); color: #fff; font-weight: 700;
-  box-shadow: inset 3px 0 0 #C9A24B;
-}
-html[data-skin="m8"] .nav-item.active .nav-icon { stroke: #fff; }
-
-/* Bandeau bas de page : rayures de maillot + signature (créé par skins.js) */
+/* ─── Bandeau bas de page (créé par skins.js) ─── */
 .skin-band {
   position: fixed; left: var(--sidebar-w); right: 0; bottom: 0; height: 28px; z-index: 5; pointer-events: none;
   display: flex; align-items: center; overflow: hidden; white-space: nowrap;
-  border-top: 3px solid #C9A24B;
-  background:
-    repeating-linear-gradient(115deg, transparent 0 18px, rgba(255,255,255,0.09) 18px 36px),
-    linear-gradient(90deg, #0B1F4D, #1E4FA8);
-  color: rgba(255,255,255,0.88); font-family: var(--font-body); font-size: 10px; font-weight: 800; letter-spacing: .38em; text-transform: uppercase;
+  border-top: 2px solid #F08AE4;
+  background: linear-gradient(90deg, rgba(12,10,16,0.90), rgba(58,20,69,0.86)), url("../images/skin-m8/tile-dark.jpg") center / 300px;
+  color: #F7B6EE; font-family: var(--font-body); font-size: 10px; font-weight: 800; letter-spacing: .34em; text-transform: uppercase;
 }
 .skin-band span { padding-left: 1.4em; }
 html[data-skin="m8"] .page { padding-bottom: 56px; }
-html[data-season] .skin-band { display: none; }
 @media (max-width: 720px) { .skin-band { display: none; } }
 
-/* Titres de cartes en capitales espacées, comme la boutique M8 */
-html[data-skin="m8"]:not([data-season]) .card-title { text-transform: uppercase; letter-spacing: .05em; }
+/* ─── Synthèse : bandeau « affiche » (écusson, logo graffiti, manette) ─── */
+.skin-hero {
+  position: relative; display: flex; align-items: center; gap: 22px; margin: 0 0 16px; padding: 12px 22px; min-height: 108px;
+  border-radius: var(--radius-md); overflow: hidden; color: #fff;
+  background: linear-gradient(100deg, rgba(12,10,16,0.94), rgba(58,20,69,0.88) 60%, rgba(154,53,146,0.80)), url("../images/skin-m8/tile-dark.jpg") center / 380px;
+  box-shadow: inset 0 0 0 1px rgba(240,138,228,0.45), var(--shadow-sm);
+}
+.skin-hero[hidden] { display: none; }
+.skin-hero-crest { height: 84px; width: auto; flex-shrink: 0; filter: drop-shadow(0 0 12px rgba(240,138,228,0.55)); }
+.skin-hero-word { height: 78px; width: auto; flex-shrink: 0; filter: drop-shadow(0 0 8px rgba(240,138,228,0.5)); }
+.skin-hero-text { font-family: var(--font-body); font-size: 11px; font-weight: 800; letter-spacing: .3em; text-transform: uppercase; color: #F7B6EE; line-height: 1.8; }
+.skin-hero-text b { display: block; font-size: 15px; letter-spacing: .18em; color: #fff; }
+.skin-hero-pad {
+  margin-left: auto; height: 118px; width: auto; flex-shrink: 0; border-radius: 10px;
+  border: 3px solid #F08AE4; transform: rotate(3deg); box-shadow: 0 8px 22px rgba(0,0,0,0.5); background: #fff;
+}
+@media (max-width: 900px) { .skin-hero-text { display: none; } }
+@media (max-width: 720px) { .skin-hero { display: none; } }
 
 /* ─── Pastille du skin (sidebar) ─── */
 .skin-badge {
   display: inline-block; margin-top: 3px; padding: 1px 8px; border-radius: 3px; line-height: 1.25; white-space: nowrap;
-  font-family: var(--font-body); font-size: 10px; font-weight: 700; letter-spacing: .12em;
-  color: var(--text-primary); background: var(--bg-white); border: 1px solid var(--brand-green);
+  font-family: var(--font-body); font-size: 10px; font-weight: 800; letter-spacing: .14em;
+  color: #fff; background: rgba(12,10,16,0.7); border: 1px solid #F08AE4;
 }
-html[data-season] .skin-badge { display: none; }
 @media (max-width: 720px) { .skin-badge { display: none; } }
 
 /* ─── Synthèse : interrupteur du skin (compte autorisé par l'admin) ─── */

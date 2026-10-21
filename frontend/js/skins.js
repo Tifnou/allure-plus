@@ -33,14 +33,28 @@
     if (on) root.dataset.skin = SKIN.id; else delete root.dataset.skin;
     document.getElementById('skin-badge')?.remove();
     document.getElementById('skin-band')?.remove();
+    document.getElementById('skin-hero')?.remove();
     if (on && document.body) {
       // Bandeau de bas de page (rayures de maillot + signature répétée).
       const band = document.createElement('div');
       band.id = 'skin-band';
       band.className = 'skin-band';
       band.setAttribute('aria-hidden', '1');
-      band.innerHTML = Array(14).fill('<span>Gentle Mates · M8</span>').join('');
+      band.innerHTML = Array(14).fill('<span>Gentle Mates ✦ M8 ✦ Paris</span>').join('');
       document.body.appendChild(band);
+      // Bandeau « affiche » de la Synthèse : écusson, logo graffiti, manette.
+      const toggle = document.getElementById('skin-toggle');
+      if (toggle) {
+        const hero = document.createElement('div');
+        hero.id = 'skin-hero';
+        hero.className = 'skin-hero';
+        hero.setAttribute('aria-hidden', '1');
+        hero.innerHTML = '<img class="skin-hero-crest" src="images/skin-m8/crest.png" alt="">' +
+          '<img class="skin-hero-word" src="images/skin-m8/wordmark.png" alt="">' +
+          '<div class="skin-hero-text"><b>Gentle Mates</b>M8 ✦ Paris</div>' +
+          '<img class="skin-hero-pad" src="images/skin-m8/pad.jpg" alt="">';
+        toggle.insertAdjacentElement('afterend', hero);
+      }
       const user = document.querySelector('.sidebar-brand .brand-user');
       if (user && user.parentElement) {
         const b = document.createElement('div');
