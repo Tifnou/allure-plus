@@ -18,6 +18,8 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cesium@1.120.0/Build/Cesium/Widgets/widgets.css" />
   <link rel="stylesheet" href="css/style.css?v=1790100000032" />
   <link rel="stylesheet" href="css/seasons.css?v=1790000000004" />
+  <link rel="stylesheet" href="css/skins.css?v=1790200000001" />
+  <script src="js/skins.js?v=1790200000001"></script>
   <link rel="stylesheet" href="css/plans.css?v=1787132767395" />
   <link rel="stylesheet" href="css/routes.css?v=1787650000004" />
   <link rel="stylesheet" href="css/route_editor.css?v=1787650000014" />
@@ -349,6 +351,12 @@
                 <div id="profile-run-category" class="profile-run-cat" style="display:none"></div>
               </div>
             </section>
+          </div>
+
+          <!-- Apparence : skins personnels (skins.js) -->
+          <div class="card">
+            <div class="card-header"><h2 class="card-title"><span class="card-title-icon">&#x1F3A8;</span> Apparence</h2></div>
+            <div class="skin-picker" id="skin-picker" role="radiogroup" aria-label="Habillage"></div>
           </div>
 
           <!-- Applications connectées -->
@@ -1542,7 +1550,7 @@
     <span class="support-fab-dot" id="support-fab-dot" style="display:none"></span>
   </button>
 
-  <script src="js/app.js?v=1790100000012"></script>
+  <script src="js/app.js?v=1790200000001"></script>
   <script src="js/season_scenes.js?v=1790000000004"></script>
   <script src="js/themes.js?v=1790000000004"></script>
   <script src="js/gear.js?v=1786459105634"></script>

@@ -1,0 +1,61 @@
+/* ═══════════════════════════════════════════════════════════════════════
+   SKINS — habillages choisis par l'utilisateur (activation : js/skins.js)
+   html[data-skin="..."] se superpose à :root / [data-theme]. Chaque skin a une
+   palette CLAIRE (bloc de base) et une SOMBRE (bloc [data-theme="dark"]).
+   `:not([data-season])` : un thème de saison actif reste prioritaire.
+═══════════════════════════════════════════════════════════════════════ */
+
+/* ─── Gentle Mates · M8 — clair ───
+   Sobre « streetwear » : fond gris très clair, noir pur, bleu royal du maillot
+   Worlds 2026 en accent, doré de l'écusson en second accent. */
+html[data-skin="m8"]:not([data-season]) {
+  --bg: #F1F3F2; --bg-white: #FFFFFF; --bg-hover: #E6E9E8;
+  --border: #D8DCDA; --border-light: #E8EBEA;
+  --accent: #1E4FA8; --accent-light: #E8EEF9; --accent-text: #173F87;
+  --orange: #A87A1C; --orange-bg: #FBF4E4;
+  --text-primary: #0A0A0A; --text-secondary: #505555; --text-muted: #666B6B;
+  --nav-text: #0A0A0A; --card-bg: rgba(255,255,255,0.93);
+  --brand-green: #B8913A;
+  --font: 'DIN Next','Helvetica Neue',Helvetica,Arial,sans-serif;
+  --font-body: 'Helvetica Neue',Helvetica,Arial,sans-serif;
+  --radius-sm: 4px; --radius-md: 6px; --radius-lg: 8px;
+}
+
+/* ─── Gentle Mates · M8 — sombre : noir profond, bleu éclairci, or ─── */
+html[data-skin="m8"][data-theme="dark"]:not([data-season]) {
+  --bg: #080808; --bg-white: #111212; --bg-hover: #1C1E1E;
+  --border: #2A2D2D; --border-light: #1B1D1D;
+  --accent: #4F86E6; --accent-light: #0F1B33; --accent-text: #A4C0F3;
+  --orange: #E0B04A; --orange-bg: #241B07;
+  --text-primary: #F1F3F2; --text-secondary: #A5AAAA; --text-muted: #8E9393;
+  --nav-text: #E6E8E8; --card-bg: rgba(17,18,18,0.93);
+  --brand-green: #D4AF5A;
+}
+html[data-skin="m8"][data-theme="dark"]:not([data-season]) .sidebar { background: rgba(8,8,8,0.95); }
+
+/* Titres de cartes en capitales espacées, comme la boutique M8 */
+html[data-skin="m8"]:not([data-season]) .card-title { text-transform: uppercase; letter-spacing: .05em; }
+
+/* ─── Pastille du skin (sidebar) ─── */
+.skin-badge {
+  display: inline-block; margin-top: 3px; padding: 1px 8px; border-radius: 3px; line-height: 1.25; white-space: nowrap;
+  font-family: var(--font-body); font-size: 10px; font-weight: 700; letter-spacing: .12em;
+  color: var(--text-primary); background: var(--bg-white); border: 1px solid var(--brand-green);
+}
+html[data-season] .skin-badge { display: none; }
+@media (max-width: 720px) { .skin-badge { display: none; } }
+
+/* ─── Profil > Apparence : sélecteur de skin ─── */
+.skin-picker { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 12px; padding: 4px 2px 2px; }
+.skin-tile {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 6px; text-align: left; cursor: pointer;
+  padding: 12px 14px; border-radius: var(--radius-md); border: 1.5px solid var(--border);
+  background: var(--bg-white); color: var(--text-primary); font-family: var(--font-body);
+}
+.skin-tile:hover { border-color: var(--accent); }
+.skin-tile:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.skin-tile.is-selected { border-color: var(--accent); background: var(--accent-light); }
+.skin-sws { display: flex; gap: 4px; }
+.skin-sw { width: 22px; height: 22px; border-radius: 50%; border: 1px solid rgba(128,128,128,.4); }
+.skin-tile-name { font-size: 13.5px; font-weight: 700; }
+.skin-tile-desc { font-size: 12px; line-height: 1.4; color: var(--text-secondary); }
