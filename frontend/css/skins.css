@@ -87,7 +87,7 @@ html[data-skin="m8"] .sidebar-brand .brand-name {
 html[data-skin="m8"] .sidebar-brand .brand-user { color: #EADCF3; }
 
 html[data-skin="m8"] .nav-item { color: var(--nav-text); }
-html[data-skin="m8"] .nav-item:hover { background: rgba(240,138,228,0.14); color: #fff; box-shadow: inset 3px 0 0 #F08AE4; }
+html[data-skin="m8"] .nav-item:hover { background: rgba(240,138,228,0.18); color: #fff; }
 html[data-skin="m8"] .nav-item.active {
   background: linear-gradient(90deg, #F08AE4, #B83FA9); color: #1A0D1F; font-weight: 800;
   box-shadow: 0 0 16px rgba(240,138,228,0.35);
