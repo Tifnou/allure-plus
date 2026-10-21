@@ -68,7 +68,7 @@ html[data-skin="m8"] .page-header-date { color: rgba(255,255,255,0.85); }
 
 /* Cartes : liseré bleu en tête, comme un col de maillot */
 html[data-skin="m8"] .card,
-html[data-skin="m8"] .stat-card { border-top: 3px solid var(--accent); }
+html[data-skin="m8"] .stat-card { box-shadow: inset 0 3px 0 var(--accent), var(--shadow-sm); }
 html[data-skin="m8"] .stat-value { font-weight: 800; letter-spacing: -.01em; }
 
 /* Barre latérale : en-tête bleu à liseré doré, onglet actif plein */
