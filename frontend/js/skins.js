@@ -32,7 +32,15 @@
     const on = skinActive();
     if (on) root.dataset.skin = SKIN.id; else delete root.dataset.skin;
     document.getElementById('skin-badge')?.remove();
+    document.getElementById('skin-band')?.remove();
     if (on && document.body) {
+      // Bandeau de bas de page (rayures de maillot + signature répétée).
+      const band = document.createElement('div');
+      band.id = 'skin-band';
+      band.className = 'skin-band';
+      band.setAttribute('aria-hidden', '1');
+      band.innerHTML = Array(14).fill('<span>Gentle Mates · M8</span>').join('');
+      document.body.appendChild(band);
       const user = document.querySelector('.sidebar-brand .brand-user');
       if (user && user.parentElement) {
         const b = document.createElement('div');

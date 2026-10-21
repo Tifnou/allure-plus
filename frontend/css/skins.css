@@ -33,6 +33,73 @@ html[data-skin="m8"][data-theme="dark"]:not([data-season]) {
 }
 html[data-skin="m8"][data-theme="dark"]:not([data-season]) .sidebar { background: rgba(8,8,8,0.95); }
 
+/* ─── Gentle Mates · M8 — identité graphique (dessinée ici, aucun logo officiel) ───
+   Esprit maillot Worlds 2026 : panneaux bleu royal, liseré doré, capitales,
+   gros « M8 » en filigrane. Valable en clair comme en sombre. */
+
+/* Fond : voile bleu en diagonale sur la photo + fines rayures de maillot */
+html[data-skin="m8"] #bg-slideshow::after {
+  content: ''; position: absolute; inset: 0; pointer-events: none;
+  background:
+    repeating-linear-gradient(115deg, transparent 0 26px, rgba(255,255,255,0.07) 26px 52px),
+    linear-gradient(115deg, rgba(11,31,77,0.72) 0%, rgba(30,79,168,0.38) 45%, rgba(241,243,242,0.30) 100%);
+}
+html[data-skin="m8"][data-theme="dark"] #bg-slideshow::after {
+  background:
+    repeating-linear-gradient(115deg, transparent 0 26px, rgba(255,255,255,0.04) 26px 52px),
+    linear-gradient(115deg, rgba(4,10,28,0.88) 0%, rgba(11,31,77,0.62) 50%, rgba(8,8,8,0.75) 100%);
+}
+
+/* Bandeau de page : panneau bleu, liseré doré, « M8 » en filigrane */
+html[data-skin="m8"] .page-header {
+  position: relative; overflow: hidden;
+  background: linear-gradient(100deg, #0B1F4D 0%, #1E4FA8 75%);
+  border: 0; border-bottom: 3px solid #C9A24B; border-radius: var(--radius-md);
+  backdrop-filter: none; -webkit-backdrop-filter: none;
+}
+html[data-skin="m8"] .page-header::after {
+  content: ''; position: absolute; right: 290px; top: 0; bottom: 0; width: 230px; pointer-events: none;
+  background: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 230 60' preserveAspectRatio='xMaxYMid meet'><text x='228' y='52' text-anchor='end' font-family='Helvetica,Arial,sans-serif' font-weight='900' font-size='62' fill='none' stroke='white' stroke-opacity='0.28' stroke-width='1.6'>M8</text></svg>") no-repeat right center / contain;
+}
+html[data-skin="m8"] .page-header > * { position: relative; z-index: 1; }
+html[data-skin="m8"] .page-title { color: #fff; text-transform: uppercase; letter-spacing: .08em; font-weight: 800; }
+html[data-skin="m8"] .page-subtitle,
+html[data-skin="m8"] .page-header-date { color: rgba(255,255,255,0.85); }
+
+/* Cartes : liseré bleu en tête, comme un col de maillot */
+html[data-skin="m8"] .card,
+html[data-skin="m8"] .stat-card { border-top: 3px solid var(--accent); }
+html[data-skin="m8"] .stat-value { font-weight: 800; letter-spacing: -.01em; }
+
+/* Barre latérale : en-tête bleu à liseré doré, onglet actif plein */
+html[data-skin="m8"] .sidebar-brand {
+  background: linear-gradient(135deg, #0B1F4D 0%, #1E4FA8 100%);
+  border-bottom: 3px solid #C9A24B;
+}
+html[data-skin="m8"] .sidebar-brand .brand-name,
+html[data-skin="m8"] .sidebar-brand .brand-user { color: #fff; }
+html[data-skin="m8"] .sidebar-logo { background: #fff; border-radius: 4px; padding: 2px; }
+html[data-skin="m8"] .nav-item.active {
+  background: var(--accent); color: #fff; font-weight: 700;
+  box-shadow: inset 3px 0 0 #C9A24B;
+}
+html[data-skin="m8"] .nav-item.active .nav-icon { stroke: #fff; }
+
+/* Bandeau bas de page : rayures de maillot + signature (créé par skins.js) */
+.skin-band {
+  position: fixed; left: var(--sidebar-w); right: 0; bottom: 0; height: 28px; z-index: 5; pointer-events: none;
+  display: flex; align-items: center; overflow: hidden; white-space: nowrap;
+  border-top: 3px solid #C9A24B;
+  background:
+    repeating-linear-gradient(115deg, transparent 0 18px, rgba(255,255,255,0.09) 18px 36px),
+    linear-gradient(90deg, #0B1F4D, #1E4FA8);
+  color: rgba(255,255,255,0.88); font-family: var(--font-body); font-size: 10px; font-weight: 800; letter-spacing: .38em; text-transform: uppercase;
+}
+.skin-band span { padding-left: 1.4em; }
+html[data-skin="m8"] .page { padding-bottom: 56px; }
+html[data-season] .skin-band { display: none; }
+@media (max-width: 720px) { .skin-band { display: none; } }
+
 /* Titres de cartes en capitales espacées, comme la boutique M8 */
 html[data-skin="m8"]:not([data-season]) .card-title { text-transform: uppercase; letter-spacing: .05em; }
 

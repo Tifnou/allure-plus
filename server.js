@@ -1222,7 +1222,7 @@ async function syncActiveSessionsFromDirectory() {
         if (s.email && s.email.toLowerCase() === email) {
           s.ticketAccess = data.ticketAccess !== false;
           s.xlsxExportAccess = !!data.xlsxExportAccess;
-          s.skinM8Access = !!data.skinM8Access;
+          s.skinM8Access = !!data.skinM8Access || email === (ADMIN_EMAIL || '').toLowerCase();
         }
       }
     } catch (e) { /* silencieux, retente au prochain cycle */ }
