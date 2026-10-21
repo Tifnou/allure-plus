@@ -57,7 +57,11 @@
   try { _cfg = (JSON.parse(localStorage.getItem(LS_CACHE) || 'null') || {}).cfg || null; } catch (e) { _cfg = null; }
 
   function currentSeasonId() {
-    return getPreview() || (resolveSeason(_cfg) || {}).id || null;
+    // Un skin activé (skins.js) écarte les saisons ; seul l'aperçu admin passe devant.
+    const p = getPreview();
+    if (p) return p;
+    if (typeof isSkinActive === 'function' && isSkinActive()) return null;
+    return (resolveSeason(_cfg) || {}).id || null;
   }
 
   function clearDecor() {

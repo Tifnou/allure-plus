@@ -45,17 +45,12 @@ html[data-skin="m8"]:not([data-season]) .card-title { text-transform: uppercase;
 html[data-season] .skin-badge { display: none; }
 @media (max-width: 720px) { .skin-badge { display: none; } }
 
-/* ─── Profil > Apparence : sélecteur de skin ─── */
-.skin-picker { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 12px; padding: 4px 2px 2px; }
-.skin-tile {
-  display: flex; flex-direction: column; align-items: flex-start; gap: 6px; text-align: left; cursor: pointer;
-  padding: 12px 14px; border-radius: var(--radius-md); border: 1.5px solid var(--border);
-  background: var(--bg-white); color: var(--text-primary); font-family: var(--font-body);
-}
-.skin-tile:hover { border-color: var(--accent); }
-.skin-tile:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.skin-tile.is-selected { border-color: var(--accent); background: var(--accent-light); }
-.skin-sws { display: flex; gap: 4px; }
-.skin-sw { width: 22px; height: 22px; border-radius: 50%; border: 1px solid rgba(128,128,128,.4); }
-.skin-tile-name { font-size: 13.5px; font-weight: 700; }
-.skin-tile-desc { font-size: 12px; line-height: 1.4; color: var(--text-secondary); }
+/* ─── Synthèse : interrupteur du skin (compte autorisé par l'admin) ─── */
+.skin-toggle { display: inline-flex; align-items: center; gap: 10px; margin: 0 0 14px; cursor: pointer; font-family: var(--font-body); font-size: 12.5px; font-weight: 600; color: var(--text-primary); }
+.skin-toggle[hidden] { display: none; }
+.skin-toggle input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.skin-toggle-track { position: relative; width: 34px; height: 18px; border-radius: 999px; background: var(--border); transition: background var(--transition); flex-shrink: 0; }
+.skin-toggle-track::after { content: ''; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.3); transition: transform var(--transition); }
+.skin-toggle input:checked + .skin-toggle-track { background: var(--accent); }
+.skin-toggle input:checked + .skin-toggle-track::after { transform: translateX(16px); }
+.skin-toggle input:focus-visible + .skin-toggle-track { outline: 2px solid var(--accent); outline-offset: 2px; }

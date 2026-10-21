@@ -359,13 +359,13 @@ async function handleUserPing(req, env) {
   // plan en Excel) suit la meme logique, ferme par defaut sauf pour l'admin.
   const key = userKey(email);
   const existing = await env.USERS_KV.get(key, { type: 'json' });
-  const record = existing || { email, firstSeen: now, blocked: false, ticketAccess: !!body.isAdmin, xlsxExportAccess: !!body.isAdmin };
+  const record = existing || { email, firstSeen: now, blocked: false, ticketAccess: !!body.isAdmin, xlsxExportAccess: !!body.isAdmin, skinM8Access: !!body.isAdmin };
   record.lastSeen = now;
   if (displayName) record.displayName = displayName;
   // Version d'Allure+ installee (signalee par les clients recents ; absente = ancienne version)
   if (body.appVersion) record.appVersion = String(body.appVersion).slice(0, 20).trim();
   await env.USERS_KV.put(key, JSON.stringify(record));
-  return json({ blocked: !!record.blocked, ticketAccess: record.ticketAccess !== false, xlsxExportAccess: !!record.xlsxExportAccess });
+  return json({ blocked: !!record.blocked, ticketAccess: record.ticketAccess !== false, xlsxExportAccess: !!record.xlsxExportAccess, skinM8Access: !!record.skinM8Access });
 }
 
 // Endpoint volontairement leger (pas d'adminKey) : interroge en continu par
@@ -379,6 +379,7 @@ async function handleUserStatus(req, env, email) {
     blocked: !!(record && record.blocked),
     ticketAccess: record ? record.ticketAccess !== false : true,
     xlsxExportAccess: !!(record && record.xlsxExportAccess),
+    skinM8Access: !!(record && record.skinM8Access),
   });
 }
 
@@ -450,6 +451,7 @@ export default {
         if (parts.length === 3 && parts[2] === 'block' && req.method === 'POST') return await handleSetUserFlag(req, env, decodeURIComponent(parts[1]), 'blocked');
         if (parts.length === 3 && parts[2] === 'ticket-access' && req.method === 'POST') return await handleSetUserFlag(req, env, decodeURIComponent(parts[1]), 'ticketAccess');
         if (parts.length === 3 && parts[2] === 'xlsx-export-access' && req.method === 'POST') return await handleSetUserFlag(req, env, decodeURIComponent(parts[1]), 'xlsxExportAccess');
+        if (parts.length === 3 && parts[2] === 'skin-m8-access' && req.method === 'POST') return await handleSetUserFlag(req, env, decodeURIComponent(parts[1]), 'skinM8Access');
         return json({ message: 'Not found' }, 404);
       }
 

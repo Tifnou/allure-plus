@@ -554,9 +554,9 @@ async function finalizeGarminSession(gc, email) {
   // rejette la connexion s'il a ete bloque par l'admin (voir
   // checkUserDirectory plus bas - throw si blocked) - seule visibilite/
   // controle possible sur une appli distribuee en .exe, sans autre canal.
-  const { ticketAccess, xlsxExportAccess } = await checkUserDirectory(email, displayName);
+  const { ticketAccess, xlsxExportAccess, skinM8Access } = await checkUserDirectory(email, displayName);
 
-  return { gc, email, displayName, fns, lastAccess: Date.now(), ticketAccess, xlsxExportAccess };
+  return { gc, email, displayName, fns, lastAccess: Date.now(), ticketAccess, xlsxExportAccess, skinM8Access };
 }
 
 async function createGarminSession(email, password) {
@@ -750,8 +750,8 @@ async function restoreGarminSession() {
     // catch ci-dessous reserve aux jetons vraiment perimes/invalides), le
     // blocage est une decision Allure+, pas un probleme d'authentification
     // Garmin.
-    const { ticketAccess, xlsxExportAccess } = await checkUserDirectory(restoredEmail, displayName);
-    return { gc, email: restoredEmail, displayName, fns, lastAccess: Date.now(), ticketAccess, xlsxExportAccess };
+    const { ticketAccess, xlsxExportAccess, skinM8Access } = await checkUserDirectory(restoredEmail, displayName);
+    return { gc, email: restoredEmail, displayName, fns, lastAccess: Date.now(), ticketAccess, xlsxExportAccess, skinM8Access };
   } catch(e) {
     if (e.blocked) {
       console.warn(`[WARN] Compte bloque par l'administrateur, session non restauree : ${e.message}`);
@@ -887,6 +887,8 @@ app.get('/api/status', (req, res) => {
     // true uniquement si explicitement accorde par l'admin (voir
     // checkUserDirectory) - ferme par defaut, contrairement a ticketAccess.
     xlsxExportAccess: !!s?.xlsxExportAccess,
+    // Skin Gentle Mates M8 : accorde par l'admin (tableau Utilisateurs).
+    skinM8Access: !!s?.skinM8Access,
   });
 });
 
@@ -1177,11 +1179,13 @@ async function checkUserDirectory(email, displayName) {
     // xlsxExportAccess (export du plan en Excel) : contrairement a
     // ticketAccess, ferme par defaut - une panne du relais ne doit jamais
     // accorder un droit qui n'a pas ete explicitement valide par l'admin.
-    return { ticketAccess: data.ticketAccess !== false, xlsxExportAccess: !!data.xlsxExportAccess };
+    // skinM8Access (skin Gentle Mates M8) : meme logique, ferme par defaut -
+    // sauf pour le compte admin, qui l'a toujours (pour pouvoir l'essayer).
+    return { ticketAccess: data.ticketAccess !== false, xlsxExportAccess: !!data.xlsxExportAccess, skinM8Access: !!data.skinM8Access || isAdmin };
   } catch (e) {
     if (e.blocked) throw e;
     console.warn('[users] Verification du repertoire impossible (fail-open) :', e.message);
-    return { ticketAccess: true, xlsxExportAccess: false };
+    return { ticketAccess: true, xlsxExportAccess: false, skinM8Access: false };
   }
 }
 
@@ -1218,6 +1222,7 @@ async function syncActiveSessionsFromDirectory() {
         if (s.email && s.email.toLowerCase() === email) {
           s.ticketAccess = data.ticketAccess !== false;
           s.xlsxExportAccess = !!data.xlsxExportAccess;
+          s.skinM8Access = !!data.skinM8Access;
         }
       }
     } catch (e) { /* silencieux, retente au prochain cycle */ }
@@ -1257,6 +1262,16 @@ app.post('/api/admin/users/:email/xlsx-export-access', requireAdmin, async (req,
     const data = await callSupportRelay(`/users/${encodeURIComponent(req.params.email)}/xlsx-export-access`, {
       method: 'POST',
       body: JSON.stringify({ adminKey: SUPPORT_ADMIN_KEY, xlsxExportAccess: !!req.body?.xlsxExportAccess }),
+    });
+    res.json(data);
+  } catch (err) { handleError(res, err); }
+});
+
+app.post('/api/admin/users/:email/skin-m8-access', requireAdmin, async (req, res) => {
+  try {
+    const data = await callSupportRelay(`/users/${encodeURIComponent(req.params.email)}/skin-m8-access`, {
+      method: 'POST',
+      body: JSON.stringify({ adminKey: SUPPORT_ADMIN_KEY, skinM8Access: !!req.body?.skinM8Access }),
     });
     res.json(data);
   } catch (err) { handleError(res, err); }

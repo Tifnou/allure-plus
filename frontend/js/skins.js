@@ -1,80 +1,83 @@
 // ═══════════════════════════════════════════════════════════════════════
-// SKINS (habillages choisis par l'utilisateur, ex : Gentle Mates M8)
+// SKIN Gentle Mates · M8 (habillage réservé aux comptes choisis par l'admin)
 // ═══════════════════════════════════════════════════════════════════════
-// Différent des thèmes de saison (themes.js) : un skin est un CHOIX PERSONNEL
-// permanent (Profil > Apparence), pas un calendrier. Il se superpose à la
-// préférence clair/sombre sans jamais la forcer — chaque skin a donc sa palette
-// claire ET sa palette sombre (css/skins.css). Un thème de saison actif reste
-// prioritaire (le CSS exclut `[data-season]`).
-// Clé `allure_skin` : durable (DURABLE_LS_KEYS, app.js) pour suivre le compte
-// d'un PC à l'autre. Chargé dans <head> pour éviter le flash au démarrage.
+// Droit : Admin > Utilisateurs > colonne « Skin M8 » (relais support, drapeau
+// skinM8Access, relu par /api/status). Un compte autorisé voit un interrupteur
+// sur sa page Synthèse ; l'admin y a toujours accès. Sans droit, le skin ne
+// s'applique jamais, même si la clé locale existe encore (droit retiré).
+//
+// Priorité : skin activé > thème de saison (themes.js l'écarte, voir
+// currentSeasonId) — le skin libère aussi le choix clair/sombre, que Halloween
+// ou Noël verrouillent. Seul l'aperçu admin d'une saison reste prioritaire.
+//
+// Clés : `allure_skin` = 'm8' si l'interrupteur est activé (durable, suit le
+// compte d'un PC à l'autre) ; `allure_skin_access` = dernier droit connu
+// (purement local, évite un flash au démarrage avant la réponse du serveur).
+// Chargé dans <head> pour appliquer l'attribut avant le premier rendu.
 (function () {
   const LS_KEY = 'allure_skin';
+  const LS_ACCESS = 'allure_skin_access';
+  const SKIN = { id: 'm8', label: 'Gentle Mates · M8', badge: 'M8' };
 
-  // `swatches` : [clair, sombre, accent, accent secondaire] — aperçu du sélecteur.
-  const SKINS = {
-    m8: {
-      label: 'Gentle Mates · M8',
-      badge: 'M8',
-      desc: 'Noir, blanc cassé et bleu royal du maillot, avec une touche dorée.',
-      swatches: ['#F1F3F2', '#080808', '#1E4FA8', '#C9A24B'],
-    },
-  };
-  window.SKINS = SKINS;
+  const read = k => { try { return localStorage.getItem(k); } catch (e) { return null; } };
 
-  function getSkin() {
-    try { const v = localStorage.getItem(LS_KEY); return SKINS[v] ? v : null; } catch (e) { return null; }
-  }
+  let _access = read(LS_ACCESS) === '1';
+
+  // Skin effectivement appliqué : activé par l'utilisateur ET autorisé.
+  function skinActive() { return _access && read(LS_KEY) === SKIN.id; }
+  window.isSkinActive = skinActive;
 
   function applySkin() {
-    const id = getSkin();
     const root = document.documentElement;
-    if (id) root.dataset.skin = id; else delete root.dataset.skin;
+    const on = skinActive();
+    if (on) root.dataset.skin = SKIN.id; else delete root.dataset.skin;
     document.getElementById('skin-badge')?.remove();
-    if (id && document.body) {
+    if (on && document.body) {
       const user = document.querySelector('.sidebar-brand .brand-user');
       if (user && user.parentElement) {
         const b = document.createElement('div');
         b.id = 'skin-badge';
         b.className = 'skin-badge';
-        b.textContent = SKINS[id].badge;
-        b.title = SKINS[id].label;
+        b.textContent = SKIN.badge;
+        b.title = SKIN.label;
         user.parentElement.appendChild(b);
       }
     }
-    renderSkinPicker();
+    // La saison reprend la main quand le skin s'éteint (et s'efface quand il s'allume).
+    if (typeof applySeason === 'function') applySeason();
+    else if (typeof applyTheme === 'function') applyTheme(read('allure_theme') || 'light');
+    renderSkinToggle();
   }
 
-  function setSkin(id) {
+  function renderSkinToggle() {
+    const box = document.getElementById('skin-toggle');
+    if (!box) return;
+    box.hidden = !_access;
+    const cb = box.querySelector('input');
+    if (cb) cb.checked = read(LS_KEY) === SKIN.id;
+  }
+
+  // Appelé avec la réponse de /api/status (app.js).
+  window.setSkinAccess = function (granted) {
+    _access = !!granted;
+    try { localStorage.setItem(LS_ACCESS, _access ? '1' : '0'); } catch (e) { /* silencieux */ }
+    applySkin();
+  };
+
+  // Interrupteur de la page Synthèse.
+  window.toggleSkin = function (on) {
     try {
-      if (id && SKINS[id]) localStorage.setItem(LS_KEY, id);
+      if (on) localStorage.setItem(LS_KEY, SKIN.id);
       else localStorage.removeItem(LS_KEY);
     } catch (e) { /* silencieux */ }
     applySkin();
-  }
-  window.setSkin = setSkin;
-  window.applySkin = applySkin;
-
-  function tile(id, label, desc, swatches, selected) {
-    const sw = swatches.map(c => `<span class="skin-sw" style="background:${c}"></span>`).join('');
-    return `<button type="button" class="skin-tile${selected ? ' is-selected' : ''}" role="radio" aria-checked="${selected}" onclick="setSkin(${id ? `'${id}'` : 'null'})">` +
-      `<span class="skin-sws">${sw}</span><span class="skin-tile-name">${label}</span><span class="skin-tile-desc">${desc}</span></button>`;
-  }
-
-  function renderSkinPicker() {
-    const box = document.getElementById('skin-picker');
-    if (!box) return;
-    const cur = getSkin();
-    box.innerHTML = tile(null, 'Allure+', 'L’habillage d’origine.', ['#F7F6F3', '#0B0D14', '#2563EB', '#6CB840'], !cur) +
-      Object.keys(SKINS).map(id => tile(id, SKINS[id].label, SKINS[id].desc, SKINS[id].swatches, cur === id)).join('');
-  }
+  };
 
   // Attribut posé tout de suite (avant le premier rendu) : pas de flash.
-  const early = getSkin();
-  if (early) document.documentElement.dataset.skin = early;
+  if (skinActive()) document.documentElement.dataset.skin = SKIN.id;
 
   document.addEventListener('DOMContentLoaded', applySkin);
-  // La synchro serveur des clés durables peut rapporter le skin d'un autre PC.
+  // La synchro serveur des clés durables peut rapporter le choix d'un autre PC.
   window.addEventListener('load', () => {
     if (typeof _userDataSyncPromise !== 'undefined' && _userDataSyncPromise && _userDataSyncPromise.then) {
       _userDataSyncPromise.then(applySkin, () => {});

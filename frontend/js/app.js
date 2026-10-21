@@ -428,6 +428,9 @@ async function checkStatus() {
     // Afficher menu Admin si compte administrateur
     showAdminNav(data.user, data.xlsxExportAccess);
 
+    // Skin Gentle Mates M8 : droit accordé par l'admin (skins.js)
+    if (typeof setSkinAccess === 'function') setSkinAccess(data.skinM8Access === true);
+
     // Tampon "Pref 2" (case a cocher reservee a un compte, dans Mes informations)
     loadPref2State();
 
@@ -4584,6 +4587,7 @@ async function loadAdminUsers() {
               <th>Version</th>
               <th>Accès tickets</th>
               <th>Export Excel</th>
+              <th>Skin M8</th>
               <th>Accès Allure+</th>
             </tr>
           </thead>
@@ -4606,13 +4610,18 @@ async function loadAdminUsers() {
                   </label>
                 </td>
                 <td>
+                  <label class="admin-users-checkbox" onclick="event.stopPropagation()">
+                    <input type="checkbox" data-email="${escapeHtml(u.email)}" data-field="skinM8Access" ${u.skinM8Access ? 'checked' : ''} title="Propose le skin Gentle Mates M8 à ce compte (interrupteur sur sa page Synthèse). Prend jusqu'à 2 minutes si déjà connecté.">
+                  </label>
+                </td>
+                <td>
                   <button class="admin-users-block-btn ${u.blocked ? 'admin-users-block-btn--blocked' : ''}" data-email="${escapeHtml(u.email)}" type="button" onclick="event.stopPropagation()">
                     ${u.blocked ? '🔒 Bloqué — débloquer' : '🔓 Bloquer'}
                   </button>
                 </td>
               </tr>
               <tr class="admin-users-detail-row">
-                <td colspan="8">
+                <td colspan="9">
                   <div class="admin-users-detail-panel"></div>
                 </td>
               </tr>`).join('')}
@@ -4652,6 +4661,23 @@ async function loadAdminUsers() {
             body: JSON.stringify({ xlsxExportAccess: cb.checked }),
           });
           showToast('Export Excel mis à jour', 'success');
+        } catch (e) {
+          showToast('Erreur : ' + e.message, 'error');
+          cb.checked = !cb.checked;
+        }
+        cb.disabled = false;
+      };
+    });
+    wrap.querySelectorAll('input[data-field="skinM8Access"]').forEach(cb => {
+      cb.onchange = async () => {
+        cb.disabled = true;
+        try {
+          const r = await fetch(`${API}/api/admin/users/${encodeURIComponent(cb.dataset.email)}/skin-m8-access`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ skinM8Access: cb.checked }),
+          });
+          if (!r.ok) throw new Error('relais support non à jour (HTTP ' + r.status + ')');
+          showToast('Skin M8 mis à jour', 'success');
         } catch (e) {
           showToast('Erreur : ' + e.message, 'error');
           cb.checked = !cb.checked;
