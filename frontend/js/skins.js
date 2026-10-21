@@ -52,7 +52,7 @@
         hero.innerHTML = '<img class="skin-hero-crest" src="images/skin-m8/crest.png" alt="">' +
           '<img class="skin-hero-word" src="images/skin-m8/wordmark.png" alt="">' +
           '<div class="skin-hero-text"><b>Gentle Mates</b>M8 ✦ Paris</div>' +
-          '<img class="skin-hero-pad" src="images/skin-m8/pad.jpg" alt="">';
+          '<img class="skin-hero-pad" src="images/skin-m8/pad.png" alt="">';
         toggle.insertAdjacentElement('afterend', hero);
       }
       const user = document.querySelector('.sidebar-brand .brand-user');

@@ -9,7 +9,7 @@
    Gris, noir, rose, violet, blanc — visuels dans images/skin-m8/ :
    crest.png (écusson M8 Paris), wordmark.png (logo graffiti), tile-light.jpg /
    tile-dark.jpg (motifs répétables, miroir), char.jpg (personnage de la barre
-   latérale), pad.jpg (manette du bandeau de la Synthèse). */
+   latérale), pad.png (manette du bandeau de la Synthèse). */
 
 /* ─── Palette claire : blanc lilas, rose magenta ─── */
 html[data-skin="m8"] {
@@ -155,8 +155,8 @@ html[data-skin="m8"] .page { padding-bottom: 56px; }
 .skin-hero-text { font-family: var(--font-body); font-size: 11px; font-weight: 800; letter-spacing: .3em; text-transform: uppercase; color: #F7B6EE; line-height: 1.8; }
 .skin-hero-text b { display: block; font-size: 15px; letter-spacing: .18em; color: #fff; }
 .skin-hero-pad {
-  margin-left: auto; height: 118px; width: auto; flex-shrink: 0; border-radius: 10px;
-  border: 3px solid #F08AE4; transform: rotate(3deg); box-shadow: 0 8px 22px rgba(0,0,0,0.5); background: #fff;
+  margin-left: auto; height: 124px; width: auto; flex-shrink: 0;
+  transform: rotate(3deg); filter: drop-shadow(0 8px 14px rgba(0,0,0,0.55)) drop-shadow(0 0 10px rgba(240,138,228,0.35));
 }
 @media (max-width: 900px) { .skin-hero-text { display: none; } }
 @media (max-width: 720px) { .skin-hero { display: none; } }
