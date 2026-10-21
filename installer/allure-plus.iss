@@ -1,5 +1,5 @@
 #define MyAppName "Allure+"
-#define MyAppVersion "1.98.0"
+#define MyAppVersion "1.98.1"
 #define MyAppPublisher "Allure+"
 
 [Setup]
