@@ -253,7 +253,7 @@ const ASCENT_CALIBRATION_FACTOR = 1.26;
 // une iteration de plus et un seuil plus strict rapprochent davantage la
 // boucle de base de la cible en amont, ce qui laisse aussi un budget de
 // duree plus fiable pour les repetitions eventuelles (cf DURATION_HARD_CEILING_RATIO).
-const DEFAULT_REFINE_ITERATIONS = 3;
+const DEFAULT_REFINE_ITERATIONS = 4;
 const REFINE_CONVERGENCE_TOLERANCE = 0.10;
 
 // Budget de "reparation" reserve aux repetitions de cote (cf etude externe
@@ -277,19 +277,26 @@ const DENSITY_SHORTFALL_MARGIN = 0.85;
 
 const R_EARTH = 6371000;
 
-// Supprime les "culs-de-sac" : excursion qui repasse exactement par ses propres
-// points a l'envers (aller puis retour sur le meme chemin) et revient au point de
-// depart de l'excursion. Longueur maximale SPUR_MAX_M ; la boucle elle-meme
-// (premier/dernier point) n'est jamais consideree comme une excursion.
-const SPUR_MAX_M = 600, SPUR_MIN_M = 25, SPUR_CLOSE_M = 14;
+// Supprime les demi-tours immediats ("culs-de-sac") : excursion qui repasse par
+// ses propres points a l'envers (aller puis retour sur le meme chemin) et
+// revient au point de depart de l'excursion. REGLE PRODUIT (zero tolerance, en
+// mode boucle) : on ne reprend jamais un chemin qu'on vient de faire ; repasser
+// plus tard par un meme chemin (apres une vraie boucle entre les deux) reste
+// permis, ce n'est pas un demi-tour. La boucle elle-meme (premier/dernier
+// point) n'est jamais consideree comme une excursion.
+// SPUR_MAX_M borne seulement le cout de la detection (une impasse de 2,5 km
+// est deja une excursion enorme) ; SPUR_MIN_M ecarte le bruit GPS. Un demi-tour
+// dont le bout n'a qu'UN seul sommet (aller de 85 m, retour par le meme
+// sommet) est aussi detecte (cas tot === 0 ci-dessous).
+const SPUR_MAX_M = 2500, SPUR_MIN_M = 10, SPUR_CLOSE_M = 14;
 function removeSpurs(points) {
-  if (!Array.isArray(points) || points.length < 6) return { points, removed: 0 };
+  if (!Array.isArray(points) || points.length < 4) return { points, removed: 0 };
   let pts = points.slice();
   let removed = 0;
   let again = true;
   while (again) {
     again = false;
-    for (let i = 1; i < pts.length - 3 && !again; i++) {
+    for (let i = 1; i < pts.length - 2 && !again; i++) {
       let len = 0;
       for (let j = i + 1; j < pts.length - 1; j++) {
         len += haversineDistance(pts[j - 1], pts[j]);
@@ -299,17 +306,39 @@ function removeSpurs(points) {
         let m = i, far = 0;
         for (let k = i + 1; k < j; k++) { const d = haversineDistance(pts[i], pts[k]); if (d > far) { far = d; m = k; } }
         if (m === i || far < SPUR_MIN_M / 2) continue;
-        // l'aller (i..m) est-il re-parcouru au retour (m..j) ?
+        // l'aller (i..m) est-il re-parcouru au retour (m..j) ? Sans sommet
+        // intermediaire (m === i + 1), l'aller et le retour passent par le seul
+        // sommet du bout : c'est bien un demi-tour.
         let hit = 0, tot = 0;
         for (let k = i + 1; k < m; k++) {
           tot++;
           for (let q = m; q <= j; q++) { if (haversineDistance(pts[k], pts[q]) <= SPUR_CLOSE_M) { hit++; break; } }
         }
-        if (tot >= 1 && hit / tot >= 0.85) { pts.splice(i + 1, j - i); removed++; again = true; break; }
+        if (tot === 0 || hit / tot >= 0.85) { pts.splice(i + 1, j - i); removed++; again = true; break; }
       }
     }
   }
   return { points: pts, removed };
+}
+
+// Applique removeSpurs a un resultat BRouter de boucle et recale distance / D+
+// (le D+ BRouter est ramene au prorata de la distance conservee : le chiffre
+// final affiche vient de l'IGN, cf generateRouteOptions). Utilise DANS la
+// convergence (scan + affinage du rayon) pour que la distance visee soit
+// atteinte APRES nettoyage, et non perdue apres coup.
+function cleanLoopResult(result) {
+  if (!result || !Array.isArray(result.points)) return result;
+  const cleaned = removeSpurs(result.points);
+  if (!cleaned.removed) return result;
+  const distanceM = Math.round(pathLengthM(cleaned.points));
+  const k = result.distanceM > 0 ? distanceM / result.distanceM : 1;
+  return {
+    ...result,
+    points: cleaned.points,
+    distanceM,
+    filteredAscendM: result.filteredAscendM != null ? Math.round(result.filteredAscendM * k) : result.filteredAscendM,
+    spursRemoved: (result.spursRemoved || 0) + cleaned.removed,
+  };
 }
 
 function haversineDistance(a, b) {
@@ -605,13 +634,13 @@ const SEARCH_DIRECTIONS = 8;
 // a 0 n'a pas de cible, mais elle a bien un PLAFOND - les directions qui le
 // depassent sont classees apres les autres.
 const ascentCapStore = new AsyncLocalStorage();
-async function scanDirections(start, targetDistanceM, profile, targetAscentM, trailStyle) {
+async function scanDirections(start, targetDistanceM, profile, targetAscentM, trailStyle, cleanSpurs = false) {
   const radius = targetDistanceM / 4;
   const bearingsToTry = Array.from({ length: SEARCH_DIRECTIONS }, (_, k) => (360 / SEARCH_DIRECTIONS) * k);
   const scanResults = await Promise.all(bearingsToTry.map(async (bearing) => {
     try {
-      const result = await routeThroughPoints(loopWaypointsForBearing(start, bearing, radius), profile, { trackname: `scan_${bearing}`, trailStyle });
-      return { bearing, result };
+      const raw = await routeThroughPoints(loopWaypointsForBearing(start, bearing, radius), profile, { trackname: `scan_${bearing}`, trailStyle });
+      return { bearing, result: cleanSpurs ? cleanLoopResult(raw) : raw };
     } catch (err) {
       // BRouter injoignable (Java/process down) : aucune direction ne
       // reussira jamais, inutile d'attendre les 7 autres pour finalement
@@ -679,7 +708,7 @@ async function refineLoopFromBearing(start, bearing, initialResult, initialRadiu
     // faire s'effondrer ou exploser le rayon au lieu de converger doucement.
     bestRadius *= Math.max(0.5, Math.min(2, ratio));
     try {
-      best = await routeThroughPoints(loopWaypointsForBearing(start, bearing, bestRadius), profile, { trackname: `refine_${bearing}_${iter}`, trailStyle });
+      best = cleanLoopResult(await routeThroughPoints(loopWaypointsForBearing(start, bearing, bestRadius), profile, { trackname: `refine_${bearing}_${iter}`, trailStyle }));
     } catch (err) {
       if (process.env.ROUTE_GEN_DEBUG) console.log(`[refine] iter=${iter} bearing=${bearing} radius=${bestRadius.toFixed(0)} ECHEC: ${err.message}`);
       break; // le rayon affine n'est plus routable, on garde le meilleur resultat connu
@@ -846,7 +875,7 @@ const LOOP_RETRY_CANDIDATES = 3;
 // plus une exploration infinie qui ruinerait le temps de reponse.
 async function generateLoop(start, targetDistanceM, profile, opts = {}) {
   const maxRefineIterations = opts.maxRefineIterations ?? DEFAULT_REFINE_ITERATIONS;
-  const { candidates, radius } = await scanDirections(start, targetDistanceM, profile, opts.targetAscentM, opts.trailStyle);
+  const { candidates, radius } = await scanDirections(start, targetDistanceM, profile, opts.targetAscentM, opts.trailStyle, true);
   if (candidates.length === 0) {
     throw new Error('Impossible de generer une boucle exploitable autour de ce depart.');
   }
@@ -891,7 +920,7 @@ function towardCompassPhrase(bearing) {
 // tracés "ailleurs" plutot que la seule meilleure direction en D+.
 async function generateLoopWithAlternates(start, targetDistanceM, profile, opts = {}) {
   const maxRefineIterations = opts.maxRefineIterations ?? DEFAULT_REFINE_ITERATIONS;
-  const { candidates: rawCandidates, radius } = await scanDirections(start, targetDistanceM, profile, opts.targetAscentM, opts.trailStyle);
+  const { candidates: rawCandidates, radius } = await scanDirections(start, targetDistanceM, profile, opts.targetAscentM, opts.trailStyle, true);
   if (rawCandidates.length === 0) {
     throw new Error('Impossible de generer une boucle exploitable autour de ce depart.');
   }
@@ -2315,6 +2344,7 @@ module.exports = {
   TRAIL_STYLE_PARAMS,
   DEFAULT_TRAIL_STYLE,
   ASCENT_CALIBRATION_FACTOR,
+  removeSpurs,
 };
 
 function finalWarningCandidate(w) { return !!w && /plus vallonn/.test(w); }
