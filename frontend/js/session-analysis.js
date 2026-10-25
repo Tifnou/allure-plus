@@ -326,8 +326,7 @@ async function getCorrectVma(activity) {
     || (typeof _latestVO2Max !== 'undefined' ? _latestVO2Max : null);
   if (vo2 && vo2 > 3.5) {
     const profile = loadProfileData();
-    const factor = (profile.sex || 'M') === 'F' ? 0.315 : 0.313;
-    return Math.round((vo2 - 3.5) * factor * 10) / 10;
+    return calcVMA(vo2, profile.sex || 'M');
   }
   return campusState.fitness?.vma || null;
 }

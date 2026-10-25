@@ -76,7 +76,7 @@ const API = '';
 // rallumait a tort le point rouge sur TOUS les tickets deja lus (constat
 // utilisateur : la notification "reste" parfois sans raison apparente) -
 // meme categorie de bug que le profil/plan importe avant leur ajout ici.
-const DURABLE_LS_KEYS = ['suivi_sport_profile', 'suivi_personal_goals', 'suivi_imported_plan', 'suivi_local_done', 'suivi_session_mood', 'prefer_imported_plan', 'suivi_forced_goal_pace', 'suivi_free_sessions', 'suivi_free_routine', 'support_tickets_seen', 'support_admin_seen', 'allure_skin'];
+const DURABLE_LS_KEYS = ['suivi_sport_profile', 'suivi_personal_goals', 'suivi_imported_plan', 'suivi_local_done', 'suivi_session_mood', 'prefer_imported_plan', 'suivi_forced_goal_pace', 'suivi_free_sessions', 'suivi_free_routine', 'support_tickets_seen', 'support_admin_seen', 'allure_skin', 'suivi_vma_test'];
 const DURABLE_LS_PREFIXES = ['suivi_objectif_dist_', 'suivi_objectif_dplus_', 'suivi_objectif_validated_', 'suivi_objectif_startvo2_'];
 // Promesse de syncUserDataFromServer() exposee globalement (scope partage
 // entre scripts) - campus.js l'attend avant toute decision basee sur
@@ -3193,10 +3193,38 @@ function renderWeightReminder() {
 // VMA depuis VO2max (formule ACSM, plus pr\u00e9cise que /3.5)
 // VO2 running = 0.2*v(m/min) + 3.5 => VMA(m/min) = (VO2max-3.5)/0.2 => km/h = *60/1000
 // Correction femme +5% (\u00e9conomie de course)
-function calcVMA(vo2max, sex) {
+// SOURCE UNIQUE de la conversion VO2max -> VMA : toutes les surfaces (profil,
+// objectifs, export Garmin, analyse de seance...) passent par ici. Le facteur
+// de base (0,313 / 0,315 femme) est inchange ; un test VMA 3'+9' applique par
+// l'utilisateur ajoute un coefficient d'ecart (voir getVmaAdjustment) qui
+// laisse la VMA suivre la VO2max Garmin du moment.
+// opts.raw = true : formule de base SANS l'ajustement du test (sert a calculer
+// le coefficient d'ecart au moment du test, et a l'afficher en comparaison).
+function calcVMA(vo2max, sex, opts) {
   if (!vo2max || vo2max <= 0) return null;
   const factor = sex === 'F' ? 0.315 : 0.313;
-  return Math.round((vo2max - 3.5) * factor * 10) / 10;
+  const adj = (opts && opts.raw) ? null : getVmaAdjustment();
+  const v = (vo2max - 3.5) * factor * (adj ? adj.ratio : 1);
+  return (opts && opts.raw) ? v : Math.round(v * 10) / 10;
+}
+
+// Test VMA 3'+9' (protocole Running Addict / Campus) : cle durable
+// `suivi_vma_test` = { tests: [...], appliedId }. Le coefficient d'ecart est
+// fige AU MOMENT DU TEST (VMA du test / VMA formule du jour) puis applique a
+// la formule : la VMA continue de suivre la VO2max, seul le biais de la
+// formule sur cet utilisateur est corrige. Sans test applique : null.
+function loadVmaTestState() {
+  try {
+    const s = JSON.parse(localStorage.getItem('suivi_vma_test') || '{}');
+    return { tests: Array.isArray(s.tests) ? s.tests : [], appliedId: s.appliedId || null };
+  } catch (e) { return { tests: [], appliedId: null }; }
+}
+function getVmaAdjustment() {
+  const st = loadVmaTestState();
+  if (!st.appliedId) return null;
+  const t = st.tests.find(x => x.id === st.appliedId);
+  if (!t || !(t.ratio > 0)) return null;
+  return { ratio: t.ratio, pct: (t.ratio - 1) * 100, test: t };
 }
 
 /** Estimation du temps de course en secondes depuis la VMA (deplacee ici
@@ -3433,7 +3461,7 @@ function renderProfile() {
           <div class="profile-ind-unit">km/h</div>
         </div>
         <div class="profile-ind-label">VMA estimée</div>
-        <div class="profile-ind-sub">= allure ${vmaAllure} — formule ACSM${sex==='F'?' +5% ♀':''}</div>
+        <div class="profile-ind-sub">= allure ${vmaAllure} — ${(() => { const a = getVmaAdjustment(); return a ? 'ajustée ' + (a.pct >= 0 ? '+' : '') + a.pct.toFixed(1) + ' % (test du ' + new Date(a.test.date).toLocaleDateString('fr-FR') + ')' : 'formule ACSM' + (sex==='F'?' +5% ♀':''); })()}</div>
       </div>` : ''}
       ${hrMax ? `
       <div class="profile-ind-card">
@@ -3466,6 +3494,8 @@ function renderProfile() {
   } else if (indEl) {
     indEl.innerHTML = '<div class="profile-indicator-empty">Renseignez vos données pour voir les calculs</div>';
   }
+
+  if (typeof renderVmaTestCard === 'function') renderVmaTestCard();
 
   // ─ IMC + poids idéal ─
   const bmiEl = el('profile-bmi-section');

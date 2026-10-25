@@ -1669,9 +1669,8 @@ function renderSessionDetail(session, weekId, isCurrentWeek) {
   const _vo2loc  = typeof _latestVO2Max !== 'undefined' ? _latestVO2Max : null;
   const _profLoc = JSON.parse(localStorage.getItem('suivi_sport_profile') || '{}');
   const _sexLoc  = _profLoc.sex || 'M';
-  const _factLoc = _sexLoc === 'F' ? 0.315 : 0.313;
   const vma      = (_vo2loc && _vo2loc > 3.5)
-    ? Math.round((_vo2loc - 3.5) * _factLoc * 10) / 10
+    ? calcVMA(_vo2loc, _sexLoc)
     : (campusState.fitness?.vma || null); // fallback Campus si pas de VO2max Garmin
   // FC cible indicative par zone d'allure (retour utilisateur explicite,
   // 28/09) : reutilise TEL QUEL le meme calcul deja utilise cote analyse
@@ -1693,8 +1692,7 @@ function renderSessionDetail(session, weekId, isCurrentWeek) {
     const vo2local     = typeof _latestVO2Max !== 'undefined' ? _latestVO2Max : null;
     const profLocal    = JSON.parse(localStorage.getItem('suivi_sport_profile') || '{}');
     const sexLocal     = profLocal.sex || 'M';
-    const factorL      = sexLocal === 'F' ? 0.315 : 0.313;
-    const vmaLocal     = vo2local ? Math.round((vo2local - 3.5) * factorL * 10) / 10 : null;
+    const vmaLocal     = vo2local ? calcVMA(vo2local, sexLocal) : null;
     let raceInfoRows   = '<div style="font-size:12px;color:#888">Compl&eacute;tez votre profil pour voir l&rsquo;estimation</div>';
     if (distKm > 0 && vmaLocal) {
       const flatTimeH   = distKm / (vmaLocal * 0.70);        // plat + descente
@@ -1972,10 +1970,7 @@ async function exportWeekToGarmin(weekId, sessionNum) {
     const _vo2  = typeof _latestVO2Max !== 'undefined' ? _latestVO2Max : null;
     const _prof = JSON.parse(localStorage.getItem('suivi_sport_profile') || '{}');
     const _sex  = _prof.sex || 'M';
-    const _fact = _sex === 'F' ? 0.315 : 0.313;
-    let vmaExport = (_vo2 && _vo2 > 3.5)
-      ? Math.round((_vo2 - 3.5) * _fact * 10) / 10
-      : null;
+    let vmaExport = (_vo2 && _vo2 > 3.5) ? calcVMA(_vo2, _sex) : null;
 
     // ── Allure objectif forcée pour CETTE séance (cf computeGoalPaceInfo/
     // toggleForceGoalPace) : remplace la VMA réelle par la VMA implicite de
@@ -2683,13 +2678,13 @@ function fmtPaceFromSecs(distKm, secs) {
 /** Retourne la VMA (km/h) depuis les sources disponibles.
  * Priorité : campusState.fitness.vma > _latestVO2Max global > null */
 function getVmaFromState() {
-  if (campusState.fitness?.vma > 0) return campusState.fitness.vma;
+  // Un test VMA applique par l'utilisateur prime sur la VMA Campus.
+  if (!getVmaAdjustment() && campusState.fitness?.vma > 0) return campusState.fitness.vma;
   if (typeof _latestVO2Max !== 'undefined' && _latestVO2Max > 3.5) {
     const profile = JSON.parse(localStorage.getItem('suivi_sport_profile') || '{}');
-    const factor = (profile.sex || 'M') === 'F' ? 0.315 : 0.313;
-    return Math.round((_latestVO2Max - 3.5) * factor * 10) / 10;
+    return calcVMA(_latestVO2Max, profile.sex || 'M');
   }
-  return null;
+  return campusState.fitness?.vma > 0 ? campusState.fitness.vma : null;
 }
 
 /** Convertit un VO2max en VMA en se calibrant sur la VMA "actuelle" réelle
@@ -2708,8 +2703,7 @@ function vo2ToVmaCalibrated(vo2) {
     return (vo2 - 3.5) * (currentVma / (currentVo2 - 3.5));
   }
   const profile = JSON.parse(localStorage.getItem('suivi_sport_profile') || '{}');
-  const sexFactor = (profile.sex || 'M') === 'F' ? 0.315 : 0.313;
-  return (vo2 - 3.5) * sexFactor;
+  return calcVMA(vo2, profile.sex || 'M') ?? 0;
 }
 
 /** Inverse de vo2ToVmaCalibrated - pour afficher un "VO2max projeté" cohérent
@@ -2721,7 +2715,7 @@ function vmaToVo2Calibrated(vma) {
     return vma / (currentVma / (currentVo2 - 3.5)) + 3.5;
   }
   const profile = JSON.parse(localStorage.getItem('suivi_sport_profile') || '{}');
-  const sexFactor = (profile.sex || 'M') === 'F' ? 0.315 : 0.313;
+  const sexFactor = ((profile.sex || 'M') === 'F' ? 0.315 : 0.313) * (getVmaAdjustment()?.ratio || 1);
   return vma / sexFactor + 3.5;
 }
 
@@ -3882,8 +3876,7 @@ function buildPacesTableHTML() {
   const profile = JSON.parse(localStorage.getItem('suivi_sport_profile') || '{}');
   const sex = profile.sex || 'M';
   const vo2 = typeof _latestVO2Max !== 'undefined' ? _latestVO2Max : null;
-  const factorVma = sex === 'F' ? 0.315 : 0.313;
-  const vmaKmh = (vo2 && vo2 > 3.5) ? Math.round((vo2 - 3.5) * factorVma * 10) / 10 : null;
+  const vmaKmh = (vo2 && vo2 > 3.5) ? calcVMA(vo2, sex) : null;
 
   const colHeader = isTrail
     ? `<div class="paces-col-header"><span class="paces-col-zone"></span><span class="paces-col-road">${personEmoji('running')} Route /km</span><span class="paces-col-trail">&#x1F3D4; Trail /km</span></div>`
