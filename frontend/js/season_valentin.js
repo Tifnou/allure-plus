@@ -63,7 +63,6 @@
       <path d="M552 120q14-26 28-6M610 150q10-20 22-6" stroke="#D81B45" stroke-width="1.4" fill="none" opacity=".5" stroke-linecap="round"/>`;
     return `<div id="season-hero" class="season-hero">
       ${svg('0 0 1000 200', body, 'vl-hero-art', 'preserveAspectRatio="xMidYMid slice"')}
-      <div class="vl-hero-hearts"></div>
       <div class="vl-hero-text"><span class="vl-hero-kicker">Allure+ · 14 février</span><b>Joyeuse Saint-Valentin</b><span class="vl-hero-sub">Cours avec le cœur… mais garde du souffle.</span></div>
     </div>`;
   }

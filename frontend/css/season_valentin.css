@@ -55,10 +55,6 @@ html[data-season="saint-valentin"] .season-hero { background: #EDE3DD; box-shado
 html[data-season="saint-valentin"] .season-hero::before { background: radial-gradient(ellipse at 40% 55%, transparent 55%, rgba(120, 60, 72, .25) 100%); }
 html[data-season="saint-valentin"] .season-hero::after { background: linear-gradient(270deg, rgba(255, 244, 246, .85) 0%, rgba(255, 244, 246, .55) 36%, transparent 64%); }
 .vl-hero-art { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
-.vl-hero-hearts { position: absolute; inset: 0; z-index: 1; pointer-events: none; opacity: .8;
-  background-image: radial-gradient(circle at 10px 10px, rgba(216, 27, 69, .5) 0 2.2px, transparent 3px), radial-gradient(circle at 120px 70px, rgba(255, 90, 130, .45) 0 1.8px, transparent 2.6px);
-  background-size: 210px 170px; animation: vl-hero-bg 11s linear infinite; }
-@keyframes vl-hero-bg { to { background-position: 0 -170px; } }
 .vl-hero-text { position: absolute; right: 26px; bottom: 20px; z-index: 2; text-align: right; display: flex; flex-direction: column; gap: 3px; max-width: 48%; }
 .vl-hero-kicker { font-family: var(--font-body); font-size: 10.5px; font-weight: 700; letter-spacing: .3em; text-transform: uppercase; color: #B3123A; }
 .vl-hero-text b { font-family: var(--font-heading, var(--font-body)); font-size: 26px; line-height: 1.1; color: #8F0A26; text-shadow: 0 0 20px rgba(255, 255, 255, .9), 0 1px 0 rgba(255, 255, 255, .8); animation: vl-title 4.5s ease-in-out infinite; }
