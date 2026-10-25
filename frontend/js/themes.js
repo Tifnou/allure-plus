@@ -21,7 +21,7 @@
 
   // kind 'fall' : tombent ; 'rise' : montent. count volontairement modeste.
   const SEASONS = {
-    halloween: { label: 'Halloween', emoji: '🎃', base: 'dark', hat: HAT_WITCH, fx: { kind: 'fall', chars: ['🦇', '🍂', '🎃', '🕸️'], count: 14 } },
+    halloween: { label: 'Halloween', emoji: '🎃', base: 'dark', hat: HAT_WITCH, pack: 'halloween', fx: { kind: 'fall', chars: ['🦇', '🍂', '🎃', '🕸️'], count: 14 } },
     noel: { label: 'Noël', emoji: '🎄', base: 'dark', hat: HAT_SANTA, fx: { kind: 'fall', chars: ['❄', '❅', '❆', '✦'], count: 22 } },
     'saint-valentin': { label: 'Saint-Valentin', emoji: '💝', base: 'light', hat: HAT_HEART, fx: { kind: 'rise', chars: ['❤️', '💗', '💕', '💖'], count: 14 } },
   };
@@ -69,12 +69,17 @@
     document.getElementById('season-scene')?.remove();
     document.getElementById('season-hat')?.remove();
     document.getElementById('season-badge')?.remove();
+    Object.values(window.SEASON_PACKS || {}).forEach(p => p.clear && p.clear());
   }
 
   function buildDecor(id) {
     const s = SEASONS[id];
     clearDecor();
-    if (document.body) {
+    // Pack d'immersion complet (ex : Halloween, season_halloween.js) : il remplace
+    // les particules emoji et la scène de bas de page par son propre décor.
+    const pack = s.pack && window.SEASON_PACKS && window.SEASON_PACKS[s.pack];
+    if (pack && document.body) pack.build();
+    if (document.body && !pack) {
       const fx = document.createElement('div');
       fx.id = 'season-fx';
       fx.setAttribute('aria-hidden', '1');

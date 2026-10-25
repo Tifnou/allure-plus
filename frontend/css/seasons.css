@@ -5,18 +5,15 @@
    règles [data-theme="dark"] existantes continuent donc de s'appliquer.
 ═══════════════════════════════════════════════════════════════════════ */
 
-/* ─── Halloween (sombre) ─── */
+/* ─── Halloween (sombre) : nuit bleue + lueur orange (pack complet : season_halloween.css) ─── */
 html[data-season="halloween"] {
-  --bg: #0E0912; --bg-white: #171021; --bg-hover: #241733;
-  --border: #3A2552; --border-light: #2A1A3D;
-  --accent: #F97316; --accent-light: #2A1606; --accent-text: #FDBA74;
-  --orange: #FB923C; --orange-bg: #2A1606; --purple: #A855F7;
-  --text-primary: #F3E8FF; --text-secondary: #B9A3D6; --text-muted: #9C86BC;
-  --nav-text: #E9D8FD; --card-bg: rgba(23,16,33,0.92);
-  --brand-green: #F97316;
-}
-html[data-season="halloween"] #bg-slideshow::after {
-  background: linear-gradient(180deg, rgba(76,29,149,0.42), rgba(249,115,22,0.16));
+  --bg: #070B18; --bg-white: #0E1830; --bg-hover: #16264A;
+  --border: #2A3E6B; --border-light: #1B2B50;
+  --accent: #FF8A1F; --accent-light: #2A1608; --accent-text: #FFB866;
+  --orange: #FF9A3C; --orange-bg: #2A1608; --purple: #8B7BFF;
+  --text-primary: #EAF0FF; --text-secondary: #AEBBE0; --text-muted: #8F9FCB;
+  --nav-text: #DCE6FF; --card-bg: rgba(14,24,48,0.86);
+  --brand-green: #FF8A1F;
 }
 
 /* ─── Noël (sombre) ─── */

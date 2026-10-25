@@ -1,0 +1,135 @@
+/* ═══════════════════════════════════════════════════════════════════════
+   PACK D'IMMERSION HALLOWEEN — décor, bandeau, mascotte, micro-animations
+   (DOM construit par js/season_halloween.js ; palette dans seasons.css)
+   Règles : animations sur transform/opacity uniquement, tout est coupé si
+   l'utilisateur demande de réduire les animations, rien ne reçoit la souris.
+═══════════════════════════════════════════════════════════════════════ */
+
+/* Le ciel remplace le fond d'écran défilant. */
+html[data-season="halloween"] #bg-slideshow { display: none; }
+html[data-season="halloween"] body { background: #050813; }
+html[data-season="halloween"] .page { padding-bottom: 60px; }
+
+/* ─── Ciel plein écran (fixe, derrière le contenu) ─── */
+.season-sky { position: fixed; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; contain: strict; }
+.season-sky > * { position: absolute; }
+.hw-sky-base { inset: 0; background: linear-gradient(180deg, #050813 0%, #0A1534 42%, #14305A 76%, #3B2A1A 100%); }
+.hw-stars { left: 0; top: 0; width: 100%; height: 62%; }
+.hw-star { animation: hw-twinkle 4.2s ease-in-out infinite; }
+@keyframes hw-twinkle { 0%, 100% { opacity: .25; } 50% { opacity: 1; } }
+
+.hw-moon-wrap { right: 3vw; top: 13vh; width: clamp(130px, 17vmin, 230px); aspect-ratio: 1; }
+.hw-moon-svg { width: 100%; height: 100%; overflow: visible; }
+.hw-moon-halo { transform-box: fill-box; transform-origin: center; animation: hw-breathe 7s ease-in-out infinite; }
+@keyframes hw-breathe { 0%, 100% { transform: scale(1); opacity: .85; } 50% { transform: scale(1.1); opacity: 1; } }
+
+.hw-clouds { inset: 0 0 40% 0; }
+.hw-c { position: absolute; display: block; height: 110px; border-radius: 50%; filter: blur(22px); background: radial-gradient(ellipse at center, rgba(70, 105, 175, .34), transparent 70%); animation: hw-cloud 140s linear infinite; }
+.hw-c1 { top: 12%; width: 46vw; left: -50vw; }
+.hw-c2 { top: 30%; width: 38vw; left: -50vw; animation-duration: 180s; animation-delay: -70s; opacity: .8; }
+.hw-c3 { top: 4%; width: 52vw; left: -50vw; animation-duration: 220s; animation-delay: -150s; opacity: .6; }
+@keyframes hw-cloud { to { transform: translateX(170vw); } }
+
+/* Chauves-souris qui traversent l'écran (battement d'ailes + léger flottement) */
+.hw-flyer { left: 0; width: 56px; animation: hw-cross linear infinite; will-change: transform; }
+.hw-flyer-svg { width: 100%; height: auto; overflow: visible; transform: scale(var(--s, 1)); animation: hw-bob 2.6s ease-in-out infinite; }
+@keyframes hw-cross { from { transform: translateX(-90px); } to { transform: translateX(calc(100vw + 90px)); } }
+@keyframes hw-bob { 0%, 100% { translate: 0 0; } 50% { translate: 0 -12px; } }
+.hw-wing { transform-box: fill-box; animation: hw-flap .34s ease-in-out infinite alternate; }
+.hw-wing--l { transform-origin: 100% 100%; }
+.hw-wing--r { transform-origin: 0% 100%; }
+@keyframes hw-flap { from { transform: scaleY(1) rotate(0deg); } to { transform: scaleY(.38) rotate(0deg); } }
+
+/* Village : fenêtres qui vacillent, citrouilles qui respirent */
+.hw-village { left: 0; right: 0; bottom: 0; width: 100%; height: 48vh; }
+.hw-win { animation: hw-flicker 5s ease-in-out infinite; }
+@keyframes hw-flicker { 0%, 100% { opacity: 1; } 8% { opacity: .55; } 12% { opacity: 1; } 46% { opacity: .85; } 52% { opacity: .5; } 58% { opacity: .95; } 80% { opacity: .78; } }
+.hw-face { animation: hw-flame 3.1s ease-in-out infinite; filter: drop-shadow(0 0 5px rgba(255, 160, 40, .95)); }
+.hw-face--b { animation-duration: 2.4s; animation-delay: -.8s; }
+.hw-face--c { animation-duration: 3.7s; animation-delay: -1.6s; }
+.hw-face--m { animation-duration: 2.2s; }
+@keyframes hw-flame { 0%, 100% { opacity: 1; } 18% { opacity: .82; } 34% { opacity: 1; } 55% { opacity: .7; } 70% { opacity: .96; } }
+.hw-halo { transform-box: fill-box; transform-origin: center; animation: hw-halo 3.4s ease-in-out infinite; }
+@keyframes hw-halo { 0%, 100% { transform: scale(1); opacity: .9; } 50% { transform: scale(1.12); opacity: .6; } }
+.hw-leaves { animation: hw-sway 6s ease-in-out infinite; transform-box: fill-box; transform-origin: 50% 100%; }
+@keyframes hw-sway { 0%, 100% { transform: rotate(-1.2deg); } 50% { transform: rotate(1.2deg); } }
+
+/* Brume qui dérive + lueur orange au ras du sol */
+.hw-fog { left: 0; bottom: 0; width: 200%; height: 36vh; background:
+    radial-gradient(ellipse 22% 55% at 12% 78%, rgba(140, 170, 225, .20), transparent 72%),
+    radial-gradient(ellipse 26% 48% at 46% 86%, rgba(140, 170, 225, .15), transparent 72%),
+    radial-gradient(ellipse 20% 52% at 78% 80%, rgba(140, 170, 225, .18), transparent 72%);
+  background-size: 50% 100%; background-repeat: repeat-x; animation: hw-fog 95s linear infinite; }
+.hw-fog--b { height: 24vh; opacity: .75; animation-duration: 140s; animation-direction: reverse; filter: blur(6px); }
+@keyframes hw-fog { to { transform: translateX(-50%); } }
+.hw-glowfloor { left: 0; right: 0; bottom: 0; height: 30vh; background: linear-gradient(0deg, rgba(255, 125, 25, .17), transparent); }
+
+/* Braises qui montent, feuilles qui tombent */
+.hw-particles { inset: 0; }
+.hw-ember { position: absolute; bottom: -12px; border-radius: 50%; background: #FFB347; box-shadow: 0 0 7px 2px rgba(255, 138, 31, .75); animation: hw-ember linear infinite; will-change: transform, opacity; }
+@keyframes hw-ember {
+  0% { transform: translate3d(0, 0, 0); opacity: 0; } 10% { opacity: .95; }
+  50% { transform: translate3d(var(--sway), -55vh, 0); opacity: .7; }
+  100% { transform: translate3d(calc(var(--sway) * -1), -108vh, 0); opacity: 0; }
+}
+.hw-leaf { position: absolute; top: -30px; width: 16px; animation: hw-leaf linear infinite; will-change: transform; opacity: .85; }
+.hw-leaf-svg { width: 100%; height: auto; display: block; }
+@keyframes hw-leaf {
+  0% { transform: translate3d(0, -4vh, 0) rotate(0); }
+  50% { transform: translate3d(var(--sway), 52vh, 0) rotate(calc(var(--rot) / 2)); }
+  100% { transform: translate3d(calc(var(--sway) * -.6), 108vh, 0) rotate(var(--rot)); }
+}
+
+/* ─── Bandeau « affiche » de la Synthèse ─── */
+.season-hero { position: relative; margin: 0 0 16px; height: 190px; border-radius: var(--radius-lg); overflow: hidden; background: #070D1F;
+  box-shadow: inset 0 0 0 1px rgba(255, 138, 31, .4), 0 12px 40px rgba(0, 0, 0, .5), 0 0 34px rgba(255, 120, 20, .14); }
+/* voile derrière le texte du bandeau (lisibilité sur le ciel et les maisons) */
+.season-hero::after { content: ''; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(270deg, rgba(5, 8, 19, .62) 0%, rgba(5, 8, 19, .35) 34%, transparent 58%); }
+.hw-hero-text { z-index: 2; }
+.hw-hero-art { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.hw-hero-text { position: absolute; right: 26px; bottom: 20px; text-align: right; display: flex; flex-direction: column; gap: 3px; max-width: 46%; }
+.hw-hero-kicker { font-family: var(--font-body); font-size: 10.5px; font-weight: 700; letter-spacing: .3em; text-transform: uppercase; color: #FFB45E; }
+.hw-hero-text b { font-family: var(--font-heading, var(--font-body)); font-size: 28px; line-height: 1.1; color: #FFE2B0; text-shadow: 0 0 22px rgba(255, 138, 31, .75), 0 2px 0 rgba(0, 0, 0, .5); animation: hw-title-glow 4.5s ease-in-out infinite; }
+.hw-hero-sub { font-family: var(--font-body); font-size: 12px; color: #B9C9EE; }
+@keyframes hw-title-glow { 0%, 100% { text-shadow: 0 0 18px rgba(255, 138, 31, .6), 0 2px 0 rgba(0, 0, 0, .5); } 50% { text-shadow: 0 0 30px rgba(255, 150, 40, .95), 0 2px 0 rgba(0, 0, 0, .5); } }
+.hw-bat { animation: hw-hero-fly 24s linear infinite; }
+.hw-bat--2 { animation-duration: 31s; animation-delay: -11s; }
+.hw-bat--3 { animation-duration: 38s; animation-delay: -23s; }
+@keyframes hw-hero-fly { from { translate: -60px 0; } to { translate: 1060px 0; } }
+.hw-cloud { animation: hw-hero-cloud 60s linear infinite alternate; }
+.hw-cloud--b { animation-duration: 80s; }
+@keyframes hw-hero-cloud { from { translate: -30px 0; } to { translate: 40px 0; } }
+@media (max-width: 720px) { .hw-hero-sub, .season-mascot { display: none; } .season-hero { height: 150px; } .hw-hero-text b { font-size: 20px; } }
+
+/* ─── Mascotte au pied de la sidebar ─── */
+.season-mascot { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 8px 0 0; }
+.hw-mascot-svg { width: 62px; height: 62px; overflow: visible; }
+.hw-mascot-cap { font-family: var(--font-body); font-size: 10px; font-weight: 600; letter-spacing: .06em; color: var(--accent-text); opacity: .85; }
+@media (max-height: 760px) { .season-mascot { display: none; } }
+
+/* ─── Micro-animations de l'interface ─── */
+html[data-season="halloween"] .card { transition: box-shadow .28s ease, border-color .28s ease, background-color .28s ease; box-shadow: inset 0 1px 0 rgba(255, 170, 80, .14), 0 6px 24px rgba(0, 0, 0, .35); }
+html[data-season="halloween"] .card:hover { border-color: rgba(255, 138, 31, .55); box-shadow: inset 0 1px 0 rgba(255, 170, 80, .3), 0 8px 30px rgba(0, 0, 0, .45), 0 0 26px rgba(255, 120, 20, .16); }
+html[data-season="halloween"] .page.active { animation: hw-page-in .38s ease both; }
+@keyframes hw-page-in { from { opacity: .4; translate: 0 10px; filter: blur(3px); } to { opacity: 1; translate: 0 0; filter: blur(0); } }
+html[data-season="halloween"] .page-title { text-shadow: 0 0 20px rgba(255, 138, 31, .4); }
+html[data-season="halloween"] .sidebar { background: rgba(8, 13, 30, .86); border-right-color: rgba(255, 138, 31, .28); box-shadow: 4px 0 30px rgba(0, 0, 0, .45); }
+html[data-season="halloween"] .nav-item { transition: background .25s ease, color .25s ease, text-shadow .25s ease; }
+html[data-season="halloween"] .nav-item:hover { background: linear-gradient(90deg, rgba(255, 138, 31, .16), rgba(255, 138, 31, .02)); text-shadow: 0 0 12px rgba(255, 150, 50, .55); }
+html[data-season="halloween"] .nav-item.active { background: linear-gradient(90deg, rgba(255, 138, 31, .24), rgba(255, 138, 31, .04)); box-shadow: inset 0 0 0 1px rgba(255, 138, 31, .28), 0 0 18px rgba(255, 120, 20, .14); }
+html[data-season="halloween"] .nav-item.active .nav-icon { filter: drop-shadow(0 0 5px rgba(255, 150, 40, .9)); animation: hw-icon-pulse 3.2s ease-in-out infinite; }
+@keyframes hw-icon-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .72; } }
+html[data-season="halloween"] .btn-save-profile,
+html[data-season="halloween"] .confirm-modal-btn--confirm,
+html[data-season="halloween"] .btn-export-garmin { background-image: linear-gradient(135deg, #FF9A2E, #E8590C); color: #1A0B02; border-color: #FF9A2E; transition: box-shadow .25s ease, filter .25s ease; }
+html[data-season="halloween"] .btn-save-profile:hover,
+html[data-season="halloween"] .confirm-modal-btn--confirm:hover,
+html[data-season="halloween"] .btn-export-garmin:hover { box-shadow: 0 0 22px rgba(255, 138, 31, .6); filter: brightness(1.08); }
+html[data-season="halloween"] ::selection { background: rgba(255, 138, 31, .45); color: #fff; }
+html[data-season="halloween"] ::-webkit-scrollbar-thumb { background: rgba(255, 138, 31, .55); }
+
+/* Animations coupées si l'utilisateur le demande : le décor reste, immobile. */
+@media (prefers-reduced-motion: reduce) {
+  .season-sky *, .season-hero *, .season-mascot *, html[data-season="halloween"] .page.active, html[data-season="halloween"] .nav-item.active .nav-icon { animation: none !important; }
+  .hw-flyer, .hw-ember, .hw-leaf, .hw-c, .hw-fog--b { display: none; }
+}
