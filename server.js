@@ -57,6 +57,7 @@ const {
   buildGarminFunctions
 } = require('./garmin_client');
 const { getZoneRange, annotatePaceZones, ZONE_LABELS } = require('./zones');
+const { buildVmaTestWorkout } = require('./vma_test_workout');
 const { isBrouterConfigured, isTilePresent, getTileRemoteSize, downloadTile } = require('./brouter_manager');
 const { geocode, getCommunesForPostcode, getCommunesForDepartment, searchStreet, getTownHall, getPlacesForPostcodeIntl, searchStreetIntl, generateRouteOptions, normalizeAscentBand, targetFromAscentBand, buildGpxXml, trailLevelMidKmh, TRAIL_STYLE_PARAMS, routeThroughPoints, routeThroughViaPoint, TERRAIN_PROFILES } = require('./route_generator');
 const { getPaceProfile, refreshPaceProfile, migratePaceProfileToScoped, efFastPaceMinPerKm, applyEfPaceAnchor, bucketForGrade } = require('./pace_profile');
@@ -4272,6 +4273,27 @@ app.post('/api/garmin/workout-from-session', requireSession, async (req, res) =>
       workout: { ...(result || {}), workoutName: workout.workoutName },
     });
   } catch(err) { handleError(res, err); }
+});
+
+
+// Séance du test VMA 3'+9' (aucune donnée du client : structure fixe, voir
+// vma_test_workout.js). Si Garmin refuse le type d'étape "rest" pour les mises
+// en place, on retente avec des étapes "recovery" (type déjà éprouvé).
+app.post('/api/garmin/vma-test-workout', requireSession, async (req, res) => {
+  try {
+    const gc = req.session.gc;
+    let workout = buildVmaTestWorkout();
+    let result;
+    try {
+      result = await gc.addWorkout(workout);
+    } catch (e) {
+      console.log('[VMA test] etape "rest" refusee, nouvel essai en "recovery" : ' + (e && e.message));
+      workout = buildVmaTestWorkout({ restAsRecovery: true });
+      result = await gc.addWorkout(workout);
+    }
+    console.log('[OK] Workout test VMA cree dans Garmin (id:' + (result?.workoutId || '?') + ')');
+    res.json({ success: true, workout: { ...(result || {}), workoutName: workout.workoutName } });
+  } catch (err) { handleError(res, err); }
 });
 
 

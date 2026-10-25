@@ -144,7 +144,24 @@ function renderVmaTestProtocol() {
       <li><strong>Retour au calme — 10 à 15 min</strong><br>Jogging lent.</li>
     </ol>
     <p class="vt-hint">Ensuite, onglet « Mon résultat » : saisis tes deux distances. Allure+ calcule ta VMA (moyenne des vitesses des deux efforts), la compare à la sienne et te montre l'écart.</p>
-    <div class="vt-actions"><button class="vt-btn vt-btn--primary" onclick="setVmaTestTab('result')">J'ai fait le test</button></div>`;
+    <div class="vt-actions">
+      <button class="vt-btn" id="vt-export" onclick="exportVmaTestToGarmin()" title="Crée la séance dans Garmin Connect : pauses au lap avant chaque effort, aucune allure cible">Envoyer la séance vers Garmin</button>
+      <button class="vt-btn vt-btn--primary" onclick="setVmaTestTab('result')">J'ai fait le test</button>
+    </div>
+    <p class="vt-hint">La séance Garmin contient l'échauffement (EF + gammes, version générique), les pauses au lap avant le 3' et avant le 9', les 30' de récupération et le retour au calme.</p>`;
+}
+
+async function exportVmaTestToGarmin() {
+  const btn = document.getElementById('vt-export');
+  if (btn) btn.disabled = true;
+  try {
+    const res = await fetchJSON('/api/garmin/vma-test-workout', { method: 'POST', body: '{}' });
+    if (res && res.success) showToast('✓ Séance « Test VMA 3+9 » envoyée vers Garmin !', 'success');
+  } catch (err) {
+    showToast('Erreur export Garmin : ' + err.message, 'error');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
 }
 
 function setVmaTestTerrain(t) {
