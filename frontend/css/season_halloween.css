@@ -7,13 +7,13 @@
 
 /* Le ciel remplace le fond d'écran défilant. */
 html[data-season="halloween"] #bg-slideshow { display: none; }
-html[data-season="halloween"] body { background: #050813; }
+html[data-season="halloween"] body { background: #02030A; }
 html[data-season="halloween"] .page { padding-bottom: 60px; }
 
 /* ─── Ciel plein écran (fixe, derrière le contenu) ─── */
 .season-sky { position: fixed; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; contain: strict; }
 .season-sky > * { position: absolute; }
-.hw-sky-base { inset: 0; background: linear-gradient(180deg, #050813 0%, #0A1534 42%, #14305A 76%, #3B2A1A 100%); }
+.hw-sky-base { inset: 0; background: linear-gradient(180deg, #02030A 0%, #070D24 44%, #0E2140 78%, #2B1C12 100%); }
 .hw-stars { left: 0; top: 0; width: 100%; height: 62%; }
 .hw-star { animation: hw-twinkle 4.2s ease-in-out infinite; }
 @keyframes hw-twinkle { 0%, 100% { opacity: .25; } 50% { opacity: 1; } }
@@ -56,9 +56,9 @@ html[data-season="halloween"] .page { padding-bottom: 60px; }
 
 /* Brume qui dérive + lueur orange au ras du sol */
 .hw-fog { left: 0; bottom: 0; width: 200%; height: 36vh; background:
-    radial-gradient(ellipse 22% 55% at 12% 78%, rgba(140, 170, 225, .20), transparent 72%),
-    radial-gradient(ellipse 26% 48% at 46% 86%, rgba(140, 170, 225, .15), transparent 72%),
-    radial-gradient(ellipse 20% 52% at 78% 80%, rgba(140, 170, 225, .18), transparent 72%);
+    radial-gradient(ellipse 22% 55% at 12% 78%, rgba(140, 170, 225, .26), transparent 72%),
+    radial-gradient(ellipse 26% 48% at 46% 86%, rgba(140, 170, 225, .2), transparent 72%),
+    radial-gradient(ellipse 20% 52% at 78% 80%, rgba(140, 170, 225, .24), transparent 72%);
   background-size: 50% 100%; background-repeat: repeat-x; animation: hw-fog 95s linear infinite; }
 .hw-fog--b { height: 24vh; opacity: .75; animation-duration: 140s; animation-direction: reverse; filter: blur(6px); }
 @keyframes hw-fog { to { transform: translateX(-50%); } }
@@ -133,3 +133,26 @@ html[data-season="halloween"] ::-webkit-scrollbar-thumb { background: rgba(255, 
   .season-sky *, .season-hero *, .season-mascot *, html[data-season="halloween"] .page.active, html[data-season="halloween"] .nav-item.active .nav-icon { animation: none !important; }
   .hw-flyer, .hw-ember, .hw-leaf, .hw-c, .hw-fog--b { display: none; }
 }
+
+/* ─── Version « inquiétante » : vignette, grain, yeux dans le noir, silhouette, araignée, fantôme, corbeaux ─── */
+.hw-vignette { inset: 0; background: radial-gradient(ellipse at 50% 45%, transparent 52%, rgba(0, 0, 0, .62) 100%); }
+.hw-grain { inset: 0; opacity: .1; mix-blend-mode: overlay; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .9 0'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23n)'/%3E%3C/svg%3E"); }
+.hw-moon-wrap { overflow: visible; }
+.hw-moon-cloud { position: absolute; left: -30%; top: 38%; width: 160%; height: 9%; border-radius: 50%; background: #050913; filter: blur(5px); opacity: .85; animation: hw-moon-cloud 46s ease-in-out infinite alternate; }
+@keyframes hw-moon-cloud { from { transform: translateX(-30%); } to { transform: translateX(30%); } }
+.hw-eyes { opacity: 0; filter: drop-shadow(0 0 4px currentColor); animation: hw-eyes 11s ease-in-out infinite; }
+@keyframes hw-eyes { 0%, 56%, 100% { opacity: 0; } 60%, 70% { opacity: 1; } 64% { opacity: .1; } 74% { opacity: 0; } }
+.hw-figure { animation: hw-figure 19s ease-in-out infinite; }
+@keyframes hw-figure { 0%, 42%, 100% { opacity: 0; } 46%, 60% { opacity: 1; } 64% { opacity: 0; } }
+.hw-crow { transform-box: fill-box; transform-origin: 50% 100%; animation: hw-crow 7s ease-in-out infinite; }
+@keyframes hw-crow { 0%, 70%, 100% { transform: rotate(0); } 76% { transform: rotate(-5deg); } 82% { transform: rotate(3deg); } 90% { transform: rotate(0); } }
+.hw-spider { animation: hw-spider 11s ease-in-out infinite; }
+@keyframes hw-spider { 0%, 100% { translate: 0 0; } 40%, 62% { translate: 0 var(--len); } }
+.hw-ghost { left: -12vw; top: 56vh; width: 60px; opacity: .1; filter: blur(1.2px); animation: hw-ghost 80s linear infinite; }
+.hw-ghost-svg { width: 100%; height: auto; display: block; animation: hw-ghost-bob 5s ease-in-out infinite; }
+@keyframes hw-ghost { to { transform: translateX(120vw); } }
+@keyframes hw-ghost-bob { 0%, 100% { translate: 0 0; } 50% { translate: 0 -14px; } }
+.season-hero::before { content: ''; position: absolute; inset: 0; z-index: 1; pointer-events: none; background: radial-gradient(ellipse at 40% 55%, transparent 45%, rgba(0, 0, 0, .55) 100%); }
+.hw-face { filter: drop-shadow(0 0 7px rgba(255, 110, 20, .95)); }
+.hw-mascot-cap { color: #FF9A5C; font-style: italic; }
+@media (prefers-reduced-motion: reduce) { .hw-ghost, .hw-moon-cloud { display: none; } .hw-eyes { opacity: .55; } }
