@@ -42,3 +42,12 @@ test('variante de repli : mises en place en recup si "rest" est refuse', () => {
   const st = buildVmaTestWorkout({ restAsRecovery: true }).workoutSegments[0].workoutSteps;
   assert.ok(!st.some(s => s.stepType.stepTypeKey === 'rest'));
 });
+
+test('echauffement = UN seul bloc de 15 min, puis mise en place au lap ; 11 etapes au total', () => {
+  const st = steps();
+  assert.strictEqual(st[0].stepType.stepTypeKey, 'warmup');
+  assert.strictEqual(st[0].endConditionValue, 15 * 60);
+  assert.strictEqual(st.filter(s => s.stepType.stepTypeKey === 'warmup').length, 1);
+  assert.strictEqual(st[1].stepType.stepTypeKey, 'rest');
+  assert.strictEqual(st.length, 11);
+});

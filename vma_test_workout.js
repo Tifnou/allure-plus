@@ -3,14 +3,13 @@
 // Contrairement aux séances de plan (buildGarminWorkoutFromSession, server.js),
 // aucune allure cible : les deux efforts sont "à fond". Ce qui compte ici, ce
 // sont les PAUSES AU LAP : l'athlète doit être placé sur la piste avant chaque
-// effort, donc l'échauffement, la mise en place avant le 3', la mise en place
-// avant le 9' et le retour au calme se terminent au bouton Lap, jamais à la
-// durée. Seules les récupérations (30' en 5 étapes) et les efforts ont une
+// effort, donc la mise en place avant le 3', la mise en place avant le 9' et le
+// retour au calme se terminent au bouton Lap, jamais à la durée. L'échauffement
+// (un seul bloc de 15'), les récupérations (30' en 5 étapes) et les efforts ont une
 // durée fixe — les 30' de récup sont comptées exactement entre la fin du 3' et
 // la mise en place du 9' (la pause au lap ne les allonge pas).
 //
-// Échauffement : version GÉNÉRIQUE (EF tranquille + gammes), à ajuster par
-// l'utilisateur — voir WARMUP_DRILLS.
+// Échauffement : un seul bloc de 15' (voir WARMUP_SEC).
 
 const LAP = { conditionTypeId: 1, conditionTypeKey: 'lap.button' };
 const TIME = { conditionTypeId: 2, conditionTypeKey: 'time' };
@@ -23,13 +22,9 @@ const TYPES = {
   rest:     { stepTypeId: 5, stepTypeKey: 'rest' },
 };
 
-const WARMUP_EF_SEC = 8 * 60; // EF tranquille avant les gammes
-const WARMUP_DRILLS = [
-  'Gammes : talons-fesses',
-  'Gammes : montees de genou',
-  'Gammes : pointes de pieds',
-  'Accelerations progressives (2 x 80 a 100 m)',
-];
+// Échauffement : UN SEUL bloc de 15' (retour utilisateur : trop de découpages sur la montre) ;
+// le détail (EF tranquille puis gammes) n'est que dans le nom de l'étape.
+const WARMUP_SEC = 15 * 60;
 // Récupération de 30' entre les deux efforts : [description, secondes]
 const RECOVERY_30 = [
   ['Marche', 5 * 60],
@@ -62,13 +57,7 @@ function buildVmaTestWorkout(opts = {}) {
     });
   };
 
-  // Échauffement 15' : EF tranquille puis gammes, chaque gamme au lap suivie
-  // d'un temps de replacement (marche retour) lui aussi au lap.
-  add('warmup', 'EF tranquille', TIME, WARMUP_EF_SEC);
-  WARMUP_DRILLS.forEach((d, i) => {
-    add('warmup', d, LAP);
-    if (i < WARMUP_DRILLS.length - 1) add('recovery', 'Replacement (marche)', LAP);
-  });
+  add('warmup', 'Echauffement 15 min : EF tranquille puis gammes (talons-fesses, montees de genou, pointes de pieds)', TIME, WARMUP_SEC);
 
   add(restKey, 'Mise en place sur la piste - lap quand pret', LAP);
   add('interval', 'EFFORT 1 : 3 min a fond - noter distance et temps au repere', TIME, 3 * 60);
@@ -80,10 +69,10 @@ function buildVmaTestWorkout(opts = {}) {
   const sportType = { sportTypeId: 1, sportTypeKey: 'running' };
   return {
     workoutName: 'Test VMA 3+9',
-    description: "Test VMA 3'+9' (Allure+) : pauses au lap avant chaque effort, aucun objectif d'allure. Echauffement generique a ajuster.",
+    description: "Test VMA 3'+9' (Allure+) : pauses au lap avant chaque effort, aucun objectif d'allure.",
     sportType,
     workoutSegments: [{ segmentOrder: 1, sportType, workoutSteps: steps }],
   };
 }
 
-module.exports = { buildVmaTestWorkout, WARMUP_DRILLS, RECOVERY_30 };
+module.exports = { buildVmaTestWorkout, WARMUP_SEC, RECOVERY_30 };

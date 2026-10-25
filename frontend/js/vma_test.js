@@ -148,7 +148,7 @@ function renderVmaTestProtocol() {
       <button class="vt-btn" id="vt-export" onclick="exportVmaTestToGarmin()" title="Crée la séance dans Garmin Connect : pauses au lap avant chaque effort, aucune allure cible">Envoyer la séance vers Garmin</button>
       <button class="vt-btn vt-btn--primary" onclick="setVmaTestTab('result')">J'ai fait le test</button>
     </div>
-    <p class="vt-hint">La séance Garmin contient l'échauffement (EF + gammes, version générique), les pauses au lap avant le 3' et avant le 9', les 30' de récupération et le retour au calme.</p>`;
+    <p class="vt-hint">La séance Garmin contient l'échauffement (un seul bloc de 15 min), les pauses au lap avant le 3' et avant le 9', les 30' de récupération et le retour au calme.</p>`;
 }
 
 async function exportVmaTestToGarmin() {
