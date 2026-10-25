@@ -13,7 +13,8 @@ const VMA_TEST_OLD_MONTHS    = 12;  // « test ancien »
 const VMA_TEST_GAP_WARN_PCT  = 10;  // au-delà : vérifier la saisie avant d'appliquer
 const VMA_TEST_SPEED_RANGE   = [6, 30]; // km/h plausibles pour un effort de 3' ou 9'
 
-let _vmaTestFormOpen = false;
+let _vmaTestTab = null;      // 'protocol' | 'result' (onglet de la modale)
+let _vmaTestTerrain = 'piste';
 
 function saveVmaTestState(st) {
   localStorage.setItem('suivi_vma_test', JSON.stringify({ tests: st.tests, appliedId: st.appliedId || null }));
@@ -58,12 +59,13 @@ function vmaTestCurrentFormula() {
 }
 
 function renderVmaTestCard() {
-  const root = document.getElementById('profile-vma-test');
-  if (!root) return;
+  const root = document.getElementById('vt-modal-body');
+  if (!root) return; // modale fermée : rien à rendre
   const st = loadVmaTestState();
   const applied = st.tests.find(t => t.id === st.appliedId) || null;
   const last = st.tests.length ? st.tests[st.tests.length - 1] : null;
   const f = vmaTestCurrentFormula();
+  if (!_vmaTestTab) _vmaTestTab = st.tests.length ? 'result' : 'protocol';
 
   // Statut de la VMA actuellement utilisée
   let status = '';
@@ -78,16 +80,22 @@ function renderVmaTestCard() {
       <div><strong>VMA ajustée par ton test</strong> du ${new Date(applied.date).toLocaleDateString('fr-FR')} :
       formule ${vmaTestFmtPct((applied.ratio - 1) * 100)} — elle suit toujours ta VO₂max Garmin.</div>
       ${age}
-      <button class="btn-secondary vt-btn" onclick="clearVmaTestApplied()">Revenir à la formule standard</button>
+      <button class="vt-btn" onclick="clearVmaTestApplied()">Revenir à la formule standard</button>
     </div>`;
   } else {
     status = `<div class="vt-status vt-status--muted">Aucun test appliqué : la VMA vient de la formule standard à partir de ta VO₂max Garmin.</div>`;
   }
 
-  // Dernier test non appliqué : comparaison + choix
+  // Analyse du dernier test : en tête de l'onglet « Mon résultat », le
+  // formulaire de saisie passe en dessous (repliable une fois un test fait).
   let compare = '';
   if (last && last.id !== st.appliedId && !last.dismissed) compare = renderVmaTestCompare(last, false);
   else if (applied) compare = renderVmaTestCompare(applied, true);
+
+  const form = renderVmaTestForm(f);
+  const formBlock = st.tests.length
+    ? `<details class="vt-newtest"><summary>Saisir un nouveau test</summary>${form}</details>`
+    : form;
 
   const history = st.tests.length > 1 ? `
     <details class="vt-history"><summary>Historique des tests (${st.tests.length})</summary>
@@ -102,34 +110,58 @@ function renderVmaTestCard() {
     </details>` : '';
 
   root.innerHTML = `
-    <div class="card-header"><h2 class="card-title"><span class="card-title-icon">&#x23F1;&#xFE0F;</span> Test VMA 3'+9'</h2></div>
-    <div class="vt-body">
-      <p class="vt-intro">Deux efforts à fond (3 min puis 9 min) pour mesurer ta VMA réelle et la comparer à celle d'Allure+. À refaire une fois par an.</p>
-      ${status}
-      <div class="vt-actions">
-        <button class="btn-primary vt-btn" onclick="openVmaTestProtocol()">Je vais faire le test — voir le protocole</button>
-        <button class="btn-secondary vt-btn" onclick="toggleVmaTestForm()">J'ai fait le test — saisir mes distances</button>
-      </div>
-      ${_vmaTestFormOpen ? renderVmaTestForm(f) : ''}
+    <p class="vt-intro">Deux efforts à fond (3 min puis 9 min) pour mesurer ta VMA réelle et la comparer à celle d'Allure+. À refaire une fois par an.</p>
+    ${status}
+    <div class="vt-tabs" role="tablist">
+      <button class="vt-tab" data-tab="protocol" onclick="setVmaTestTab('protocol')">Protocole</button>
+      <button class="vt-tab" data-tab="result" onclick="setVmaTestTab('result')">Mon résultat</button>
+    </div>
+    <div class="vt-pane" data-pane="protocol">${renderVmaTestProtocol()}</div>
+    <div class="vt-pane" data-pane="result">
       ${compare}
+      ${formBlock}
       ${history}
     </div>`;
-  if (_vmaTestFormOpen) updateVmaTestPreview();
+  setVmaTestTab(_vmaTestTab);
+}
+
+function setVmaTestTab(tab) {
+  _vmaTestTab = tab;
+  document.querySelectorAll('#vt-modal-body .vt-tab').forEach(b => b.classList.toggle('is-active', b.dataset.tab === tab));
+  document.querySelectorAll('#vt-modal-body .vt-pane').forEach(p => { p.hidden = p.dataset.pane !== tab; });
+}
+
+function renderVmaTestProtocol() {
+  return `
+    <p class="vt-hint">Sur une piste (ou route plate), en forme, sans vent fort. Prévois environ 1 h 20 au total.</p>
+    <ol class="vt-steps">
+      <li><strong>Échauffement — 15 min</strong><br>EF tranquille, puis gammes (talons-fesses, montées de genou, pointes de pieds…) en prenant le temps de te replacer entre chaque.</li>
+      <li><strong>Mise en place sur la piste</strong><br>Prends ton temps pour être prêt(e) au départ.</li>
+      <li><strong>Effort n°1 — 3 min à fond</strong><br>Arrête-toi au repère de piste le plus proche des 3 min et note la distance et le temps réel.</li>
+      <li><strong>Récupération — 30 min</strong><br>5 min de marche · 10 min de jogging lent · 5 min de marche · 5 min de jogging lent · 5 min de marche.</li>
+      <li><strong>Mise en place sur la piste</strong><br>Reviens à la ligne de départ, bien en place.</li>
+      <li><strong>Effort n°2 — 9 min à fond</strong><br>Allure régulière, ne pars pas trop vite. Note la distance et le temps réel au repère le plus proche des 9 min.</li>
+      <li><strong>Retour au calme — 10 à 15 min</strong><br>Jogging lent.</li>
+    </ol>
+    <p class="vt-hint">Ensuite, onglet « Mon résultat » : saisis tes deux distances. Allure+ calcule ta VMA (moyenne des vitesses des deux efforts), la compare à la sienne et te montre l'écart.</p>
+    <div class="vt-actions"><button class="vt-btn vt-btn--primary" onclick="setVmaTestTab('result')">J'ai fait le test</button></div>`;
+}
+
+function setVmaTestTerrain(t) {
+  _vmaTestTerrain = t;
+  document.querySelectorAll('#vt-modal-body .vt-seg').forEach(b => b.classList.toggle('is-active', b.dataset.terrain === t));
 }
 
 function renderVmaTestForm(f) {
   const today = new Date().toISOString().slice(0, 10);
+  const terr = [['piste', 'Piste'], ['route', 'Route plate'], ['tapis', 'Tapis']];
   return `
     <div class="vt-form">
       <div class="vt-form-grid">
         <label>Date du test<input type="date" id="vt-date" value="${today}" max="${today}"></label>
-        <label>Terrain
-          <select id="vt-terrain">
-            <option value="piste">Piste</option>
-            <option value="route">Route plate</option>
-            <option value="tapis">Tapis</option>
-          </select>
-        </label>
+        <div class="vt-field">Terrain
+          <div class="vt-segs">${terr.map(([k, l]) => `<button type="button" class="vt-seg${k === _vmaTestTerrain ? ' is-active' : ''}" data-terrain="${k}" onclick="setVmaTestTerrain('${k}')">${l}</button>`).join('')}</div>
+        </div>
         <label>Effort de 3' — distance (m)<input type="number" id="vt-d3" min="100" max="2000" step="5" placeholder="ex : 1000" oninput="updateVmaTestPreview()"></label>
         <label>Temps réel (mm:ss)<input type="text" id="vt-t3" value="3:00" placeholder="2:53" oninput="updateVmaTestPreview()"></label>
         <label>Effort de 9' — distance (m)<input type="number" id="vt-d9" min="300" max="6000" step="5" placeholder="ex : 2800" oninput="updateVmaTestPreview()"></label>
@@ -138,8 +170,7 @@ function renderVmaTestForm(f) {
       <p class="vt-hint">Si tu t'es arrêté au repère de piste le plus proche, entre le temps réel à ce repère (ex : 1000 m en 2:53).</p>
       <div id="vt-preview" class="vt-preview"></div>
       <div class="vt-actions">
-        <button class="btn-primary vt-btn" id="vt-save" onclick="saveVmaTestResult()" disabled>Enregistrer le résultat</button>
-        <button class="btn-secondary vt-btn" onclick="toggleVmaTestForm()">Annuler</button>
+        <button class="vt-btn vt-btn--primary" id="vt-save" onclick="saveVmaTestResult()" disabled>Enregistrer le résultat</button>
       </div>
       ${f.raw ? '' : '<p class="vt-hint vt-warn">VO₂max Garmin indisponible : le résultat sera enregistré mais la comparaison est impossible.</p>'}
     </div>`;
@@ -169,11 +200,6 @@ function updateVmaTestPreview() {
   if (btn) btn.disabled = bad;
 }
 
-function toggleVmaTestForm() {
-  _vmaTestFormOpen = !_vmaTestFormOpen;
-  renderVmaTestCard();
-}
-
 function saveVmaTestResult() {
   const { d3, d9, t3, t9, calc } = readVmaTestForm();
   if (!calc) return;
@@ -181,7 +207,7 @@ function saveVmaTestResult() {
   const test = {
     id: 't' + Date.now(),
     date: document.getElementById('vt-date')?.value || new Date().toISOString().slice(0, 10),
-    terrain: document.getElementById('vt-terrain')?.value || 'piste',
+    terrain: _vmaTestTerrain,
     d3, t3, d9, t9,
     v3: +calc.v3.toFixed(3), v9: +calc.v9.toFixed(3),
     vmaTest: +calc.vma.toFixed(2),
@@ -193,7 +219,7 @@ function saveVmaTestResult() {
   const st = loadVmaTestState();
   st.tests.push(test);
   saveVmaTestState(st);
-  _vmaTestFormOpen = false;
+  _vmaTestTab = 'result';
   renderVmaTestCard();
   showToast('Test enregistré — choisis comment l\'utiliser', 'success');
 }
@@ -208,8 +234,8 @@ function renderVmaTestCompare(t, isApplied) {
     : `Ton test est <strong>en dessous</strong> de ce qu'estime Allure+ : la formule te surestime peut-être, ou le test était à moins que ton maximum.`;
   const choices = isApplied ? '' : `
     <div class="vt-actions">
-      <button class="btn-primary vt-btn" onclick="applyVmaTest('${t.id}')">Ajuster ma VMA (${vmaTestFmtPct(t.gapPct)})</button>
-      <button class="btn-secondary vt-btn" onclick="dismissVmaTest('${t.id}')">Garder la VMA Allure+</button>
+      <button class="vt-btn vt-btn--primary" onclick="applyVmaTest('${t.id}')">Ajuster ma VMA (${vmaTestFmtPct(t.gapPct)})</button>
+      <button class="vt-btn" onclick="dismissVmaTest('${t.id}')">Garder la VMA Allure+</button>
     </div>
     <p class="vt-hint">L'écart est appliqué à la formule : ta VMA continue de varier avec ta VO₂max Garmin (forme du moment), seul le biais de la formule sur toi est corrigé.</p>`;
   return `
@@ -274,31 +300,22 @@ function afterVmaTestChange(msg) {
   showToast(msg, 'success');
 }
 
-function openVmaTestProtocol() {
+function openVmaTestModal() {
+  if (document.getElementById('vt-modal-body')) return;
+  _vmaTestTab = null;
   const bd = document.createElement('div');
   bd.className = 'confirm-modal-backdrop';
   bd.innerHTML = `
-    <div class="confirm-modal vt-protocol">
-      <div class="confirm-modal-title">Protocole du test VMA 3'+9'</div>
-      <div class="confirm-modal-msg">
-        <p class="vt-hint">Sur une piste (ou route plate), en forme, sans vent fort. Prévois environ 1 h 20 au total.</p>
-        <ol class="vt-steps">
-          <li><strong>Échauffement — 15 min</strong><br>EF tranquille, puis gammes (talons-fesses, montées de genou, pointes de pieds…) en prenant le temps de te replacer entre chaque.</li>
-          <li><strong>Mise en place sur la piste</strong><br>Prends ton temps pour être prêt(e) au départ.</li>
-          <li><strong>Effort n°1 — 3 min à fond</strong><br>Arrête-toi au repère de piste le plus proche des 3 min et note la distance et le temps réel.</li>
-          <li><strong>Récupération — 30 min</strong><br>5 min de marche · 10 min de jogging lent · 5 min de marche · 5 min de jogging lent · 5 min de marche.</li>
-          <li><strong>Mise en place sur la piste</strong><br>Reviens à la ligne de départ, bien en place.</li>
-          <li><strong>Effort n°2 — 9 min à fond</strong><br>Allure régulière, ne pars pas trop vite. Note la distance et le temps réel au repère le plus proche des 9 min.</li>
-          <li><strong>Retour au calme — 10 à 15 min</strong><br>Jogging lent.</li>
-        </ol>
-        <p class="vt-hint">Ensuite, reviens ici : « J'ai fait le test » pour saisir tes deux distances. Allure+ calcule ta VMA (moyenne des vitesses des deux efforts) et la compare à la sienne.</p>
+    <div class="confirm-modal vt-modal" role="dialog" aria-label="Test VMA 3'+9'">
+      <div class="vt-modal-head">
+        <div class="confirm-modal-title">Test VMA 3'+9'</div>
+        <button class="vt-close" id="vt-close" aria-label="Fermer">&times;</button>
       </div>
-      <div class="confirm-modal-actions">
-        <button class="confirm-modal-btn confirm-modal-btn--confirm" id="vt-close">J'ai compris</button>
-      </div>
+      <div id="vt-modal-body" class="vt-modal-body"></div>
     </div>`;
   document.body.appendChild(bd);
   const close = () => bd.remove();
   bd.querySelector('#vt-close').onclick = close;
   attachBackdropClose(bd, close);
+  renderVmaTestCard();
 }
