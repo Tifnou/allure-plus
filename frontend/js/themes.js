@@ -22,8 +22,8 @@
   // kind 'fall' : tombent ; 'rise' : montent. count volontairement modeste.
   const SEASONS = {
     halloween: { label: 'Halloween', emoji: '🎃', base: 'dark', hat: HAT_WITCH, pack: 'halloween', fx: { kind: 'fall', chars: ['🦇', '🍂', '🎃', '🕸️'], count: 14 } },
-    noel: { label: 'Noël', emoji: '🎄', base: 'dark', hat: HAT_SANTA, fx: { kind: 'fall', chars: ['❄', '❅', '❆', '✦'], count: 22 } },
-    'saint-valentin': { label: 'Saint-Valentin', emoji: '💝', base: 'light', hat: HAT_HEART, fx: { kind: 'rise', chars: ['❤️', '💗', '💕', '💖'], count: 14 } },
+    noel: { label: 'Noël', emoji: '🎄', base: 'dark', hat: HAT_SANTA, pack: 'noel', fx: { kind: 'fall', chars: ['❄', '❅', '❆', '✦'], count: 22 } },
+    'saint-valentin': { label: 'Saint-Valentin', emoji: '💝', base: 'light', hat: HAT_HEART, pack: 'saint-valentin', fx: { kind: 'rise', chars: ['❤️', '💗', '💕', '💖'], count: 14 } },
   };
   const SEASON_IDS = Object.keys(SEASONS);
   window.SEASONS = SEASONS;

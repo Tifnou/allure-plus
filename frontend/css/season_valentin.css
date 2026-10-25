@@ -1,0 +1,97 @@
+/* ═══════════════════════════════════════════════════════════════════════
+   PACK D'IMMERSION SAINT-VALENTIN — décor, bandeau, mascotte, micro-animations
+   (DOM construit par js/season_valentin.js ; palette dans seasons.css)
+   Même règles que les autres packs : transform/opacity seulement, coupé si
+   « réduire les animations », rien ne reçoit la souris.
+═══════════════════════════════════════════════════════════════════════ */
+
+html[data-season="saint-valentin"] #bg-slideshow { display: none; }
+html[data-season="saint-valentin"] body { background: #EFE4DE; }
+html[data-season="saint-valentin"] .page { padding-bottom: 60px; }
+
+/* ─── Décor plein écran : bois clair patiné, fanion de cœurs, tulipes, oiseaux ─── */
+.vl-sky > * { position: absolute; }
+.vl-wood { inset: 0;
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='260' height='520'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.45 .01' numOctaves='3' seed='9'/%3E%3CfeColorMatrix values='0 0 0 0 .45 0 0 0 0 .36 0 0 0 0 .3 0 0 0 .55 0'/%3E%3C/filter%3E%3Crect width='260' height='520' filter='url(%23g)'/%3E%3C/svg%3E"),
+    repeating-linear-gradient(90deg, rgba(120, 98, 86, .45) 0 2px, transparent 2px 150px),
+    repeating-linear-gradient(90deg, #EDE3DD 0 150px, #E3D7D0 150px 300px, #F1E8E2 300px 450px, #E6DAD3 450px 600px);
+  background-size: 260px 520px, auto, auto; }
+.vl-warm { inset: 0; background: radial-gradient(ellipse at 50% 20%, rgba(255, 190, 205, .4), transparent 62%), radial-gradient(ellipse at 90% 100%, rgba(255, 120, 150, .22), transparent 50%); }
+.vl-top { left: 0; top: 0; width: 100%; height: 22vh; }
+.vl-birds { left: 0; top: 0; width: 100%; height: 100%; }
+.vl-bottom { left: 0; bottom: 0; width: 100%; height: 36vh; }
+.vl-vignette { inset: 0; background: radial-gradient(ellipse at 50% 45%, transparent 55%, rgba(120, 60, 72, .22) 100%); }
+
+/* Tulipes qui se balancent, fanions qui oscillent, tête de l'oiseau qui dodeline */
+.vl-sway { transform-box: fill-box; transform-origin: 50% 100%; animation: vl-sway 5.4s ease-in-out infinite alternate; }
+@keyframes vl-sway { from { transform: rotate(-2.6deg); } to { transform: rotate(2.6deg); } }
+.vl-swing { animation: vl-swing 4.2s ease-in-out infinite alternate; }
+g.vl-swing:not([style*="transform-origin"]) { transform-box: fill-box; transform-origin: 50% 0; }
+@keyframes vl-swing { from { transform: rotate(-5deg); } to { transform: rotate(5deg); } }
+.vl-bob { transform-box: fill-box; transform-origin: 30% 80%; animation: vl-bob 4.6s ease-in-out infinite; }
+@keyframes vl-bob { 0%, 100% { transform: rotate(0); } 18% { transform: rotate(-7deg); } 36% { transform: rotate(3deg); } 52% { transform: rotate(0); } }
+
+/* Cœurs qui montent, pétales qui tombent, étincelles roses */
+.vl-particles { inset: 0; }
+.vl-rise { position: absolute; bottom: -40px; animation: vl-rise linear infinite; will-change: transform, opacity; }
+.vl-rise-svg, .vl-petal-svg { width: 100%; height: auto; display: block; overflow: visible; }
+@keyframes vl-rise {
+  0% { transform: translate3d(0, 0, 0) scale(.7); opacity: 0; } 12% { opacity: .85; }
+  50% { transform: translate3d(var(--sway), -55vh, 0) scale(1); }
+  100% { transform: translate3d(calc(var(--sway) * -.8), -112vh, 0) scale(.85); opacity: 0; }
+}
+.vl-petal { position: absolute; top: -30px; width: 15px; animation: vl-petal linear infinite; will-change: transform; opacity: .85; }
+@keyframes vl-petal {
+  0% { transform: translate3d(0, -4vh, 0) rotate(0); }
+  50% { transform: translate3d(var(--sway), 52vh, 0) rotate(calc(var(--rot) / 2)); }
+  100% { transform: translate3d(calc(var(--sway) * -.6), 108vh, 0) rotate(var(--rot)); }
+}
+.vl-spark { position: absolute; width: 14px; height: 14px; margin: -7px; background: radial-gradient(circle, #fff 0%, rgba(255, 140, 170, .6) 32%, transparent 70%); animation: vl-spark ease-in-out infinite; }
+@keyframes vl-spark { 0%, 100% { opacity: 0; transform: scale(.4); } 50% { opacity: 1; transform: scale(1.1); } }
+
+/* ─── Bandeau « affiche » de la Synthèse ─── */
+html[data-season="saint-valentin"] .season-hero { background: #EDE3DD; box-shadow: inset 0 0 0 1px rgba(216, 27, 69, .4), 0 12px 34px rgba(120, 60, 72, .28), 0 0 30px rgba(255, 90, 130, .16); }
+html[data-season="saint-valentin"] .season-hero::before { background: radial-gradient(ellipse at 40% 55%, transparent 55%, rgba(120, 60, 72, .25) 100%); }
+html[data-season="saint-valentin"] .season-hero::after { background: linear-gradient(270deg, rgba(255, 244, 246, .85) 0%, rgba(255, 244, 246, .55) 36%, transparent 64%); }
+.vl-hero-art { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.vl-hero-hearts { position: absolute; inset: 0; z-index: 1; pointer-events: none; opacity: .8;
+  background-image: radial-gradient(circle at 10px 10px, rgba(216, 27, 69, .5) 0 2.2px, transparent 3px), radial-gradient(circle at 120px 70px, rgba(255, 90, 130, .45) 0 1.8px, transparent 2.6px);
+  background-size: 210px 170px; animation: vl-hero-bg 11s linear infinite; }
+@keyframes vl-hero-bg { to { background-position: 0 -170px; } }
+.vl-hero-text { position: absolute; right: 26px; bottom: 20px; z-index: 2; text-align: right; display: flex; flex-direction: column; gap: 3px; max-width: 48%; }
+.vl-hero-kicker { font-family: var(--font-body); font-size: 10.5px; font-weight: 700; letter-spacing: .3em; text-transform: uppercase; color: #B3123A; }
+.vl-hero-text b { font-family: var(--font-heading, var(--font-body)); font-size: 26px; line-height: 1.1; color: #8F0A26; text-shadow: 0 0 20px rgba(255, 255, 255, .9), 0 1px 0 rgba(255, 255, 255, .8); animation: vl-title 4.5s ease-in-out infinite; }
+.vl-hero-sub { font-family: var(--font-body); font-size: 12px; color: #6B2A38; }
+@keyframes vl-title { 0%, 100% { text-shadow: 0 0 16px rgba(255, 255, 255, .8), 0 1px 0 rgba(255, 255, 255, .8); } 50% { text-shadow: 0 0 28px rgba(255, 120, 150, .85), 0 1px 0 rgba(255, 255, 255, .8); } }
+@media (max-width: 720px) { .vl-hero-sub { display: none; } .vl-hero-text b { font-size: 19px; } }
+
+/* ─── Mascotte : l'oiseau au nœud à pois ─── */
+.vl-mascot-svg { width: 76px; height: 70px; overflow: visible; }
+.vl-mascot-cap { font-family: var(--font-body); font-size: 10px; font-weight: 600; letter-spacing: .05em; color: var(--accent-text); opacity: .9; }
+
+/* ─── Micro-animations de l'interface ─── */
+html[data-season="saint-valentin"] .card { transition: box-shadow .28s ease, border-color .28s ease; box-shadow: 0 4px 18px rgba(150, 70, 90, .14); }
+html[data-season="saint-valentin"] .card:hover { border-color: rgba(216, 27, 69, .5); box-shadow: 0 8px 28px rgba(150, 70, 90, .22), 0 0 24px rgba(255, 90, 130, .22); }
+html[data-season="saint-valentin"] .page.active { animation: vl-page-in .38s ease both; }
+@keyframes vl-page-in { from { opacity: .4; translate: 0 10px; filter: blur(3px); } to { opacity: 1; translate: 0 0; filter: blur(0); } }
+html[data-season="saint-valentin"] .page-title { text-shadow: 0 0 18px rgba(255, 255, 255, .9); }
+html[data-season="saint-valentin"] .sidebar { background: rgba(255, 246, 247, .9); border-right-color: rgba(216, 27, 69, .28); box-shadow: 4px 0 26px rgba(150, 70, 90, .18); }
+html[data-season="saint-valentin"] .nav-item { transition: background .25s ease, color .25s ease; }
+html[data-season="saint-valentin"] .nav-item:hover { background: linear-gradient(90deg, rgba(216, 27, 69, .14), rgba(216, 27, 69, .01)); }
+html[data-season="saint-valentin"] .nav-item.active { background: linear-gradient(90deg, rgba(216, 27, 69, .22), rgba(216, 27, 69, .04)); box-shadow: inset 0 0 0 1px rgba(216, 27, 69, .3), 0 0 16px rgba(255, 90, 130, .2); }
+html[data-season="saint-valentin"] .nav-item.active .nav-icon { filter: drop-shadow(0 0 4px rgba(255, 90, 130, .8)); animation: vl-beat 1.8s ease-in-out infinite; transform-origin: center; }
+@keyframes vl-beat { 0%, 100% { transform: scale(1); } 15% { transform: scale(1.14); } 30% { transform: scale(1); } 45% { transform: scale(1.1); } }
+html[data-season="saint-valentin"] .btn-save-profile,
+html[data-season="saint-valentin"] .confirm-modal-btn--confirm,
+html[data-season="saint-valentin"] .btn-export-garmin { background-image: linear-gradient(135deg, #FF5A78, #C4122F); color: #fff; border-color: #FF5A78; transition: box-shadow .25s ease, filter .25s ease; }
+html[data-season="saint-valentin"] .btn-save-profile:hover,
+html[data-season="saint-valentin"] .confirm-modal-btn--confirm:hover,
+html[data-season="saint-valentin"] .btn-export-garmin:hover { box-shadow: 0 0 22px rgba(255, 90, 130, .6); filter: brightness(1.06); }
+html[data-season="saint-valentin"] ::selection { background: rgba(255, 90, 130, .4); }
+html[data-season="saint-valentin"] ::-webkit-scrollbar-thumb { background: rgba(216, 27, 69, .5); }
+
+@media (prefers-reduced-motion: reduce) {
+  .vl-sky *, .season-hero *, .season-mascot *, html[data-season="saint-valentin"] .page.active, html[data-season="saint-valentin"] .nav-item.active .nav-icon { animation: none !important; }
+  .vl-rise, .vl-petal, .vl-spark { display: none; }
+}

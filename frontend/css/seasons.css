@@ -16,33 +16,27 @@ html[data-season="halloween"] {
   --brand-green: #FF8A1F;
 }
 
-/* ─── Noël (sombre) ─── */
+/* ─── Noël (sombre) : sapin, bois chaud, rouge et or (pack complet : season_noel.css) ─── */
 html[data-season="noel"] {
-  --bg: #08140F; --bg-white: #0F1F18; --bg-hover: #17302A;
-  --border: #24473A; --border-light: #183226;
-  --accent: #EF4444; --accent-light: #2A0F12; --accent-text: #FCA5A5;
-  --green: #22C55E; --green-bg: #0B2417; --green-text: #86EFAC;
-  --orange: #FBBF24; --orange-bg: #2A1F06;
-  --text-primary: #F1F7F2; --text-secondary: #9DBBAA; --text-muted: #86A895;
-  --nav-text: #DCEFE2; --card-bg: rgba(15,31,24,0.92);
-  --brand-green: #EF4444;
-}
-html[data-season="noel"] #bg-slideshow::after {
-  background: linear-gradient(180deg, rgba(6,40,24,0.5), rgba(185,28,28,0.18));
+  --bg: #0D1510; --bg-white: #13231A; --bg-hover: #1C3326;
+  --border: #35604A; --border-light: #22402F;
+  --accent: #E0342B; --accent-light: #2C1010; --accent-text: #FF9C92;
+  --green: #3DBE6A; --green-bg: #0B2417; --green-text: #8CE6A8;
+  --orange: #F2B544; --orange-bg: #2A1F06;
+  --text-primary: #F7F1E3; --text-secondary: #B9CDBF; --text-muted: #9DB5A5;
+  --nav-text: #E4F0E7; --card-bg: rgba(16,32,23,0.9);
+  --brand-green: #E0342B;
 }
 
-/* ─── Saint-Valentin (clair) ─── */
+/* ─── Saint-Valentin (clair) : bois clair, tulipes, cœurs à pois (pack complet : season_valentin.css) ─── */
 html[data-season="saint-valentin"] {
-  --bg: #FFF4F6; --bg-white: #FFFFFF; --bg-hover: #FFE4EA;
-  --border: #F9C9D4; --border-light: #FDE7EC;
-  --accent: #E11D48; --accent-light: #FFF1F3; --accent-text: #BE123C;
+  --bg: #FBF1F0; --bg-white: #FFFFFF; --bg-hover: #FFE6EA;
+  --border: #F0C4CD; --border-light: #F8DDE2;
+  --accent: #D81B45; --accent-light: #FFF0F3; --accent-text: #B3123A;
   --purple: #C026D3;
-  --text-primary: #2A0A12; --text-secondary: #8A4B5A; --text-muted: #9C6070;
-  --nav-text: #3B0D1A; --card-bg: rgba(255,255,255,0.9);
-  --brand-green: #E11D48;
-}
-html[data-season="saint-valentin"] #bg-slideshow::after {
-  background: linear-gradient(180deg, rgba(255,228,234,0.45), rgba(244,114,182,0.16));
+  --text-primary: #3A0D18; --text-secondary: #7A3F4F; --text-muted: #8F5667;
+  --nav-text: #4A1022; --card-bg: rgba(255,255,255,0.92);
+  --brand-green: #D81B45;
 }
 
 /* Voile de teinte par-dessus le fond d'écran défilant */
