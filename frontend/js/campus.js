@@ -435,11 +435,22 @@ function sessionMoodIconSvg(mood, size) {
 }
 // Badge affiche dans le tableau des activites (app.js, renderAllActivities)
 // quand une activite est liee a une seance qui a un ressenti enregistre.
-function sessionMoodBadgeForActivity(activityId) {
-  if (typeof _analysisIndex === 'undefined') return '';
+// Sortie libre (liee a aucune seance) : le ressenti est range dans la MEME cle
+// durable que celui des seances, sous un pseudo-"weekId" 'act' et l'id Garmin
+// de l'activite (cle 'act_<id>') — sauvegarde/synchro identiques, aucun
+// nouveau champ a declarer. Les lectures du moteur de routine se font par
+// semaine ('free_<lundi>'), elles ne voient donc pas ces entrees.
+const FREE_ACTIVITY_MOOD_WEEK = 'act';
+function _activityMoodKey(activityId) {
+  if (typeof _analysisIndex === 'undefined') return null;
   const rec = _analysisIndex.byActivity[String(activityId)];
-  if (!rec?.planKey?.weekId) return '';
-  const mood = getSessionMood(rec.planKey.weekId, rec.planKey.trainingIndex);
+  if (rec?.planKey?.weekId) return { weekId: rec.planKey.weekId, trainingIndex: rec.planKey.trainingIndex };
+  return { weekId: FREE_ACTIVITY_MOOD_WEEK, trainingIndex: String(activityId) };
+}
+function sessionMoodBadgeForActivity(activityId) {
+  const k = _activityMoodKey(activityId);
+  if (!k) return '';
+  const mood = getSessionMood(k.weekId, k.trainingIndex);
   return mood ? ` <span class="activity-mood-badge">${sessionMoodIconSvg(mood, 16)}</span>` : '';
 }
 // Case "Ressenti" dans le detail d'une activite (app.js, showActivityDetail),
@@ -451,13 +462,12 @@ function sessionMoodBadgeForActivity(activityId) {
 // affichages restent automatiquement synchronises (wireActivityMoodStat,
 // app.js showActivityDetail).
 function activityMoodStatHtml(activityId) {
-  if (typeof _analysisIndex === 'undefined') return '';
-  const rec = _analysisIndex.byActivity[String(activityId)];
-  if (!rec?.planKey?.weekId) return '';
-  const mood = getSessionMood(rec.planKey.weekId, rec.planKey.trainingIndex);
+  const k = _activityMoodKey(activityId);
+  if (!k) return '';
+  const mood = getSessionMood(k.weekId, k.trainingIndex);
   const icon = mood ? sessionMoodIconSvg(mood, 24) : '<span class="activity-mood-empty">+</span>';
   return `<div class="activity-stat activity-stat--clickable" id="activity-mood-stat"
-      data-week-id="${rec.planKey.weekId}" data-training-index="${rec.planKey.trainingIndex}"
+      data-week-id="${k.weekId}" data-training-index="${k.trainingIndex}"
       title="${mood ? 'Modifier le ressenti' : 'Ajouter un ressenti'}">
       <div class="activity-stat-value" id="activity-mood-value">${icon}</div>
       <div class="activity-stat-label">Ressenti</div>
@@ -478,6 +488,35 @@ function wireActivityMoodStat() {
   };
 }
 
+// Demande du ressenti d'une sortie libre : proposee UNE seule fois, a
+// l'ouverture du detail d'une sortie recente (3 jours) de course sans ressenti
+// ni seance liee. Fermer la modale sans choisir compte comme "deja demande"
+// (jamais de relance en boucle) ; la case "+" reste cliquable ensuite.
+// Memoire purement locale (hors cles durables) : au pire une 2e demande apres
+// un nettoyage du navigateur.
+function maybeAskFreeActivityMood(activity) {
+  try {
+    if (!activity?.id) return;
+    const t = String(activity.activityType || activity.type || '').toLowerCase();
+    if (!(t.includes('run') || t.includes('trail'))) return;
+    const k = _activityMoodKey(activity.id);
+    if (!k || k.weekId !== FREE_ACTIVITY_MOOD_WEEK) return;
+    if (getSessionMood(k.weekId, k.trainingIndex)) return;
+    const ts = Date.parse(String(activity.date || '').replace(' ', 'T'));
+    if (!ts || Date.now() - ts > 3 * 86400000) return;
+    const asked = JSON.parse(localStorage.getItem('allure_free_mood_asked') || '[]');
+    if (asked.includes(String(activity.id))) return;
+    asked.push(String(activity.id));
+    localStorage.setItem('allure_free_mood_asked', JSON.stringify(asked.slice(-200)));
+    setTimeout(() => {
+      promptSessionMood(k.weekId, k.trainingIndex, (mood) => {
+        const valueEl = document.getElementById('activity-mood-value');
+        if (valueEl && mood) valueEl.innerHTML = sessionMoodIconSvg(mood, 24);
+      });
+    }, 500);
+  } catch (e) { /* jamais bloquant */ }
+}
+
 // Petite modale "Comment s'est passee la seance ?" proposee juste apres
 // avoir marque une seance comme faite - 3 choix (facile a saisir, pas de
 // texte libre pour rester rapide). Ne bloque rien si l'utilisateur ferme
@@ -492,7 +531,7 @@ function promptSessionMood(weekId, trainingIndex, onDone) {
   bd.id = 'session-mood-modal-backdrop';
   bd.innerHTML = `
     <div class="confirm-modal">
-      <div class="confirm-modal-title">Comment s'est passée la séance ?</div>
+      <div class="confirm-modal-title">${weekId === FREE_ACTIVITY_MOOD_WEEK ? 'Comment s\'est passée la sortie ?' : 'Comment s\'est passée la séance ?'}</div>
       <div class="session-mood-picker">
         ${Object.keys(SESSION_MOOD_STYLES).map(mood => `
           <button type="button" class="session-mood-btn" data-mood="${mood}" title="${SESSION_MOOD_STYLES[mood].label}">

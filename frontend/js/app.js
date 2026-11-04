@@ -1753,6 +1753,7 @@ function showActivityDetail(activity, backTo = 'activities') {
   if (typeof wireActivityAnalysisButtons === 'function') wireActivityAnalysisButtons(activity);
   if (typeof mountActivityGearField === 'function') mountActivityGearField(activity);
   if (typeof wireActivityMoodStat === 'function') wireActivityMoodStat();
+  if (typeof maybeAskFreeActivityMood === 'function') maybeAskFreeActivityMood(activity);
 
   // Reinitialise la carte GPS (elements statiques, reutilises a chaque activite)
   const routeLoading = el('route-loading');
@@ -2255,6 +2256,78 @@ function finalizeEffortGroup(g, vma, isTrail) {
   return g;
 }
 
+// Complements d'analyse d'une sortie LIBRE (aucune seance cible a comparer) :
+// pauses, repartition du temps par zone d'allure, position par rapport aux
+// sorties de distance voisine des dernieres semaines, effet d'entrainement
+// Garmin. Tout vient de donnees deja chargees (laps, liste d'activites) :
+// aucun appel reseau. Chaque ligne est facultative (absente si la donnee
+// manque) pour ne jamais afficher un chiffre bancal.
+function buildFreeRunExtraInsights({ activity, validLaps, repLaps, vma, isTrail }) {
+  const out = [];
+  const fmtMin = s => { const m = Math.round(s / 60); return m < 1 ? `${Math.round(s)} s` : `${m} min`; };
+
+  // 1) Pauses : ecart temps ecoule / temps en mouvement
+  const elapsed = validLaps.reduce((s, l) => s + (l.elapsedDuration || l.duration || 0), 0);
+  const moving = validLaps.reduce((s, l) => s + (l.movingDuration || 0), 0);
+  if (elapsed > 0 && moving > 0 && elapsed - moving >= 90) {
+    out.push(`Pauses : <strong>${fmtMin(elapsed - moving)}</strong> à l'arrêt sur ${fmtMin(elapsed)} (allure en mouvement plus représentative que l'allure moyenne)`);
+  }
+
+  // 2) Repartition du temps par zone d'allure (zones Allure+, pondere par la duree de chaque km)
+  if (vma && typeof ALLURE_PLUS_ZONES !== 'undefined') {
+    const byZone = {};
+    let total = 0;
+    repLaps.forEach(l => {
+      const dur = l.movingDuration || l.elapsedDuration || l.duration || 0;
+      if (!(l.averageSpeed > 0) || !dur) return;
+      const key = matchZoneFromPaceTrailAware(1000 / l.averageSpeed, vma, isTrail);
+      if (!key) return;
+      byZone[key] = (byZone[key] || 0) + dur;
+      total += dur;
+    });
+    if (total > 0) {
+      const parts = Object.entries(byZone)
+        .map(([k, d]) => ({ label: String(ALLURE_PLUS_ZONES[k]?.label || k).split(' — ')[0], pct: Math.round(100 * d / total) }))
+        .filter(p => p.pct >= 10).sort((a, b) => b.pct - a.pct).slice(0, 3);
+      if (parts.length) out.push(`Répartition : ${parts.map(p => `<strong>${p.pct} %</strong> ${p.label}`).join(', ')}`);
+    }
+  }
+
+  // 3) Position par rapport aux sorties de distance voisine (+/-15 %, 12 dernieres semaines)
+  try {
+    const dist = activity.distanceKm || (activity.distance ? activity.distance / 1000 : 0);
+    const ts = Date.parse(String(activity.date || '').replace(' ', 'T'));
+    if (dist > 1 && ts && Array.isArray(_allActivities)) {
+      const similar = _allActivities.filter(a => {
+        if (!a || String(a.id) === String(activity.id)) return false;
+        const t = String(a.activityType || a.type || '').toLowerCase();
+        if (!(t.includes('run') || t.includes('trail'))) return false;
+        const d = a.distanceKm || (a.distance ? a.distance / 1000 : 0);
+        const at = Date.parse(String(a.date || '').replace(' ', 'T'));
+        return d > 0 && Math.abs(d - dist) / dist <= 0.15 && at && at < ts && ts - at <= 84 * 86400000 && a.avgPaceSecPerKm > 0;
+      });
+      if (similar.length >= 3 && activity.avgPaceSecPerKm > 0) {
+        const med = arr => { const s = [...arr].sort((x, y) => x - y); return s[Math.floor(s.length / 2)]; };
+        const dPace = Math.round(activity.avgPaceSecPerKm - med(similar.map(a => a.avgPaceSecPerKm)));
+        const hrs = similar.map(a => a.avgHR).filter(h => h > 0);
+        const dHr = (activity.avgHR && hrs.length >= 3) ? Math.round(activity.avgHR - med(hrs)) : null;
+        const paceTxt = Math.abs(dPace) <= 3 ? 'allure comparable' : `${Math.abs(dPace)}"/km ${dPace < 0 ? 'plus rapide' : 'plus lent'}`;
+        const hrTxt = dHr == null ? '' : (Math.abs(dHr) <= 2 ? ', FC comparable' : `, FC ${dHr > 0 ? '+' : ''}${dHr} bpm`);
+        out.push(`Par rapport à tes ${similar.length} sorties de distance voisine (12 dernières semaines) : ${paceTxt}${hrTxt}`);
+      }
+    }
+  } catch (e) { /* facultatif */ }
+
+  // 4) Effet d'entrainement Garmin (si fourni avec l'activite)
+  if (activity.aerobicTrainingEffect > 0) {
+    const ana = activity.anaerobicTrainingEffect > 0 ? ` · anaérobie ${Number(activity.anaerobicTrainingEffect).toFixed(1)}` : '';
+    const teLabels = { AEROBIC_BASE: 'base aérobie', RECOVERY: 'récupération', TEMPO: 'tempo', LACTATE_THRESHOLD: 'seuil lactique', VO2MAX: 'VO2max', ANAEROBIC_CAPACITY: 'capacité anaérobie', SPEED: 'vitesse', SPRINT: 'sprint' };
+    const teLabel = teLabels[String(activity.trainingEffectLabel || '').toUpperCase()];
+    out.push(`Effet d'entraînement Garmin : aérobie <strong>${Number(activity.aerobicTrainingEffect).toFixed(1)}</strong>${ana}${teLabel ? ' — ' + teLabel : ''}`);
+  }
+  return out;
+}
+
 async function loadActivityAnalysis(activity) {
 
   const panel = el('activity-analysis-panel');
@@ -2422,15 +2495,25 @@ async function loadActivityAnalysis(activity) {
               ? `Allure régulière une fois ajustée au dénivelé (D+ total : <strong>${Math.round(totalElevGain)} m</strong>)`
               : `Allure très régulière tout au long de la sortie `);
           }
+          // Derive cardiaque : le 1er km ne compte pas (le coeur "demarre" et ne
+          // reflete pas encore le regime de croisiere : 124 bpm au km 1 contre 135
+          // des le km 2 sur une sortie reelle, ce qui gonflait la derive de +20 a
+          // tort). On part donc du 2e km des qu'il reste au moins 2 km comparables.
           const hrLaps = repLaps.filter(l => l.averageHR);
-          if (hrLaps.length >= 2) {
-            const hrFirst = Math.round(hrLaps[0].averageHR);
-            const hrLast  = Math.round(hrLaps[hrLaps.length-1].averageHR);
+          const driftLapsHr = repLaps.length >= 3 && repLaps[0].averageHR ? hrLaps.slice(1) : hrLaps;
+          if (driftLapsHr.length >= 2) {
+            const skipped = driftLapsHr.length < hrLaps.length;
+            const hrFirst = Math.round(driftLapsHr[0].averageHR);
+            const hrLast  = Math.round(driftLapsHr[driftLapsHr.length-1].averageHR);
             const drift = hrLast - hrFirst;
             insights.push(Math.abs(drift) <= 5
               ? `FC stable sur la sortie`
-              : `Dérive cardiaque de <strong>${drift > 0 ? '+' : ''}${drift} bpm</strong> du 1er au dernier km`);
+              : `Dérive cardiaque de <strong>${drift > 0 ? '+' : ''}${drift} bpm</strong> du ${skipped ? '2e' : '1er'} au dernier km`
+                + (skipped ? ` <span class="analysis-hint">(1er km écarté : le cœur n'a pas encore atteint son régime)</span>` : ''));
           }
+
+          // ── Complements d'analyse d'une sortie libre (aucune comparaison a une seance) ──
+          try { buildFreeRunExtraInsights({ activity, validLaps, repLaps, vma, isTrail }).forEach(i => insights.push(i)); } catch (e) { console.warn('extra insights', e); }
         }
         analysisEl.innerHTML = insights.map(i=>`<div class="analysis-item">${i}</div>`).join('')
           || '<p class="no-data">Pas de données</p>';
