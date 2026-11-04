@@ -382,6 +382,8 @@ function saveRoutineStore(store) {
   const keys = Object.keys(store.weeks).map(Number).sort((a, b) => b - a);
   keys.slice(ROUTINE_STORE_KEEP_WEEKS).forEach(k => { delete store.weeks[k]; });
   localStorage.setItem(ROUTINE_STORE_KEY, JSON.stringify(store));
+  // animateur d'une routine partagée : republication (différée) des semaines à chaque modification
+  if (typeof routineShareOnStoreSaved === 'function') routineShareOnStoreSaved();
 }
 
 function freeWeekDate(prefs, weekNum) { return prefs.anchorMonday + (weekNum - 1) * 7 * 86400000; }
@@ -501,6 +503,7 @@ function reconcileRoutineWithPlan(prefs, planInfo) {
   Object.keys(store.weeks).forEach(k => {
     if (Number(k) + 7 * 86400000 < now) return;                      // semaine passée : intacte
     const w = store.weeks[k];
+    if (w.shared) return;                                            // semaine reçue d'un animateur : jamais régénérée ici
     // obsolète si l'échéance (plan / course) OU les réglages (terrain, séances/semaine,
     // durée max, gêne) ont changé depuis sa génération — sans signature mémorisée
     // (ancienne semaine), on juge au nombre de séances
@@ -568,6 +571,9 @@ async function ensureRoutineWeek(prefs, weekNum, planInfo, opts) {
   const store = getRoutineStore();
   const wd = freeWeekDate(prefs, weekNum);
   const existing = store.weeks[wd];
+  if (existing && existing.shared) return existing;                  // semaine partagée : le contenu vient de l'animateur
+  // suiveur d'une routine partagée : rien n'est généré ici, les semaines arrivent de l'animateur
+  if (!existing && typeof routineShareActive === 'function' && routineShareActive()) return null;
   if (existing) {
     const rebuild = existing.preview && !(opts && opts.preview) && routineWeekIsUntouched(wd, existing);
     if (!rebuild) return existing;
@@ -677,12 +683,14 @@ async function renderFreeSessionsWeek(forceIdx) {
     if (stored) {
       w.sessions = stored.sessions.map((s, i) => routineSnapshotToSession(s, i));
       w.stored = stored;
-      if (stored.preview) w.context = { cycleDescription: 'Séances proposées à titre indicatif : elles seront modifiées si besoin d’après ta forme, ton assiduité, ta charge récente et tes ressentis avant que cette semaine commence.' };
+      if (stored.shared) w.context = { cycleDescription: `Séances partagées par ${stored.sharedFromName || 'ton animateur'} : mêmes exercices, avec tes allures. Tu peux choisir ta propre variante d’intensité ou passer une séance ; la semaine suit l’animateur tant que tu n’y as rien pointé.` };
+      else if (stored.preview) w.context = { cycleDescription: 'Séances proposées à titre indicatif : elles seront modifiées si besoin d’après ta forme, ton assiduité, ta charge récente et tes ressentis avant que cette semaine commence.' };
     } else {
       w.sessions = [];
       w.pending = true;
-      w.emptyHtml = routinePendingCard(wn, phase, currentWeekNum, prefs, planInfo, start);
-      w.emptyMessage = wn < currentWeekNum
+      const sharedMode = typeof routineShareActive === 'function' && routineShareActive() && wn >= currentWeekNum;
+      w.emptyHtml = sharedMode ? routineSharePendingCard() : routinePendingCard(wn, phase, currentWeekNum, prefs, planInfo, start);
+      w.emptyMessage = sharedMode ? 'Semaine pas encore publiée par ton animateur.' : wn < currentWeekNum
         ? 'Semaine non générée (l’application n’a pas été ouverte cette semaine-là).'
         : wn <= currentWeekNum + 1
           ? 'Cliquez sur l’onglet pour générer cette semaine.'
@@ -787,6 +795,7 @@ async function renderFreeSessionsWeek(forceIdx) {
           <div class="plan-subtitle-desc">${NOT_A_PLAN_ADVICE}${phaseHtml}</div>
           <div class="rt-adapt-note">🔄 <strong>Des séances qui s’adaptent.</strong> Celles que tu vois sont des <strong>propositions</strong> : elles peuvent être modifiées selon ta forme, ton assiduité (séances faites ou manquées), ta charge récente, tes autres sports et ton ressenti. La semaine en cours reste stable ; les semaines à venir sont ajustées quand elles commencent.</div>
           ${planBannerHtml}
+          ${typeof routineShareBanner === 'function' ? routineShareBanner() : ''}
         </div>
       </div></div>
     </div>`;
@@ -818,6 +827,7 @@ async function renderFreeSessionsWeek(forceIdx) {
       <button class="btn-plan-action" onclick="toggleRoutineCaution()" title="Bloque les variantes orange et rouge et garde les prochaines séances au palier modéré">
         ${prefs.caution ? '🩹 Gêne signalée — lever' : '🩹 Signaler une gêne / fatigue'}
       </button>
+      ${typeof routineShareIsAdmin === 'function' && routineShareIsAdmin() ? `<button class="btn-plan-action" onclick="openRoutineShareModal()" title="Partager ta routine avec d’autres utilisateurs : mêmes séances, chacun avec ses allures">🤝 ${routineShareIsLeader() ? 'Partage en cours…' : 'Partager ma routine'}</button>` : ''}
       <button class="btn-plan-action btn-cancel-plan" onclick="disableFreeSessions()" style="margin-left:auto;opacity:.85;background:rgba(229,57,53,.15);color:#e53935;border:1px solid rgba(229,57,53,.3);">
         ✕ Désactiver les séances libres
       </button>

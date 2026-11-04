@@ -347,6 +347,64 @@ app.post('/api/admin/routine-config', requireAdmin, (req, res) => {
   res.json(next);
 });
 
+// ─── Routine partagée (v2.6.0) ────────────────────────────────────────────
+// Le compte admin publie ses semaines de routine dans SON espace du relais de synchro (type
+// 'routine_share', entrée 'current') ; les comptes invités (liste `recipients`) les lisent via
+// /inbox. Le relais ne vérifie pas qui lit quoi (clé partagée embarquée, comme pour toute la
+// synchro) : l'accord du destinataire se fait dans l'appli (modale Accepter / Pas maintenant).
+// ⚠️ Nécessite 'routine_share' dans ALLOWED_TYPES du Worker (sync-relay/src/index.js) déployé.
+const ROUTINE_SHARE_MAX_BYTES = 300 * 1024;
+const _routineShareCache = { at: 0, value: null };
+async function pullRoutineShare(force) {
+  if (!force && _routineShareCache.value && Date.now() - _routineShareCache.at < 60000) return _routineShareCache.value;
+  const env = await syncClient.pullEnvelope('routine_share', ADMIN_EMAIL.toLowerCase());
+  const cur = env && env.entries && env.entries.current && !env.entries.current.deletedAt ? env.entries.current : null;
+  _routineShareCache.at = Date.now();
+  _routineShareCache.value = cur;
+  return cur;
+}
+app.get('/api/routine-share/published', requireAdmin, async (req, res) => {
+  try {
+    const cur = await pullRoutineShare(true);
+    res.json({ recipients: (cur && cur.value && cur.value.recipients) || [], updatedAt: cur ? cur.updatedAt : null });
+  } catch (err) { res.json({ recipients: [], unavailable: true }); }
+});
+app.post('/api/routine-share/publish', requireAdmin, async (req, res) => {
+  try {
+    const payload = req.body && req.body.payload;
+    if (!payload || !Array.isArray(payload.weeks)) return res.status(400).json({ message: 'Charge utile invalide' });
+    if (JSON.stringify(payload).length > ROUTINE_SHARE_MAX_BYTES) return res.status(413).json({ message: 'Routine trop volumineuse' });
+    const previous = await pullRoutineShare(true).catch(() => null);
+    const prevVal = (previous && previous.value) || {};
+    const prevSince = prevVal.since || {};
+    let recipients = prevVal.recipients || [];
+    if (Array.isArray(req.body.recipients)) {
+      recipients = [...new Set(req.body.recipients.map(e => String(e || '').trim().toLowerCase()).filter(e => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e) && e !== ADMIN_EMAIL.toLowerCase()))].slice(0, 20);
+    }
+    // `since` : date de la PREMIÈRE invitation de chaque destinataire (sert à ne reproposer que les nouvelles invitations)
+    const since = {};
+    const nowIso = new Date().toISOString();
+    recipients.forEach(e => { since[e] = prevSince[e] || nowIso; });
+    const entry = { value: { recipients, since, payload }, updatedAt: nowIso, deletedAt: null };
+    await syncClient.pushEntries('routine_share', ADMIN_EMAIL.toLowerCase(), { current: entry });
+    _routineShareCache.at = 0;
+    res.json({ ok: true, recipients, updatedAt: nowIso });
+  } catch (err) {
+    const msg = /400/.test(String(err.message)) ? 'Le relais de synchro ne connaît pas encore le type "routine_share" : redéploie le Worker (sync-relay).' : 'Relais de synchro indisponible';
+    res.status(502).json({ message: msg });
+  }
+});
+app.get('/api/routine-share/inbox', requireSession, async (req, res) => {
+  try {
+    const me = String(req.session.email || '').toLowerCase();
+    if (!me || me === ADMIN_EMAIL.toLowerCase()) return res.json({ offered: false });
+    const cur = await pullRoutineShare(false);
+    const v = cur && cur.value;
+    if (!v || !Array.isArray(v.recipients) || !v.recipients.includes(me)) return res.json({ offered: false });
+    res.json({ offered: true, from: ADMIN_EMAIL.toLowerCase(), fromName: (v.payload && v.payload.fromName) || null, since: (v.since && v.since[me]) || null, updatedAt: cur.updatedAt, payload: v.payload });
+  } catch (err) { res.json({ offered: false, unavailable: true }); }
+});
+
 // Ajout / suppression des images du diaporama de fond
 app.post('/api/bg-images', requireSession, upload.single('image'), (req, res) => {
   try {

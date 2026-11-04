@@ -5923,3 +5923,11 @@ body { background: var(--bg) !important; }
 .vt-segs{display:flex;gap:4px;}
 .vt-seg{flex:1;padding:7px 6px;border:1px solid var(--border);border-radius:8px;background:var(--bg-white);color:var(--text-primary);font-family:var(--font-body);font-size:12px;cursor:pointer;}
 .vt-seg.is-active{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600;}
+/* Partage de routine (modale animateur) */
+.rt-share-modal { max-width: 520px; }
+.rt-share-help { font-size: 13px; opacity: .85; margin: 0 0 10px; }
+.rt-share-list { max-height: 280px; overflow: auto; display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
+.rt-share-row { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 8px; cursor: pointer; background: var(--bg-white); color: var(--text-primary); }
+.rt-share-row:hover { background: rgba(128,128,128,.12); }
+.rt-share-mail { margin-left: auto; font-size: 11px; opacity: .6; }
+.rt-share-empty { font-size: 13px; opacity: .75; padding: 8px; }
