@@ -129,7 +129,7 @@ test('variantes : vert < jaune < orange < rouge en charge, jaune = fiche telle q
   assert.equal(v.yellow.dsl, byId['A03-01'].dsl);
   assert.ok(v.green.load < v.yellow.load && v.yellow.load < v.orange.load && v.orange.load < v.red.load);
   assert.ok(v.green.totalMin < v.yellow.totalMin && v.orange.totalMin > v.yellow.totalMin);
-  assert.ok(v.green.dsl.includes('2x(6m S60_L)') && v.orange.dsl.includes('4x(6m S60_H)'), `${v.green.dsl} / ${v.orange.dsl}`);
+  assert.ok(v.green.dsl.includes('2x(6m S60_M3)') && v.orange.dsl.includes('4x(6m S60_P3)'), `${v.green.dsl} / ${v.orange.dsl}`);
 });
 
 test('variantes : la nature de la séance ne change jamais (mêmes codes d\'allure)', () => {
@@ -328,13 +328,13 @@ test('écran de réglage : les boutons ont un gestionnaire de clic et existent d
 });
 
 // ─── Intensité des variantes : bas / haut de plage dans la MÊME zone ─────
-test('variantes : vert = bas de plage, orange/rouge = haut de plage, jaune = plage complète', () => {
+test('variantes : vert −3 %, orange +3 %, rouge +5 % de vitesse, jaune = allure de la zone', () => {
   const v = V('A03-01');
   assert.equal(v.yellow.intensity, null);
-  assert.equal(v.green.intensity, 'bas de plage');
-  assert.equal(v.orange.intensity, 'haut de plage');
-  assert.equal(v.red.intensity, 'haut de plage');
-  assert.ok(!/_[LH]/.test(v.yellow.dsl));
+  assert.equal(v.green.intensity, '−3 %');
+  assert.equal(v.orange.intensity, '+3 %');
+  assert.equal(v.red.intensity, '+5 %');
+  assert.ok(!/_[LHPM]\d*\b/.test(v.yellow.dsl));
   // jamais d'autre zone : mêmes codes ; efforts au ressenti et EF non modulés
   const legacy = E.routineVaryDsl('15m EF + 3x(1m RPE7:cote + 2m EF) + 10m EF', 'green');
   assert.ok(legacy && !/_[LH]/.test(legacy), legacy);      // ancien format RPE : jamais de bas / haut de plage
@@ -353,6 +353,44 @@ test("bas / haut de plage : le suffixe survit à l'aller-retour DSL, aux étapes
   assert.ok(E.routineLoadOfDsl(dsl, true).score > base.score);
   assert.ok(E.routineLoadOfDsl('15m EF + 3x(6m AS21_L) r2m EF + 10m EF', true).score < base.score);
   assert.throws(() => compileRoutineDsl('15m EF + 3x(6m XYZ_L) r2m EF'));
+});
+
+// ─── Leviers : répétitions / allure / les deux ───────────────────────────
+test('variantes : le levier choisit ce qui bouge (répétitions, allure, ou les deux)', () => {
+  const snap = { ...snapOf('A03-01') };
+  const by = lever => Object.fromEntries(E.routineBuildVariants({ ...snap, lever }, WK).map(x => [x.variant, x]));
+  const rep = by('rep'), pace = by('pace'), both = by('both');
+  // répétitions seules : aucune allure décalée, plus de volume
+  assert.ok(!/_[PM]\d/.test(rep.orange.dsl) && rep.orange.totalMin > rep.yellow.totalMin);
+  assert.equal(rep.orange.intensity, null);
+  // allure seule : même volume, allure décalée
+  assert.equal(pace.orange.totalMin, pace.yellow.totalMin);
+  assert.ok(/3x\(6m S60_P3\)/.test(pace.orange.dsl), pace.orange.dsl);
+  assert.equal(pace.green.totalMin, pace.yellow.totalMin);
+  assert.ok(/S60_M3/.test(pace.green.dsl));
+  // les deux : cumul, donc plus de charge que chaque levier seul
+  assert.ok(both.orange.load > rep.orange.load && both.orange.load > pace.orange.load);
+  // orange et rouge restent distincts avec l'allure seule (+3 % / +5 %)
+  assert.notEqual(pace.orange.dsl, pace.red.dsl);
+  // endurance seule : pas d'allure à décaler
+  const ef = E.routineBuildVariants({ ...snapOf('A01-03'), lever: 'pace' }, WK);
+  assert.ok(!ef.find(x => x.variant === 'orange').available);
+});
+
+test("décalage d'allure : le suffixe survit à l'aller-retour DSL, aux étapes et reste dans une zone voisine", () => {
+  const { routineParseDsl, routineTreeToDsl, compileRoutineDsl, routineToSessionStructure } = require('../frontend/js/routine_catalog.js');
+  const dsl = '15m EF + 3x(6m AS21_P3) r2m EF + 10m EF';
+  assert.equal(routineTreeToDsl(routineParseDsl(dsl)), dsl);
+  assert.equal(routineTreeToDsl(routineParseDsl('10m S60_M3')), '10m S60_M3');
+  const st = routineToSessionStructure(compileRoutineDsl(dsl));
+  assert.equal(st.paceZones.filter(z => z.sub === 'p+3').length, 3);
+  const { getZoneRange } = require('../zones.js');
+  const as21 = getZoneRange('AS21'), up = getZoneRange('AS21', 'p+3'), dn = getZoneRange('AS21', 'p-3');
+  assert.ok(up.pctHigh > as21.pctHigh && dn.pctLow < as21.pctLow);
+  assert.ok(up.pctHigh <= 0.87 + 1e-9, 'AS21 +3 % ne dépasse pas le haut de S60');
+  const s60 = getZoneRange('S60', 'p+3');
+  assert.ok(Math.abs(s60.pctHigh / 0.87 - 1.03) < 1e-9, 'S60 +3 % : pas de plafond atteint');
+  assert.deepEqual(getZoneRange('EF', 'p+0'), getZoneRange('EF'));
 });
 
 test("EF classique / soutenue : deux plages d'allure distinctes contenues dans la zone EF", () => {

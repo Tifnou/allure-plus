@@ -3950,10 +3950,14 @@ function buildGarminWorkoutFromSession(session, weekNum, sessionDisplay, userZon
     let description = toAscii(zoneName);
 
     // sous-zone (EF classique / soutenue des routines) : plage plus étroite si calculée
-    const subKey = zone.sub ? refinedKey + '_' + String(zone.sub).toUpperCase() : null;
+    const subOffM = zone.sub ? /^p([+-]\d+)$/.exec(String(zone.sub)) : null;   // 'p+3' : allure +3 % (variantes d'effort)
+    const subKey = !zone.sub ? null
+      : subOffM ? refinedKey + '_' + (Number(subOffM[1]) >= 0 ? 'P' : 'M') + Math.abs(Number(subOffM[1]))
+      : refinedKey + '_' + String(zone.sub).toUpperCase();
     const apUserZone = userZones && subKey && userZones[subKey] ? userZones[subKey]
       : (userZones && userZones[refinedKey] ? userZones[refinedKey] : null);
-    if (zone.sub) description += refinedKey === 'EF' ? (zone.sub === 'low' ? ' classique' : ' soutenue') : (zone.sub === 'low' ? ' bas de plage' : ' haut de plage');
+    if (subOffM) description += ' allure ' + (Number(subOffM[1]) >= 0 ? '+' : '-') + Math.abs(Number(subOffM[1])) + ' %';
+    else if (zone.sub) description += refinedKey === 'EF' ? (zone.sub === 'low' ? ' classique' : ' soutenue') : (zone.sub === 'low' ? ' bas de plage' : ' haut de plage');
     // RECOVER/RECOVERY = allure libre (jamais de cible Garmin)
     // Le code brut (zKey) sert au type d'étape Garmin plus bas, pas à la cible :
     // un pas tagué RECOVER par Campus peut avoir un slug "ef" (ex: retour au calme
@@ -4192,11 +4196,13 @@ app.post('/api/garmin/workout-from-session', requireSession, async (req, res) =>
       const hasIntervalsServer = sessionZoneKeys.some(k => !['EF','RECOVER','RECOVERY','WARMUP','COOLDOWN'].includes(k));
       const calcZone = (zKey) => {
         // clés "EF_LOW" / "EF_HIGH" = moitié basse / haute de la zone (EF classique / soutenue)
-        const subM     = /^(.*)_(LOW|HIGH)$/.exec(zKey);
+        // clés "AS21_P3" / "AS21_M3" = allure décalée de +3 % / -3 % de vitesse (variantes d'effort)
+        const subM     = /^(.*)_(LOW|HIGH|[PM]\d+)$/.exec(zKey);
         const baseKey  = subM ? subM[1] : zKey;
         zKey           = baseKey;
         const apKey    = ZG[zKey] || zKey;
-        const z        = getZoneRange(apKey, subM ? subM[2].toLowerCase() : undefined);
+        const subVal   = !subM ? undefined : /^[PM]/.test(subM[2]) ? 'p' + (subM[2][0] === 'P' ? '+' : '-') + subM[2].slice(1) : subM[2].toLowerCase();
+        const z        = getZoneRange(apKey, subVal);
         if (!z) return null;
         // EF en warmup (session avec intervalles) → Route ; EF sortie longue → Trail
         // On utilise hasIntervals du frontend (déjà calculé correctement)
@@ -4217,6 +4223,14 @@ app.post('/api/garmin/workout-from-session', requireSession, async (req, res) =>
       // moitiés basse / haute de chaque zone (EF classique / soutenue, variantes bas / haut de plage)
       ['EF','TEMPO','SWEET_SPOT','AS42','AS21','S60','S30','AS10','VMA'].forEach(k => {
         ['LOW','HIGH'].forEach(h => { const z = calcZone(k + '_' + h); if (z) userZones[k + '_' + h] = z; });
+      });
+      // décalages d'allure en % (variantes d'effort) réellement présents dans cette séance : AS21_P3, S60_M3...
+      const offsetSubs = new Set((session.paceZones || []).map(pz => /^p[+-]\d+$/.test(String(pz.sub || '')) ? String(pz.sub) : null).filter(Boolean));
+      offsetSubs.forEach(sv => {
+        const suffix = (sv[1] === '+' ? 'P' : 'M') + sv.slice(2);
+        ['EF','TEMPO','SWEET_SPOT','AS42','AS21','S60','S30','AS10','VMA'].forEach(k => {
+          const z = calcZone(k + '_' + suffix); if (z) userZones[k + '_' + suffix] = z;
+        });
       });
       console.log('[Allure+] VMA=' + allureplusVma + ' isTrail=' + isTrail + ' zones calculees');
     } else {

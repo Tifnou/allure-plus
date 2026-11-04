@@ -1322,12 +1322,30 @@ async function buildSessionAnalysis(session, week, activity) {
     volume, structure, paceAnalysis, reps, repsHRBand, regularity, pacingStrategy, recovery, hr, cardiacDrift,
     coherenceNarrative, timeInZoneBreakdown, trail, anomalies, positives, improvements, commentary, timeline: stepsUnavailable ? [] : timeline,
     steps: stepRows, stepNotice, race,
+    variantNote: buildRoutineVariantNote(session),
     pairingKey: computePairingKey(session),
     // Detail du calcul du score, pour la modale "Comprendre votre score" —
     // composants bruts + ponderations effectivement utilisees (celles a null
     // sont exclues du calcul, cf §~752).
     scoreBreakdown: { components, weights: profile.weights },
   };
+}
+
+// Séance libre en variante (orange, vert, rouge) : l'utilisateur a CHOISI de s'écarter de la fiche de
+// référence (plus de répétitions, allure plus soutenue ou plus douce). Les allures cibles du tableau
+// tiennent déjà compte de ce décalage (calcAllureRef) ; cette ligne le dit pour que le verdict se lise
+// avec le bon cadre — une allure "hors zone" voulue n'est pas une erreur.
+function buildRoutineVariantNote(session) {
+  const r = session && session.routine;
+  if (!r || !r.variant || r.variant === 'yellow') return null;
+  const name = { green: 'verte', orange: 'orange', red: 'rouge' }[r.variant];
+  if (!name) return null;
+  let off = null;
+  (session.paceZones || []).forEach(z => { const m = /^p([+-]\d+)$/.exec(z.sub || ''); if (off == null && m) off = parseInt(m[1], 10); });
+  const parts = [];
+  if (r.lever !== 'pace') parts.push(r.variant === 'green' ? 'volume allégé' : 'volume augmenté');
+  if (off != null && r.lever !== 'rep') parts.push(`allure ${off >= 0 ? '+' : '−'}${Math.abs(off)} % de vitesse`);
+  return `Variante ${name} choisie${parts.length ? ' (' + parts.join(', ') + ')' : ''} : les allures cibles ci-dessous en tiennent compte.`;
 }
 
 function regularityLabelFromDurations(durations) {
@@ -2347,7 +2365,8 @@ function buildAnalysisModalHtml(record) {
       <thead><tr>${hasBlocks ? '<th>Bloc</th><th>Rép.</th>' : ''}<th>Étape</th><th>Cible</th><th>Réalisé</th><th>Analyse</th>${stepsHaveHR ? '<th>FC</th>' : ''}</tr></thead>
       <tbody>${displayRows.map(stepRowHtml).join('')}</tbody>
     </table>` : '';
-  const stepNoticeHtml = record.stepNotice ? `<div class="analysis-step-notice">${record.stepNotice}</div>` : '';
+  const stepNoticeHtml = (record.variantNote ? `<div class="analysis-step-notice">${record.variantNote}</div>` : '')
+    + (record.stepNotice ? `<div class="analysis-step-notice">${record.stepNotice}</div>` : '');
   const repsTableHtml = (record.steps && record.steps.length) ? stepsTableHtml : record.reps.length ? `
     <div class="analysis-section-title">Répétitions</div>
     <table class="analysis-reps-table">

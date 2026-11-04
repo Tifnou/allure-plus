@@ -619,7 +619,7 @@ function routineSnapshotToSession(snap, idx) {
     paceZones, exercisesBlocks,
     description: RoutineEngine.routineDescribe(snap.dsl) + '.',
     stats: { expectedDuration: compiled.totalSec, expectedElevationGain: trail ? (snap.role === 'long' ? 300 : 100) : 0 },
-    routine: { modelId: snap.modelId, slot: snap.slot, family: snap.family, tier: snap.tier, variant: snap.variant || 'yellow' },
+    routine: { modelId: snap.modelId, slot: snap.slot, family: snap.family, tier: snap.tier, variant: snap.variant || 'yellow', lever: snap.lever || 'both' },
   };
   if (snap.role === 'quality') session.coachAdvice = NOT_A_PLAN_ADVICE;
   return session;
@@ -998,10 +998,10 @@ function routineLookup(weekId, idx) {
 // panneaux d'explication sont superposés (la zone garde la hauteur du plus grand). Survol / focus =
 // aperçu sans changer le choix ; un clic applique la variante.
 const ROUTINE_VARIANT_PURPOSE = {
-  green: ['Allégée', 'Moins de travail et allure en bas de la fourchette de la zone. Pour une semaine chargée, une reprise, ou quand la forme n’est pas là.'],
+  green: ['Allégée', 'Moins de travail et/ou allure plus douce (−3 %), selon le levier choisi. Pour une semaine chargée, une reprise, ou quand la forme n’est pas là.'],
   yellow: ['Référence prévue', 'La séance telle que construite pour ta semaine, ton niveau et ta forme du moment.'],
-  orange: ['Renforcée', 'Un paramètre de plus (répétition ou durée de bloc) et allure en haut de la fourchette. Compte comme une charge supérieure dans ton cycle.'],
-  red: ['Très exigeante', 'Deux crans au-dessus, réservée aux profils confirmés quand toutes les conditions sont réunies. Jamais deux séances très exigeantes dans la même semaine.'],
+  orange: ['Renforcée', 'Un paramètre de plus (répétition ou durée de bloc) et/ou allure plus soutenue (+3 %), selon le levier choisi. Compte comme une charge supérieure dans ton cycle.'],
+  red: ['Très exigeante', 'Deux crans au-dessus (jusqu’à +5 % d’allure), réservée aux profils confirmés quand toutes les conditions sont réunies. Jamais deux séances très exigeantes dans la même semaine.'],
 };
 const ROUTINE_BAR_HEIGHT = { green: 22, yellow: 34, orange: 46, red: 58 };
 
@@ -1050,8 +1050,17 @@ function renderRoutineVariantBar(session, weekId) {
   };
   const lockedMsg = (done || pastWeek) ? '<div class="rt-variant-note">Séance faite ou semaine passée : variante figée.</div>'
     : prefs.caution ? '<div class="rt-variant-note">🩹 Gêne signalée : les variantes plus exigeantes sont bloquées.</div>' : '';
+  const lever = ['rep', 'pace', 'both'].includes(snap.lever) ? snap.lever : 'both';
+  const lockedAll = done || pastWeek;
+  const leverBtn = (key, label, tip) => `<button type="button" class="rt-lever${lever === key ? ' rt-lever--on' : ''}" aria-pressed="${lever === key}" title="${tip}"${lockedAll ? ' disabled' : ''}
+      onclick="event.stopPropagation();setRoutineLever('${weekId}',${idx},'${key}')">${label}</button>`;
+  const leverBar = `<div class="rt-levers"><span>Ce qui change :</span><span class="rt-lever-group" role="group" aria-label="Levier de la variante">
+      ${leverBtn('rep', 'Répétitions', 'Plus ou moins de répétitions (ou de durée de bloc), même allure')}
+      ${leverBtn('pace', 'Allure', 'Même volume, allure plus douce (−3 %) ou plus soutenue (+3 %, rouge +5 %)')}
+      ${leverBtn('both', 'Les deux', 'Répétitions et allure ensemble')}</span></div>`;
   return `<div class="session-detail-section rt-variants" data-selected="${sel.variant}">
     <div class="session-detail-section-title">Intensité de la séance <span class="zones-source-note">charge ≈ ${sel.load}</span></div>
+    ${leverBar}
     <div class="rt-var-layout">
       <div class="rt-cols" role="radiogroup" aria-label="Intensité de la séance">${variants.map(col).join('')}</div>
       <div class="rt-var-info" aria-live="polite">${variants.map(panel).join('')}</div>
@@ -1069,14 +1078,38 @@ function rtShowVariantInfo(el, variant) {
   box.querySelectorAll('.rt-col').forEach(b => b.classList.toggle('rt-col--peek', !!variant && b.dataset.variant === variant && variant !== box.dataset.selected));
 }
 
-function setRoutineVariant(weekId, idx, variant) {
+// Change le levier (répétitions / allure / les deux). Si une variante est déjà choisie, elle est
+// recalculée avec le nouveau levier ; si elle n'existe pas avec ce levier, rien ne change (message).
+function setRoutineLever(weekId, idx, lever) {
+  const found = routineLookup(weekId, idx);
+  if (!found || !['rep', 'pace', 'both'].includes(lever)) return;
+  const { prefs, store, stored, wd, snap } = found;
+  const done = typeof getLocalSessionStatus === 'function' && getLocalSessionStatus(weekId, idx) === 'done';
+  if (done || wd + 7 * 86400000 < Date.now()) return;
+  if ((snap.lever || 'both') === lever) return;
+  const current = snap.variant || 'yellow';
+  if (current !== 'yellow') {
+    const v = RoutineEngine.routineBuildVariants({ ...snap, lever }, routineWeekCtx(prefs, stored, idx, false)).find(x => x.variant === current);
+    if (!v || !(v.available || v.selected)) { showToast((v && v.reason) || 'Pas de variation possible avec ce levier.', 'info'); return; }
+  }
+  snap.lever = lever;
+  if (current === 'yellow') {
+    saveRoutineStore(store);
+    const keepIdx = campusState.selectedWeekIdx;
+    renderFreeSessionsWeek(keepIdx).then(() => { campusState.openSessionIdx = idx; renderSessionList(keepIdx); });
+    return;
+  }
+  setRoutineVariant(weekId, idx, current, true);
+}
+
+function setRoutineVariant(weekId, idx, variant, force) {
   const found = routineLookup(weekId, idx);
   if (!found) return;
   const { prefs, store, stored, wd, snap } = found;
   const done = typeof getLocalSessionStatus === 'function' && getLocalSessionStatus(weekId, idx) === 'done';
   if (done || wd + 7 * 86400000 < Date.now()) return;
   const v = RoutineEngine.routineBuildVariants(snap, routineWeekCtx(prefs, stored, idx, false)).find(x => x.variant === variant);
-  if (!v || !v.available) { if (v && v.reason) showToast(v.reason, 'info'); return; }
+  if (!v || (!v.available && !force)) { if (v && v.reason) showToast(v.reason, 'info'); return; }
   snap.baseDsl = snap.baseDsl || snap.dsl;
   snap.variant = variant;
   snap.dsl = v.dsl;

@@ -118,6 +118,27 @@ const ALLURE_PLUS_ZONES = {
 // Calcule min/max allure (sec/km) pour une zone et une VMA données
 // sub = 'low' | 'high' : moitié basse / haute de la zone (routines hors plan :
 // "EF classique" / "EF soutenue") — calculée depuis la zone elle-même, aucun % dupliqué.
+// sub = 'p+3' / 'p-3' : allure décalée de +3 % / -3 % de VITESSE (variantes d'effort des routines :
+// le décalage se sent, contrairement à la moitié haute/basse d'une zone de 3 points seulement).
+// Plafonné pour rester honnête : jamais plus vite que le haut de la zone voisine au-dessus, ni plus
+// lent que le bas de la zone voisine en dessous (un AS21 "+3 %" ne devient pas un AS10).
+// ⚠️ Même logique que getZoneRange (zones.js, serveur) — à garder synchronisées.
+function _shiftZoneRange(zoneKey, pL, pH, pct) {
+  let f = 1 + pct / 100;
+  const others = Object.entries(ALLURE_PLUS_ZONES).filter(([k, z]) => k !== zoneKey && !z.noTarget && !z.isSweetSpot);
+  if (pct > 0) {
+    const caps = others.map(([, z]) => z.pctHigh).filter(h => h > pH);
+    if (caps.length) f = Math.min(f, Math.min(...caps) / pH);
+  } else if (pct < 0) {
+    const floors = others.map(([, z]) => z.pctLow).filter(l => l < pL);
+    if (floors.length) f = Math.max(f, Math.max(...floors) / pL);
+  }
+  return { pL: pL * f, pH: pH * f };
+}
+function _subOffsetPct(sub) {
+  const m = /^p([+-]\d+)$/.exec(sub || '');
+  return m ? parseInt(m[1], 10) : null;
+}
 function calcAllureRef(zoneKey, vma, sub) {
   const ref = ALLURE_PLUS_ZONES[zoneKey];
   if (!ref || !vma) return null;
@@ -128,6 +149,8 @@ function calcAllureRef(zoneKey, vma, sub) {
   }
   if (sub === 'low')  pH = (pL + pH) / 2;
   if (sub === 'high') pL = (pL + pH) / 2;
+  const off = _subOffsetPct(sub);
+  if (off != null && !ref.noTarget) { const s = _shiftZoneRange(zoneKey, pL, pH, off); pL = s.pL; pH = s.pH; }
   return {
     paceMin: Math.round(3600 / (vma * pH)), // allure rapide sec/km
     paceMax: Math.round(3600 / (vma * pL)), // allure lente  sec/km
@@ -1798,7 +1821,7 @@ function renderSessionDetail(session, weekId, isCurrentWeek) {
       // l'affiche "Échauffement", meme cohérence que l'export xlsx.
       const zoneLbl = (apZone === 'RECOVER' && idx === 0)
         ? 'Échauffement'
-        : (zoneDef ? zoneDef.label + (z.sub ? (apZone === 'EF' ? (z.sub === 'low' ? ' · classique' : ' · soutenue') : (z.sub === 'low' ? ' · bas de plage' : ' · haut de plage')) : '') : fmtZoneKind(z.kind, session.displayName || session.name || ''));
+        : (zoneDef ? zoneDef.label + (z.sub ? (_subOffsetPct(z.sub) != null ? ` · allure ${_subOffsetPct(z.sub) >= 0 ? '+' : '−'}${Math.abs(_subOffsetPct(z.sub))} %` : apZone === 'EF' ? (z.sub === 'low' ? ' · classique' : ' · soutenue') : (z.sub === 'low' ? ' · bas de plage' : ' · haut de plage')) : '') : fmtZoneKind(z.kind, session.displayName || session.name || ''));
       // FC cible indicative de cette zone (~min-max bpm) - meme pour une zone
       // "allure libre" (RECOVER), la FC reste un repere pertinent la ou
       // l'allure n'en est pas un.

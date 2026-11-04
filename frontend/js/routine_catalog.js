@@ -55,7 +55,7 @@ function routineTokenize(src) {
     ['SEP',   /^([rR])(?=\d)/],
     ['DUR',   /^(\d+m\d*|\d+s)/],
     ['SLASH', /^\//],
-    ['CODE',  /^[A-Z][A-Z0-9]*(?:_[LH])?(?::[a-z0-9_]+)?/],
+    ['CODE',  /^[A-Z][A-Z0-9]*(?:_(?:[LH]|[PM]\d{1,2}))?(?::[a-z0-9_]+)?/],
   ];
   const out = [];
   let i = 0;
@@ -90,9 +90,18 @@ function routineParseDuration(v) {
 function routineParseCode(v) {
   const rpe = /^RPE(\d+)(?::([a-z0-9_]+))?$/.exec(v);
   if (rpe) return { code: 'RPE', rpe: parseInt(rpe[1], 10), label: rpe[2] || null };
-  const m = /^([A-Z0-9]+)(?:_([LH]))?$/.exec(v);
+  const m = /^([A-Z0-9]+)(?:_([LH]|[PM]\d{1,2}))?$/.exec(v);
   if (!m || !ROUTINE_CODES[m[1]]) throw new Error(`DSL: code d'allure inconnu "${v}"`);
-  return m[2] ? { code: m[1], sub: m[2] === 'L' ? 'low' : 'high' } : { code: m[1] };
+  if (!m[2]) return { code: m[1] };
+  if (m[2] === 'L') return { code: m[1], sub: 'low' };
+  if (m[2] === 'H') return { code: m[1], sub: 'high' };
+  // _P3 / _M3 : allure décalée de +3 % / -3 % de vitesse par rapport à la zone (variantes d'effort)
+  return { code: m[1], sub: 'p' + (m[2][0] === 'P' ? '+' : '-') + m[2].slice(1) };
+}
+// sub 'p+3' / 'p-3' → décalage en % de vitesse (nombre signé), sinon null
+function routineSubOffset(sub) {
+  const m = /^p([+-]\d+)$/.exec(sub || '');
+  return m ? parseInt(m[1], 10) : null;
 }
 
 function routineParseDsl(src) {
@@ -147,7 +156,10 @@ function routineDurToDsl(sec) {
 }
 function routineCodeToDsl(n) {
   if (n.code === 'RPE') return 'RPE' + n.rpe + (n.label ? ':' + n.label : '');
-  return n.code + (n.sub && n.code !== 'EFL' && n.code !== 'EFH' ? (n.sub === 'low' ? '_L' : '_H') : '');
+  if (!n.sub || n.code === 'EFL' || n.code === 'EFH') return n.code;
+  const off = routineSubOffset(n.sub);
+  if (off != null) return n.code + '_' + (off >= 0 ? 'P' : 'M') + Math.abs(off);
+  return n.code + (n.sub === 'low' ? '_L' : '_H');
 }
 function routineTreeToDsl(nodes) {
   const sep = s => (s ? ' ' + (s.role === 'recovery' ? 'r' : 'R') + routineDurToDsl(s.sec) + ' ' + routineCodeToDsl(s) : '');
@@ -277,7 +289,7 @@ function routineStepToZone(s) {
   }
   const c = ROUTINE_CODES[s.code];
   const sub = s.sub || c.sub;
-  return { kind: c.kind, slug: c.slug, sub: (sub === 'low' || sub === 'high') ? sub : null };
+  return { kind: c.kind, slug: c.slug, sub: (sub === 'low' || sub === 'high' || routineSubOffset(sub) != null) ? sub : null };
 }
 
 // Catégorie Campus d'une séance libre, déduite de son contenu : l'analyse choisit son profil de score

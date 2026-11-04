@@ -19,6 +19,8 @@ const ALLURE_PLUS_ZONES = {
 
 // Sweet Spot = 95% de la vitesse S60 (règle métier Allure+)
 // sub = 'low' | 'high' : moitié basse / haute de la zone (routines hors plan : EF classique / soutenue)
+// sub = 'p+3' / 'p-3' : allure décalée de +3 % / -3 % de vitesse (variantes d'effort), plafonnée aux zones
+// voisines. ⚠️ Même logique que _shiftZoneRange / calcAllureRef (frontend/js/campus.js) — à garder synchronisées.
 function getZoneRange(zoneKey, sub) {
   const ref = ALLURE_PLUS_ZONES[zoneKey];
   if (!ref) return null;
@@ -26,6 +28,20 @@ function getZoneRange(zoneKey, sub) {
   if (ref.isSweetSpot) { pctLow = ALLURE_PLUS_ZONES.S60.pctLow * 0.95; pctHigh = ALLURE_PLUS_ZONES.S60.pctHigh * 0.95; }
   if (sub === 'low')  pctHigh = (pctLow + pctHigh) / 2;
   if (sub === 'high') pctLow = (pctLow + pctHigh) / 2;
+  const m = /^p([+-]\d+)$/.exec(sub || '');
+  if (m && zoneKey !== 'RECOVER') {
+    const pct = parseInt(m[1], 10);
+    let f = 1 + pct / 100;
+    const others = Object.entries(ALLURE_PLUS_ZONES).filter(([k, z]) => k !== zoneKey && k !== 'RECOVER' && !z.isSweetSpot);
+    if (pct > 0) {
+      const caps = others.map(([, z]) => z.pctHigh).filter(h => h > pctHigh);
+      if (caps.length) f = Math.min(f, Math.min(...caps) / pctHigh);
+    } else if (pct < 0) {
+      const floors = others.map(([, z]) => z.pctLow).filter(l => l < pctLow);
+      if (floors.length) f = Math.max(f, Math.max(...floors) / pctLow);
+    }
+    pctLow *= f; pctHigh *= f;
+  }
   return { pctLow, pctHigh };
 }
 

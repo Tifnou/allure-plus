@@ -544,29 +544,43 @@ function _varyNode(n, mode) {
   return { ...n, body: n.body.map(b => (b.t === 'step' || b.t === 'ladder' ? _varyNode(b, mode) : b)) };
 }
 
-// Intensité : vert = bas de la fourchette d'allure de la zone, orange / rouge = haut.
-// Même zone (même domaine physiologique), jamais un autre code d'allure ; les efforts
-// au ressenti (RPE) et l'EF n'ont pas de fourchette à moduler.
-function _applyIntensity(nodes, mode) {
-  const sub = mode === 'green' ? 'low' : 'high';
+// Intensité : décalage d'allure PERCEPTIBLE en % de vitesse (vert -3, orange +3, rouge +5), appliqué
+// à tout le travail de la séance. L'ancien "bas / haut de fourchette" ne bougeait que de 1 à 2 % (une zone
+// fait ~3 points de large) : imperceptible. Le décalage est plafonné aux zones voisines au calcul des
+// allures (calcAllureRef / getZoneRange) ; les efforts RPE et l'EF n'ont pas d'allure à moduler.
+const ROUTINE_PACE_OFFSET = { green: -3, orange: 3, red: 5 };
+function _applyPace(nodes, pct) {
+  const sub = 'p' + (pct >= 0 ? '+' : '-') + Math.abs(pct);
   nodes.forEach(n => {
-    if (n.t === 'rep') { _applyIntensity(n.body, mode); return; }
+    if (n.t === 'rep') { _applyPace(n.body, pct); return; }
     if ((n.t === 'step' || n.t === 'ladder') && n.code !== 'RPE' && !_EASY_CODES.includes(n.code)) n.sub = sub;
   });
 }
+// 'p+3' / 'p-3' → +3 / -3 ; sinon null
+function _subOffset(sub) {
+  const m = /^p([+-]\d+)$/.exec(sub || '');
+  return m ? parseInt(m[1], 10) : null;
+}
 
-// dsl de base → dsl varié, ou null si aucune variation sensée n'existe
-function routineVaryDsl(dsl, mode) {
+// dsl de base → dsl varié, ou null si aucune variation sensée n'existe.
+// lever : 'rep' (répétitions / durées seulement), 'pace' (allure seulement) ou 'both' (défaut)
+function routineVaryDsl(dsl, mode, lever) {
+  lever = lever || 'both';
+  const orig = _RC.routineTreeToDsl(_RC.routineParseDsl(dsl));
   const tree = JSON.parse(JSON.stringify(_RC.routineParseDsl(dsl)));
   const works = tree.map(_workSec);
   const hasWork = works.some(w => w > 0);
   let idx, next;
   if (hasWork) {
     idx = works.indexOf(Math.max(...works));
-    next = _varyNode(tree[idx], mode);
+    next = lever === 'pace' ? tree[idx] : _varyNode(tree[idx], mode);
+    tree[idx] = next;
+    if (lever !== 'rep') _applyPace(tree, ROUTINE_PACE_OFFSET[mode]);
+    const out = _RC.routineTreeToDsl(tree);
+    return out === orig ? null : out;
   } else {
-    // séance d'endurance seule : volume ±10 min (±5 min si plusieurs blocs), jamais de rouge
-    if (mode === 'red') return null;
+    // séance d'endurance seule : pas d'allure à décaler, volume ±10 min (±5 min si plusieurs blocs), jamais de rouge
+    if (mode === 'red' || lever === 'pace') return null;
     const tots = tree.map(_totalSecNode);
     idx = tots.indexOf(Math.max(...tots));
     const n = tree[idx];
@@ -577,7 +591,6 @@ function routineVaryDsl(dsl, mode) {
   }
   if (JSON.stringify(next) === JSON.stringify(tree[idx])) return null;
   tree[idx] = next;
-  if (hasWork) _applyIntensity(tree, mode);
   return _RC.routineTreeToDsl(tree);
 }
 
@@ -592,7 +605,9 @@ function routineLoadOfDsl(dsl, wuCd) {
     if (['warmup', 'cooldown', 'recovery', 'setRecovery'].includes(s.role)) return;
     const min = s.sec / 60;
     const k = s.code === 'RPE' ? 'RPE' + s.rpe : s.code;
-    const mult = s.sub === 'low' ? 0.94 : s.sub === 'high' ? 1.06 : 1;     // bas / haut de plage
+    const off = _subOffset(s.sub);
+    // bas / haut de plage ±6 % ; décalage d'allure : +2 % de charge par % de vitesse (+3 % → ×1,06)
+    const mult = off != null ? 1 + off * 0.02 : s.sub === 'low' ? 0.94 : s.sub === 'high' ? 1.06 : 1;
     let w;
     if (s.code === 'RPE') w = routineRpeWeight(s.rpe);
     else if (ROUTINE_WEIGHTS[s.code]) w = ROUTINE_WEIGHTS[s.code] * mult;
@@ -618,11 +633,12 @@ function routineBuildVariants(snap, wk) {
   const base = routineLoadOfDsl(baseDsl, wuCd);
   const baseLoad = routineLoadValue(base);
   const current = snap.variant || 'yellow';
+  const lever = ['rep', 'pace', 'both'].includes(snap.lever) ? snap.lever : 'both';
   const list = ROUTINE_VARIANT_ORDER.map(variant => {
-    const rec = { variant, label: ROUTINE_VARIANT_LABEL[variant], available: true, reason: null, selected: current === variant };
+    const rec = { variant, label: ROUTINE_VARIANT_LABEL[variant], available: true, reason: null, selected: current === variant, lever };
     let dsl = baseDsl;
     if (variant !== 'yellow') {
-      dsl = routineVaryDsl(baseDsl, variant === 'red' ? 'red' : variant);
+      dsl = routineVaryDsl(baseDsl, variant === 'red' ? 'red' : variant, lever);
       if (!dsl) { rec.available = false; rec.reason = 'Pas de variation possible pour cette séance.'; dsl = baseDsl; }
     }
     const l = routineLoadOfDsl(dsl, wuCd);
@@ -631,7 +647,12 @@ function routineBuildVariants(snap, wk) {
       dsl, totalMin: Math.round(l.totalMin), tier: l.tier, load,
       deltaTotalMin: Math.round(l.totalMin - base.totalMin), deltaWorkMin: Math.round(l.qualityMin - base.qualityMin),
       deltaLoadPct: baseLoad ? Math.round((load - baseLoad) / baseLoad * 100) : 0,
-      intensity: /_L\b/.test(dsl) && variant !== 'yellow' ? 'bas de plage' : /_H\b/.test(dsl) && variant !== 'yellow' ? 'haut de plage' : null,
+      intensity: (() => {
+        if (variant === 'yellow') return null;
+        const m = /_([PM])(\d+)\b/.exec(dsl);
+        if (m) return (m[1] === 'P' ? '+' : '−') + m[2] + ' %';
+        return /_L\b/.test(dsl) ? 'bas de plage' : /_H\b/.test(dsl) ? 'haut de plage' : null;
+      })(),
     });
     if (rec.available && variant === 'green' && snap.role !== 'ef' && base.qualityMin > 8 && l.qualityMin < 6) { rec.available = false; rec.reason = 'Déjà au minimum utile.'; }
     if (variant === 'orange' || variant === 'red') {
@@ -689,7 +710,12 @@ function _fmtSec(s) {
   return Math.floor(s / 60) + ' min ' + (s % 60) + ' s';
 }
 const _CODE_LABEL = { EF: 'EF', EFL: 'EF classique', EFH: 'EF soutenue', TEMPO: 'Tempo', AS42: 'AS42', SS: 'Sweet Spot', AS21: 'AS21', S60: 'S60', AS10: 'AS10', S30: 'S30', VMA: 'VMA', WALK: 'marche', STRIDE: 'relance relâchée' };
-function _subSuffix(n) { return n.sub && n.code !== 'EFL' && n.code !== 'EFH' ? (n.sub === 'low' ? ' (bas de plage)' : ' (haut de plage)') : ''; }
+function _subSuffix(n) {
+  if (!n.sub || n.code === 'EFL' || n.code === 'EFH') return '';
+  const off = _subOffset(n.sub);
+  if (off != null) return ' (allure ' + (off >= 0 ? '+' : '−') + Math.abs(off) + ' %)';
+  return n.sub === 'low' ? ' (bas de plage)' : ' (haut de plage)';
+}
 function _fmtStep(n) {
   if (n.code === 'RPE') return _fmtSec(n.sec) + ' effort ressenti ' + n.rpe + '/10' + (n.label ? ' (' + n.label.replace(/_/g, ' ') + ')' : '');
   return _fmtSec(n.sec) + ' ' + _CODE_LABEL[n.code] + _subSuffix(n);
