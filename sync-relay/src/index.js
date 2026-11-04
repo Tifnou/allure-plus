@@ -24,8 +24,6 @@
 const ALLOWED_TYPES = [
   'user_data', 'records_overrides', 'races', 'gear', 'activity_gear',
   'session_analyses', 'weight_history', 'health_snapshots', 'pps', 'pace_profile',
-  // Routine partagée : le compte admin y publie ses semaines (entrée "current"), les suiveurs invités la lisent
-  'routine_share',
 ];
 
 function json(data, status = 200) {
