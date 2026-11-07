@@ -1072,12 +1072,18 @@ function renderRoutineVariantBar(session, weekId) {
     : prefs.caution ? '<div class="rt-variant-note">🩹 Gêne signalée : les variantes plus exigeantes sont bloquées.</div>' : '';
   const lever = ['rep', 'pace', 'both'].includes(snap.lever) ? snap.lever : 'both';
   const lockedAll = done || pastWeek;
+  // Un levier n'est proposé que s'il change vraiment quelque chose pour CETTE séance
+  // (une endurance seule n'a pas de levier « allure ») ; moins de deux leviers = pas de choix à faire.
+  const leverWorks = key => RoutineEngine.routineBuildVariants({ ...snap, lever: key }, routineWeekCtx(prefs, stored, idx, false))
+    .some(x => x.variant !== 'yellow' && x.variant !== 'red' && x.available);
+  const works = { rep: leverWorks('rep'), pace: leverWorks('pace') };
+  works.both = works.rep && works.pace;
   const leverBtn = (key, label, tip) => `<button type="button" class="rt-lever${lever === key ? ' rt-lever--on' : ''}" aria-pressed="${lever === key}" title="${tip}"${lockedAll ? ' disabled' : ''}
       onclick="event.stopPropagation();setRoutineLever('${weekId}',${idx},'${key}')">${label}</button>`;
-  const leverBar = `<div class="rt-levers"><span>Ce qui change :</span><span class="rt-lever-group" role="group" aria-label="Levier de la variante">
+  const leverBar = (works.rep && works.pace) ? `<div class="rt-levers"><span>Ce qui change :</span><span class="rt-lever-group" role="group" aria-label="Levier de la variante">
       ${leverBtn('rep', 'Répétitions', 'Plus ou moins de répétitions (ou de durée de bloc), même allure')}
       ${leverBtn('pace', 'Allure', 'Même volume, allure plus douce (−3 %) ou plus soutenue (+3 %, rouge +5 %)')}
-      ${leverBtn('both', 'Les deux', 'Répétitions et allure ensemble')}</span></div>`;
+      ${leverBtn('both', 'Les deux', 'Répétitions et allure ensemble')}</span></div>` : '';
   return `<div class="session-detail-section rt-variants" data-selected="${sel.variant}">
     <div class="session-detail-section-title">Intensité de la séance <span class="zones-source-note">charge ≈ ${sel.load}</span></div>
     ${leverBar}
@@ -1110,7 +1116,21 @@ function setRoutineLever(weekId, idx, lever) {
   const current = snap.variant || 'yellow';
   if (current !== 'yellow') {
     const v = RoutineEngine.routineBuildVariants({ ...snap, lever }, routineWeekCtx(prefs, stored, idx, false)).find(x => x.variant === current);
-    if (!v || !(v.available || v.selected)) { showToast((v && v.reason) || 'Pas de variation possible avec ce levier.', 'info'); return; }
+    if (!v || !(v.available || v.selected)) {
+      // la variante choisie n'existe pas avec ce levier : on change quand même de levier et on
+      // revient à la référence (jaune) plutôt que de refuser le clic en silence
+      snap.lever = lever;
+      snap.variant = 'yellow';
+      snap.dsl = snap.baseDsl || snap.dsl;
+      const base = RoutineEngine.routineBuildVariants(snap, routineWeekCtx(prefs, stored, idx, false)).find(x => x.variant === 'yellow');
+      if (base) { snap.totalSec = base.totalMin * 60; snap.tier = base.tier; snap.load = base.load; snap.qualitySec = Math.round(RoutineEngine.routineLoadOfDsl(base.dsl, snap.wuCd !== false).qualityMin * 60); }
+      stored.hardCount = stored.sessions.filter(s => s.tier >= 2).length;
+      saveRoutineStore(store);
+      showToast('Variante remise à Jaune : elle n’existe pas avec ce levier.', 'info');
+      const keep = campusState.selectedWeekIdx;
+      renderFreeSessionsWeek(keep).then(() => { campusState.openSessionIdx = idx; renderSessionList(keep); });
+      return;
+    }
   }
   snap.lever = lever;
   if (current === 'yellow') {
@@ -1119,6 +1139,8 @@ function setRoutineLever(weekId, idx, lever) {
     renderFreeSessionsWeek(keepIdx).then(() => { campusState.openSessionIdx = idx; renderSessionList(keepIdx); });
     return;
   }
+  // setRoutineVariant relit le magasin : le nouveau levier doit y être enregistré d'abord
+  saveRoutineStore(store);
   setRoutineVariant(weekId, idx, current, true);
 }
 
