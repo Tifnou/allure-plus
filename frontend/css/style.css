@@ -5724,10 +5724,10 @@ body { background: var(--bg) !important; }
 .rt-cols { display: flex; gap: 8px; }
 .rt-col { --c: 150, 150, 150; flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: stretch; gap: 1px; padding: 4px 2px 6px;
   border: 0; border-radius: 8px; background: transparent; color: var(--text-primary); font: inherit; cursor: pointer; text-align: center; }
-.rt-col--green { --c: 46, 158, 79; } .rt-col--yellow { --c: 242, 183, 5; } .rt-col--orange { --c: 245, 124, 0; } .rt-col--red { --c: 229, 57, 53; }
+.rt-col--green { --c: 22, 190, 70; } .rt-col--yellow { --c: 255, 196, 0; } .rt-col--orange { --c: 255, 109, 0; } .rt-col--red { --c: 245, 32, 40; }
 .rt-col-barwrap { display: flex; align-items: flex-end; height: 62px; border-bottom: 2px solid var(--border); }
-.rt-col-bar { display: block; width: 100%; border-radius: 4px 4px 0 0; background: rgb(var(--c)); opacity: .5; transition: opacity .12s; }
-.rt-col:hover .rt-col-bar, .rt-col:focus-visible .rt-col-bar, .rt-col--peek .rt-col-bar { opacity: .85; }
+.rt-col-bar { display: block; width: 100%; border-radius: 4px 4px 0 0; background: rgb(var(--c)); opacity: .82; transition: opacity .12s; }
+.rt-col:hover .rt-col-bar, .rt-col:focus-visible .rt-col-bar, .rt-col--peek .rt-col-bar { opacity: 1; filter: saturate(1.15); }
 .rt-col--on .rt-col-bar { opacity: 1; box-shadow: 0 0 0 2px var(--bg-white), 0 0 0 4px rgb(var(--c)); }
 .rt-col:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .rt-col--off { cursor: not-allowed; }
@@ -5931,3 +5931,7 @@ body { background: var(--bg) !important; }
 .rt-share-row:hover { background: rgba(128,128,128,.12); }
 .rt-share-mail { margin-left: auto; font-size: 11px; opacity: .6; }
 .rt-share-empty { font-size: 13px; opacity: .75; padding: 8px; }
+
+/* Fonds des lignes de zones d'allure : suivent le thème en direct (cf getZoneColor, campus.js) */
+:root{--zr-Z1:#f3f3f3;--zr-Z2:#f1f8e9;--zr-Z3:#fff8e1;--zr-Z4:#fff3e0;--zr-Z5:#fce4ec;--zr-RECOVER:#f5f5f5;--zr-RECOVERY:#f5f5f5;--zr-WARMUP:#e8f5e9;--zr-COOLDOWN:#e8f5e9;--zr-GPP:#ede7f6;--zr-DEFAULT:#fafafa;}
+[data-theme="dark"]{--zr-Z1:rgba(50,55,70,0.85);--zr-Z2:rgba(15,55,25,0.85);--zr-Z3:rgba(60,52,10,0.85);--zr-Z4:rgba(75,42,10,0.85);--zr-Z5:rgba(80,18,30,0.85);--zr-RECOVER:rgba(28,32,50,0.85);--zr-RECOVERY:rgba(28,32,50,0.85);--zr-WARMUP:rgba(12,50,22,0.85);--zr-COOLDOWN:rgba(12,50,22,0.85);--zr-GPP:rgba(45,18,75,0.85);--zr-DEFAULT:rgba(18,21,31,0.80);}

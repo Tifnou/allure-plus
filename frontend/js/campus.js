@@ -1473,10 +1473,11 @@ const ZONE_ROW_COLORS_DARK = {
   WARMUP: 'rgba(12,50,22,0.85)',  COOLDOWN: 'rgba(12,50,22,0.85)',
   GPP: 'rgba(45,18,75,0.85)', DEFAULT: 'rgba(18,21,31,0.80)',
 };
+// Variables CSS (--zr-<ZONE>, style.css) : le fond suit le thème en direct, sans re-rendu.
+// Les maps ci-dessus restent la référence des valeurs (miroir dans style.css).
 function getZoneColor(zKey) {
-  const isDark = document.documentElement.dataset.theme === 'dark';
-  const map = isDark ? ZONE_ROW_COLORS_DARK : ZONE_ROW_COLORS;
-  return map[(zKey||'').toUpperCase()] || map.DEFAULT;
+  const k = (zKey || '').toUpperCase();
+  return 'var(--zr-' + (ZONE_ROW_COLORS[k] ? k : 'DEFAULT') + ')';
 }
 
 // "?"? Sanitisation des textes coach "?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?"?
