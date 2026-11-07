@@ -210,7 +210,7 @@ async function askRoutineShare(inbox) {
     prefs = {
       terrain: inbox.payload && inbox.payload.terrain === 'trail' ? 'trail' : 'route',
       frequency: Math.min(5, Math.max(2, parseInt(inbox.payload && inbox.payload.frequency, 10) || 3)),
-      maxMin: 90, anchorMonday: mondayOfWeek(Date.now()), engine: 'v2', engineStartWeek: 1,
+      maxMin: 90, anchorMonday: routineNextStartMonday(), engine: 'v2', engineStartWeek: 1,
       seedSalt: Math.floor(Math.random() * 1000000) + 1,
     };
     saveFreeSessionsPrefs(prefs);

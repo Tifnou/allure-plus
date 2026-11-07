@@ -35,6 +35,12 @@ function mondayOfWeek(ts) {
   const diff = day === 0 ? -6 : 1 - day;
   return new Date(d.getFullYear(), d.getMonth(), d.getDate() + diff).getTime();
 }
+// Une routine ne démarre jamais dans la semaine déjà commencée : toujours le lundi
+// STRICTEMENT après aujourd'hui (dimanche → le lendemain ; lundi → le lundi suivant).
+function routineNextStartMonday(now = Date.now()) {
+  const m = new Date(mondayOfWeek(now));
+  return new Date(m.getFullYear(), m.getMonth(), m.getDate() + 7).getTime();
+}
 function freeSessionsWeekNumber(prefs, now = Date.now()) {
   const weeks = Math.round((mondayOfWeek(now) - prefs.anchorMonday) / (7 * 86400000));
   return weeks + 1; // 1-based
@@ -739,6 +745,10 @@ async function renderFreeSessionsWeek(forceIdx) {
       (st.notes || []).concat(st.warnings || []).forEach(n => { phaseHtml += `<br><span style="opacity:.85">ℹ️ ${n}</span>`; });
     }
   }
+  if (currentWeekNum < 1) {
+    chips.push(chip('Départ', `lundi ${routineDateFr(prefs.anchorMonday)}`));
+    phaseHtml = ` <strong>Ta routine démarre le lundi ${routineDateFr(prefs.anchorMonday)}</strong> (jamais en cours de semaine). Voici sa première semaine.` + phaseHtml;
+  }
   if (planInfo) chips.push(chip('Plan', `démarre le ${routineDateFr(planInfo.startMs)}`));
   else if (prefs.race && prefs.race.dateMs > Date.now()) chips.push(chip('Course', routineDateFr(prefs.race.dateMs)));
 
@@ -880,7 +890,7 @@ function startFreeSessions() {
   const terrainBtn = document.querySelector('#free-sessions-terrain-toggle .routes-toggle-btn.active');
   const freqBtn = document.querySelector('#free-sessions-freq-toggle .routes-toggle-btn.active');
   const maxBtn = document.querySelector('#free-sessions-maxmin-toggle .routes-toggle-btn.active');
-  const anchorMonday = mondayOfWeek(Date.now());
+  const anchorMonday = routineNextStartMonday();
   const prefs = {
     terrain: terrainBtn?.dataset.terrain || 'route',
     frequency: parseInt(freqBtn?.dataset.freq, 10) || 3,
@@ -903,7 +913,7 @@ function startFreeSessions() {
   saveRoutineStore(store);
   saveFreeSessionsPrefs(prefs);
   renderFreeSessionsWeek();
-  showToast('Séances libres générées pour cette semaine', 'success');
+  showToast(`Routine programmée : elle démarre le lundi ${routineDateFr(anchorMonday)}`, 'success');
 }
 
 async function disableFreeSessions() {
