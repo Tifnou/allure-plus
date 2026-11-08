@@ -838,7 +838,7 @@ async function renderFreeSessionsWeek(forceIdx) {
       <button class="btn-plan-action" onclick="toggleRoutineCaution()" title="Bloque les variantes orange et rouge et garde les prochaines séances au palier modéré">
         ${prefs.caution ? '🩹 Gêne signalée — lever' : '🩹 Signaler une gêne / fatigue'}
       </button>
-      ${typeof routineShareIsAdmin === 'function' && routineShareIsAdmin() ? `<button class="btn-plan-action" onclick="openRoutineShareModal()" title="Partager ta routine avec d’autres utilisateurs : mêmes séances, chacun avec ses allures">🤝 ${routineShareIsLeader() ? 'Partage en cours…' : 'Partager ma routine'}</button>` : ''}
+      ${typeof routineShareIsAdmin === 'function' && routineShareIsAdmin() ? `<button class="btn-plan-action" id="rt-share-btn" onclick="openRoutineShareModal()" title="Partager ta routine avec d’autres utilisateurs : mêmes séances, chacun avec ses allures">🤝 ${routineShareIsLeader() ? 'Partage en cours…' : 'Partager ma routine'}</button>` : ''}
       <button class="btn-plan-action btn-cancel-plan" onclick="disableFreeSessions()" style="margin-left:auto;opacity:.85;background:rgba(229,57,53,.15);color:#e53935;border:1px solid rgba(229,57,53,.3);">
         ✕ Désactiver les séances libres
       </button>
@@ -846,6 +846,7 @@ async function renderFreeSessionsWeek(forceIdx) {
 
   el('campus-plan-wrap').innerHTML = checkinHtml + header + weekTabs + horizonNote + actions + `<div id="training-session-list"></div>`;
   renderSessionList(campusState.selectedWeekIdx);
+  if (typeof routineShareRefreshButton === 'function') routineShareRefreshButton();   // « Partage en cours » d'après le relais, pas un indicateur local périmé
 }
 
 // Carte d'une semaine pas encore construite : lisible (fond opaque), avec ce qui est déjà

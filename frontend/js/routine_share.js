@@ -320,6 +320,21 @@ async function unpublishRoutineShare() {
   try { await fetch(`${API}/api/routine-share/unpublish`, { method: 'POST' }); } catch (e) { /* relais indisponible : réessayé à la prochaine publication */ }
 }
 
+// Libellé du bouton d'en-tête : « Partage en cours… » tant qu'au moins une personne est destinataire.
+// La vérité est sur le relais (l'indicateur local peut être périmé ou absent sur un autre poste).
+function routineShareSetButton(active) {
+  try { localStorage.setItem(RT_SHARE_ACTIVE_KEY, active ? '1' : '0'); } catch (e) { /* stockage indisponible */ }
+  const b = document.getElementById('rt-share-btn');
+  if (b) b.textContent = '🤝 ' + (active ? 'Partage en cours…' : 'Partager ma routine');
+}
+async function routineShareRefreshButton() {
+  if (!routineShareIsAdmin() || !document.getElementById('rt-share-btn')) return;
+  try {
+    const p = await fetch(`${API}/api/routine-share/published`).then(r => r.json());
+    if (!p.unavailable) routineShareSetButton((p.recipients || []).length > 0);
+  } catch (e) { /* hors-ligne : on garde l'état local */ }
+}
+
 async function openRoutineShareModal() {
   if (document.getElementById('rt-share-backdrop')) return;
   let users = [], published = { recipients: [] };
@@ -349,7 +364,7 @@ async function openRoutineShareModal() {
     const recipients = [...bd.querySelectorAll('.rt-share-list input:checked')].map(i => i.value).slice(0, ROUTINE_SHARE_MAX_RECIPIENTS);
     try {
       await publishRoutineShare(recipients);
-      try { localStorage.setItem(RT_SHARE_ACTIVE_KEY, recipients.length ? '1' : '0'); } catch (e) { /* stockage indisponible */ }
+      routineShareSetButton(recipients.length > 0);   // le bouton change tout de suite, sans recharger la page
       showToast(recipients.length ? `Routine partagée avec ${recipients.length} personne${recipients.length > 1 ? 's' : ''}.` : 'Partage arrêté.', 'success');
       close();
     } catch (e) { showToast(e.message || 'Publication impossible', 'error'); }
