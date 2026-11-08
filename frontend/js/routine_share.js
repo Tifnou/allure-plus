@@ -185,6 +185,10 @@ async function checkRoutineShare(opts) {
     if (what === 'ask') await askRoutineShare(inbox);
     else if (what === 'apply') await applyRoutineShare(inbox);
     else if (what === 'end') {
+      // l'animateur a arrêté sa routine : on retire ses semaines à venir intactes (rien ne reste d'une ancienne routine)
+      const st = getRoutineStore();
+      const removed = leaveSharedWeeks(st, Date.now(), _rsTouched);
+      if (removed.length) saveRoutineStore(st);
       saveRoutineShareState({ ...local, state: 'ended', inviteSince: local.inviteSince, endedAt: Date.now() });
       showToast('Le partage de routine avec ' + (local.fromName || 'ton animateur') + ' est terminé : ta routine reprend.', 'info');
       _rsRefreshRoutineView();
@@ -306,6 +310,14 @@ async function publishRoutineShare(recipients) {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.message || 'Publication impossible');
   return data;
+}
+
+// Arrête le partage pour tout le monde (appelé quand l'animateur désactive / annule / remplace sa routine).
+async function unpublishRoutineShare() {
+  if (!routineShareIsAdmin()) return;
+  try { localStorage.setItem(RT_SHARE_ACTIVE_KEY, '0'); } catch (e) { /* stockage indisponible */ }
+  clearTimeout(_rsPublishTimer);
+  try { await fetch(`${API}/api/routine-share/unpublish`, { method: 'POST' }); } catch (e) { /* relais indisponible : réessayé à la prochaine publication */ }
 }
 
 async function openRoutineShareModal() {

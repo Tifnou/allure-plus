@@ -2145,6 +2145,7 @@ async function cancelPlan() {
   if (typeof getFreeSessionsPrefs === 'function') {
     const fp = getFreeSessionsPrefs();
     if (fp && !fp.dormant) saveFreeSessionsPrefs({ ...fp, dormant: true });
+    if (typeof unpublishRoutineShare === 'function') unpublishRoutineShare();   // plus de routine : le partage s'arrête pour tout le monde
   }
 
   // Nettoyer état local

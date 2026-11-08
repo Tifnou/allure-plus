@@ -397,6 +397,19 @@ app.post('/api/routine-share/publish', requireAdmin, async (req, res) => {
     res.status(502).json({ message: 'Relais de synchro indisponible' });
   }
 });
+// Arrêt du partage (routine désactivée, annulée ou remplacée) : l'entrée est supprimée (tombstone) pour
+// TOUS les destinataires — ils voient « partage terminé » et leurs semaines partagées à venir intactes
+// sont retirées. Une nouvelle publication repart d'une invitation neuve (nouveau `since`).
+app.post('/api/routine-share/unpublish', requireAdmin, async (req, res) => {
+  try {
+    const nowIso = new Date().toISOString();
+    await syncClient.pushEntries(ROUTINE_SHARE_TYPE, ADMIN_EMAIL.toLowerCase(), { [ROUTINE_SHARE_ENTRY]: { value: null, updatedAt: nowIso, deletedAt: nowIso } });
+    _routineShareCache.at = 0; _routineShareCache.value = null;
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(502).json({ message: 'Relais de synchro indisponible' });
+  }
+});
 app.get('/api/routine-share/inbox', requireSession, async (req, res) => {
   try {
     const me = String(req.session.email || '').toLowerCase();

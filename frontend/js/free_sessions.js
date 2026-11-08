@@ -908,6 +908,8 @@ function startFreeSessions() {
   }
   // La semaine en cours est régénérée avec les nouveaux réglages ; les
   // semaines passées restent dans le magasin et servent d'historique (variété).
+  // une nouvelle routine n'hérite jamais de l'ancien partage : il s'arrête, on repartage explicitement
+  if (typeof unpublishRoutineShare === 'function') unpublishRoutineShare();
   const store = getRoutineStore();
   delete store.weeks[anchorMonday];
   saveRoutineStore(store);
@@ -925,6 +927,7 @@ async function disableFreeSessions() {
   });
   if (!ok) return;
   localStorage.removeItem(FREE_SESSIONS_KEY);
+  if (typeof unpublishRoutineShare === 'function') unpublishRoutineShare();   // le partage s'arrête pour tout le monde
   campusState.usingImportedPlan = false;
   const snap = campusState.planSnapshot;
   if (snap) renderTrainingPlan(snap.goal, snap.weeks, { skipRoutine: true });
