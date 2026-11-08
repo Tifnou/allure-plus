@@ -653,8 +653,9 @@ async function renderFreeSessionsWeek(forceIdx) {
   if (currentWeekNum >= start) await ensureRoutineWeek(prefs, currentWeekNum, planInfo);
   // Un cycle complet visible : semaine en cours + 3 suivantes, en avant-première
   // (réajustées à la forme du moment quand chacune devient la semaine en cours).
-  for (let k = 1; k <= 3; k++) {
-    const wn = currentWeekNum + k;
+  // Avant le départ (semaine en cours = 0) le cycle visible est les semaines 1 à 4.
+  const lastPreview = Math.max(currentWeekNum + 3, 4);
+  for (let wn = Math.max(currentWeekNum + 1, 1); wn <= lastPreview; wn++) {
     if (wn < start) continue;
     if (planInfo && routineWeeksBetween(freeWeekDate(prefs, wn), planInfo.startMs) < 1) break;
     await ensureRoutineWeek(prefs, wn, planInfo, { preview: true });
