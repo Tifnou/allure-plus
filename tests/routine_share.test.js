@@ -95,6 +95,8 @@ test('invitation : on propose une fois, on applique les mises à jour, on ne reh
   assert.equal(S.routineShareDecision({ state: 'declined', inviteSince: 's0' }, inbox), 'ask');        // nouvelle invitation
   assert.equal(S.routineShareDecision({ state: 'accepted', appliedUpdatedAt: '' }, inbox), 'apply');
   assert.equal(S.routineShareDecision({ state: 'accepted', appliedUpdatedAt: inbox.updatedAt }, inbox), 'none');
+  assert.equal(S.routineShareDecision({ state: 'accepted', inviteSince: 's0', appliedUpdatedAt: 'x' }, { offered: true, since: 's1', updatedAt: 'y' }), 'ask');   // invitation neuve : on redemande
+  assert.equal(S.routineShareDecision({ state: 'accepted', inviteSince: 's1', appliedUpdatedAt: 'x' }, { offered: true, since: 's1', updatedAt: 'y' }), 'apply');
   assert.equal(S.routineShareDecision({ state: 'accepted' }, { offered: false }), 'end');             // retiré par l'animateur
   assert.equal(S.routineShareDecision({ state: 'left', inviteSince: 's1' }, inbox), 'none');
   assert.equal(S.routineShareDecision({}, { offered: false }), 'none');

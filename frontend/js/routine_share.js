@@ -146,7 +146,12 @@ function leaveSharedWeeks(store, now, isTouched) {
 function routineShareDecision(local, inbox) {
   const st = local && local.state;
   if (!inbox || !inbox.offered) return st === 'accepted' ? 'end' : 'none';
-  if (st === 'accepted') return (inbox.updatedAt || '') > (local.appliedUpdatedAt || '') ? 'apply' : 'none';
+  if (st === 'accepted') {
+    // une invitation NEUVE (l'animateur a arrêté puis repartagé : `since` différent) se redemande toujours —
+    // l'ancien « oui » ne vaut pas pour une autre routine
+    if (inbox.since && local.inviteSince && inbox.since !== local.inviteSince) return 'ask';
+    return (inbox.updatedAt || '') > (local.appliedUpdatedAt || '') ? 'apply' : 'none';
+  }
   // pas (ou plus) membre : on ne repropose que pour une NOUVELLE invitation (since différent)
   if ((st === 'declined' || st === 'left' || st === 'ended') && local.inviteSince === inbox.since) return 'none';
   return 'ask';
@@ -180,7 +185,13 @@ async function checkRoutineShare(opts) {
     const res = await fetch(`${API}/api/routine-share/inbox`);
     if (!res.ok) return;
     const inbox = await res.json();
-    const local = getRoutineShareState();
+    let local = getRoutineShareState();
+    // « accepté » sans aucune routine active chez moi (plan/routine annulés, jamais appliqué) = pas membre :
+    // on ne l'applique pas en silence, on redemande
+    if (local.state === 'accepted') {
+      const fp = getFreeSessionsPrefs();
+      if (!fp || fp.dormant) { local = { inviteSince: local.inviteSince }; saveRoutineShareState(local); }
+    }
     const what = routineShareDecision(local, inbox);
     if (what === 'ask') await askRoutineShare(inbox);
     else if (what === 'apply') await applyRoutineShare(inbox);
@@ -207,7 +218,14 @@ async function askRoutineShare(inbox) {
     icon: '🤝',
   });
   const local = getRoutineShareState();
-  if (!ok) { saveRoutineShareState({ ...local, state: 'declined', inviteSince: inbox.since }); return; }
+  if (!ok) {
+    if (local.state === 'accepted') {                                  // l'ancien partage ne vaut plus : on nettoie ses semaines à venir
+      const st = getRoutineStore();
+      if (leaveSharedWeeks(st, Date.now(), _rsTouched).length) saveRoutineStore(st);
+    }
+    saveRoutineShareState({ ...local, state: 'declined', inviteSince: inbox.since });
+    return;
+  }
   // pas encore de routine : on en crée une de base (terrain / fréquence de l'animateur), le contenu vient du partage
   let prefs = getFreeSessionsPrefs();
   if (!prefs || prefs.dormant) {
