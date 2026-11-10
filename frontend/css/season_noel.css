@@ -1,90 +1,168 @@
 /* ═══════════════════════════════════════════════════════════════════════
-   PACK D'IMMERSION NOËL — décor, bandeau, mascotte, micro-animations
-   (DOM construit par js/season_noel.js ; palette dans seasons.css)
-   Même règles que le pack Halloween : transform/opacity seulement, coupé si
-   « réduire les animations », rien ne reçoit la souris.
+   PACK « NOËL GIVRÉ » — nuit enneigée, verre givré, lanterne au premier plan
+   (DOM + neige : js/season_noel.js ; palette : seasons.css ; images :
+   images/skin-noel2/). Préfixe nz-. transform/opacity seulement pour les
+   animations, tout est coupé si « réduire les animations ».
 ═══════════════════════════════════════════════════════════════════════ */
 
 html[data-season="noel"] #bg-slideshow { display: none; }
-html[data-season="noel"] body { background: #1A0E08; }
-html[data-season="noel"] .page { padding-bottom: 60px; }
+html[data-season="noel"] body { background: #0A1330 !important; }
+html[data-season="noel"] .page { padding-bottom: 150px; }
 
-/* ─── Décor plein écran : table en bois chaud, guirlande, cadeaux, neige ─── */
-.nx-sky > * { position: absolute; }
-.nx-wood { inset: 0;
-  background:
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='260' height='520'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.5 .012' numOctaves='3' seed='4'/%3E%3CfeColorMatrix values='0 0 0 0 .1 0 0 0 0 .05 0 0 0 0 .02 0 0 0 .75 0'/%3E%3C/filter%3E%3Crect width='260' height='520' filter='url(%23g)'/%3E%3C/svg%3E"),
-    repeating-linear-gradient(90deg, rgba(0, 0, 0, .55) 0 2px, transparent 2px 130px),
-    repeating-linear-gradient(90deg, #4A2A18 0 130px, #3D2113 130px 260px, #52301B 260px 390px, #43261A 390px 520px);
-  background-size: 260px 520px, auto, auto; }
-.nx-warm { inset: 0; background: radial-gradient(ellipse at 50% 12%, rgba(255, 190, 100, .22), transparent 62%), radial-gradient(ellipse at 85% 95%, rgba(255, 150, 60, .14), transparent 50%); }
-.nx-top { left: 0; top: 0; width: 100%; height: 30vh; }
-.nx-bottom { left: 0; bottom: 0; width: 100%; height: 34vh; }
-.nx-vignette { inset: 0; background: radial-gradient(ellipse at 50% 45%, transparent 50%, rgba(10, 4, 2, .62) 100%); }
+/* ─── Fond : la photo de nuit, calée « cover » sur une scène 16:9 ─── */
+.nz-stage { left: 50%; top: 50%; transform: translate(-50%, -50%);
+  width: max(100vw, 177.78vh); height: max(100vh, 56.25vw); }
+.nz-bg { position: absolute; inset: 0; background: #0E1A3D url("../images/skin-noel2/bg.jpg") center / 100% 100% no-repeat; }
+/* Voile : fond un peu plus doux pour que les cartes en verre restent lisibles */
+.nz-veil { inset: 0; background: linear-gradient(180deg, rgba(6, 12, 36, .18), rgba(6, 12, 36, .05) 40%, rgba(6, 12, 36, .22)); }
 
-/* Boules qui se balancent, ampoules qui clignotent, étoile et bougies */
-.nx-swing { transform-box: fill-box; transform-origin: 50% 0; animation: nx-swing 4.8s ease-in-out infinite alternate; }
-@keyframes nx-swing { from { transform: rotate(-4.5deg); } to { transform: rotate(4.5deg); } }
-.nx-bulb { animation: nx-bulb 3.2s ease-in-out infinite; filter: drop-shadow(0 0 6px var(--c, #fff)); }
-@keyframes nx-bulb { 0%, 100% { opacity: 1; } 45% { opacity: .42; } 55% { opacity: .42; } 70% { opacity: 1; } }
-.nx-twinkle { animation: nx-twinkle 1.9s ease-in-out infinite; transform-box: fill-box; transform-origin: center; filter: drop-shadow(0 0 7px rgba(255, 216, 74, .95)); }
-@keyframes nx-twinkle { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .65; transform: scale(1.12); } }
-.nx-flicker { transform-box: fill-box; transform-origin: 50% 100%; animation: nx-flicker 2.3s ease-in-out infinite; }
-@keyframes nx-flicker { 0%, 100% { opacity: 1; transform: scale(1); } 20% { opacity: .85; transform: scale(.94, 1.06); } 45% { opacity: 1; transform: scale(1.04, .96); } 70% { opacity: .8; transform: scale(.96, 1.05); } }
+/* ─── Guirlandes : canvas (halo jaune ↔ disque sombre sur chaque ampoule de la photo) ─── */
+.nz-lights { inset: 0; width: 100%; height: 100%; }
 
-/* Neige et étincelles */
-.nx-particles { inset: 0; }
-.nx-flake { position: absolute; top: -12px; border-radius: 50%; background: #fff; box-shadow: 0 0 7px rgba(255, 255, 255, .85); animation: nx-fall linear infinite; will-change: transform; }
-@keyframes nx-fall {
-  0% { transform: translate3d(0, -4vh, 0); }
-  50% { transform: translate3d(var(--sway), 52vh, 0); }
-  100% { transform: translate3d(calc(var(--sway) * -.7), 110vh, 0); }
+/* ─── Neige (canvas plein écran, derrière le contenu) ─── */
+.nz-snow { inset: 0; width: 100%; height: 100%; }
+
+/* ─── Premier plan : lanterne + paquets devant la barre latérale et le contenu ─── */
+.nz-props { position: fixed; left: 150px; bottom: -8px; width: 200px; z-index: 260; pointer-events: none; }
+.nz-props img { display: block; width: 100%; height: auto; filter: drop-shadow(0 6px 10px rgba(0, 0, 0, .35)); }
+.nz-props-glow { position: absolute; right: -34px; top: 8%; width: 190px; height: 190px; border-radius: 50%;
+  background: radial-gradient(circle, rgba(255, 196, 96, .55), rgba(255, 170, 60, .18) 45%, transparent 70%);
+  mix-blend-mode: screen; animation: nz-lantern 3.4s ease-in-out infinite; }
+@keyframes nz-lantern { 0%, 100% { opacity: .85; transform: scale(1); } 30% { opacity: 1; transform: scale(1.08); } 55% { opacity: .7; transform: scale(.95); } 75% { opacity: .95; transform: scale(1.04); } }
+@media (max-height: 640px), (max-width: 900px) { .nz-props { display: none; } }
+
+/* ─── Barre latérale : panneau de glace (image) ─── */
+html[data-season="noel"] .sidebar {
+  background: #DCE5F2 url("../images/skin-noel2/sidebar.jpg") right top / auto 100% no-repeat;
+  border-right: 1px solid rgba(255, 255, 255, .6);
+  box-shadow: 6px 0 34px rgba(0, 8, 30, .45);
+  backdrop-filter: none; -webkit-backdrop-filter: none;
 }
-.nx-spark { position: absolute; width: 14px; height: 14px; margin: -7px; background: radial-gradient(circle, #FFF6C8 0%, rgba(255, 220, 120, .55) 30%, transparent 70%); animation: nx-spark ease-in-out infinite; }
-@keyframes nx-spark { 0%, 100% { opacity: 0; transform: scale(.4); } 50% { opacity: .95; transform: scale(1.1); } }
+html[data-season="noel"] .sidebar-brand { background: transparent; border-bottom-color: rgba(120, 150, 190, .25); }
+html[data-season="noel"] .sidebar-footer { background: transparent; border-top-color: rgba(120, 150, 190, .25); }
+html[data-season="noel"] .nav-item:hover { background: rgba(255, 255, 255, .55); }
+html[data-season="noel"] .nav-item.active {
+  background: linear-gradient(90deg, rgba(196, 238, 204, .95), rgba(236, 250, 238, .85));
+  color: #1B5C38; font-weight: 600;
+  box-shadow: 0 2px 10px rgba(40, 130, 80, .22), inset 0 0 0 1px rgba(255, 255, 255, .7);
+}
+html[data-season="noel"] .nav-item.active .nav-icon { stroke: #1B5C38; }
 
-/* ─── Bandeau « affiche » de la Synthèse ─── */
-html[data-season="noel"] .season-hero { background: #2A140B; box-shadow: inset 0 0 0 1px rgba(242, 201, 76, .5), 0 12px 40px rgba(0, 0, 0, .5), 0 0 32px rgba(255, 170, 60, .18); }
-html[data-season="noel"] .season-hero::before { background: radial-gradient(ellipse at 40% 55%, transparent 50%, rgba(10, 4, 2, .5) 100%); }
-html[data-season="noel"] .season-hero::after { background: linear-gradient(270deg, rgba(20, 8, 4, .72) 0%, rgba(20, 8, 4, .4) 36%, transparent 62%); }
-.nx-hero-art { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
-.nx-snow-in { position: absolute; inset: 0; z-index: 1; pointer-events: none; opacity: .8;
-  background-image: radial-gradient(2.2px 2.2px at 30px 40px, #fff, transparent), radial-gradient(1.6px 1.6px at 90px 120px, #fff, transparent), radial-gradient(2.6px 2.6px at 160px 70px, #fff, transparent), radial-gradient(1.4px 1.4px at 60px 180px, #fff, transparent);
-  background-size: 190px 200px; animation: nx-snow-bg 9s linear infinite; }
-@keyframes nx-snow-bg { to { background-position: -26px 200px; } }
-.nx-hero-text { position: absolute; right: 26px; bottom: 20px; z-index: 2; text-align: right; display: flex; flex-direction: column; gap: 3px; max-width: 46%; }
-.nx-hero-kicker { font-family: var(--font-body); font-size: 10.5px; font-weight: 700; letter-spacing: .3em; text-transform: uppercase; color: #F2C94C; }
-.nx-hero-text b { font-family: var(--font-heading, var(--font-body)); font-size: 30px; line-height: 1.1; color: #FFF1D0; text-shadow: 0 0 22px rgba(255, 190, 80, .7), 0 2px 0 rgba(0, 0, 0, .5); animation: nx-title-glow 4.5s ease-in-out infinite; }
-.nx-hero-sub { font-family: var(--font-body); font-size: 12px; color: #D8E6DA; }
-@keyframes nx-title-glow { 0%, 100% { text-shadow: 0 0 16px rgba(255, 190, 80, .55), 0 2px 0 rgba(0, 0, 0, .5); } 50% { text-shadow: 0 0 30px rgba(255, 205, 100, .95), 0 2px 0 rgba(0, 0, 0, .5); } }
-@media (max-width: 720px) { .nx-hero-sub { display: none; } .nx-hero-text b { font-size: 21px; } }
+/* ─── Cartes : verre givré + bonnet de neige + collines enneigées ─── */
+html[data-season="noel"] .card,
+html[data-season="noel"] .stat-card {
+  background: linear-gradient(180deg, rgba(246, 250, 255, .86), rgba(228, 238, 250, .8));
+  backdrop-filter: blur(10px) saturate(1.2); -webkit-backdrop-filter: blur(10px) saturate(1.2);
+  border: 1px solid rgba(255, 255, 255, .75);
+  box-shadow: 0 8px 26px rgba(2, 10, 40, .34), inset 0 1px 0 rgba(255, 255, 255, .9);
+}
+html[data-season="noel"] .card:hover,
+html[data-season="noel"] .stat-card:hover { box-shadow: 0 10px 32px rgba(2, 10, 40, .42), 0 0 22px rgba(255, 214, 140, .25), inset 0 1px 0 #fff; }
+/* La neige déborde au-dessus de la tuile : on lève le rognage (les tableaux gardent leur propre défilement). */
+html[data-season="noel"] .card,
+html[data-season="noel"] .stat-card { overflow: visible; }
 
-/* ─── Mascotte : petit sapin illuminé ─── */
-.nx-mascot-svg { width: 58px; height: 100px; overflow: visible; }
-.nx-mascot-cap { font-family: var(--font-body); font-size: 10px; font-weight: 600; letter-spacing: .06em; color: #F2C94C; opacity: .9; }
+/* Neige accumulée sur le bord supérieur (7 variantes d'images fournies, alternées d'une tuile à
+   l'autre) + boule suspendue. --snow/--snow-pos/--snow-size/--bauble pilotent les calques. */
+html[data-season="noel"] .card::before,
+html[data-season="noel"] .stat-card::before {
+  content: ''; position: absolute; left: -1%; right: -1%; top: -19px; height: 70px; pointer-events: none; z-index: 2;
+  background-repeat: no-repeat;
+  background-image: var(--bauble, none), var(--snow, none);
+  background-position: var(--bauble-pos, 62%) 20px, var(--snow-pos, center top);
+  background-size: 17px auto, var(--snow-size, 100% 28px);
+}
+html[data-season="noel"] .card:nth-of-type(3n+1),
+html[data-season="noel"] .stat-card:nth-child(3n+1) { --bauble: url("../images/skin-noel2/bauble-red.png"); }
+html[data-season="noel"] .card:nth-of-type(3n+2),
+html[data-season="noel"] .stat-card:nth-child(3n+2) { --bauble: url("../images/skin-noel2/bauble-gold.png"); --bauble-pos: 38%; }
+html[data-season="noel"] .card:nth-of-type(7n+1), html[data-season="noel"] .stat-card:nth-child(7n+1) { --snow: url("../images/skin-noel2/snow-a.png"); }
+html[data-season="noel"] .card:nth-of-type(7n+4), html[data-season="noel"] .stat-card:nth-child(7n+4) { --snow: url("../images/skin-noel2/snow-c.png"); --snow-pos: left top; --snow-size: 82% 32px; }
 
-/* ─── Micro-animations de l'interface ─── */
-html[data-season="noel"] .card { transition: box-shadow .28s ease, border-color .28s ease; box-shadow: inset 0 1px 0 rgba(255, 230, 170, .12), 0 6px 24px rgba(0, 0, 0, .35); }
-html[data-season="noel"] .card:hover { border-color: rgba(242, 201, 76, .6); box-shadow: inset 0 1px 0 rgba(255, 230, 170, .28), 0 8px 30px rgba(0, 0, 0, .45), 0 0 26px rgba(255, 170, 60, .18); }
-html[data-season="noel"] .page.active { animation: nx-page-in .38s ease both; }
-@keyframes nx-page-in { from { opacity: .4; translate: 0 10px; filter: blur(3px); } to { opacity: 1; translate: 0 0; filter: blur(0); } }
-html[data-season="noel"] .page-title { text-shadow: 0 0 20px rgba(255, 190, 80, .4); }
-html[data-season="noel"] .sidebar { background: rgba(12, 20, 15, .9); border-right-color: rgba(242, 201, 76, .3); box-shadow: 4px 0 30px rgba(0, 0, 0, .45); }
-html[data-season="noel"] .nav-item { transition: background .25s ease, color .25s ease, text-shadow .25s ease; }
-html[data-season="noel"] .nav-item:hover { background: linear-gradient(90deg, rgba(224, 52, 43, .2), rgba(224, 52, 43, .02)); text-shadow: 0 0 12px rgba(255, 190, 80, .5); }
-html[data-season="noel"] .nav-item.active { background: linear-gradient(90deg, rgba(224, 52, 43, .3), rgba(224, 52, 43, .05)); box-shadow: inset 0 0 0 1px rgba(242, 201, 76, .35), 0 0 18px rgba(224, 52, 43, .18); }
-html[data-season="noel"] .nav-item.active .nav-icon { filter: drop-shadow(0 0 5px rgba(255, 200, 90, .9)); animation: nx-icon 3.2s ease-in-out infinite; }
-@keyframes nx-icon { 0%, 100% { opacity: 1; } 50% { opacity: .72; } }
-html[data-season="noel"] .btn-save-profile,
-html[data-season="noel"] .confirm-modal-btn--confirm,
-html[data-season="noel"] .btn-export-garmin { background-image: linear-gradient(135deg, #E8433A, #A8141C); color: #FFF6E6; border-color: #F2C94C; transition: box-shadow .25s ease, filter .25s ease; }
-html[data-season="noel"] .btn-save-profile:hover,
-html[data-season="noel"] .confirm-modal-btn--confirm:hover,
-html[data-season="noel"] .btn-export-garmin:hover { box-shadow: 0 0 22px rgba(242, 201, 76, .55); filter: brightness(1.08); }
-html[data-season="noel"] ::selection { background: rgba(224, 52, 43, .5); color: #fff; }
-html[data-season="noel"] ::-webkit-scrollbar-thumb { background: rgba(224, 52, 43, .6); }
+/* Habillage EN FOND de tuile (calques de background, sous le contenu) : coins de
+   houx / sapin / nœud, alternés d'une tuile à l'autre. Pour ajouter un motif :
+   une ligne url(...) de plus devant le dégradé. */
+html[data-season="noel"] .card,
+html[data-season="noel"] .stat-card {
+  background:
+    url("../images/skin-noel2/c-holly-br.png") right bottom / 96px auto no-repeat,
+    linear-gradient(180deg, rgba(246, 250, 255, .86), rgba(228, 238, 250, .8));
+}
+html[data-season="noel"] .card:nth-of-type(3n+2) {
+  background:
+    url("../images/skin-noel2/c-fir-br.png") right bottom / 104px auto no-repeat,
+    url("../images/skin-noel2/c-bow-tl.png") left top / 70px auto no-repeat,
+    linear-gradient(180deg, rgba(246, 250, 255, .86), rgba(228, 238, 250, .8));
+}
+html[data-season="noel"] .card:nth-of-type(3n) {
+  background:
+    url("../images/skin-noel2/c-holly-tr.png") right top / 70px auto no-repeat,
+    url("../images/skin-noel2/c-fir-bl.png") left bottom / 100px auto no-repeat,
+    linear-gradient(180deg, rgba(246, 250, 255, .86), rgba(228, 238, 250, .8));
+}
+html[data-season="noel"] .stat-card:nth-child(odd) {
+  background:
+    url("../images/skin-noel2/c-holly-tl.png") left top / 58px auto no-repeat,
+    linear-gradient(180deg, rgba(246, 250, 255, .86), rgba(228, 238, 250, .8));
+}
+html[data-season="noel"] .stat-card:nth-child(even) {
+  background:
+    url("../images/skin-noel2/c-fir-tr.png") right top / 60px auto no-repeat,
+    linear-gradient(180deg, rgba(246, 250, 255, .86), rgba(228, 238, 250, .8));
+}
+/* Petites collines + sapins en bas des tuiles de la Synthèse */
+html[data-season="noel"] .stat-card::after {
+  content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 46px; pointer-events: none; opacity: .5;
+  background: url("../images/skin-noel2/hill-trees-l.png") left bottom / 100% 100% no-repeat;
+}
+html[data-season="noel"] .stat-card:nth-child(even)::after { background-image: url("../images/skin-noel2/hill-trees-r.png"); }
+/* Tuiles internes (bien-être…) : discrètes, sans décor, pour la lisibilité */
 
+/* Bonnet de Père Noël sur le logo (plus grand, posé sur le coin) */
+html[data-season="noel"] .season-hat { left: 2px; top: 4px; width: 58px; height: 46px; transform: rotate(-4deg); filter: drop-shadow(0 2px 3px rgba(0, 0, 0, .4)); }
+
+/* États vides posés directement sur le fond (Objectifs, Santé, Plans, Nutrition…) : même verre givré */
+html[data-season="noel"] .goals-empty-state,
+html[data-season="noel"] .health-empty,
+html[data-season="noel"] .plans-empty,
+html[data-season="noel"] .nutri-empty,
+html[data-season="noel"] .pps-empty-state {
+  background: linear-gradient(180deg, rgba(246, 250, 255, .88), rgba(228, 238, 250, .82)) !important;
+  border: 1px solid rgba(255, 255, 255, .8); border-radius: var(--radius-lg);
+  box-shadow: 0 8px 26px rgba(2, 10, 40, .34), inset 0 1px 0 #fff;
+  color: var(--text-primary); padding: 32px 28px;
+}
+html[data-season="noel"] .goals-empty-state *,
+html[data-season="noel"] .health-empty *,
+html[data-season="noel"] .plans-empty * { color: inherit; }
+
+/* ─── Bandeau de page : verre + neige + houx ─── */
+html[data-season="noel"] .page-header,
+html[data-season="noel"] .health-sticky-header {
+  position: relative;
+  background: linear-gradient(180deg, rgba(246, 250, 255, .9), rgba(226, 236, 249, .82));
+  border: 1px solid rgba(255, 255, 255, .8);
+  box-shadow: 0 8px 24px rgba(2, 10, 40, .34), inset 0 1px 0 #fff;
+}
+html[data-season="noel"] .page-header::before {
+  content: ''; position: absolute; left: 0; right: 0; top: -18px; height: 28px; pointer-events: none; z-index: 2;
+  background: url("../images/skin-noel2/snow-d.png") center top / 100% 100% no-repeat;
+}
+html[data-season="noel"] .page-header::after {
+  content: ''; position: absolute; right: 230px; top: -16px; width: 74px; height: 46px; pointer-events: none; z-index: 3;
+  background: url("../images/skin-noel2/holly-b.png") center / contain no-repeat;
+  filter: drop-shadow(0 2px 3px rgba(0, 0, 0, .3));
+}
+@media (max-width: 900px) { html[data-season="noel"] .page-header::after { display: none; } }
+
+/* Interrupteur de skin posé directement sur le fond de nuit */
+html[data-season="noel"] .skin-toggle-label { color: #E8F0FF; text-shadow: 0 1px 4px rgba(0, 0, 0, .7); }
+
+/* ─── Boutons principaux : rouge Noël ─── */
+html[data-season="noel"] .btn-primary,
+html[data-season="noel"] .btn-wizard-next:not(:disabled) { background: linear-gradient(180deg, #D8403A, #B02620); border-color: #8F1B17; color: #fff; }
+
+/* ─── Réduire les animations : fond fixe, lumières allumées, lanterne stable ─── */
 @media (prefers-reduced-motion: reduce) {
-  .nx-sky *, .season-hero *, .season-mascot *, html[data-season="noel"] .page.active, html[data-season="noel"] .nav-item.active .nav-icon { animation: none !important; }
-  .nx-flake, .nx-spark { display: none; }
+  .nz-props-glow { animation: none !important; }
 }

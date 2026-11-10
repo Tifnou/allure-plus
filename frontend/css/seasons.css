@@ -5,38 +5,36 @@
    règles [data-theme="dark"] existantes continuent donc de s'appliquer.
 ═══════════════════════════════════════════════════════════════════════ */
 
-/* ─── Halloween (sombre) : nuit bleue + lueur orange (pack complet : season_halloween.css) ─── */
+/* ─── Halloween (clair, cartes en verre sur crépuscule violet ; pack : season_halloween.css) ─── */
 html[data-season="halloween"] {
-  --bg: #070B18; --bg-white: #0E1830; --bg-hover: #16264A;
-  --border: #2A3E6B; --border-light: #1B2B50;
-  --accent: #FF8A1F; --accent-light: #2A1608; --accent-text: #FFB866;
-  --orange: #FF9A3C; --orange-bg: #2A1608; --purple: #8B7BFF;
-  --text-primary: #EAF0FF; --text-secondary: #AEBBE0; --text-muted: #8F9FCB;
-  --nav-text: #DCE6FF; --card-bg: rgba(14,24,48,0.86);
-  --brand-green: #FF8A1F;
+  --bg: #D9CCEC; --bg-white: #E7DDF5; --bg-hover: #DCCDF0;
+  --border: #BCA6DA; --border-light: #CDBBE5;
+  --accent: #E8640C; --accent-light: #FFE8D4; --accent-text: #A8430A;
+  --orange: #E8640C; --orange-bg: #FFE8D4; --purple: #6D3FC9;
+  --text-primary: #2A1650; --text-secondary: #55407A; --text-muted: #6E5A92;
+  --nav-text: #2A1650; --card-bg: rgba(208,193,232,0.93);
+  --brand-green: #E8640C;
 }
 
-/* ─── Noël (sombre) : sapin, bois chaud, rouge et or (pack complet : season_noel.css) ─── */
+/* ─── Noël (clair, cartes en verre sur nuit enneigée ; pack : season_noel.css) ─── */
 html[data-season="noel"] {
-  --bg: #0D1510; --bg-white: #13231A; --bg-hover: #1C3326;
-  --border: #35604A; --border-light: #22402F;
-  --accent: #E0342B; --accent-light: #2C1010; --accent-text: #FF9C92;
-  --green: #3DBE6A; --green-bg: #0B2417; --green-text: #8CE6A8;
-  --orange: #F2B544; --orange-bg: #2A1F06;
-  --text-primary: #F7F1E3; --text-secondary: #B9CDBF; --text-muted: #9DB5A5;
-  --nav-text: #E4F0E7; --card-bg: rgba(16,32,23,0.9);
-  --brand-green: #E0342B;
+  --bg: #E7EEF8; --bg-white: #F2F7FD; --bg-hover: #E2ECF8;
+  --border: #C3D2E6; --border-light: #DAE5F3;
+  --accent: #2F8F5B; --accent-light: #DDF3E5; --accent-text: #1B5C38;
+  --text-primary: #1B2A48; --text-secondary: #475A7B; --text-muted: #5A6C8B;
+  --nav-text: #1B2A48; --card-bg: rgba(240,246,253,0.84);
+  --brand-green: #2F8F5B;
 }
 
-/* ─── Saint-Valentin (clair) : bois clair, tulipes, cœurs à pois (pack complet : season_valentin.css) ─── */
+/* ─── Saint-Valentin (clair) : coucher de soleil rose, verre rose, rose profond (pack : season_valentin.css) ─── */
 html[data-season="saint-valentin"] {
-  --bg: #FBF1F0; --bg-white: #FFFFFF; --bg-hover: #FFE6EA;
-  --border: #F0C4CD; --border-light: #F8DDE2;
-  --accent: #D81B45; --accent-light: #FFF0F3; --accent-text: #B3123A;
-  --purple: #C026D3;
-  --text-primary: #3A0D18; --text-secondary: #7A3F4F; --text-muted: #8F5667;
-  --nav-text: #4A1022; --card-bg: rgba(255,255,255,0.92);
-  --brand-green: #D81B45;
+  --bg: #FCEBF0; --bg-white: #FFF6F8; --bg-hover: #FFE2EA;
+  --border: #F0BFCE; --border-light: #F8DCE4;
+  --accent: #D3224F; --accent-light: #FFE3EA; --accent-text: #A8123A;
+  --purple: #B02A8F;
+  --text-primary: #4A1128; --text-secondary: #7A3F55; --text-muted: #8A5468;
+  --nav-text: #4A1128; --card-bg: rgba(255,244,247,0.88);
+  --brand-green: #D3224F;
 }
 
 /* Voile de teinte par-dessus le fond d'écran défilant */

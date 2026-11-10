@@ -8,7 +8,7 @@
 //
 // Priorité : skin activé > thème de saison (themes.js l'écarte, voir
 // currentSeasonId) — le skin libère aussi le choix clair/sombre, que Halloween
-// ou Noël verrouillent. Seul l'aperçu admin d'une saison reste prioritaire.
+// ou Noël verrouillent. Il prime aussi sur l'aperçu admin d'une saison.
 //
 // Clés : `allure_skin` = 'm8' si l'interrupteur est activé (durable, suit le
 // compte d'un PC à l'autre) ; `allure_skin_access` = dernier droit connu

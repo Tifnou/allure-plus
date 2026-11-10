@@ -16,14 +16,15 @@
   const REFRESH_MS = 3 * 60 * 60 * 1000;
 
   const HAT_SANTA = '<svg viewBox="0 0 48 40" aria-hidden="true"><path d="M5 31C8 9 30 1 45 14c-9-2-17 3-19 17z" fill="#DC2626"/><rect x="1" y="28" width="31" height="9" rx="4.5" fill="#fff"/><circle cx="44.5" cy="14" r="5" fill="#fff"/></svg>';
-  const HAT_WITCH = '<svg viewBox="0 0 48 40" aria-hidden="true"><path d="M26 1l11 29H13z" fill="#6D28D9"/><rect x="3" y="28" width="42" height="7" rx="3.5" fill="#4C1D95"/><rect x="15" y="21" width="20" height="5" fill="#F97316"/></svg>';
+  const HAT_WITCH = '<img src="images/skin-halloween/hat.png" alt="" style="width:100%;height:100%;object-fit:contain;display:block">';
+  const HAT_SANTA_IMG = '<img src="images/skin-noel2/hat.png" alt="" style="width:100%;height:100%;object-fit:contain;display:block">';
   const HAT_HEART = '<svg viewBox="0 0 48 40" aria-hidden="true"><path d="M24 36C8 24 6 12 14 8c5-2 9 1 10 5 1-4 5-7 10-5 8 4 6 16-10 28z" fill="#E11D48"/></svg>';
 
   // kind 'fall' : tombent ; 'rise' : montent. count volontairement modeste.
   const SEASONS = {
-    halloween: { label: 'Halloween', emoji: '🎃', base: 'dark', hat: HAT_WITCH, pack: 'halloween', fx: { kind: 'fall', chars: ['🦇', '🍂', '🎃', '🕸️'], count: 14 } },
-    noel: { label: 'Noël', emoji: '🎄', base: 'dark', hat: HAT_SANTA, pack: 'noel', fx: { kind: 'fall', chars: ['❄', '❅', '❆', '✦'], count: 22 } },
-    'saint-valentin': { label: 'Saint-Valentin', emoji: '💝', base: 'light', hat: HAT_HEART, pack: 'saint-valentin', fx: { kind: 'rise', chars: ['❤️', '💗', '💕', '💖'], count: 14 } },
+    halloween: { label: 'Halloween', emoji: '🎃', base: 'light', hat: HAT_WITCH, pack: 'halloween', fx: { kind: 'fall', chars: ['🍂'], count: 0 } },
+    noel: { label: 'Noël', emoji: '🎄', base: 'light', hat: HAT_SANTA_IMG, pack: 'noel', fx: { kind: 'fall', chars: ['❄'], count: 0 } },
+    'saint-valentin': { label: 'Saint-Valentin', emoji: '💝', base: 'light', hat: HAT_HEART, pack: 'saint-valentin', fx: { kind: 'rise', chars: ['❤️'], count: 0 } },
   };
   const SEASON_IDS = Object.keys(SEASONS);
   window.SEASONS = SEASONS;
@@ -58,9 +59,10 @@
 
   function currentSeasonId() {
     // Un skin activé (skins.js) écarte les saisons ; seul l'aperçu admin passe devant.
+    // Le skin (M8) prime sur TOUT, aperçu admin compris : sinon ses éléments se mélangeaient à ceux du thème.
+    if (typeof isSkinActive === 'function' && isSkinActive()) return null;
     const p = getPreview();
     if (p) return p;
-    if (typeof isSkinActive === 'function' && isSkinActive()) return null;
     return (resolveSeason(_cfg) || {}).id || null;
   }
 
