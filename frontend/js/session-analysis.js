@@ -1999,6 +1999,25 @@ async function linkSessionToActivity(weekId, trainingIndex, activityId) {
   const activity = (_allActivities || []).find(a => String(a.id) === String(activityId));
   if (!week || !session || !activity) { if (typeof showToast === 'function') showToast('Données introuvables', 'error'); return; }
 
+  // Séance libre : si le choix d'intensité (vert/jaune/orange/rouge) n'est pas enregistré, on demande
+  // avant de lier — l'analyse utilise la variante telle qu'elle est à cet instant.
+  if (typeof routineLookup === 'function' && String(weekId).startsWith('free_')) {
+    const f = routineLookup(weekId, trainingIndex);
+    if (f) {
+      const si = routineSavedInfo(f.snap);
+      if (si.dirty) {
+        const ok = await showConfirmModal({
+          title: 'Choix d’intensité non enregistré',
+          message: `Cette séance est actuellement en « ${routineChoiceLabel(si.cur.variant, si.cur.lever)} » mais ce choix n’est pas enregistré (enregistré : « ${routineChoiceLabel(si.sv.variant, si.sv.lever)} »). L’analyse sera faite avec « ${routineChoiceLabel(si.cur.variant, si.cur.lever)} » et le choix sera figé après la liaison. Continuer ?`,
+          confirmLabel: 'Enregistrer et lier', cancelLabel: 'Retour',
+        });
+        if (!ok) return;
+      }
+      f.snap.saved = { variant: si.cur.variant, lever: si.cur.lever, at: Date.now() };
+      saveRoutineStore(f.store);
+    }
+  }
+
   const listEl = document.getElementById('session-link-picker-list');
   if (listEl) listEl.innerHTML = '<div style="padding:20px 0;text-align:center;font-family:var(--font-body);font-size:12.5px;color:var(--text-muted)">Analyse en cours…</div>';
 

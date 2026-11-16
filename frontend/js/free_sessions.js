@@ -1030,6 +1030,58 @@ const ROUTINE_VARIANT_PURPOSE = {
 };
 const ROUTINE_BAR_HEIGHT = { green: 22, yellow: 34, orange: 46, red: 58 };
 
+// ─── Choix d'intensité : « enregistré » vs « en cours de choix » ───────────
+// Un clic sur une couleur applique la variante tout de suite (aperçu de la séance), mais le choix
+// n'est considéré comme ENGAGÉ qu'une fois enregistré (snap.saved). Tant qu'il diffère de ce qui est
+// enregistré, un bandeau le dit et propose d'enregistrer ou d'annuler ; avant de lier une activité,
+// l'appli redemande. Une fois la séance liée à une activité, le choix est figé (l'analyse l'a utilisé).
+const ROUTINE_VARIANT_NAME = { green: 'Vert', yellow: 'Jaune', orange: 'Orange', red: 'Rouge' };
+const ROUTINE_LEVER_NAME = { rep: 'répétitions', pace: 'allure', both: 'répétitions + allure' };
+function routineChoiceLabel(variant, lever) {
+  return ROUTINE_VARIANT_NAME[variant] + (variant === 'yellow' ? ' (référence)' : ' · ' + ROUTINE_LEVER_NAME[lever || 'both']);
+}
+function routineSavedInfo(snap) {
+  const cur = { variant: snap.variant || 'yellow', lever: ['rep', 'pace', 'both'].includes(snap.lever) ? snap.lever : 'both' };
+  const sv = snap.saved || { variant: 'yellow', lever: 'both' };
+  const dirty = cur.variant !== sv.variant || (cur.variant !== 'yellow' && cur.lever !== sv.lever);
+  return { cur, sv, dirty, hasSaved: !!snap.saved };
+}
+function routineIsLinked(weekId, idx) {
+  return typeof _analysisIndex !== 'undefined' && !!_analysisIndex.bySession[weekId + '_' + (idx ?? 0)];
+}
+function _routineRerender(idx) {
+  const keep = campusState.selectedWeekIdx;
+  renderFreeSessionsWeek(keep).then(() => { campusState.openSessionIdx = idx; renderSessionList(keep); });
+}
+function saveRoutineVariantChoice(weekId, idx) {
+  const found = routineLookup(weekId, idx);
+  if (!found) return;
+  const { store, snap } = found;
+  const { cur } = routineSavedInfo(snap);
+  snap.saved = { variant: cur.variant, lever: cur.lever, at: Date.now() };
+  saveRoutineStore(store);
+  showToast('Choix enregistré : ' + routineChoiceLabel(cur.variant, cur.lever), 'success');
+  _routineRerender(idx);
+}
+function revertRoutineVariantChoice(weekId, idx) {
+  const found = routineLookup(weekId, idx);
+  if (!found) return;
+  const { store, snap } = found;
+  const { sv } = routineSavedInfo(snap);
+  snap.lever = sv.lever;
+  saveRoutineStore(store);
+  setRoutineVariant(weekId, idx, sv.variant, true);
+}
+// Pastille « Enregistré : … » (liste des séances) — vide si rien n'a été enregistré
+function routineSavedBadge(weekId, idx) {
+  const found = routineLookup(weekId, idx);
+  if (!found) return '';
+  const { cur, dirty, hasSaved, sv } = routineSavedInfo(found.snap);
+  if (dirty) return `<span class="rt-saved-badge rt-saved-badge--dirty" title="Choix d'intensité non enregistré">⚠ ${ROUTINE_VARIANT_NAME[cur.variant]} non enregistré</span>`;
+  if (!hasSaved) return '';
+  return `<span class="rt-saved-badge" title="Choix d'intensité enregistré : ${routineChoiceLabel(sv.variant, sv.lever)}">✓ ${ROUTINE_VARIANT_NAME[sv.variant]}</span>`;
+}
+
 function renderRoutineVariantBar(session, weekId) {
   const idx = session.trainingIndex ?? 0;
   const found = routineLookup(weekId, idx);
@@ -1037,6 +1089,7 @@ function renderRoutineVariantBar(session, weekId) {
   const { prefs, stored, wd, snap } = found;
   const done = typeof getLocalSessionStatus === 'function' && getLocalSessionStatus(weekId, idx) === 'done';
   const pastWeek = wd + 7 * 86400000 < Date.now();
+  const linked = routineIsLinked(weekId, idx);
   const variants = RoutineEngine.routineBuildVariants(snap, routineWeekCtx(prefs, stored, idx, done || pastWeek));
   const sel = variants.find(v => v.selected) || variants[1];
   const sgn = n => (n >= 0 ? '+' : '') + n;
@@ -1073,10 +1126,11 @@ function renderRoutineVariantBar(session, weekId) {
       ${cond}
     </div>`;
   };
-  const lockedMsg = (done || pastWeek) ? '<div class="rt-variant-note">Séance faite ou semaine passée : variante figée.</div>'
+  const lockedMsg = linked ? `<div class="rt-variant-note">🔒 Séance liée à une activité : choix figé (${routineChoiceLabel(routineSavedInfo(snap).sv.variant, routineSavedInfo(snap).sv.lever)}).</div>`
+    : (done || pastWeek) ? '<div class="rt-variant-note">Séance faite ou semaine passée : variante figée.</div>'
     : prefs.caution ? '<div class="rt-variant-note">🩹 Gêne signalée : les variantes plus exigeantes sont bloquées.</div>' : '';
   const lever = ['rep', 'pace', 'both'].includes(snap.lever) ? snap.lever : 'both';
-  const lockedAll = done || pastWeek;
+  const lockedAll = done || pastWeek || linked;
   // Un levier n'est proposé que s'il change vraiment quelque chose pour CETTE séance
   // (une endurance seule n'a pas de levier « allure ») ; moins de deux leviers = pas de choix à faire.
   const leverWorks = key => RoutineEngine.routineBuildVariants({ ...snap, lever: key }, routineWeekCtx(prefs, stored, idx, false))
@@ -1090,7 +1144,10 @@ function renderRoutineVariantBar(session, weekId) {
       ${leverBtn('pace', 'Allure', 'Même volume, allure plus douce (−3 %) ou plus soutenue (+3 %, rouge +5 %)')}
       ${leverBtn('both', 'Les deux', 'Répétitions et allure ensemble')}</span></div>` : '';
   return `<div class="session-detail-section rt-variants" data-selected="${sel.variant}">
-    <div class="session-detail-section-title">Intensité de la séance <span class="zones-source-note">charge ≈ ${sel.load}</span></div>
+    <div class="session-detail-section-title">Intensité de la séance <span class="zones-source-note">charge ≈ ${sel.load}</span>${routineSavedInfo(snap).hasSaved && !routineSavedInfo(snap).dirty ? `<span class="rt-saved-tag">✓ Enregistré : ${routineChoiceLabel(routineSavedInfo(snap).sv.variant, routineSavedInfo(snap).sv.lever)}</span>` : ''}</div>
+    ${routineSavedInfo(snap).dirty && !lockedAll ? `<div class="rt-unsaved" role="status"><span>⚠ <b>Choix non enregistré</b> : ${routineChoiceLabel(routineSavedInfo(snap).cur.variant, routineSavedInfo(snap).cur.lever)}. Enregistré actuellement : ${routineChoiceLabel(routineSavedInfo(snap).sv.variant, routineSavedInfo(snap).sv.lever)}.</span>
+      <span class="rt-unsaved-actions"><button type="button" class="btn-plan-action rt-unsaved-save" onclick="event.stopPropagation();saveRoutineVariantChoice('${weekId}',${idx})">Enregistrer ce choix</button>
+      <button type="button" class="btn-plan-action" onclick="event.stopPropagation();revertRoutineVariantChoice('${weekId}',${idx})">Annuler</button></span></div>` : ''}
     ${leverBar}
     <div class="rt-var-layout">
       <div class="rt-cols" role="radiogroup" aria-label="Intensité de la séance">${variants.map(col).join('')}</div>
@@ -1117,6 +1174,7 @@ function setRoutineLever(weekId, idx, lever) {
   const { prefs, store, stored, wd, snap } = found;
   const done = typeof getLocalSessionStatus === 'function' && getLocalSessionStatus(weekId, idx) === 'done';
   if (done || wd + 7 * 86400000 < Date.now()) return;
+  if (routineIsLinked(weekId, idx)) { showToast('Séance déjà liée à une activité : le choix d’intensité est figé.', 'info'); return; }
   if ((snap.lever || 'both') === lever) return;
   const current = snap.variant || 'yellow';
   if (current !== 'yellow') {
@@ -1155,6 +1213,7 @@ function setRoutineVariant(weekId, idx, variant, force) {
   const { prefs, store, stored, wd, snap } = found;
   const done = typeof getLocalSessionStatus === 'function' && getLocalSessionStatus(weekId, idx) === 'done';
   if (done || wd + 7 * 86400000 < Date.now()) return;
+  if (routineIsLinked(weekId, idx)) { showToast('Séance déjà liée à une activité : le choix d’intensité est figé.', 'info'); return; }
   const v = RoutineEngine.routineBuildVariants(snap, routineWeekCtx(prefs, stored, idx, false)).find(x => x.variant === variant);
   if (!v || (!v.available && !force)) { if (v && v.reason) showToast(v.reason, 'info'); return; }
   snap.baseDsl = snap.baseDsl || snap.dsl;
