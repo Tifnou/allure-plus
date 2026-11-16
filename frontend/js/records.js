@@ -147,8 +147,8 @@ function openRecordEditModal(key, prefill = null) {
         <input type="date" class="form-input" id="record-form-date" style="max-width:100%" />
       </div>
       <div class="form-row">
-        <span class="form-label">Distance (m)</span>
-        <input type="number" class="form-input" id="record-form-distance" style="max-width:100%" />
+        <span class="form-label">Distance (km)</span>
+        <input type="number" step="0.001" class="form-input" id="record-form-distance" style="max-width:100%" />
       </div>
       <div class="form-row">
         <span class="form-label">Chrono (hh:mm:ss ou mm:ss)</span>
@@ -164,7 +164,7 @@ function openRecordEditModal(key, prefill = null) {
 
   el('record-form-name').value = current.name || '';
   el('record-form-date').value = current.date ? String(current.date).slice(0, 10) : '';
-  el('record-form-distance').value = current.distance || RECORD_DISTANCES_M[key];
+  el('record-form-distance').value = +(((current.distance || RECORD_DISTANCES_M[key]) / 1000).toFixed(3));
   el('record-form-duration').value = current.duration ? secondsToDurationInput(current.duration) : '';
 
   const close = () => backdrop.remove();
@@ -174,7 +174,7 @@ function openRecordEditModal(key, prefill = null) {
   document.getElementById('record-modal-save').onclick = async () => {
     const name = el('record-form-name').value.trim();
     const date = el('record-form-date').value;
-    const distanceM = parseFloat(el('record-form-distance').value);
+    const distanceM = Math.round(parseFloat(el('record-form-distance').value) * 1000);
     const durationSec = parseDurationInput(el('record-form-duration').value);
     if (!name || !date || !distanceM || !durationSec) {
       showToast('Merci de remplir tous les champs', 'error');
