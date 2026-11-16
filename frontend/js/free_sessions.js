@@ -758,7 +758,7 @@ async function renderFreeSessionsWeek(forceIdx) {
   {
     const prevWd = freeWeekDate(prefs, currentWeekNum - 1);
     const prev = store.weeks[prevWd];
-    if (prev && !prev.checkin && prev.sessions.length && prevWd + 7 * 86400000 <= Date.now() && prevWd + 21 * 86400000 > Date.now()) {
+    if (currentWeekNum - 1 >= 1 && prev && !prev.checkin && prev.sessions.length && prevWd + 7 * 86400000 <= Date.now() && prevWd + 21 * 86400000 > Date.now()) {
       const nDone = prev.sessions.filter((x, i) => typeof getLocalSessionStatus === 'function' && getLocalSessionStatus('free_' + prevWd, i) === 'done').length;
       const btn = m => `<button type="button" class="session-mood-btn" onclick="routineCheckin(${prevWd},'${m}')" title="${SESSION_MOOD_STYLES[m].label}">${sessionMoodIconSvg(m, 34)}<span>${SESSION_MOOD_STYLES[m].label}</span></button>`;
       checkinHtml = `<div class="rt-checkin card"><div><strong>Comment s’est passée ta semaine S${currentWeekNum - 1} ?</strong>
