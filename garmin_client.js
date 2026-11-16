@@ -424,7 +424,8 @@ function getPersonalRecords(activities) {
     '1km': { threshold: 900, max: 1100, best: null },
     '5km': { threshold: 4500, max: 5500, best: null },
     '10km': { threshold: 9000, max: 11000, best: null },
-    'semi': { threshold: 19000, max: 22000, best: null },
+    '20km': { threshold: 19000, max: 20500, best: null },
+    'semi': { threshold: 20500, max: 22000, best: null },
     'marathon': { threshold: 40000, max: 43500, best: null }
   };
 

@@ -2298,7 +2298,7 @@ app.get('/api/activities/year/:year', requireSession, async (req, res) => {
 });
 
 // ─── Records personnels : calcul Garmin + corrections manuelles ───────
-const RECORD_KEYS = ['1km', '5km', '10km', 'semi', 'marathon'];
+const RECORD_KEYS = ['1km', '5km', '10km', '20km', 'semi', 'marathon'];
 
 app.get('/api/records', requireSession, async (req, res) => {
   try {

@@ -2,16 +2,17 @@
 // records.js — Records personnels editables + tableau de courses
 // ============================================================
 
-const RECORD_LABELS = { '1km': '1 km', '5km': '5 km', '10km': '10 km', semi: 'Semi', marathon: 'Marathon' };
-const RECORD_DISTANCES_M = { '1km': 1000, '5km': 5000, '10km': 10000, semi: 21097.5, marathon: 42195 };
-const RECORD_ORDER = ['1km', '5km', '10km', 'semi', 'marathon'];
+const RECORD_LABELS = { '1km': '1 km', '5km': '5 km', '10km': '10 km', '20km': '20 km', semi: 'Semi', marathon: 'Marathon' };
+const RECORD_DISTANCES_M = { '1km': 1000, '5km': 5000, '10km': 10000, '20km': 20000, semi: 21097.5, marathon: 42195 };
+const RECORD_ORDER = ['1km', '5km', '10km', '20km', 'semi', 'marathon'];
 // Meme tolerance que getPersonalRecords() (garmin_client.js) pour detecter
 // qu'une course saisie correspond exactement a une distance de record.
 const RECORD_TOLERANCE_M = {
   '1km':      { min: 900,   max: 1100 },
   '5km':      { min: 4500,  max: 5500 },
   '10km':     { min: 9000,  max: 11000 },
-  semi:       { min: 19000, max: 22000 },
+  '20km':     { min: 19000, max: 20500 },
+  semi:       { min: 20500, max: 22000 },
   marathon:   { min: 40000, max: 43500 },
 };
 
@@ -62,7 +63,7 @@ async function initRecordsPage() {
   }
 }
 
-// ─── Bandeau des 5 records (editable) ───────────────────────────────────
+// ─── Bandeau des records (editable) ───────────────────────────────────
 function renderRecordsBandeau() {
   const container = el('records-list-full');
   if (!container) return;
