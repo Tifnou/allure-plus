@@ -912,13 +912,30 @@ function fmtRaceTime(sec) {
 // haut - projections Objectifs, allures cibles) : pas de 2e formule
 // concurrente qui donnerait des chiffres differents pour un meme VO2max
 // selon la page consultee.
-function renderRacePredictor(vo2max, sex) {
+async function renderRacePredictor(vo2max, sex) {
   const container = el('dash-race-predictor');
   if (!container) return;
   const vma = vo2max ? calcVMA(vo2max, sex || 'M') : null;
   if (!vma) {
     container.innerHTML = '<div class="dash-predictor-empty">VO&#x2082;max indisponible</div>';
     return;
+  }
+  // Moteur hybride (VO2max + courses récentes + meilleurs efforts) : chrono, fourchette, confiance.
+  if (typeof predictRoadNow === 'function') {
+    await ensureRacesLoaded();
+    const dists0 = [{ label: '5 km', km: 5 }, { label: '10 km', km: 10 }, { label: 'Semi', km: 21.0975 }, { label: 'Marathon', km: 42.195 }];
+    const items = dists0.map(d => ({ d, p: predictRoadNow(d.km, 0, { vo2max, sex }) }));
+    if (items.every(x => x.p)) {
+      container.innerHTML = items.map(({ d, p }) => {
+        const info = describeRoadPrediction(p, fmtRaceTime);
+        return `<div class="dash-predictor-item" title="${escapeHtml(info.range + '. ' + info.detail)}">
+      <div class="dash-predictor-time">${fmtRaceTime(p.sec)}</div>
+      <div class="dash-predictor-label">${d.label}</div>
+      <div class="dash-predictor-range">${fmtRaceTime(p.lowSec)} – ${fmtRaceTime(p.highSec)}</div>
+    </div>`;
+      }).join('');
+      return;
+    }
   }
   const dists = [
     { label: '5 km', km: 5 },
@@ -3317,6 +3334,9 @@ function getVmaAdjustment() {
  *  Trail : methode km equivalents (1m D+ = 10m plat), standard trail francais */
 function estimateRaceTime(vma, distKm, dplusM, isTrail) {
   if (!vma || !distKm) return null;
+  // ROUTE : courbe continue calibrée sur des courses réelles (race_predictor.js, modèle road-1),
+  // sans rupture à 5/10/21 km. Les anciens paliers 97/90/83/76 % étaient trop optimistes (~-6,5 %).
+  if (!isTrail && typeof RacePredictor !== 'undefined') return RacePredictor.timeFromVma(distKm, dplusM, vma);
   const equivKm = (isTrail && dplusM > 0) ? distKm + dplusM / 100 : distKm;
   let pctVma = isTrail
     ? (distKm <= 21 ? 0.70 : distKm <= 42 ? 0.65 : distKm <= 80 ? 0.58 : 0.50)

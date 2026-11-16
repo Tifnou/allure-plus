@@ -5943,3 +5943,7 @@ body { background: var(--bg) !important; }
 .rt-unsaved-save { font-weight: 700; }
 .rt-saved-badge { padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; background: rgba(34,197,94,.16); color: #4ade80; white-space: nowrap; }
 .rt-saved-badge--dirty { background: rgba(245,158,11,.18); color: #fbbf24; }
+
+/* Prédicteur / estimation route : fourchette et confiance */
+.dash-predictor-range { font-family: var(--font-body); font-size: 10.5px; color: var(--text-muted); margin-top: 1px; white-space: nowrap; }
+.goals-est-note { font-size: 11px; color: var(--text-muted); margin-top: 2px; cursor: help; }
