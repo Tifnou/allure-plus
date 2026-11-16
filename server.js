@@ -2773,7 +2773,18 @@ function captureHealthSnapshot(metric, dateStr, value, email) {
   if (value == null || !email) return;
   const store = readScoped(HEALTH_SNAPSHOTS_FILE, email, {});
   const arr = store[metric] || (store[metric] = []);
-  if (arr.some(e => e.date === dateStr)) return;
+  const existing = arr.find(e => e.date === dateStr);
+  if (existing) {
+    // Un instantane du jour existe deja : on ne le remplace que pour y ajouter
+    // la valeur precise du VO2max (decimales) manquante - sinon le panel Admin
+    // restait fige sur l'entier capture quand l'historique Garmin etait en echec.
+    const upgrade = metric === 'vo2max' && typeof value?.precise === 'number' && typeof existing.value?.precise !== 'number';
+    if (!upgrade) return;
+    existing.value = value;
+    writeScoped(HEALTH_SNAPSHOTS_FILE, email, store);
+    scheduleSync('health_snapshots', `${metric}::${dateStr}`, email);
+    return;
+  }
   arr.push({ date: dateStr, value });
   arr.sort((a, b) => new Date(a.date) - new Date(b.date));
   writeScoped(HEALTH_SNAPSHOTS_FILE, email, store);
