@@ -88,3 +88,60 @@ test('désaccord fort entre les voies : fourchette élargie et mention', () => {
   assert.ok(r.factors.some(f => /divergent/.test(f)));
   assert.notStrictEqual(r.confidence, 'high');
 });
+
+// ─── Projection de fin de plan (plan-1) ───────────────────────────────────────────────
+const planBase = { weeksTotal: 12, weeksElapsed: 0, vo2Now: 50, vo2Peak: 50, historyDays: 1500, adherence: { score: 0.9 } };
+
+test('plan : un coureur confirmé AU sommet n\'a aucune progression forcée (gain nul ou négatif)', () => {
+  const p = RP.projectPlanGain(planBase);
+  assert.ok(p.vo2GainPct <= 0.01, `gain ${p.vo2GainPct}`);
+});
+
+test('plan : plus la VO2max est sous le sommet personnel, plus la marge est grande', () => {
+  const near = RP.projectPlanGain({ ...planBase, vo2Now: 49.5 }).vo2GainPct;
+  const far = RP.projectPlanGain({ ...planBase, vo2Now: 45 }).vo2GainPct;
+  assert.ok(far > near);
+});
+
+test('plan : séances manquées -> projection sans gain positif automatique', () => {
+  const p = RP.projectPlanGain({ ...planBase, vo2Now: 45, weeksElapsed: 3, adherence: { score: 0.2 } });
+  assert.ok(p.vo2GainPct <= 0.5, `gain ${p.vo2GainPct}`);
+});
+
+test('plan : 100 % d\'assiduité mais performances stagnantes -> pas d\'amélioration forcée', () => {
+  // tendance observée nulle sur 6 semaines : la tendance pèse 6/14 et tire le gain vers 0
+  const noTrend = RP.projectPlanGain({ ...planBase, vo2Now: 45, weeksElapsed: 6, vo2Start: 45, adherence: { score: 1 } }).vo2GainPct;
+  const prior = RP.projectPlanGain({ ...planBase, vo2Now: 45, weeksElapsed: 6, adherence: { score: 1 } }).vo2GainPct;
+  assert.ok(noTrend < prior);
+});
+
+test('plan : une charge très supérieure au plan plafonne le gain', () => {
+  const ok = RP.projectPlanGain({ ...planBase, vo2Now: 44, adherence: { score: 0.95 } }).vo2GainPct;
+  const over = RP.projectPlanGain({ ...planBase, vo2Now: 44, adherence: { score: 0.95, overload: true } }).vo2GainPct;
+  assert.ok(over < ok);
+});
+
+test('plan : début de plan sans semaine écoulée -> provisoire, fourchette large', () => {
+  const p = RP.projectPlanGain({ ...planBase, vo2Now: 46, adherence: { score: null } });
+  assert.ok(p.factors.some(f => /provisoire/.test(f)));
+  assert.ok(p.highFrac - p.lowFrac > 0.05);
+});
+
+test('plan : plan terminé -> aucune progression, aucune fourchette', () => {
+  const p = RP.projectPlanGain({ ...planBase, weeksElapsed: 12 });
+  assert.strictEqual(p.gainFrac, 0);
+  assert.strictEqual(p.highFrac, p.lowFrac);
+});
+
+test('plan : un débutant a plus de marge qu\'un coureur confirmé (même écart au sommet)', () => {
+  const nov = RP.projectPlanGain({ ...planBase, vo2Now: 42, vo2Peak: 42, historyDays: 100 }).vo2GainPct;
+  const exp = RP.projectPlanGain({ ...planBase, vo2Now: 42, vo2Peak: 42, historyDays: 2000 }).vo2GainPct;
+  assert.ok(nov > exp);
+});
+
+test('plan : la fourchette contient le gain central et s\'élargit avec les semaines restantes', () => {
+  const short = RP.projectPlanGain({ ...planBase, weeksTotal: 4, vo2Now: 46 });
+  const long = RP.projectPlanGain({ ...planBase, weeksTotal: 20, vo2Now: 46 });
+  assert.ok(short.lowFrac <= short.gainFrac && short.gainFrac <= short.highFrac);
+  assert.ok((long.highFrac - long.lowFrac) > (short.highFrac - short.lowFrac));
+});

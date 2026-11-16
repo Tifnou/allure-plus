@@ -2809,6 +2809,89 @@ function getVO2maxGainPct(weeksTotal) {
  *  irregulier produit quand meme une part de l'adaptation physiologique
  *  attendue - la ramener a quasi zero serait irrealiste. */
 function getRemainingVmaGainPct(weeksTotal, weeks) {
+  const proj = getPlanGainProjection(weeksTotal, weeks);
+  if (proj) return proj.gainFrac;
+  return _legacyRemainingVmaGainPct(weeksTotal, weeks);
+}
+
+/** Assiduité QUALIFIÉE (cahier des charges §5.3) : pas seulement « séances faites / prévues ».
+ *  4 dimensions sur les semaines déjà écoulées : séances clés/pondérées (stimulus), volume réalisé vs
+ *  prévu (plafonné à 100 % : en faire plus n'aide pas), sorties longues, régularité. Une charge très
+ *  supérieure au plan est signalée (fatigue), jamais récompensée. Renvoie score null si aucune semaine
+ *  n'est encore écoulée. */
+function computePlanAdherence(weeks) {
+  const now = Date.now();
+  const due = (weeks || []).filter(w => startOfDay(w.weekDate + 7 * 86400000) <= startOfDay(now));
+  if (!due.length) return { score: null, overload: false, parts: {} };
+  const doneMap = JSON.parse(localStorage.getItem('suivi_local_done') || '{}');
+  const status = (w, s) => doneMap[(w._id || '') + '_' + s.trainingIndex] || s.status || 'todo';
+  const parts = {};
+  const wKey = computeWeightedCardioAssiduity(due);
+  if (wKey != null) parts.key = { v: wKey / 100, w: 0.40 };
+  // volume : minutes prévues (séances de course des semaines écoulées) vs minutes courues dans ces semaines
+  const acts = (typeof _allActivities !== 'undefined' && Array.isArray(_allActivities)) ? _allActivities : [];
+  const earliest = acts.length ? Math.min(...acts.map(a => new Date(String(a.date).replace(' ', 'T')).getTime())) : Infinity;
+  let planned = 0, actual = 0;
+  due.forEach(w => {
+    if (w.weekDate < earliest) return; // semaine hors de la période d'activités chargées : pas de mesure fiable
+    (w.sessions || []).forEach(s => { if (!isStrengthSession(s)) planned += (s.stats?.expectedDuration || 0); });
+    acts.forEach(a => {
+      if (!/run/i.test(a.activityType || '')) return;
+      const t = new Date(String(a.date).replace(' ', 'T')).getTime();
+      if (t >= w.weekDate && t < w.weekDate + 7 * 86400000) actual += (a.durationSec || 0);
+    });
+  });
+  let overload = false;
+  if (planned > 0) {
+    const ratio = actual / planned;
+    parts.volume = { v: Math.min(ratio, 1), w: 0.30 };
+    if (ratio > 1.3) overload = true;
+  }
+  // sorties longues
+  let longDue = 0, longDone = 0;
+  due.forEach(w => (w.sessions || []).forEach(s => {
+    if (!/long/i.test((s.trainingCategory || '') + ' ' + (s.name || ''))) return;
+    longDue++; if (status(w, s) === 'done') longDone++;
+  }));
+  if (longDue > 0) parts.long = { v: longDone / longDue, w: 0.15 };
+  // régularité : semaines avec au moins 60 % des séances faites
+  let okWeeks = 0, countWeeks = 0;
+  due.forEach(w => {
+    const ss = (w.sessions || []).filter(s => !isStrengthSession(s));
+    if (!ss.length) return;
+    countWeeks++;
+    if (ss.filter(s => status(w, s) === 'done').length / ss.length >= 0.6) okWeeks++;
+  });
+  if (countWeeks > 0) parts.regularity = { v: okWeeks / countWeeks, w: 0.15 };
+  const wsum = Object.values(parts).reduce((s, p) => s + p.w, 0);
+  const score = wsum > 0 ? Object.values(parts).reduce((s, p) => s + p.v * p.w, 0) / wsum : null;
+  return { score, overload, parts };
+}
+
+/** Projection de gain de capacité jusqu'à la fin du plan (moteur plan-1, race_predictor.js). */
+function getPlanGainProjection(weeksTotal, weeks) {
+  if (!weeksTotal || typeof RacePredictor === 'undefined') return null;
+  const vo2Now = (typeof _latestVO2MaxPrecise !== 'undefined' && _latestVO2MaxPrecise) ? _latestVO2MaxPrecise : (typeof _latestVO2Max !== 'undefined' ? _latestVO2Max : null);
+  if (!(vo2Now > 3.5)) return null;
+  const now = Date.now();
+  const weeksElapsed = (weeks || []).filter(w => startOfDay(w.weekDate + 7 * 86400000) <= startOfDay(now)).length;
+  const series = (typeof _vo2maxSeries !== 'undefined' ? _vo2maxSeries : []).filter(p => p && p.date && now - new Date(p.date).getTime() <= 365 * 86400000);
+  const vo2Peak = Math.max(vo2Now, ...series.map(p => (typeof p.preciseValue === 'number' ? p.preciseValue : p.value) || 0));
+  let vo2Start = null;
+  try { vo2Start = getStartVo2(weeks, buildAnchoredVo2History(), (campusState.goal && campusState.goal._id) || 'plan'); } catch (e) { /* sans tendance */ }
+  const acts = (typeof _allActivities !== 'undefined' && Array.isArray(_allActivities)) ? _allActivities : [];
+  const runTimes = acts.filter(a => /run/i.test(a.activityType || '')).map(a => new Date(String(a.date).replace(' ', 'T')).getTime());
+  // Ancienneté de pratique : les années passées ne sont pas toutes chargées ici, on s'appuie aussi sur les courses saisies
+  const raceTimes = (typeof _racesData !== 'undefined' && Array.isArray(_racesData) ? _racesData : []).map(r => new Date(String(r.date).slice(0, 10) + 'T00:00:00').getTime());
+  const first = Math.min(...runTimes, ...raceTimes);
+  const historyDays = isFinite(first) ? (now - first) / 86400000 : null;
+  return RacePredictor.projectPlanGain({
+    weeksTotal, weeksElapsed, vo2Now, vo2Peak, vo2Start: weeksElapsed >= 3 ? vo2Start : null, historyDays,
+    adherence: computePlanAdherence(weeks),
+  });
+}
+
+function _legacyRemainingVmaGainPct(weeksTotal, weeks) {
   if (!weeksTotal) return 0;
   const now = Date.now();
   // Une semaine ne compte comme "ecoulee" qu'une fois terminee (7 jours
@@ -3099,6 +3182,18 @@ function renderEstimations(goal, weeks, dplusM, distKmOverride) {
       : '';
   }
   setRangeText(el('goals-time-projected'), secsEnd);
+  // Fourchette et facteurs de la projection de fin de plan (jamais un chiffre sans contexte)
+  const projNote = el('goals-time-projected-note');
+  if (projNote) {
+    const pj = getPlanGainProjection(weeksTotal, weeks);
+    if (pj && secsEnd != null) {
+      const fast = estimateGoalTimeSecs(vma * (1 + pj.highFrac), raceParams), slow = estimateGoalTimeSecs(vma * (1 + pj.lowFrac), raceParams);
+      const gp = Math.round(pj.vo2GainPct * 10) / 10;
+      projNote.textContent = `${fmtSecsToTime(fast)} – ${fmtSecsToTime(slow)} · progression attendue ${gp >= 0 ? '+' : ''}${String(gp).replace('.', ',')} % de VO2max`;
+      projNote.title = 'Modèle plan-1. ' + pj.factors.join(' ');
+      projNote.style.display = '';
+    } else { projNote.textContent = ''; projNote.style.display = 'none'; }
+  }
   if (delta && el('goals-time-delta')) {
     const dm = Math.floor(Math.abs(delta) / 60);
     el('goals-time-delta').textContent = delta > 0 ? `−${dm} min attendues` : `+${dm} min`;

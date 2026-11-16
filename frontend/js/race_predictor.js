@@ -58,6 +58,84 @@
 
   const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 
+  // --- Projection de FIN DE PLAN (cahier des charges §5) -------------------------------------
+  // Gain de capacité attendu sur les semaines RESTANTES du plan, en % de VO2max puis de VMA.
+  // Mesuré sur 30 fenêtres de 12 semaines précédant des courses (16/11/2026) : le gain réel est
+  // en moyenne de +1 % (médiane +0,6 %), très loin des +3..+9 % forfaitaires de l'ancien modèle ;
+  // il dépend surtout de la MARGE de progression (écart au sommet personnel des 12 derniers mois :
+  // mesure LOO 2,46 % d'erreur contre 3,45 % pour l'ancien +3 % fixe). Tout est ajustable ici.
+  const PLAN_PARAMS = {
+    version: 'plan-1',
+    // gain de base sur 12 semaines (en % de VO2max) selon la maturité d'entraînement, avant marge
+    baseByMaturity: { novice: 3.0, intermediate: 1.0, experienced: -2.0 },
+    gapSlope: 0.70,          // + % de gain par % d'écart entre la VO2max actuelle et le sommet de 12 mois
+    potMin: -2.0, potMax: 6.0,
+    fullWeeks: 16,           // au-delà de 16 semaines restantes, rendement divisé par deux
+    obsDamping: 0.5,         // une tendance observée n'est extrapolée qu'à moitié
+    obsWeightWeeks: 8,       // poids de la tendance observée = e / (e + 8)
+    noEvidenceMult: 0.8,     // aucune semaine écoulée : projection prudente
+    adherenceFloor: 0.4,     // en dessous : plus de gain, voire perte (désentraînement)
+    overloadMult: 0.5,       // charge excessive : le gain est plafonné
+    intervalVo2Pct: 3.2,     // écart-type résiduel du backtest (% de VO2max par 12 semaines)
+    intervalMinPct: 1.5,
+    // Maturité = ANCIENNETÉ de pratique (jours depuis la 1re sortie de course connue), jamais le volume récent :
+    // un coureur confirmé en période creuse n'est pas un débutant (il regagne un niveau déjà atteint).
+    maturityDays: { experienced: 730, intermediate: 365 },
+  };
+
+  function planMaturity(historyDays, P) {
+    if (!(historyDays >= 0)) return 'intermediate';
+    return historyDays >= P.maturityDays.experienced ? 'experienced' : historyDays >= P.maturityDays.intermediate ? 'intermediate' : 'novice';
+  }
+
+  /**
+   * @param {object} i  weeksTotal, weeksElapsed, vo2Now, vo2Peak (sommet des 12 mois),
+   *   vo2Start (VO2max au début du plan, facultatif), historyDays (ancienneté de pratique),
+   *   adherence {score 0..1|null, overload bool}, params
+   * @returns {{gainFrac, lowFrac, highFrac, vo2GainPct, maturity, mult, factors}} fractions de VMA (peuvent être négatives)
+   */
+  function projectPlanGain(i) {
+    const P = Object.assign({}, PLAN_PARAMS, i.params || {});
+    const rem = Math.max(0, (i.weeksTotal || 0) - (i.weeksElapsed || 0));
+    const maturity = planMaturity(i.historyDays, P);
+    const factors = [];
+    if (!(rem > 0) || !(i.vo2Now > 3.5)) return { gainFrac: 0, lowFrac: 0, highFrac: 0, vo2GainPct: 0, maturity, mult: 1, factors: ['Plan terminé : plus de progression à projeter.'] };
+
+    const peak = Math.max(i.vo2Peak || 0, i.vo2Now);
+    const gapPct = (i.vo2Now / peak - 1) * 100; // <= 0
+    const pot12 = clamp(P.baseByMaturity[maturity] + P.gapSlope * Math.abs(gapPct), P.potMin, P.potMax);
+    const effW = Math.min(rem, P.fullWeeks) + 0.5 * Math.max(0, rem - P.fullWeeks);
+    const prior = pot12 * effW / 12;
+    if (Math.abs(gapPct) >= 2) factors.push(`VO2max ${Math.abs(Math.round(gapPct * 10) / 10)} % sous votre meilleur niveau des 12 derniers mois : marge de progression.`);
+    else factors.push('VO2max proche de votre meilleur niveau récent : peu de marge de progression.');
+    factors.push(`Profil d'entraînement : ${{ novice: 'débutant', intermediate: 'intermédiaire', experienced: 'confirmé' }[maturity]}.`);
+
+    // Tendance réellement observée depuis le début du plan (jamais comptée deux fois :
+    // la capacité actuelle contient déjà l'acquis, seule la suite est projetée)
+    let blended = prior;
+    const e = i.weeksElapsed || 0;
+    if (e >= 3 && i.vo2Start > 3.5) {
+      const rate = ((i.vo2Now / i.vo2Start - 1) * 100) / e;
+      const obs = rate * rem * P.obsDamping;
+      const wo = e / (e + P.obsWeightWeeks);
+      blended = (1 - wo) * prior + wo * obs;
+      factors.push(`Tendance observée depuis le début du plan : ${rate >= 0 ? '+' : ''}${(Math.round(rate * 100) / 100).toString().replace('.', ',')} % de VO2max/semaine.`);
+    }
+
+    // Assiduité qualifiée : au-dessus de 0,9 gain plein ; sous le plancher, désentraînement
+    const s = i.adherence && i.adherence.score;
+    let mult = s == null ? P.noEvidenceMult : clamp((s - P.adherenceFloor) / (0.9 - P.adherenceFloor), -0.5, 1);
+    if (i.adherence && i.adherence.overload) { mult = Math.min(mult, P.overloadMult); factors.push('Charge supérieure au plan : le gain est plafonné (fatigue).'); }
+    if (s == null) factors.push('Pas encore de semaine écoulée : projection provisoire, fourchette large.');
+    else factors.push(`Assiduité qualifiée ${Math.round(s * 100)} % → ${mult >= 1 ? 'gain plein' : mult > 0 ? 'gain réduit' : 'aucun gain attendu'}.`);
+
+    // Un gain positif dépend de l'assiduité ; une pente négative (régression vers la moyenne) est seulement atténuée
+    const vo2Gain = blended >= 0 ? blended * mult : blended * (1 - 0.5 * clamp(mult, 0, 1));
+    const hw = Math.max(P.intervalMinPct, P.intervalVo2Pct * Math.sqrt(rem / 12));
+    const toVma = g => (g / 100) * (i.vo2Now / (i.vo2Now - 3.5)); // % de VO2max -> fraction de VMA
+    return { gainFrac: toVma(vo2Gain), lowFrac: toVma(vo2Gain - hw), highFrac: toVma(vo2Gain + hw), vo2GainPct: vo2Gain, maturity, mult, factors };
+  }
+
   function isRoadFlat(r, maxElev) {
     return r && r.durationSec > 0 && r.distanceKm > 0 && !r.dnf &&
       (r.type === undefined || r.type === 'route') &&
@@ -185,7 +263,7 @@
     };
   }
 
-  const api = { PARAMS, equivKm, timeFromVma, pctVma, voieA, voieB, voieC, estimateHrMax, predictRoad, riegelProject, fmtHm };
+  const api = { PARAMS, PLAN_PARAMS, projectPlanGain, planMaturity, equivKm, timeFromVma, pctVma, voieA, voieB, voieC, estimateHrMax, predictRoad, riegelProject, fmtHm };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.RacePredictor = api;
 })(typeof window !== 'undefined' ? window : globalThis);
