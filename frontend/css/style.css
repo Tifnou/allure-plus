@@ -5947,3 +5947,17 @@ body { background: var(--bg) !important; }
 /* Prédicteur / estimation route : fourchette et confiance */
 .dash-predictor-range { font-family: var(--font-body); font-size: 10.5px; color: var(--text-muted); margin-top: 1px; white-space: nowrap; }
 .goals-est-note { font-size: 11px; color: var(--text-muted); margin-top: 2px; cursor: help; }
+
+/* Analyse approfondie d'une sortie libre (free_analysis_ui.js) */
+.fd-bilan { font-size:13.5px; line-height:1.5; padding:10px 12px; border-radius:10px; background:var(--bg-white); color:var(--text-primary); border:1px solid var(--border, rgba(0,0,0,.08)); margin-bottom:12px; }
+.fd-block { margin-top:14px; }
+.fd-title { font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:var(--text-muted); margin-bottom:6px; }
+.fd-row { display:grid; grid-template-columns:160px 1fr; gap:12px; padding:7px 0; border-bottom:1px solid rgba(0,0,0,.05); font-size:13px; }
+.fd-row:last-child { border-bottom:none; }
+.fd-label { color:var(--text-secondary); font-weight:600; }
+.fd-value { color:var(--text-primary); }
+.fd-hint { font-size:11.5px; color:var(--text-muted); margin-top:2px; line-height:1.4; }
+.fd-profile { width:100%; height:auto; color:var(--text-secondary); display:block; }
+.fd-legend { display:flex; flex-wrap:wrap; gap:6px 14px; font-size:11px; color:var(--text-muted); margin-top:4px; }
+.fd-legend i { display:inline-block; width:10px; height:10px; border-radius:2px; margin-right:5px; vertical-align:-1px; }
+@media(max-width:600px) { .fd-row { grid-template-columns:1fr; gap:2px; } }

@@ -2356,6 +2356,7 @@ async function loadActivityAnalysis(activity) {
   panel.style.display = '';
   if (analysisCard) analysisCard.style.display = '';
   if (lapsFilterEl) lapsFilterEl.innerHTML = '';
+  if (typeof freeDeepHide === 'function') freeDeepHide();
 
   // Contexte pour la classification en zone (VMA du coureur + trail ou route)
   const activityTypeLower = (activity.activityType || '').toLowerCase();
@@ -2433,6 +2434,11 @@ async function loadActivityAnalysis(activity) {
   try {
     const result = await fetchJSON(`/api/activity/${activity.id}/laps`);
     const validLaps = Array.isArray(result?.laps) ? result.laps : [];
+
+    // Analyse approfondie : uniquement pour une sortie de course LIBRE (non liée à une séance ou à une routine)
+    if (validLaps.length > 0 && !linkedRecord && typeof renderFreeDeepAnalysis === 'function') {
+      try { renderFreeDeepAnalysis(activity, validLaps); } catch (e) { console.warn('deep analysis', e); }
+    }
 
     if (validLaps.length > 0) {
       const circuits = isKmCircuits(validLaps);
