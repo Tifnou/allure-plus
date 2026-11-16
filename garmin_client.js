@@ -138,7 +138,8 @@ async function getVO2MaxData() {
 // diverger l'historique affiche de ce que montre reellement Garmin Connect.
 // Endpoint non expose par la lib garmin-connect, appele directement via
 // son client HTTP generique.
-async function getVO2MaxHistory(days = 400) {
+// NB : Garmin refuse les plages > ~1 an (HTTP 400 "date range is too large", constate 11/2026) -> 365 max, sinon repli silencieux sur des valeurs entieres.
+async function getVO2MaxHistory(days = 365) {
   return getCachedData('vo2max_history', async () => {
     const gc = await getGarminClient();
     const fmt = (d) => {
@@ -547,7 +548,8 @@ function buildGarminFunctions(gc) {
   // utilise lui-meme) - voir le commentaire de la version module-level ci-dessus
   // pour le detail du pourquoi cette source remplace l'ancienne (vo2maxSeries
   // issue des activites).
-  async function getVO2MaxHistory(days = 400) {
+  // NB : Garmin refuse les plages > ~1 an (HTTP 400 "date range is too large", constate 11/2026) -> 365 max, sinon repli silencieux sur des valeurs entieres.
+  async function getVO2MaxHistory(days = 365) {
     return cached('vo2max_history', async () => {
       const fmt = (d) => {
         const pad = (n) => String(n).padStart(2, '0');
