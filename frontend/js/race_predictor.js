@@ -136,6 +136,22 @@
     return { gainFrac: toVma(vo2Gain), lowFrac: toVma(vo2Gain - hw), highFrac: toVma(vo2Gain + hw), vo2GainPct: vo2Gain, maturity, mult, factors };
   }
 
+  // Trail (modèle trail-1, 11/2026) : MÊME courbe continue que la route sur une distance équivalente,
+  // mais 1 m de D+ vaut 1,4 m de plat-route (calibré : validation croisée sur 6 courses trail réelles,
+  // erreur médiane 14 % -> 8 %, cf tools/backtest_trail.js). Trop peu de courses pour des coefficients
+  // supplémentaires : la fourchette est large et la confiance jamais « élevée ».
+  const TRAIL_PARAMS = {
+    version: 'trail-1',
+    elevKmPer100: 1.4,
+    personalShrinkN: 3,        // le coefficient personnel pèse n/(n+3)
+    personalMin: 0.85, personalMax: 1.2,
+    personalWindowDays: 1100,
+    halfWidth: { medium: 0.09, low: 0.14 },
+    steepDensity: 35,          // m de D+ par km : au-delà, terrain de montagne (temps, arrêts, technicité imprévisibles)
+    steepExtraHw: 0.05,
+    ultraKm: 45,
+  };
+
   function isRoadFlat(r, maxElev) {
     return r && r.durationSec > 0 && r.distanceKm > 0 && !r.dnf &&
       (r.type === undefined || r.type === 'route') &&
@@ -263,7 +279,54 @@
     };
   }
 
-  const api = { PARAMS, PLAN_PARAMS, projectPlanGain, planMaturity, equivKm, timeFromVma, pctVma, voieA, voieB, voieC, estimateHrMax, predictRoad, riegelProject, fmtHm };
+
+  // --- Trail ----------------------------------------------------------------
+  function timeFromVmaTrail(distKm, dplusM, vma, TP) {
+    TP = Object.assign({}, TRAIL_PARAMS, TP || {});
+    return timeFromVma(distKm, dplusM, vma, { elevKmPer100: TP.elevKmPer100 });
+  }
+  /** Coefficient personnel : écart habituel (réel / modèle) sur les courses trail passées, atténué par
+   *  n/(n+3). Chaque course est comparée au modèle avec SA VO2max d'époque (champ vo2max de la course). */
+  function trailPersonalFactor(i, sex, vmaRatio, TP) {
+    const rows = [];
+    (i.races || []).forEach(r => {
+      if (!r || r.dnf || !(r.durationSec > 0) || !(r.distanceKm > 0) || !(r.vo2max > 3.5)) return;
+      const isTrailish = r.type === 'trail' || (r.type !== 'route' && r.type !== undefined) || (r.elevationGain || 0) / r.distanceKm >= 25;
+      if (!isTrailish) return;
+      const age = (i.nowMs - r.dateMs) / DAY;
+      if (age <= 0 || age > TP.personalWindowDays) return;
+      const vma = (r.vo2max - 3.5) * PARAMS.vmaFactor[sex === 'F' ? 'F' : 'M'] * (vmaRatio || 1);
+      const model = timeFromVmaTrail(r.distanceKm, r.elevationGain, vma, TP);
+      if (model > 0) rows.push({ lr: Math.log(r.durationSec / model), w: Math.exp(-age / 540) });
+    });
+    if (!rows.length) return { k: 1, n: 0 };
+    const wsum = rows.reduce((a, r) => a + r.w, 0);
+    const mean = rows.reduce((a, r) => a + r.w * r.lr, 0) / wsum;
+    const n = rows.length;
+    return { k: clamp(Math.exp(mean * n / (n + TP.personalShrinkN)), TP.personalMin, TP.personalMax), n };
+  }
+  function predictTrail(i) {
+    const TP = Object.assign({}, TRAIL_PARAMS, i.params || {});
+    if (!(i.vo2max > 3.5) || !(i.distKm > 0)) return null;
+    const vma = (i.vo2max - 3.5) * PARAMS.vmaFactor[i.sex === 'F' ? 'F' : 'M'] * (i.vmaRatio || 1);
+    const base = timeFromVmaTrail(i.distKm, i.dplusM, vma, TP);
+    const pf = trailPersonalFactor(i, i.sex, i.vmaRatio, TP);
+    const sec = base * pf.k;
+    const density = (i.dplusM || 0) / i.distKm;
+    const steep = density >= TP.steepDensity, ultra = i.distKm >= TP.ultraKm;
+    const confidence = (pf.n >= 2 && !steep && !ultra) ? 'medium' : 'low';
+    let hw = TP.halfWidth[confidence] + (steep ? TP.steepExtraHw : 0) + (ultra ? 0.03 : 0);
+    const f = [];
+    f.push(`VO2max ${Math.round(i.vo2max * 10) / 10} → VMA ${Math.round(vma * 10) / 10} km/h ; ${String(i.distKm).replace('.', ',')} km + ${Math.round(i.dplusM || 0)} m D+ = ${String(Math.round(equivKm(i.distKm, i.dplusM, { elevKmPer100: TP.elevKmPer100 }) * 10) / 10).replace('.', ',')} km équivalents plat.`);
+    if (pf.n) f.push(`${pf.n} course${pf.n > 1 ? 's' : ''} trail passée${pf.n > 1 ? 's' : ''} : ajustement personnel ${pf.k >= 1 ? '+' : ''}${String(Math.round((pf.k - 1) * 1000) / 10).replace('.', ',')} %.`);
+    else f.push('Aucune course trail passée avec VO2max connue : estimation générale, sans ajustement personnel.');
+    if (steep) f.push(`Terrain de montagne (${Math.round(density)} m D+/km) : temps réel très variable (technicité, marche, arrêts), plutôt plus lent que le modèle — fourchette élargie surtout vers le haut.`);
+    if (ultra) f.push('Format long : ravitaillements et fatigue non modélisés finement — fourchette élargie.');
+    f.push('Chrono total, arrêts compris (calibré sur des chronos de course).');
+    return { model: TP.version, sec: Math.round(sec), lowSec: Math.round(sec * (1 - hw)), highSec: Math.round(sec * (1 + hw + (steep ? 0.10 : 0))), confidence, personalFactor: pf.k, personalN: pf.n, voies: { A: Math.round(base) }, factors: f };
+  }
+
+  const api = { TRAIL_PARAMS, timeFromVmaTrail, trailPersonalFactor, predictTrail, PARAMS, PLAN_PARAMS, projectPlanGain, planMaturity, equivKm, timeFromVma, pctVma, voieA, voieB, voieC, estimateHrMax, predictRoad, riegelProject, fmtHm };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.RacePredictor = api;
 })(typeof window !== 'undefined' ? window : globalThis);

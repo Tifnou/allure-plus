@@ -3337,6 +3337,8 @@ function estimateRaceTime(vma, distKm, dplusM, isTrail) {
   // ROUTE : courbe continue calibrée sur des courses réelles (race_predictor.js, modèle road-1),
   // sans rupture à 5/10/21 km. Les anciens paliers 97/90/83/76 % étaient trop optimistes (~-6,5 %).
   if (!isTrail && typeof RacePredictor !== 'undefined') return RacePredictor.timeFromVma(distKm, dplusM, vma);
+  // TRAIL : modèle trail-1 (même courbe continue, 1 m D+ = 1,4 m de plat-route), cf race_predictor.js.
+  if (isTrail && typeof RacePredictor !== 'undefined') return RacePredictor.timeFromVmaTrail(distKm, dplusM, vma);
   const equivKm = (isTrail && dplusM > 0) ? distKm + dplusM / 100 : distKm;
   let pctVma = isTrail
     ? (distKm <= 21 ? 0.70 : distKm <= 42 ? 0.65 : distKm <= 80 ? 0.58 : 0.50)

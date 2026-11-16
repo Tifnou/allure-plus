@@ -22,7 +22,7 @@ function predictorProfileSex() {
 function predictorRaces() {
   return (typeof _racesData !== 'undefined' && Array.isArray(_racesData) ? _racesData : [])
     .filter(r => r && r.date && r.distanceKm > 0 && r.durationSec > 0)
-    .map(r => ({ dateMs: new Date(String(r.date).slice(0, 10) + 'T00:00:00').getTime(), distanceKm: r.distanceKm, durationSec: r.durationSec, type: r.type, elevationGain: r.elevationGain || 0, dnf: !!r.dnf }));
+    .map(r => ({ dateMs: new Date(String(r.date).slice(0, 10) + 'T00:00:00').getTime(), distanceKm: r.distanceKm, durationSec: r.durationSec, type: r.type, elevationGain: r.elevationGain || 0, dnf: !!r.dnf, vo2max: r.vo2max }));
 }
 
 function predictorActivities() {
@@ -43,6 +43,20 @@ function predictRoadNow(distKm, dplusM, opts) {
   return RacePredictor.predictRoad({
     distKm, dplusM: dplusM || 0, nowMs: Date.now(), vo2max: vo2, sex: o.sex || predictorProfileSex(),
     vmaRatio: adj ? adj.ratio : 1, races: predictorRaces(), activities: predictorActivities(),
+  });
+}
+
+/** Prédiction TRAIL (modèle trail-1) pour la distance et le D+ donnés, à la date du jour. */
+function predictTrailNow(distKm, dplusM, opts) {
+  if (typeof RacePredictor === 'undefined' || !distKm) return null;
+  const o = opts || {};
+  const vo2 = o.vo2max != null ? o.vo2max
+    : (typeof _latestVO2MaxPrecise !== 'undefined' && _latestVO2MaxPrecise) ? _latestVO2MaxPrecise
+    : (typeof _latestVO2Max !== 'undefined' ? _latestVO2Max : null);
+  const adj = (typeof getVmaAdjustment === 'function') ? getVmaAdjustment() : null;
+  return RacePredictor.predictTrail({
+    distKm, dplusM: dplusM || 0, nowMs: Date.now(), vo2max: vo2, sex: o.sex || predictorProfileSex(),
+    vmaRatio: adj ? adj.ratio : 1, races: predictorRaces(),
   });
 }
 

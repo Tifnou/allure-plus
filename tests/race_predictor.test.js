@@ -145,3 +145,34 @@ test('plan : la fourchette contient le gain central et s\'élargit avec les sema
   assert.ok(short.lowFrac <= short.gainFrac && short.gainFrac <= short.highFrac);
   assert.ok((long.highFrac - long.lowFrac) > (short.highFrac - short.lowFrac));
 });
+
+// --- Trail (trail-1) ---------------------------------------------------------
+test('trail : le D+ allonge le temps, 1 m de D+ pèse plus qu\'en route', () => {
+  const vma = 15;
+  const flat = RP.timeFromVmaTrail(20, 0, vma), hilly = RP.timeFromVmaTrail(20, 800, vma);
+  assert.ok(hilly > flat * 1.3);
+  assert.ok(hilly > RP.timeFromVma(20, 800, vma));
+});
+
+test('trail : coefficient personnel nul sans course, borné et atténué avec peu de courses', () => {
+  const now = Date.UTC(2026, 10, 1);
+  const base = { distKm: 25, dplusM: 700, nowMs: now, vo2max: 50, sex: 'M' };
+  const none = RP.predictTrail({ ...base, races: [] });
+  assert.equal(none.personalFactor, 1);
+  assert.equal(none.confidence, 'low');
+  const vma = (50 - 3.5) * 0.313;
+  const model = RP.timeFromVmaTrail(20, 500, vma);
+  const slowRace = { dateMs: now - 90 * 86400000, distanceKm: 20, durationSec: model * 1.3, type: 'trail', elevationGain: 500, vo2max: 50 };
+  const one = RP.predictTrail({ ...base, races: [slowRace] });
+  assert.ok(one.personalFactor > 1 && one.personalFactor < 1.2);
+  const two = RP.predictTrail({ ...base, races: [slowRace, { ...slowRace, dateMs: now - 200 * 86400000 }] });
+  assert.ok(two.personalFactor > one.personalFactor);
+  assert.equal(two.confidence, 'medium');
+});
+
+test('trail : terrain de montagne = confiance faible et fourchette élargie vers le haut', () => {
+  const r = RP.predictTrail({ distKm: 34, dplusM: 1700, nowMs: Date.UTC(2026, 10, 1), vo2max: 49, sex: 'M', races: [] });
+  assert.equal(r.confidence, 'low');
+  assert.ok((r.highSec - r.sec) > (r.sec - r.lowSec) * 1.5);
+  assert.ok(r.factors.some(f => /montagne/.test(f)));
+});

@@ -3134,7 +3134,7 @@ function renderEstimations(goal, weeks, dplusM, distKmOverride) {
   // Fourchette + confiance + facteurs de l'estimation actuelle (route) : jamais un chiffre sans contexte
   const noteEl = el('goals-time-current-note');
   if (noteEl) {
-    const pred = !isTrail ? raceParams.roadPred : null;
+    const pred = raceParams.roadPred || null;
     if (pred && typeof describeRoadPrediction === 'function') {
       const info = describeRoadPrediction(pred, fmtSecsToTime);
       noteEl.textContent = info.range;
@@ -4149,15 +4149,16 @@ const GPX_ADAPT_MAX_DEVIATION = 0.35; // au-delà, le GPX n'est plus représenta
 // roadK = estimation du moteur hybride aujourd'hui (VO2max + courses récentes + meilleurs efforts)
 // / estimation purement physiologique à la VMA actuelle. Tous les points de la courbe (début, semaines
 // passées, fin de plan) sont ensuite mis à l'échelle par ce même coefficient : ils restent cohérents
-// entre eux ET ancrés sur les performances réelles de la personne. Trail : non concerné (moteur à venir).
+// entre eux ET ancrés sur les performances réelles de la personne. Trail : même mécanisme avec le modèle trail-1 (coefficient = ajustement personnel sur les courses trail passées).
 function getGoalRaceParams(goal, dplusM, distKm) {
   const p = _getGoalRaceParamsRaw(goal, dplusM, distKm);
   p.roadK = 1; p.roadPred = null;
-  if (!p.isTrail && distKm > 0 && typeof predictRoadNow === 'function') {
+  const predictNow = p.isTrail ? (typeof predictTrailNow === 'function' ? predictTrailNow : null) : (typeof predictRoadNow === 'function' ? predictRoadNow : null);
+  if (distKm > 0 && predictNow) {
     try {
       const vma = getVmaFromState();
       const base = vma ? estimateGoalTimeSecs(vma, p) : null;
-      const pred = predictRoadNow(distKm, dplusM);
+      const pred = predictNow(distKm, dplusM);
       if (base && pred) { p.roadK = Math.min(1.25, Math.max(0.8, pred.sec / base)); p.roadPred = pred; }
     } catch (e) { /* repli : coefficient neutre */ }
   }
@@ -4200,10 +4201,21 @@ function _getGoalRaceParamsRaw(goal, dplusM, distKm) {
  *  semaines passées, aujourd'hui, fin de plan, courbe, jour de course). */
 function estimateGoalTimeSecs(vma, params) {
   if (!vma || !params || !params.distKm) return null;
-  const k = (!params.isTrail && params.roadK > 0) ? params.roadK : 1;
+  const k = params.roadK > 0 ? params.roadK : 1;
   if (params.gpx) {
     const r = estimateRaceTimeFromGpxProfile(vma, params.gpx, params.isTrail);
-    if (r && r.totalSecs) return r.totalSecs * k;
+    if (r && r.totalSecs) {
+      if (params.isTrail) {
+        // Trail : le total vient du modèle trail-1 (distance + D+ saisis) ; le GPX n'apporte que la FORME du
+        // terrain, comme écart relatif à un terrain « moyen » de même D+ (borné ±10 %).
+        const gd = params.gpx.totalDistM / 1000;
+        const flat = r.paceFlatSecKm * gd;
+        const shape = flat > 0 ? (r.totalSecs / flat) / ((gd + (params.gpx.ascentM || 0) / 100) / gd) : 1;
+        const t0 = estimateRaceTime(vma, params.distKm, params.dplusM, true);
+        if (t0 != null) return t0 * Math.min(1.1, Math.max(0.9, shape)) * k;
+      }
+      return r.totalSecs * k;
+    }
   }
   const t = estimateRaceTime(vma, params.distKm, params.dplusM, params.isTrail);
   return t != null ? t * k : t;
