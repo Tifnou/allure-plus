@@ -10,6 +10,7 @@
 ═══════════════════════════════════════════════ */
 const VMA_TEST_REMIND_MONTHS = 6;   // « à renouveler bientôt »
 const VMA_TEST_OLD_MONTHS    = 12;  // « test ancien »
+const VMA_TEST_VO2_DRIFT     = 2.5; // points de VO₂max d'écart avec le jour du test → proposer de le refaire
 const VMA_TEST_GAP_WARN_PCT  = 10;  // au-delà : vérifier la saisie avant d'appliquer
 const VMA_TEST_SPEED_RANGE   = [6, 30]; // km/h plausibles pour un effort de 3' ou 9'
 
@@ -47,6 +48,37 @@ function vmaTestMonthsSince(dateStr) {
   return (Date.now() - d.getTime()) / (30.44 * 86400000);
 }
 
+// Écart de VO₂max entre le jour du test appliqué et aujourd'hui (le coefficient mesuré à l'époque
+// peut ne plus coller si la forme a bougé). null si l'une des deux valeurs manque.
+function vmaTestVo2Drift(test, currentVo2) {
+  if (!test || !test.vo2 || !currentVo2) return null;
+  const delta = currentVo2 - test.vo2;
+  return { from: test.vo2, to: currentVo2, delta, exceeded: Math.abs(delta) >= VMA_TEST_VO2_DRIFT };
+}
+function vmaTestFmtVo2Drift(d) {
+  return `VO₂max au test ${d.from.toFixed(1).replace('.', ',')} → aujourd'hui ${d.to.toFixed(1).replace('.', ',')} (${(d.delta >= 0 ? '+' : '') + d.delta.toFixed(1).replace('.', ',')})`;
+}
+
+// Bandeau + pastille du bouton « Test VMA » (Profil) quand la VO₂max a bougé depuis le test appliqué
+function updateVmaTestButtonBadge() {
+  const btn = document.querySelector('.vt-open');
+  if (!btn) return;
+  const header = btn.closest('.card-header');
+  const old = document.getElementById('vt-drift-banner');
+  if (old) old.remove();
+  btn.classList.remove('vt-open--due');
+  const st = loadVmaTestState();
+  const applied = st.tests.find(t => t.id === st.appliedId) || null;
+  const drift = vmaTestVo2Drift(applied, vmaTestCurrentFormula().vo2);
+  if (!drift || !drift.exceeded || !header) return;
+  btn.classList.add('vt-open--due');
+  const b = document.createElement('div');
+  b.id = 'vt-drift-banner';
+  b.className = 'vt-drift-banner';
+  b.innerHTML = `<span>Ta VO₂max a ${drift.delta > 0 ? 'progressé' : 'baissé'} depuis ton test VMA (${vmaTestFmtVo2Drift(drift)}). L'ajustement mesuré à l'époque n'est peut-être plus juste.</span><button type="button" class="vt-btn" onclick="openVmaTestModal()">Refaire le test</button>`;
+  header.insertAdjacentElement('afterend', b);
+}
+
 function vmaTestFmtPct(p) {
   return (p >= 0 ? '+' : '') + p.toFixed(1).replace('.', ',') + ' %';
 }
@@ -71,6 +103,7 @@ function renderVmaTestCard() {
   let status = '';
   if (applied) {
     const months = vmaTestMonthsSince(applied.date);
+    const drift = vmaTestVo2Drift(applied, f.vo2);
     const age = months >= VMA_TEST_OLD_MONTHS
       ? `<span class="vt-flag vt-flag--old">Test ancien (${Math.floor(months)} mois) — à refaire</span>`
       : months >= VMA_TEST_REMIND_MONTHS
@@ -80,6 +113,7 @@ function renderVmaTestCard() {
       <div><strong>VMA ajustée par ton test</strong> du ${new Date(applied.date).toLocaleDateString('fr-FR')} :
       formule ${vmaTestFmtPct((applied.ratio - 1) * 100)} — elle suit toujours ta VO₂max Garmin.</div>
       ${age}
+      ${drift ? `<div class="vt-drift${drift.exceeded ? ' vt-drift--due' : ''}">${vmaTestFmtVo2Drift(drift)}${drift.exceeded ? ' — écart important : refais le test pour recaler l\'ajustement.' : ''}</div>` : ''}
       <button class="vt-btn" onclick="clearVmaTestApplied()">Revenir à la formule standard</button>
     </div>`;
   } else {
@@ -312,6 +346,7 @@ async function deleteVmaTest(id) {
 }
 
 function afterVmaTestChange(msg) {
+  updateVmaTestButtonBadge();
   if (typeof renderProfile === 'function') renderProfile();
   renderVmaTestCard();
   showToast(msg, 'success');

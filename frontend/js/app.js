@@ -3606,6 +3606,7 @@ function renderProfile() {
     indEl.innerHTML = '<div class="profile-indicator-empty">Renseignez vos données pour voir les calculs</div>';
   }
 
+  if (typeof updateVmaTestButtonBadge === 'function') updateVmaTestButtonBadge();
   if (typeof renderVmaTestCard === 'function') renderVmaTestCard();
 
   // ─ IMC + poids idéal ─
@@ -4934,12 +4935,65 @@ function renderAdminUserDetail(d) {
     if (d.plan.weeksTotal) parts.push(`${d.plan.weeksTotal} semaines`);
     if (d.plan.sessionsPerWeek) parts.push(`${d.plan.sessionsPerWeek} j/sem`);
     if (parts.length) planSub = `<span class="admin-users-detail-sub">${parts.join(' · ')}</span>`;
-  } else if (d.plan?.type === 'free') planLabel = 'Séances libres (par défaut)';
-  else if (d.plan?.type === 'campus') planLabel = 'Plan Campus Coach';
-  else if (d.plan?.type === 'default') planLabel = 'Plan par défaut Allure+';
+  } else if (d.plan?.type === 'campus') planLabel = 'Plan Campus Coach';
+  else {
+    // Pas de plan importé : trois cas clairs (routine en cours / rien / rien de synchronisé)
+    const rt = d.routine;
+    if (rt && rt.terrain && !rt.dormant) planLabel = 'Pas de plan — <strong>routine en cours</strong>';
+    else if (rt && rt.terrain && rt.dormant) planLabel = 'Rien en cours <span class="admin-users-detail-sub">(routine en sommeil)</span>';
+    else if (d.hasData === false) planLabel = 'Aucune donnée synchronisée <span class="admin-users-detail-sub">(compte jamais ouvert depuis la synchro ?)</span>';
+    else planLabel = 'Rien : ni plan ni routine';
+  }
   items.push({ label: 'Course', value: d.adherenceCardio != null ? d.adherenceCardio + '%' : '—', color: adminAssiduityColor(d.adherenceCardio), title: 'Assiduité aux séances de course' });
   items.push({ label: 'Renfo', value: d.adherenceStrength != null ? d.adherenceStrength + '%' : '—', color: adminAssiduityColor(d.adherenceStrength), title: 'Assiduité aux séances de renforcement' });
   items.push({ label: 'Plan suivi', value: planLabel + (planSub ? ` ${planSub}` : ''), wide: true });
+
+  // Calendrier du plan : début / course, avec l'état (à venir, en cours, terminé)
+  if (d.plan?.type === 'imported' && (d.plan.startMs || d.plan.raceMs)) {
+    const now = Date.now(), fmt = ms => formatDate(new Date(ms).toISOString().slice(0, 10));
+    const parts = [];
+    if (d.plan.startMs) {
+      const st = d.plan.startMs > now ? 'à venir' : (d.plan.raceMs && d.plan.raceMs + 86400000 < now ? 'terminé' : 'en cours');
+      parts.push(`Début ${fmt(d.plan.startMs)} <span class="admin-users-detail-sub">(${st})</span>`);
+    }
+    if (d.plan.raceMs) parts.push(`Course ${fmt(d.plan.raceMs)}`);
+    items.push({ label: 'Calendrier du plan', value: parts.join(' · '), wide: true });
+  }
+
+  // Routine hors plan + partage
+  const r = d.routine;
+  if (r) {
+    const terr = r.terrain === 'trail' ? 'Trail' : r.terrain === 'route' ? 'Route' : null;
+    const PH = { S1: 'souple', S2: 'modérée', S3: 'intense', S4: 'récupération' };
+    const futurePlan = d.plan?.type === 'imported' && d.plan.startMs > Date.now();
+    let txt, sub = '';
+    if (r.share && r.share.state === 'accepted') {
+      txt = `Routine <strong>partagée</strong> avec ${escapeHtml(r.share.fromName || 'l’animateur')}`;
+    } else if (d.plan?.type === 'imported' && d.plan.startMs <= Date.now() && !r.dormant) {
+      txt = 'Routine en pause : le plan a pris le relais';
+    } else if (r.dormant) {
+      txt = 'Routine en sommeil';
+    } else if (r.terrain) {
+      txt = 'Routine personnelle' + (futurePlan ? ' (en attendant le plan)' : '');
+    } else {
+      txt = 'Aucune routine';
+    }
+    const bits = [];
+    if (terr) bits.push(terr);
+    if (r.frequency) bits.push(`${r.frequency} séances/sem`);
+    if (r.maxMin) bits.push(`${r.maxMin} min max`);
+    if (r.current) {
+      const c = [r.current.cycleIdx ? `cycle ${r.current.cycleIdx}` : null, PH[r.current.phase] || null, r.current.themeLabel].filter(Boolean);
+      if (c.length) bits.push('cette semaine : ' + c.join(' · '));
+    }
+    if (r.race) bits.push(`course envisagée ${escapeHtml(r.race.name || '')} ${formatDate(new Date(r.race.dateMs).toISOString().slice(0, 10))}`.replace(/\s+/g, ' '));
+    if (r.share && r.share.state && r.share.state !== 'accepted') {
+      const L = { declined: 'partage refusé', left: 'partage quitté', ended: 'partage terminé par l’animateur' };
+      if (L[r.share.state]) bits.push(L[r.share.state]);
+    }
+    if (bits.length) sub = ` <span class="admin-users-detail-sub">${bits.join(' · ')}</span>`;
+    items.push({ label: 'Routine', value: txt + sub, wide: true });
+  }
 
   return `<div class="admin-users-detail-grid">${items.map(i => `
     <div class="admin-users-detail-item${i.wide ? ' admin-users-detail-item--wide' : ''}"${i.title ? ` title="${i.title}"` : ''}>

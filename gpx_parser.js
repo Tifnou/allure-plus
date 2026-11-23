@@ -8,7 +8,11 @@
 // repartition reelle des pentes) et d'alimenter la modale de visualisation
 // du parcours.
 
-const TRKPT_RE = /<trkpt[^>]*\slat="([^"]+)"[^>]*\slon="([^"]+)"[^>]*>[\s\S]*?<ele>([^<]+)<\/ele>[\s\S]*?<\/trkpt>|<trkpt[^>]*\slon="([^"]+)"[^>]*\slat="([^"]+)"[^>]*>[\s\S]*?<ele>([^<]+)<\/ele>[\s\S]*?<\/trkpt>/g;
+// Balise de point : <trkpt .../> (auto-fermante, GPX sans altitude comme ceux
+// de calculitineraires.fr) ou <trkpt ...>...</trkpt>. L'altitude <ele> est
+// FACULTATIVE : sans elle on met 0 et on marque le tracé (corrigé ensuite par
+// l'API altimétrie IGN, cf server.js).
+const PT_RE = /<(trkpt|rtept)\b([^>]*?)(\/>|>([\s\S]*?)<\/\1>)/g;
 
 const R_EARTH = 6371000;
 function haversine(a, b) {
@@ -24,16 +28,28 @@ function haversine(a, b) {
 // tiers) via le second groupe d'alternative de TRKPT_RE plutot que de
 // planter silencieusement sur un fichier par ailleurs valide.
 function parseGpxTrack(gpxText) {
-  const points = [];
-  let m;
-  TRKPT_RE.lastIndex = 0;
-  while ((m = TRKPT_RE.exec(gpxText)) !== null) {
-    const lat = parseFloat(m[1] ?? m[5]);
-    const lon = parseFloat(m[2] ?? m[4]);
-    const ele = parseFloat(m[3] ?? m[6]);
-    if (Number.isFinite(lat) && Number.isFinite(lon) && Number.isFinite(ele)) points.push({ lat, lon, ele });
-  }
-  return points;
+  const collect = (tag) => {
+    const points = [];
+    let missing = 0;
+    let m;
+    PT_RE.lastIndex = 0;
+    while ((m = PT_RE.exec(gpxText)) !== null) {
+      if (m[1] !== tag) continue;
+      const attrs = m[2] || '';
+      const lat = parseFloat((/lat\s*=\s*["']([^"']+)["']/.exec(attrs) || [])[1]);
+      const lon = parseFloat((/lon\s*=\s*["']([^"']+)["']/.exec(attrs) || [])[1]);
+      const eleM = m[4] ? /<ele>\s*([^<\s]+)\s*<\/ele>/.exec(m[4]) : null;
+      let ele = eleM ? parseFloat(eleM[1]) : NaN;
+      if (!Number.isFinite(ele)) { ele = 0; missing++; }
+      if (Number.isFinite(lat) && Number.isFinite(lon)) points.push({ lat, lon, ele });
+    }
+    return { points, missing };
+  };
+  let r = collect('trkpt');
+  if (r.points.length < 2) r = collect('rtept'); // GPX de type "route"
+  // Pas d'altitude dans le fichier : propriété non énumérable (n'est jamais sérialisée)
+  Object.defineProperty(r.points, 'elevationMissing', { value: r.points.length > 0 && r.missing > r.points.length / 2 });
+  return r.points;
 }
 
 // Sous-echantillonne a un nombre de points geres par la carte/le graphique
@@ -402,7 +418,7 @@ function analyzeGpx(gpxText) {
   const stats = computeElevationProfile(rawPoints);
   if (!stats) return null;
   const points = downsample(rawPoints, MAX_PROFILE_POINTS);
-  return { points, stats };
+  return { points, stats, elevationMissing: !!rawPoints.elevationMissing };
 }
 
 module.exports = { parseGpxTrack, computeElevationProfile, computeSections, analyzeGpx, downsample, haversine, thresholdElevationGain, CLIMB_GRADE_PCT, DESCENT_GRADE_PCT, ELEV_GAIN_THRESHOLD_M };

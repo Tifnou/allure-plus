@@ -1448,7 +1448,11 @@ app.get('/api/admin/users/:email/details', requireAdmin, async (req, res) => {
         const label = cat ? [cat.sportLabel, cat.distLabel, cat.dplusTier].filter(Boolean).join(' · ') : (goal.goalType || null);
         const weeksTotal = (data.weeks || []).length || null;
         const sessionsPerWeek = goal.sessionsPerWeek || modeOf((data.weeks || []).map(w => (w.sessions || []).length).filter(n => n > 0));
-        plan = { type: 'imported', raceName: goal.name || goal.goalTitle || null, label, weeksTotal, sessionsPerWeek };
+        const weekDates = (data.weeks || []).map(w => w.weekDate).filter(n => Number.isFinite(n));
+        const startMs = weekDates.length ? Math.min(...weekDates) : null;
+        const raceMs = goal.competitionDate ? new Date(goal.competitionDate + 'T12:00:00').getTime() : null;
+        plan = { type: 'imported', raceName: goal.name || goal.goalTitle || null, label, weeksTotal, sessionsPerWeek,
+          startMs, raceMs: Number.isFinite(raceMs) ? raceMs : null };
 
         // Assiduite : transcription fidele de computeSessionStats/
         // isStrengthSession (frontend/js/campus.js), la formule de reference
@@ -1484,7 +1488,32 @@ app.get('/api/admin/users/:email/details', requireAdmin, async (req, res) => {
       plan = { type: 'free' };
     }
 
-    res.json({ vo2max, vo2maxDate, profile, plan, adherenceCardio, adherenceStrength });
+    // Routine « hors plan » (séances libres) : réglages (suivi_free_sessions), semaine en cours
+    // (suivi_free_routine) et partage (suivi_routine_share) — mêmes clés durables déjà synchronisées.
+    let routine = null;
+    try {
+      const prefs = ud.suivi_free_sessions ? JSON.parse(ud.suivi_free_sessions) : null;
+      if (prefs && prefs.terrain) {
+        const store = ud.suivi_free_routine ? JSON.parse(ud.suivi_free_routine) : null;
+        const now = Date.now(), WK = 7 * 86400000;
+        let cur = null;
+        Object.keys((store && store.weeks) || {}).forEach(k => {
+          if (Number(k) <= now && now < Number(k) + WK) cur = store.weeks[k];
+        });
+        routine = {
+          dormant: !!prefs.dormant, terrain: prefs.terrain || null, frequency: prefs.frequency || null, maxMin: prefs.maxMin || null,
+          race: prefs.race && prefs.race.dateMs ? { dateMs: prefs.race.dateMs, name: prefs.race.name || null, distKey: prefs.race.distKey || null } : null,
+          current: cur ? { phase: cur.phase || null, cycleIdx: cur.macro && cur.macro.cycleIdx || null, themeLabel: cur.macro && cur.macro.themeLabel || null, shared: !!cur.shared } : null,
+        };
+      }
+      const sh = ud.suivi_routine_share ? JSON.parse(ud.suivi_routine_share) : null;
+      if (sh && sh.state) {
+        routine = routine || {};
+        routine.share = { state: sh.state, fromName: sh.fromName || null };
+      }
+    } catch (e) { /* données illisibles : pas de bloc routine */ }
+
+    res.json({ vo2max, vo2maxDate, profile, plan, adherenceCardio, adherenceStrength, routine, hasData: Object.keys(ud).length > 0 });
   } catch (err) { handleError(res, err); }
 });
 
@@ -3159,7 +3188,7 @@ app.post('/api/route-editor/import', requireSession, upload.single('gpx'), async
       }
     } catch (err) { /* correction IGN indisponible - on garde les altitudes brutes du GPX */ }
 
-    res.json({ filename: req.file.originalname || 'parcours.gpx', points: result.points, stats: result.stats });
+    res.json({ filename: req.file.originalname || 'parcours.gpx', points: result.points, stats: result.stats, elevationMissing: result.elevationMissing || undefined });
   } catch (err) { handleError(res, err); }
 });
 

@@ -90,7 +90,7 @@ function sanitizeShareFiche(f, compile, nameOf) {
 // ctx : { now, anchorMonday, from, fromName, isTouched(key, week), level, cap, compile, nameOf }
 // → { changed, applied:[clés], kept:[clés gardées car touchées], removed:[clés] }
 function applySharedWeeks(store, payload, ctx) {
-  const res = { changed: false, applied: [], kept: [], removed: [] };
+  const res = { changed: false, applied: [], kept: [], removed: [], realigned: [] };
   const incoming = {};
   ((payload && payload.weeks) || []).slice(0, ROUTINE_SHARE_MAX_WEEKS).forEach(pw => {
     if (!pw || !isFinite(Number(pw.weekMs))) return;
@@ -105,7 +105,21 @@ function applySharedWeeks(store, payload, ctx) {
     const key = Number(k);
     const { pw, n, sessions } = incoming[k];
     const existing = store.weeks[key];
-    if (existing && ctx.isTouched(key, existing)) { res.kept.push(key); return; }
+    if (existing && ctx.isTouched(key, existing)) {
+      res.kept.push(key);
+      // Semaine entamée : on ne touche jamais aux séances pointées / à variante choisie, mais les
+      // AUTRES séances s'alignent sur l'animateur (même fiche à la même place) — sinon le suiveur
+      // garde pour toujours une ancienne version d'une séance qu'il n'a pas encore faite.
+      if (existing.shared && ctx.isSessionTouched && existing.sessions.length === sessions.length) {
+        let ch = false;
+        existing.sessions = existing.sessions.map((s, i) => {
+          if (ctx.isSessionTouched(key, i, s) || (s.baseDsl || s.dsl) === sessions[i].dsl) return s;
+          ch = true; return sessions[i];
+        });
+        if (ch) { res.changed = true; res.realigned.push(key); }
+      }
+      return;
+    }
     store.weeks[key] = {
       weekNum: n, phase: _rsClean(pw.phase, 3) || 'S1', phaseIdx: Number(pw.phaseIdx) || 0, target: null, cap: ctx.cap != null ? ctx.cap : 2, level: ctx.level || 2,
       caution: false, macro: pw.macro || null, signals: null, plan: null, race: null,
@@ -168,6 +182,10 @@ function routineShareActive() { return getRoutineShareState().state === 'accepte
 
 function _rsTouched(key, w) {
   return !routineWeekIsUntouched(key, w);
+}
+function _rsSessionTouched(key, i, s) {
+  const st = typeof getLocalSessionStatus === 'function' ? getLocalSessionStatus('free_' + key, i) : null;
+  return ['done', 'skip'].includes(st) || (s.variant && s.variant !== 'yellow');
 }
 function _rsCompile(dsl, opts) { return compileRoutineDsl(dsl, opts); }
 function _rsNameOf(id) { const m = (typeof ROUTINE_CATALOG !== 'undefined' ? ROUTINE_CATALOG : []).find(x => x.id === id); return m ? m.name : null; }
@@ -254,12 +272,14 @@ async function applyRoutineShare(inbox) {
   const store = getRoutineStore();
   const r = applySharedWeeks(store, inbox.payload, {
     now: Date.now(), anchorMonday: prefs.anchorMonday, from: inbox.from, fromName: local.fromName || _rsClean(inbox.fromName, 40),
-    isTouched: _rsTouched, level: profile.level, cap: 2, compile: _rsCompile, nameOf: _rsNameOf,
+    isTouched: _rsTouched, isSessionTouched: _rsSessionTouched, level: profile.level, cap: 2, compile: _rsCompile, nameOf: _rsNameOf,
   });
   if (r.changed) saveRoutineStore(store);
   saveRoutineShareState({ ...local, appliedUpdatedAt: inbox.updatedAt || '', lastAppliedAt: Date.now() });
   if (r.changed) {
-    if (r.kept.length) showToast('Routine partagée mise à jour (les semaines où tu as déjà pointé une séance sont restées telles quelles).', 'info');
+    if (r.kept.length) showToast(r.realigned.length
+      ? 'Routine partagée mise à jour : les séances pointées ou à variante choisie sont restées telles quelles, les autres ont suivi ton animateur.'
+      : 'Routine partagée mise à jour (les semaines où tu as déjà pointé une séance sont restées telles quelles).', 'info');
     _rsRefreshRoutineView();
   }
 }
@@ -394,6 +414,13 @@ async function openRoutineShareModal() {
 if (typeof window !== 'undefined') {
   window.addEventListener('load', () => { setTimeout(() => checkRoutineShare(), 6000); });
   setInterval(() => { try { checkRoutineShare(); } catch (e) { /* silencieux */ } }, 30 * 60 * 1000);
+  // Retour sur l'onglet / la fenêtre : on relit (au plus toutes les 2 min) plutôt que d'attendre 30 min
+  let _rsLastFocusCheck = 0;
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible' || Date.now() - _rsLastFocusCheck < 120000) return;
+    _rsLastFocusCheck = Date.now();
+    try { checkRoutineShare(); } catch (e) { /* silencieux */ }
+  });
 }
 
 if (typeof module !== 'undefined' && module.exports) {

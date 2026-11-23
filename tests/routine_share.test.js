@@ -112,3 +112,18 @@ test('fiche reçue : nom nettoyé, rôle et terrain bornés, DSL non compilable 
   assert.equal(S.sanitizeShareFiche({ dsl: 'n importe quoi' }, compileRoutineDsl, null), null);
   assert.equal(S.sanitizeShareFiche({ dsl: 'x'.repeat(500) }, compileRoutineDsl, null), null);
 });
+
+test('semaine entamée : les séances non touchées suivent l\'animateur, les pointées restent', () => {
+  const { applySharedWeeks } = require('../frontend/js/routine_share.js');
+  const WK = 7 * 86400000, now = 1000 * WK + 10, key = 1000 * WK - 3 * 86400000 + WK; // lundi futur
+  const mk = (dsl, extra) => Object.assign({ name: 'x', dsl, baseDsl: dsl, variant: 'yellow' }, extra || {});
+  const store = { weeks: { [key]: { shared: true, sessions: [mk('35m EF'), mk('40m EF')] } } };
+  const payload = { weeks: [{ weekMs: key, sessions: [{ dsl: '30m EF', totalSec: 1, qualitySec: 0, tier: 0, load: 1 }, { dsl: '50m EF', totalSec: 1, qualitySec: 0, tier: 0, load: 1 }] }] };
+  const r = applySharedWeeks(store, payload, {
+    now, anchorMonday: key, from: 'a', compile: () => ({}), nameOf: null,
+    isTouched: () => true, isSessionTouched: (k, i) => i === 0,
+  });
+  assert.equal(store.weeks[key].sessions[0].dsl, '35m EF');   // pointée : intacte
+  assert.equal(store.weeks[key].sessions[1].dsl, '50m EF');   // alignée sur l'animateur
+  assert.deepEqual(r.realigned, [key]);
+});
