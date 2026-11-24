@@ -136,3 +136,11 @@ test('acceptation : la routine personnelle à venir est retirée, pas les semain
   assert.deepEqual(removed, [MON + WEEK]);
   assert.ok(store.weeks[MON] && store.weeks[MON - WEEK] && store.weeks[MON + 2 * WEEK]);
 });
+
+test('plan à venir : la routine partagée s\'arrête au début du plan', () => {
+  const payload = { weeks: [0, 1, 2, 3].map(i => ({ weekMs: MON + i * WEEK, phase: 'S1', sessions: [{ dsl: '10m EF', name: 'X', role: 'ef' }] })) };
+  const store = { v: 2, weeks: {} };
+  const r = S.applySharedWeeks(store, payload, { now: NOW, anchorMonday: MON, from: 'a@b.c', isTouched: () => false, compile: compileRoutineDsl, nameOf: () => null, planStartMs: MON + 2 * WEEK });
+  assert.deepEqual(r.applied.sort(), [MON, MON + WEEK]);
+  assert.ok(!store.weeks[MON + 2 * WEEK]);
+});

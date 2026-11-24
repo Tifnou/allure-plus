@@ -108,12 +108,52 @@ begin
   end;
 end;
 
+// Remise a zero UNIQUE du dossier Images (v2.9.1) : les versions <= 2.9.0 avaient livre des
+// photos personnelles du poste de dev. On vide donc Images (et thumbs) une seule fois, puis on
+// reinstalle les images de base. Un fichier-marqueur dans data garantit que les versions
+// suivantes n'y touchent PLUS jamais : chaque utilisateur gere ses photos.
+function ImagesResetMarker(): String;
+begin
+  Result := ExpandConstant('{app}dataimages_reset_v291.flag');
+end;
+
+procedure PurgeFolderFiles(const Dir: String);
+var
+  FindRec: TFindRec;
+begin
+  if not DirExists(Dir) then Exit;
+  if FindFirst(Dir + '*', FindRec) then
+  begin
+    try
+      repeat
+        if (FindRec.Attributes and FILE_ATTRIBUTE_DIRECTORY) = 0 then
+          DeleteFile(Dir + '' + FindRec.Name);
+      until not FindNext(FindRec);
+    finally
+      FindClose(FindRec);
+    end;
+  end;
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   OldDesktopLnk, OldTarget, ExpectedOldTarget: String;
 begin
+  if CurStep = ssInstall then
+  begin
+    if not FileExists(ImagesResetMarker()) then
+    begin
+      PurgeFolderFiles(ExpandConstant('{app}Images'));
+      PurgeFolderFiles(ExpandConstant('{app}Images	humbs'));
+    end;
+  end;
   if CurStep = ssPostInstall then
   begin
+    if not FileExists(ImagesResetMarker()) then
+    begin
+      ForceDirectories(ExpandConstant('{app}data'));
+      SaveStringToFile(ImagesResetMarker(), 'Images reinitialisees aux images de base (v2.9.1).', False);
+    end;
     OldDesktopLnk := ExpandConstant('{userdesktop}\Allure+.lnk');
     ExpectedOldTarget := ExpandConstant('{app}\start.bat');
     OldTarget := GetShortcutTargetPath(OldDesktopLnk);

@@ -96,6 +96,7 @@ function applySharedWeeks(store, payload, ctx) {
     if (!pw || !isFinite(Number(pw.weekMs))) return;
     const { n, key } = routineShareKeyFor(ctx.anchorMonday, Number(pw.weekMs));
     if (n < 1 || key + WEEK_MS < ctx.now) return;                    // passé : on ne rattrape jamais
+    if (ctx.planStartMs && key >= ctx.planStartMs) return;           // la routine partagée s'arrête quand le plan du suiveur commence
     const sessions = (pw.sessions || []).map(f => sanitizeShareFiche(f, ctx.compile, ctx.nameOf)).filter(Boolean);
     if (!sessions.length) return;
     sessions.forEach((s, i) => { s.trainingIndex = i; });
@@ -132,7 +133,8 @@ function applySharedWeeks(store, payload, ctx) {
   // semaines partagées devenues absentes de la publication, intactes, à venir → retirées
   Object.keys(store.weeks).forEach(k => {
     const key = Number(k), w = store.weeks[k];
-    if (!w || !w.shared || incoming[key] || key + WEEK_MS < ctx.now) return;
+    if (!w || !w.shared || key + WEEK_MS < ctx.now) return;
+    if (incoming[key] && !(ctx.planStartMs && key >= ctx.planStartMs)) return;
     if (key <= ctx.now && ctx.now < key + WEEK_MS) return;           // semaine en cours : on ne la retire jamais
     if (ctx.isTouched(key, w)) return;
     delete store.weeks[key]; res.removed.push(key); res.changed = true;
@@ -246,11 +248,50 @@ async function checkRoutineShare(opts) {
   finally { _rsChecking = false; }
 }
 
+// Ce que le suiveur a déjà : plan commencé / plan à venir (avec sa date de début) / routine personnelle.
+function routineShareSituation() {
+  let g = null, w = null;
+  try {
+    const sn = typeof campusState !== 'undefined' ? campusState.planSnapshot : null;
+    if (sn && sn.goal && sn.weeks) { g = sn.goal; w = sn.weeks; }
+    else {
+      const d = JSON.parse(localStorage.getItem('suivi_imported_plan') || 'null');
+      if (d && d.goal && Array.isArray(d.weeks)) { g = d.goal; w = d.weeks; }
+    }
+  } catch (e) { /* plan illisible : on ignore */ }
+  const plan = g ? routinePlanInfoFrom(g, w) : null;
+  const mon = mondayOfWeek(Date.now());
+  const fp = getFreeSessionsPrefs();
+  const ownRoutine = !!fp && !fp.dormant && Object.values(getRoutineStore().weeks || {}).some(x => x && !x.shared && x.sessions && x.sessions.length);
+  return { plan, planStarted: !!plan && plan.startMs <= mon, planUpcoming: !!plan && plan.startMs > mon, ownRoutine };
+}
+
+// Avertissement affiché AVANT d'accepter : ce que l'acceptation remplace ou limite.
+function routineShareWarning(sit) {
+  const out = [];
+  if (sit.planStarted) out.push(`⚠️ Tu suis déjà un plan en cours (${_rsClean(sit.plan.name, 60)}) : en acceptant, il sera SUPPRIMÉ et remplacé par la routine partagée.`);
+  if (sit.ownRoutine) out.push('⚠️ Tu as déjà une routine à toi : elle sera remplacée par la routine partagée (seules les semaines où tu as déjà pointé une séance ou choisi une variante restent telles quelles).');
+  if (sit.planUpcoming) out.push(`ℹ️ Ton plan ${_rsClean(sit.plan.name, 60)} démarre le ${new Date(sit.plan.startMs).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })} : la routine partagée s’arrêtera à cette date et ton plan prendra le relais.`);
+  return out;
+}
+
+// Un plan commencé est retiré de cet appareil (même nettoyage que « Annuler le plan »).
+function _rsDiscardCurrentPlan() {
+  try {
+    campusState.campusPlanChosen = false;
+    ['suivi_imported_plan', 'prefer_imported_plan', 'campus_was_connected'].forEach(k => localStorage.removeItem(k));
+    campusState.goal = null; campusState.weeks = []; campusState.usingImportedPlan = false; campusState.campusConnected = false; campusState.planSnapshot = null;
+    fetch('/api/campus/import-plan', { method: 'DELETE' }).catch(() => {});
+  } catch (e) { /* le plan sera de toute façon masqué par la routine */ }
+}
+
 async function askRoutineShare(inbox) {
   const who = _rsClean(inbox.fromName, 40) || 'Un utilisateur d’Allure+';
+  const sit = routineShareSituation();
+  const warn = routineShareWarning(sit);
   const ok = await showConfirmModal({
     title: `${who} te propose de partager sa routine`,
-    message: `Ta routine actuelle sera remplacée par la sienne. Tu aurais les mêmes séances que ${who} (mêmes exercices, mêmes durées de sortie longue), avec TES allures, TES variantes d’intensité et ton propre pointage. Vous n’aurez pas forcément à les faire le même jour. Les nouvelles semaines arriveront toutes seules ; tu peux passer une séance ou quitter le partage quand tu veux. Une semaine où tu as déjà pointé une séance ou choisi une variante n’est jamais modifiée.`,
+    message: `${warn.length ? warn.join(' ') + ' ' : ''}Tu aurais les mêmes séances que ${who} (mêmes exercices, mêmes durées de sortie longue), avec TES allures, TES variantes d’intensité et ton propre pointage. Vous n’aurez pas forcément à les faire le même jour. Les nouvelles semaines arriveront toutes seules ; tu peux passer une séance ou quitter le partage quand tu veux. Une semaine où tu as déjà pointé une séance ou choisi une variante n’est jamais modifiée.`,
     confirmLabel: 'Accepter',
     cancelLabel: 'Pas maintenant',
     icon: '🤝',
@@ -277,9 +318,11 @@ async function askRoutineShare(inbox) {
   }
   // la routine de l'animateur écrase celle qui est en place (sauf les semaines où une séance est déjà pointée)
   { const st0 = getRoutineStore(); if (clearOwnUpcomingWeeks(st0, Date.now(), _rsTouched).length) saveRoutineStore(st0); }
+  if (sit.planStarted) _rsDiscardCurrentPlan();
   saveRoutineShareState({ state: 'accepted', from: inbox.from, fromName: who, inviteSince: inbox.since, acceptedAt: Date.now(), appliedUpdatedAt: '' });
   await applyRoutineShare(inbox);
   showToast('Routine partagée avec ' + who + ' : séances ajoutées.', 'success');
+  if (sit.planStarted && typeof showTrainingEmpty === 'function') { try { showTrainingEmpty(); } catch (e) { /* au prochain rendu */ } }
 }
 
 async function applyRoutineShare(inbox) {
@@ -287,14 +330,15 @@ async function applyRoutineShare(inbox) {
   const local = getRoutineShareState();
   if (!prefs || local.state !== 'accepted' || !inbox || !inbox.payload) return;
   // un plan déjà démarré passe avant : le partage est en pause (la mise à jour sera reprise après)
-  const planInfo = typeof routineCurrentPlanInfo === 'function' ? routineCurrentPlanInfo() : null;
-  if (planInfo && planInfo.startMs <= Date.now()) return;
+  const planInfo = typeof routineCurrentPlanInfo === 'function' ? routineCurrentPlanInfo() : null;   // plan À VENIR seulement
+  if (routineShareSituation().planStarted) return;
   const acts = await routineActivities();
   const profile = RoutineEngine.routineAssessProfile(acts, Date.now(), prefs.maxMin || 90);
   const store = getRoutineStore();
   const r = applySharedWeeks(store, inbox.payload, {
     now: Date.now(), anchorMonday: prefs.anchorMonday, from: inbox.from, fromName: local.fromName || _rsClean(inbox.fromName, 40),
     isTouched: _rsTouched, isSessionTouched: _rsSessionTouched, level: profile.level, cap: 2, compile: _rsCompile, nameOf: _rsNameOf,
+    planStartMs: planInfo ? planInfo.startMs : null,
   });
   if (r.changed) saveRoutineStore(store);
   saveRoutineShareState({ ...local, appliedUpdatedAt: inbox.updatedAt || '', lastAppliedAt: Date.now() });
