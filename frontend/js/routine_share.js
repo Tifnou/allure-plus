@@ -157,7 +157,23 @@ function leaveSharedWeeks(store, now, isTouched) {
 //   local : { state: 'accepted'|'declined'|'left'|'ended'|null, inviteSince, appliedUpdatedAt }
 //   inbox : { offered, since, updatedAt }
 // → 'ask' (proposer), 'apply' (poser les semaines), 'end' (l'animateur a retiré ce suiveur), 'none'
-function routineShareDecision(local, inbox) {
+const RS_REASK_AFTER_MS = 6 * 3600 * 1000;   // « Pas maintenant » = on redemande plus tard, jamais un refus définitif
+
+// Avant d'adopter une routine partagée : retire ce qui reste de la routine PERSONNELLE du suiveur
+// (semaines en cours et à venir, non partagées, sans séance pointée ni variante choisie) — la routine de
+// l'animateur remplace ce qui est en place. Retourne les clés retirées.
+function clearOwnUpcomingWeeks(store, now, isTouched) {
+  const removed = [];
+  Object.keys(store.weeks || {}).forEach(k => {
+    const key = Number(k), w = store.weeks[k];
+    if (!w || w.shared || key + WEEK_MS < now) return;
+    if (isTouched(key, w)) return;
+    delete store.weeks[key]; removed.push(key);
+  });
+  return removed;
+}
+
+function routineShareDecision(local, inbox, now) {
   const st = local && local.state;
   if (!inbox || !inbox.offered) return st === 'accepted' ? 'end' : 'none';
   if (st === 'accepted') {
@@ -167,7 +183,11 @@ function routineShareDecision(local, inbox) {
     return (inbox.updatedAt || '') > (local.appliedUpdatedAt || '') ? 'apply' : 'none';
   }
   // pas (ou plus) membre : on ne repropose que pour une NOUVELLE invitation (since différent)
-  if ((st === 'declined' || st === 'left' || st === 'ended') && local.inviteSince === inbox.since) return 'none';
+  if (st === 'declined' && local.inviteSince === inbox.since) {
+    const t = Number(local.declinedAt);
+    return t && ((now == null ? Date.now() : now) - t) < RS_REASK_AFTER_MS ? 'none' : 'ask';
+  }
+  if ((st === 'left' || st === 'ended') && local.inviteSince === inbox.since) return 'none';
   return 'ask';
 }
 
@@ -230,7 +250,7 @@ async function askRoutineShare(inbox) {
   const who = _rsClean(inbox.fromName, 40) || 'Un utilisateur d’Allure+';
   const ok = await showConfirmModal({
     title: `${who} te propose de partager sa routine`,
-    message: `Tu aurais les mêmes séances que ${who} (mêmes exercices, mêmes durées de sortie longue), avec TES allures, TES variantes d’intensité et ton propre pointage. Vous n’aurez pas forcément à les faire le même jour. Les nouvelles semaines arriveront toutes seules ; tu peux passer une séance ou quitter le partage quand tu veux. Une semaine où tu as déjà pointé une séance ou choisi une variante n’est jamais modifiée.`,
+    message: `Ta routine actuelle sera remplacée par la sienne. Tu aurais les mêmes séances que ${who} (mêmes exercices, mêmes durées de sortie longue), avec TES allures, TES variantes d’intensité et ton propre pointage. Vous n’aurez pas forcément à les faire le même jour. Les nouvelles semaines arriveront toutes seules ; tu peux passer une séance ou quitter le partage quand tu veux. Une semaine où tu as déjà pointé une séance ou choisi une variante n’est jamais modifiée.`,
     confirmLabel: 'Accepter',
     cancelLabel: 'Pas maintenant',
     icon: '🤝',
@@ -241,7 +261,7 @@ async function askRoutineShare(inbox) {
       const st = getRoutineStore();
       if (leaveSharedWeeks(st, Date.now(), _rsTouched).length) saveRoutineStore(st);
     }
-    saveRoutineShareState({ ...local, state: 'declined', inviteSince: inbox.since });
+    saveRoutineShareState({ ...local, state: 'declined', inviteSince: inbox.since, declinedAt: Date.now() });
     return;
   }
   // pas encore de routine : on en crée une de base (terrain / fréquence de l'animateur), le contenu vient du partage
@@ -255,6 +275,8 @@ async function askRoutineShare(inbox) {
     };
     saveFreeSessionsPrefs(prefs);
   }
+  // la routine de l'animateur écrase celle qui est en place (sauf les semaines où une séance est déjà pointée)
+  { const st0 = getRoutineStore(); if (clearOwnUpcomingWeeks(st0, Date.now(), _rsTouched).length) saveRoutineStore(st0); }
   saveRoutineShareState({ state: 'accepted', from: inbox.from, fromName: who, inviteSince: inbox.since, acceptedAt: Date.now(), appliedUpdatedAt: '' });
   await applyRoutineShare(inbox);
   showToast('Routine partagée avec ' + who + ' : séances ajoutées.', 'success');
@@ -424,5 +446,5 @@ if (typeof window !== 'undefined') {
 }
 
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { buildSharePayload, applySharedWeeks, leaveSharedWeeks, routineShareDecision, routineShareKeyFor, sanitizeShareFiche, routineShareFiche };
+  module.exports = { buildSharePayload, applySharedWeeks, leaveSharedWeeks, routineShareDecision, clearOwnUpcomingWeeks, routineShareKeyFor, sanitizeShareFiche, routineShareFiche };
 }

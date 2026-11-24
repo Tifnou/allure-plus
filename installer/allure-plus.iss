@@ -1,5 +1,5 @@
 #define MyAppName "Allure+"
-#define MyAppVersion "2.9.0"
+#define MyAppVersion "2.9.1"
 #define MyAppPublisher "Allure+"
 
 [Setup]
@@ -35,7 +35,9 @@ Source: "..\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignorev
 ; Photos de fond : ne sont copiees que si le dossier n'existe pas encore ou est
 ; vide (installation neuve). Sur une mise a jour, on ne touche jamais aux photos
 ; de l'utilisateur (par defaut ou personnalisees) - voir ShouldSeedImages ci-dessous.
-Source: "..\Images\*"; DestDir: "{app}\Images"; Flags: recursesubdirs createallsubdirs ignoreversion; Excludes: "\thumbs,\thumbs\*"; Check: ShouldSeedImages
+; IMPORTANT : on ne livre JAMAIS le dossier Images/ du poste de dev (photos perso) : seules les
+; images de base versionnees dans installer\default-images\ sont embarquees.
+Source: "default-images\*"; DestDir: "{app}\Images"; Flags: ignoreversion; Check: ShouldSeedImages
 
 [Tasks]
 ; checkedonce : cochee par defaut (comme la plupart des installeurs), mais

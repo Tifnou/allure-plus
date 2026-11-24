@@ -91,7 +91,9 @@ test('quitter : retire les semaines partagées à venir intactes, garde la semai
 test('invitation : on propose une fois, on applique les mises à jour, on ne reharcèle pas', () => {
   const inbox = { offered: true, since: 's1', updatedAt: '2026-11-04T10:00:00Z' };
   assert.equal(S.routineShareDecision({}, inbox), 'ask');
-  assert.equal(S.routineShareDecision({ state: 'declined', inviteSince: 's1' }, inbox), 'none');
+  assert.equal(S.routineShareDecision({ state: 'declined', inviteSince: 's1' }, inbox), 'ask');        // ancien refus sans date : on redemande
+  assert.equal(S.routineShareDecision({ state: 'declined', inviteSince: 's1', declinedAt: 1000 }, inbox, 2000), 'none');   // refus récent
+  assert.equal(S.routineShareDecision({ state: 'declined', inviteSince: 's1', declinedAt: 1000 }, inbox, 1000 + 7 * 3600e3), 'ask');
   assert.equal(S.routineShareDecision({ state: 'declined', inviteSince: 's0' }, inbox), 'ask');        // nouvelle invitation
   assert.equal(S.routineShareDecision({ state: 'accepted', appliedUpdatedAt: '' }, inbox), 'apply');
   assert.equal(S.routineShareDecision({ state: 'accepted', appliedUpdatedAt: inbox.updatedAt }, inbox), 'none');
@@ -126,4 +128,11 @@ test('semaine entamée : les séances non touchées suivent l\'animateur, les po
   assert.equal(store.weeks[key].sessions[0].dsl, '35m EF');   // pointée : intacte
   assert.equal(store.weeks[key].sessions[1].dsl, '50m EF');   // alignée sur l'animateur
   assert.deepEqual(r.realigned, [key]);
+});
+
+test('acceptation : la routine personnelle à venir est retirée, pas les semaines pointées ni les passées', () => {
+  const store = { v: 2, weeks: { [MON - WEEK]: week('S1', [snap('P', '10m EF')]), [MON]: week('S2', [snap('A', '10m EF')]), [MON + WEEK]: week('S3', [snap('B', '10m EF')]), [MON + 2 * WEEK]: week('S4', [snap('C', '10m EF')], { shared: true }) } };
+  const removed = S.clearOwnUpcomingWeeks(store, NOW, (k) => k === MON);
+  assert.deepEqual(removed, [MON + WEEK]);
+  assert.ok(store.weeks[MON] && store.weeks[MON - WEEK] && store.weeks[MON + 2 * WEEK]);
 });
